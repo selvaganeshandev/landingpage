@@ -320,71 +320,68 @@ const Competitors = () => {
         ))}
       </div>
 
-      {/* Main Grid with Charts and Top Brands */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          {/* Brand Visibility Over Time */}
-          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
-            <div className="space-y-6">
-              <div className="pb-4 border-b border-border/50">
-                <h3 className="text-lg font-semibold flex items-center gap-2 font-outfit">
-                  <TrendingUp className="h-5 w-5 text-primary" />
-                  Brand Visibility Over Time
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Track how often each brand is mentioned by AI providers
-                </p>
-              </div>
-              <ResponsiveContainer width="100%" height={350}>
-                <LineChart data={mentionHistory}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <Tooltip 
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "var(--radius)",
-                    }}
-                  />
-                  <Legend />
-                  <Line 
-                    type="monotone" 
-                    dataKey="vegfit" 
-                    name="VegFit Pro"
-                    stroke="hsl(var(--primary))" 
-                    strokeWidth={3}
-                    dot={{ fill: "hsl(var(--primary))", r: 4 }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="myprotein" 
-                    name="MyProtein"
-                    stroke="hsl(var(--chart-2))" 
-                    strokeWidth={2}
-                    dot={{ fill: "hsl(var(--chart-2))", r: 3 }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="naked" 
-                    name="Naked Nutrition"
-                    stroke="hsl(var(--chart-3))" 
-                    strokeWidth={2}
-                    dot={{ fill: "hsl(var(--chart-3))", r: 3 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
+      {/* Brand Visibility Over Time */}
+      <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+        <div className="space-y-6">
+          <div className="pb-4 border-b border-border/50">
+            <h3 className="text-lg font-semibold flex items-center gap-2 font-outfit">
+              <TrendingUp className="h-5 w-5 text-primary" />
+              Brand Visibility Over Time
+            </h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Track how often each brand is mentioned by AI providers
+            </p>
+          </div>
+          <ResponsiveContainer width="100%" height={350}>
+            <LineChart data={mentionHistory}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <Tooltip 
+                contentStyle={{
+                  backgroundColor: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "var(--radius)",
+                }}
+              />
+              <Legend />
+              <Line 
+                type="monotone" 
+                dataKey="vegfit" 
+                name="VegFit Pro"
+                stroke="hsl(var(--primary))" 
+                strokeWidth={3}
+                dot={{ fill: "hsl(var(--primary))", r: 4 }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="myprotein" 
+                name="MyProtein"
+                stroke="hsl(var(--chart-2))" 
+                strokeWidth={2}
+                dot={{ fill: "hsl(var(--chart-2))", r: 3 }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="naked" 
+                name="Naked Nutrition"
+                stroke="hsl(var(--chart-3))" 
+                strokeWidth={2}
+                dot={{ fill: "hsl(var(--chart-3))", r: 3 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
 
-          {/* Heatmap */}
+      {/* Heatmap and Top Brands */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
           <CompetitorHeatmap 
             data={heatmapData} 
             platforms={["Grok", "Claude", "ChatGPT", "Perplexity", "Google Gemini"]} 
           />
         </div>
-
-        {/* Top Brands Sidebar */}
         <div>
           <TopBrandsList brands={topBrands} totalMentions={989} />
         </div>
@@ -460,8 +457,8 @@ const Competitors = () => {
       </div>
 
       {/* Platform Breakdown */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-6">Platform-Specific Competition</h3>
+      <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+        <h3 className="text-lg font-semibold mb-6 font-outfit">Platform-Specific Competition</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {Object.entries(platformComparison).map(([platform, data]) => (
             <div key={platform} className="space-y-4">
@@ -486,39 +483,6 @@ const Competitors = () => {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Competitive Insights */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-6">Competitive Intelligence</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {competitiveInsights.map((insight, idx) => (
-            <div key={idx} className="p-4 rounded-lg border border-border">
-              <div className="flex items-start gap-3 mb-2">
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                  insight.type === 'success' ? 'bg-success/10' :
-                  insight.type === 'warning' ? 'bg-warning/10' :
-                  'bg-primary/10'
-                }`}>
-                  <Target className={`h-4 w-4 ${
-                    insight.type === 'success' ? 'text-success' :
-                    insight.type === 'warning' ? 'text-warning' :
-                    'text-primary'
-                  }`} />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h4 className="font-semibold">{insight.title}</h4>
-                    <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
-                      {insight.impact} impact
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">{insight.description}</p>
-                </div>
-              </div>
             </div>
           ))}
         </div>
