@@ -11,6 +11,11 @@ import Sentiment from "./pages/Sentiment";
 import ShareOfVoice from "./pages/ShareOfVoice";
 import ContentGaps from "./pages/ContentGaps";
 import HistoricalTrends from "./pages/HistoricalTrends";
+import Topics from "./pages/Topics";
+import Alerts from "./pages/Alerts";
+import Competitors from "./pages/Competitors";
+import Reports from "./pages/Reports";
+import Multilingual from "./pages/Multilingual";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
 
@@ -31,96 +36,11 @@ const App = () => (
             <Route path="/share-of-voice" element={<ShareOfVoice />} />
             <Route path="/content-gaps" element={<ContentGaps />} />
             <Route path="/trends" element={<HistoricalTrends />} />
-            <Route 
-              path="/crawler" 
-              element={
-                <PlaceholderPage 
-                  title="AI Crawler Analysis" 
-                  description="Technical SEO for AI discoverability"
-                  features={[
-                    "AI crawler log analysis",
-                    "Technical SEO audit for AI platforms",
-                    "Indexability recommendations",
-                    "Structured data optimization"
-                  ]}
-                />
-              } 
-            />
-            <Route 
-              path="/topics" 
-              element={
-                <PlaceholderPage 
-                  title="Topic-Based Tracking" 
-                  description="Monitor performance across key topics and categories"
-                  features={[
-                    "Topic clustering and categorization",
-                    "AI-generated prompt suggestions",
-                    "Topic performance benchmarking",
-                    "Content strategy recommendations"
-                  ]}
-                />
-              } 
-            />
-            <Route 
-              path="/multilingual" 
-              element={
-                <PlaceholderPage 
-                  title="Multilingual Monitoring" 
-                  description="Global brand tracking across languages"
-                  features={[
-                    "Multi-language prompt tracking",
-                    "Regional visibility analysis",
-                    "Cross-cultural sentiment analysis",
-                    "International SEO recommendations"
-                  ]}
-                />
-              } 
-            />
-            <Route 
-              path="/alerts" 
-              element={
-                <PlaceholderPage 
-                  title="Real-Time Alerts" 
-                  description="Stay informed with instant notifications"
-                  features={[
-                    "Custom alert rules and thresholds",
-                    "Multi-channel notifications (email, Slack, SMS)",
-                    "Anomaly detection for visibility changes",
-                    "Competitive movement alerts"
-                  ]}
-                />
-              } 
-            />
-            <Route 
-              path="/competitors" 
-              element={
-                <PlaceholderPage 
-                  title="Competitor Tracking" 
-                  description="Monitor and analyze competitor performance"
-                  features={[
-                    "Competitor mention tracking",
-                    "Comparative performance dashboards",
-                    "Competitive strategy insights",
-                    "Market positioning analysis"
-                  ]}
-                />
-              } 
-            />
-            <Route 
-              path="/reports" 
-              element={
-                <PlaceholderPage 
-                  title="Custom Reporting" 
-                  description="Generate and automate branded reports"
-                  features={[
-                    "Customizable report templates",
-                    "Automated report scheduling",
-                    "White-label reporting options",
-                    "API access for integrations"
-                  ]}
-                />
-              } 
-            />
+            <Route path="/topics" element={<Topics />} />
+            <Route path="/alerts" element={<Alerts />} />
+            <Route path="/competitors" element={<Competitors />} />
+            <Route path="/multilingual" element={<Multilingual />} />
+            <Route path="/reports" element={<Reports />} />
             <Route 
               path="/copilot" 
               element={
