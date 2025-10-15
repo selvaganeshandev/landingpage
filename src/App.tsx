@@ -7,6 +7,7 @@ import { Layout } from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Prompts from "./pages/Prompts";
 import Mentions from "./pages/Mentions";
+import Sentiment from "./pages/Sentiment";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
 
@@ -23,21 +24,7 @@ const App = () => (
             <Route path="/" element={<Dashboard />} />
             <Route path="/prompts" element={<Prompts />} />
             <Route path="/mentions" element={<Mentions />} />
-            <Route 
-              path="/sentiment" 
-              element={
-                <PlaceholderPage 
-                  title="Sentiment Analysis" 
-                  description="Deep dive into brand sentiment across AI platforms"
-                  features={[
-                    "Thematic sentiment breakdown by topic and feature",
-                    "Sentiment trends over time with predictive analytics",
-                    "Comparative sentiment analysis vs competitors",
-                    "Automated sentiment alerts for negative shifts"
-                  ]}
-                />
-              } 
-            />
+            <Route path="/sentiment" element={<Sentiment />} />
             <Route 
               path="/share-of-voice" 
               element={
