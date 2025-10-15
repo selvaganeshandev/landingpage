@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +15,8 @@ import {
   FileText,
   Target
 } from "lucide-react";
+import { TopicDetailDialog } from "@/components/TopicDetailDialog";
+import { TopicOptimizeDialog } from "@/components/TopicOptimizeDialog";
 import { 
   PieChart,
   Pie,
@@ -132,6 +135,9 @@ const keywordPerformance = [
 
 const Topics = () => {
   const { toast } = useToast();
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [optimizeDialogOpen, setOptimizeDialogOpen] = useState(false);
+  const [selectedTopic, setSelectedTopic] = useState<typeof topics[0] | null>(null);
 
   const handleGenerateTopics = () => {
     toast({
@@ -147,18 +153,14 @@ const Topics = () => {
     });
   };
 
-  const handleViewDetails = () => {
-    toast({
-      title: "Loading Details",
-      description: "Opening detailed topic analysis...",
-    });
+  const handleViewDetails = (topic: typeof topics[0]) => {
+    setSelectedTopic(topic);
+    setDetailDialogOpen(true);
   };
 
-  const handleOptimize = () => {
-    toast({
-      title: "Optimizing Topic",
-      description: "AI is generating optimization recommendations...",
-    });
+  const handleOptimize = (topic: typeof topics[0]) => {
+    setSelectedTopic(topic);
+    setOptimizeDialogOpen(true);
   };
 
   const handleGenerateMore = () => {
@@ -309,8 +311,8 @@ const Topics = () => {
               </div>
 
               <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={handleViewDetails}>View Details</Button>
-                <Button size="sm" variant="outline" onClick={handleOptimize}>
+                <Button size="sm" variant="outline" onClick={() => handleViewDetails(topic)}>View Details</Button>
+                <Button size="sm" variant="outline" onClick={() => handleOptimize(topic)}>
                   <Target className="h-3 w-3 mr-1" />
                   Optimize
                 </Button>
@@ -381,6 +383,18 @@ const Topics = () => {
           </BarChart>
         </ResponsiveContainer>
       </Card>
+
+      {/* Dialogs */}
+      <TopicDetailDialog 
+        open={detailDialogOpen}
+        onOpenChange={setDetailDialogOpen}
+        topic={selectedTopic}
+      />
+      <TopicOptimizeDialog
+        open={optimizeDialogOpen}
+        onOpenChange={setOptimizeDialogOpen}
+        topic={selectedTopic}
+      />
     </div>
   );
 };
