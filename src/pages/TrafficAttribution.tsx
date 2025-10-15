@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { ExternalLink, TrendingUp, DollarSign, MousePointerClick } from "lucide-react";
 
 export default function TrafficAttribution() {
+  // Google Analytics Mock Data
   const trafficData = [
     { date: "Week 1", value: 1240 },
     { date: "Week 2", value: 1580 },
@@ -13,11 +14,42 @@ export default function TrafficAttribution() {
   ];
 
   const platformSources = [
-    { platform: "ChatGPT", visits: 1245, conversions: 89, revenue: 4450, trend: "+23%" },
-    { platform: "Perplexity", visits: 987, conversions: 124, revenue: 6200, trend: "+45%" },
-    { platform: "Claude", visits: 756, conversions: 67, revenue: 3350, trend: "+18%" },
-    { platform: "Gemini", visits: 634, conversions: 45, revenue: 2250, trend: "+12%" },
-    { platform: "Other AI", visits: 423, conversions: 28, revenue: 1400, trend: "+8%" },
+    { platform: "ChatGPT", visits: 1245, conversions: 89, revenue: 4450, trend: "+23%", bounceRate: "45%", avgDuration: "3:24" },
+    { platform: "Perplexity", visits: 987, conversions: 124, revenue: 6200, trend: "+45%", bounceRate: "32%", avgDuration: "4:15" },
+    { platform: "Claude", visits: 756, conversions: 67, revenue: 3350, trend: "+18%", bounceRate: "38%", avgDuration: "3:45" },
+    { platform: "Gemini", visits: 634, conversions: 45, revenue: 2250, trend: "+12%", bounceRate: "41%", avgDuration: "2:58" },
+    { platform: "Other AI", visits: 423, conversions: 28, revenue: 1400, trend: "+8%", bounceRate: "52%", avgDuration: "2:15" },
+  ];
+
+  // Google Search Console Mock Data
+  const searchConsoleData = [
+    { query: "best project management tool", impressions: 15420, clicks: 1245, ctr: "8.1%", position: 3.2 },
+    { query: "ai-powered productivity software", impressions: 12890, clicks: 987, ctr: "7.7%", position: 4.1 },
+    { query: "team collaboration platform", impressions: 10230, clicks: 756, ctr: "7.4%", position: 5.3 },
+    { query: "workflow automation tool", impressions: 8940, clicks: 634, ctr: "7.1%", position: 6.2 },
+    { query: "project tracking software", impressions: 7650, clicks: 423, ctr: "5.5%", position: 8.7 },
+  ];
+
+  const deviceBreakdown = [
+    { device: "Desktop", sessions: 2234, percentage: 55, conversions: 245, revenue: 14200 },
+    { device: "Mobile", sessions: 1456, percentage: 36, conversions: 98, revenue: 5800 },
+    { device: "Tablet", sessions: 365, percentage: 9, conversions: 10, revenue: 650 },
+  ];
+
+  const topLandingPages = [
+    { page: "/product", sessions: 1845, bounceRate: "32%", avgDuration: "4:23", conversions: 156 },
+    { page: "/pricing", sessions: 1234, bounceRate: "28%", avgDuration: "3:45", conversions: 134 },
+    { page: "/features", sessions: 987, bounceRate: "41%", avgDuration: "3:12", conversions: 89 },
+    { page: "/blog/ai-productivity", sessions: 756, bounceRate: "38%", avgDuration: "5:34", conversions: 67 },
+    { page: "/", sessions: 543, bounceRate: "45%", avgDuration: "2:15", conversions: 45 },
+  ];
+
+  const geographicData = [
+    { country: "United States", sessions: 1845, percentage: 45.6, revenue: 12400 },
+    { country: "United Kingdom", sessions: 756, percentage: 18.7, revenue: 4800 },
+    { country: "Canada", sessions: 523, percentage: 12.9, revenue: 3200 },
+    { country: "Germany", sessions: 456, percentage: 11.3, revenue: 2900 },
+    { country: "Others", sessions: 465, percentage: 11.5, revenue: 2350 },
   ];
 
   const conversionPaths = [
@@ -93,9 +125,11 @@ export default function TrafficAttribution() {
       <Tabs defaultValue="sources" className="space-y-6">
         <TabsList>
           <TabsTrigger value="sources">Traffic Sources</TabsTrigger>
+          <TabsTrigger value="search">Search Console</TabsTrigger>
+          <TabsTrigger value="devices">Devices & Geo</TabsTrigger>
+          <TabsTrigger value="pages">Landing Pages</TabsTrigger>
           <TabsTrigger value="conversions">Conversion Paths</TabsTrigger>
           <TabsTrigger value="attribution">Attribution Models</TabsTrigger>
-          <TabsTrigger value="trends">Trends</TabsTrigger>
         </TabsList>
 
         <TabsContent value="sources" className="space-y-6">
@@ -115,7 +149,7 @@ export default function TrafficAttribution() {
                       </div>
                       <Badge variant="default">{item.trend}</Badge>
                     </div>
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-5 gap-4">
                       <div>
                         <div className="text-sm text-muted-foreground">Visits</div>
                         <div className="text-lg font-bold">{item.visits.toLocaleString()}</div>
@@ -127,6 +161,157 @@ export default function TrafficAttribution() {
                       <div>
                         <div className="text-sm text-muted-foreground">Revenue</div>
                         <div className="text-lg font-bold">${item.revenue.toLocaleString()}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Bounce Rate</div>
+                        <div className="text-lg font-bold">{item.bounceRate}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Avg Duration</div>
+                        <div className="text-lg font-bold">{item.avgDuration}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="search" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Google Search Console Data</CardTitle>
+              <CardDescription>Top search queries driving traffic from AI platforms</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {searchConsoleData.map((item, index) => (
+                  <div key={index} className="p-4 border rounded-lg">
+                    <div className="font-medium mb-3">{item.query}</div>
+                    <div className="grid grid-cols-4 gap-4">
+                      <div>
+                        <div className="text-sm text-muted-foreground">Impressions</div>
+                        <div className="text-lg font-bold">{item.impressions.toLocaleString()}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Clicks</div>
+                        <div className="text-lg font-bold">{item.clicks.toLocaleString()}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">CTR</div>
+                        <div className="text-lg font-bold">{item.ctr}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Avg Position</div>
+                        <div className="text-lg font-bold">{item.position}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="devices" className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Device Breakdown</CardTitle>
+                <CardDescription>Sessions and conversions by device type</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {deviceBreakdown.map((item, index) => (
+                    <div key={index} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{item.device}</span>
+                        <span className="text-sm font-medium">{item.sessions.toLocaleString()} sessions</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 bg-secondary rounded-full h-2">
+                          <div
+                            className="bg-primary h-2 rounded-full transition-all"
+                            style={{ width: `${item.percentage}%` }}
+                          />
+                        </div>
+                        <span className="text-sm font-medium min-w-[45px] text-right">
+                          {item.percentage}%
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mt-2 text-sm text-muted-foreground">
+                        <div>Conversions: {item.conversions}</div>
+                        <div>Revenue: ${item.revenue.toLocaleString()}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Geographic Distribution</CardTitle>
+                <CardDescription>Sessions and revenue by country</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {geographicData.map((item, index) => (
+                    <div key={index} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{item.country}</span>
+                        <span className="text-sm font-medium">{item.sessions.toLocaleString()} sessions</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 bg-secondary rounded-full h-2">
+                          <div
+                            className="bg-primary h-2 rounded-full transition-all"
+                            style={{ width: `${item.percentage}%` }}
+                          />
+                        </div>
+                        <span className="text-sm font-medium min-w-[45px] text-right">
+                          {item.percentage.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-2">
+                        Revenue: ${item.revenue.toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="pages" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Top Landing Pages</CardTitle>
+              <CardDescription>Performance metrics for top landing pages from AI traffic</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {topLandingPages.map((item, index) => (
+                  <div key={index} className="p-4 border rounded-lg">
+                    <div className="font-medium mb-3">{item.page}</div>
+                    <div className="grid grid-cols-4 gap-4">
+                      <div>
+                        <div className="text-sm text-muted-foreground">Sessions</div>
+                        <div className="text-lg font-bold">{item.sessions.toLocaleString()}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Bounce Rate</div>
+                        <div className="text-lg font-bold">{item.bounceRate}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Avg Duration</div>
+                        <div className="text-lg font-bold">{item.avgDuration}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Conversions</div>
+                        <div className="text-lg font-bold">{item.conversions}</div>
                       </div>
                     </div>
                   </div>
@@ -193,18 +378,6 @@ export default function TrafficAttribution() {
                   </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="trends" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Traffic Trend Analysis</CardTitle>
-              <CardDescription>AI-driven traffic growth over time</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <TrendChart data={trafficData} />
             </CardContent>
           </Card>
         </TabsContent>
