@@ -57,7 +57,7 @@ export default function Auth() {
               <Building2 className="h-6 w-6 text-primary" />
             </div>
           </div>
-          <CardTitle className="text-2xl text-center">AI Brand Monitor</CardTitle>
+          <CardTitle className="text-2xl text-center">PromptMaxx</CardTitle>
           <CardDescription className="text-center">
             Sign in to your account or create a new organization
           </CardDescription>

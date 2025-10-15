@@ -174,9 +174,9 @@ export const Sidebar = () => {
     <aside className="w-64 bg-card border-r border-border h-screen sticky top-0 overflow-y-auto flex flex-col">
       <div className="p-6 border-b border-border">
         <h2 className="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-          AI Visibility Pro
+          PromptMaxx
         </h2>
-        <p className="text-xs text-muted-foreground mt-1">Brand Intelligence Platform</p>
+        <p className="text-xs text-muted-foreground mt-1">AI Visibility & Content Strategy</p>
         <div className="mt-4">
           <DomainSelector />
         </div>
