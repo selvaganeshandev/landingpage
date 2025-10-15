@@ -108,6 +108,36 @@ const App = () => (
               } 
             />
             <Route 
+              path="/crawler" 
+              element={
+                <PlaceholderPage 
+                  title="AI Crawler" 
+                  description="Crawl and analyze AI model responses across platforms"
+                  features={[
+                    "Multi-model response tracking",
+                    "Content indexing and discovery",
+                    "Citation pattern analysis",
+                    "Competitive mention monitoring"
+                  ]}
+                />
+              } 
+            />
+            <Route 
+              path="/traffic" 
+              element={
+                <PlaceholderPage 
+                  title="Traffic Attribution" 
+                  description="Track and attribute traffic from AI platforms"
+                  features={[
+                    "AI-driven traffic source tracking",
+                    "Conversion attribution modeling",
+                    "Platform referral analysis",
+                    "ROI measurement and reporting"
+                  ]}
+                />
+              } 
+            />
+            <Route 
               path="/settings" 
               element={
                 <PlaceholderPage 
