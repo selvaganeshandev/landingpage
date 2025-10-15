@@ -7,6 +7,7 @@ import { Layout } from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Prompts from "./pages/Prompts";
 import Mentions from "./pages/Mentions";
+import MentionDetail from "./pages/MentionDetail";
 import Sentiment from "./pages/Sentiment";
 import ShareOfVoice from "./pages/ShareOfVoice";
 import ContentGaps from "./pages/ContentGaps";
@@ -14,6 +15,7 @@ import HistoricalTrends from "./pages/HistoricalTrends";
 import Topics from "./pages/Topics";
 import Alerts from "./pages/Alerts";
 import Competitors from "./pages/Competitors";
+import CompetitorDetail from "./pages/CompetitorDetail";
 import Reports from "./pages/Reports";
 import Multilingual from "./pages/Multilingual";
 import PlaceholderPage from "./pages/PlaceholderPage";
@@ -32,6 +34,7 @@ const App = () => (
             <Route path="/" element={<Dashboard />} />
             <Route path="/prompts" element={<Prompts />} />
             <Route path="/mentions" element={<Mentions />} />
+            <Route path="/mentions/:id" element={<MentionDetail />} />
             <Route path="/sentiment" element={<Sentiment />} />
             <Route path="/share-of-voice" element={<ShareOfVoice />} />
             <Route path="/content-gaps" element={<ContentGaps />} />
@@ -39,6 +42,7 @@ const App = () => (
             <Route path="/topics" element={<Topics />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/competitors" element={<Competitors />} />
+            <Route path="/competitors/:id" element={<CompetitorDetail />} />
             <Route path="/multilingual" element={<Multilingual />} />
             <Route path="/reports" element={<Reports />} />
             <Route 

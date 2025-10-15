@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +65,7 @@ const getSentimentColor = (sentiment: string) => {
 };
 
 const Mentions = () => {
+  const navigate = useNavigate();
   const [selectedPlatform, setSelectedPlatform] = useState("all");
   const { toast } = useToast();
 
@@ -89,11 +91,8 @@ const Mentions = () => {
     });
   };
 
-  const handleViewFull = () => {
-    toast({
-      title: "Opening Full View",
-      description: "Loading complete mention details...",
-    });
+  const handleViewFull = (mentionId: number) => {
+    navigate(`/mentions/${mentionId}`);
   };
 
   return (
@@ -188,9 +187,9 @@ const Mentions = () => {
                     <Copy className="h-3 w-3 mr-1" />
                     Copy
                   </Button>
-                  <Button variant="outline" size="sm" onClick={handleViewFull} className="border-border/50">
+                  <Button variant="outline" size="sm" onClick={() => handleViewFull(mention.id)} className="border-border/50">
                     <ExternalLink className="h-3 w-3 mr-1" />
-                    View Full
+                    View Details
                   </Button>
                 </div>
               </div>

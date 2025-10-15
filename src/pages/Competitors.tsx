@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -158,6 +159,7 @@ const competitiveInsights = [
 ];
 
 const Competitors = () => {
+  const navigate = useNavigate();
   const [timePeriod, setTimePeriod] = useState("90");
   const [selectedTab, setSelectedTab] = useState("overview");
   const { toast } = useToast();
@@ -252,46 +254,50 @@ const Competitors = () => {
       {/* Competitor Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {competitors.map((competitor, idx) => (
-          <Card key={competitor.id} className={`p-6 ${competitor.isYou ? 'ring-2 ring-primary' : ''}`}>
+          <Card 
+            key={competitor.id} 
+            className={`p-6 hover:shadow-elegant transition-all duration-300 cursor-pointer border-border/50 backdrop-blur-sm bg-card/80 ${competitor.isYou ? 'ring-2 ring-primary/30' : ''}`}
+            onClick={() => !competitor.isYou && navigate(`/competitors/${competitor.url.replace('.com', '')}`)}
+          >
             <div className="space-y-4">
               <div className="flex items-start justify-between">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-xl font-semibold">{competitor.name}</h3>
+                    <h3 className="text-xl font-semibold font-outfit">{competitor.name}</h3>
                     {competitor.isYou && (
-                      <Badge variant="default">You</Badge>
+                      <Badge variant="default" className="gradient-primary border-0">You</Badge>
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground">{competitor.url}</p>
                 </div>
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-secondary text-primary-foreground flex items-center justify-center font-bold">
+                <div className="w-12 h-12 rounded-xl gradient-primary shadow-glow flex items-center justify-center font-bold text-white text-lg font-outfit">
                   #{idx + 1}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Mentions</p>
-                  <p className="text-2xl font-bold">{competitor.mentions}</p>
+                <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Mentions</p>
+                  <p className="text-2xl font-bold font-outfit">{competitor.mentions}</p>
                 </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Share</p>
-                  <p className="text-2xl font-bold">{competitor.shareOfVoice}%</p>
+                <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Share</p>
+                  <p className="text-2xl font-bold font-outfit">{competitor.shareOfVoice}%</p>
                 </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Visibility</p>
-                  <p className="text-lg font-bold">{competitor.visibility}%</p>
-                  <Progress value={competitor.visibility} className="h-1 mt-1" />
+                <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Visibility</p>
+                  <p className="text-lg font-bold font-outfit">{competitor.visibility}%</p>
+                  <Progress value={competitor.visibility} className="h-1.5 mt-2" />
                 </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Sentiment</p>
-                  <p className="text-lg font-bold">{competitor.sentiment}%</p>
-                  <Progress value={competitor.sentiment} className="h-1 mt-1" />
+                <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Sentiment</p>
+                  <p className="text-lg font-bold font-outfit">{competitor.sentiment}%</p>
+                  <Progress value={competitor.sentiment} className="h-1.5 mt-2" />
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-border">
-                <div className="flex items-center justify-between text-sm">
+              <div className="pt-3 border-t border-border/50 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm">
                   <span className="text-muted-foreground">Trend</span>
                   <div className="flex items-center gap-1">
                     {competitor.trend > 0 ? (
@@ -299,11 +305,16 @@ const Competitors = () => {
                     ) : (
                       <TrendingDown className="h-4 w-4 text-destructive" />
                     )}
-                    <span className={`font-medium ${competitor.trend > 0 ? 'text-success' : 'text-destructive'}`}>
+                    <span className={`font-semibold ${competitor.trend > 0 ? 'text-success' : 'text-destructive'}`}>
                       {competitor.trend > 0 ? '+' : ''}{competitor.trend}%
                     </span>
                   </div>
                 </div>
+                {!competitor.isYou && (
+                  <Button variant="ghost" size="sm" className="text-primary">
+                    View Details →
+                  </Button>
+                )}
               </div>
             </div>
           </Card>
