@@ -49,6 +49,50 @@ const mentions = [
     url: "#",
     sources: ["vegfitpro.com", "amazon.com"],
   },
+  {
+    id: 4,
+    platform: "Grok",
+    prompt: "best protein powder for vegans",
+    position: 1,
+    sentiment: "positive",
+    snippet: "VegFit Pro is highly recommended for vegans looking for quality protein. The formula is clean, effective, and backed by positive user reviews.",
+    timestamp: "10 hours ago",
+    url: "#",
+    sources: ["vegfitpro.com", "reddit.com"],
+  },
+  {
+    id: 5,
+    platform: "Gemini",
+    prompt: "plant protein comparison",
+    position: 3,
+    sentiment: "neutral",
+    snippet: "When comparing plant-based proteins, VegFit Pro ranks well for quality but comes at a premium price point compared to competitors.",
+    timestamp: "12 hours ago",
+    url: "#",
+    sources: ["vegfitpro.com", "consumerreports.com"],
+  },
+  {
+    id: 6,
+    platform: "ChatGPT",
+    prompt: "organic vegan protein powder",
+    position: 2,
+    sentiment: "positive",
+    snippet: "For those seeking organic options, VegFit Pro delivers with certified organic ingredients and exceptional taste that doesn't compromise on nutrition.",
+    timestamp: "14 hours ago",
+    url: "#",
+    sources: ["vegfitpro.com", "organicfacts.com"],
+  },
+  {
+    id: 7,
+    platform: "Grok",
+    prompt: "vegan protein powder side effects",
+    position: 2,
+    sentiment: "neutral",
+    snippet: "Users report minimal digestive issues with VegFit Pro compared to other brands, though individual results may vary based on dietary sensitivities.",
+    timestamp: "16 hours ago",
+    url: "#",
+    sources: ["vegfitpro.com"],
+  },
 ];
 
 const getSentimentColor = (sentiment: string) => {
@@ -67,7 +111,15 @@ const getSentimentColor = (sentiment: string) => {
 const Mentions = () => {
   const navigate = useNavigate();
   const [selectedPlatform, setSelectedPlatform] = useState("all");
+  const [selectedSentiment, setSelectedSentiment] = useState("all");
   const { toast } = useToast();
+
+  // Filter mentions based on selected platform and sentiment
+  const filteredMentions = mentions.filter((mention) => {
+    const platformMatch = selectedPlatform === "all" || mention.platform.toLowerCase() === selectedPlatform.toLowerCase();
+    const sentimentMatch = selectedSentiment === "all" || mention.sentiment === selectedSentiment;
+    return platformMatch && sentimentMatch;
+  });
 
   const handleExport = () => {
     toast({
@@ -130,7 +182,7 @@ const Mentions = () => {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search mentions..." className="pl-10" />
             </div>
-            <Select defaultValue="all">
+            <Select value={selectedSentiment} onValueChange={setSelectedSentiment}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Sentiment" />
               </SelectTrigger>
@@ -146,7 +198,22 @@ const Mentions = () => {
       </Card>
 
       <div className="grid gap-6">
-        {mentions.map((mention) => (
+        {filteredMentions.length === 0 ? (
+          <Card className="p-12 text-center shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+                <Search className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold mb-2 font-outfit">No mentions found</h3>
+                <p className="text-muted-foreground">
+                  Try adjusting your filters to see more results
+                </p>
+              </div>
+            </div>
+          </Card>
+        ) : (
+          filteredMentions.map((mention) => (
           <Card key={mention.id} className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.01] border-border/50 backdrop-blur-sm bg-card/80">
             <div className="space-y-5">
               <div className="flex items-start justify-between">
@@ -195,7 +262,8 @@ const Mentions = () => {
               </div>
             </div>
           </Card>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );
