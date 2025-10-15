@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Prompts from "./pages/Prompts";
+import PromptDetail from "./pages/PromptDetail";
 import Mentions from "./pages/Mentions";
 import MentionDetail from "./pages/MentionDetail";
 import Sentiment from "./pages/Sentiment";
@@ -33,6 +34,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/prompts" element={<Prompts />} />
+            <Route path="/prompts/:id" element={<PromptDetail />} />
             <Route path="/mentions" element={<Mentions />} />
             <Route path="/mentions/:id" element={<MentionDetail />} />
             <Route path="/sentiment" element={<Sentiment />} />
