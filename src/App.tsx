@@ -19,6 +19,10 @@ import Competitors from "./pages/Competitors";
 import CompetitorDetail from "./pages/CompetitorDetail";
 import Reports from "./pages/Reports";
 import Multilingual from "./pages/Multilingual";
+import PromptInsights from "./pages/PromptInsights";
+import AgentAnalytics from "./pages/AgentAnalytics";
+import AICrawler from "./pages/AICrawler";
+import TrafficAttribution from "./pages/TrafficAttribution";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
 
@@ -47,6 +51,10 @@ const App = () => (
             <Route path="/competitors/:id" element={<CompetitorDetail />} />
             <Route path="/multilingual" element={<Multilingual />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/prompt-insights" element={<PromptInsights />} />
+            <Route path="/agent-analytics" element={<AgentAnalytics />} />
+            <Route path="/crawler" element={<AICrawler />} />
+            <Route path="/traffic" element={<TrafficAttribution />} />
             <Route 
               path="/copilot" 
               element={
@@ -63,21 +71,6 @@ const App = () => (
               } 
             />
             <Route 
-              path="/prompt-insights" 
-              element={
-                <PlaceholderPage 
-                  title="Prompt Volume Insights" 
-                  description="Understand trending queries and search volumes"
-                  features={[
-                    "Prompt volume trends and forecasting",
-                    "Emerging query identification",
-                    "Search intent analysis",
-                    "Demand opportunity scoring"
-                  ]}
-                />
-              } 
-            />
-            <Route 
               path="/misinformation" 
               element={
                 <PlaceholderPage 
@@ -88,51 +81,6 @@ const App = () => (
                     "Brand misinformation alerts",
                     "Fact-checking assistance",
                     "Correction tracking and verification"
-                  ]}
-                />
-              } 
-            />
-            <Route 
-              path="/agent-analytics" 
-              element={
-                <PlaceholderPage 
-                  title="Agent Analytics" 
-                  description="Deep intelligence on AI model behavior and source preferences"
-                  features={[
-                    "Model-specific performance tracking",
-                    "Source citation analysis",
-                    "Agent behavior patterns",
-                    "Referral pathway optimization"
-                  ]}
-                />
-              } 
-            />
-            <Route 
-              path="/crawler" 
-              element={
-                <PlaceholderPage 
-                  title="AI Crawler" 
-                  description="Crawl and analyze AI model responses across platforms"
-                  features={[
-                    "Multi-model response tracking",
-                    "Content indexing and discovery",
-                    "Citation pattern analysis",
-                    "Competitive mention monitoring"
-                  ]}
-                />
-              } 
-            />
-            <Route 
-              path="/traffic" 
-              element={
-                <PlaceholderPage 
-                  title="Traffic Attribution" 
-                  description="Track and attribute traffic from AI platforms"
-                  features={[
-                    "AI-driven traffic source tracking",
-                    "Conversion attribution modeling",
-                    "Platform referral analysis",
-                    "ROI measurement and reporting"
                   ]}
                 />
               } 
