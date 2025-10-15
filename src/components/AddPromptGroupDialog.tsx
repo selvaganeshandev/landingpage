@@ -12,8 +12,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { X } from "lucide-react";
+import { X, Sparkles, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 interface AddPromptGroupDialogProps {
   open: boolean;
@@ -28,6 +29,7 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
   const [description, setDescription] = useState("");
   const [variants, setVariants] = useState<string[]>([]);
   const [variantInput, setVariantInput] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const handleAddVariant = () => {
     if (variantInput.trim() && !variants.includes(variantInput.trim())) {
@@ -81,6 +83,57 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
     }
   };
 
+  const handleGenerateSuggestions = async () => {
+    if (!mainPrompt.trim()) {
+      toast({
+        title: "Missing Main Prompt",
+        description: "Please enter a main prompt first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-prompt-suggestions', {
+        body: { mainPrompt: mainPrompt.trim() }
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      // Set the generated group name and variants
+      if (data.groupName) {
+        setName(data.groupName);
+      }
+
+      if (data.variants && Array.isArray(data.variants)) {
+        setVariants(data.variants);
+      }
+
+      toast({
+        title: "Suggestions Generated",
+        description: `Generated ${data.variants?.length || 0} prompt variants and a group name.`,
+      });
+
+    } catch (error: any) {
+      console.error("Error generating suggestions:", error);
+      toast({
+        title: "Generation Failed",
+        description: error.message || "Failed to generate suggestions. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
@@ -107,15 +160,29 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
           {/* Main Prompt */}
           <div className="space-y-2">
             <Label htmlFor="mainPrompt">Main Prompt*</Label>
-            <Input
-              id="mainPrompt"
-              placeholder="e.g., best vegan protein powder for athletes"
-              value={mainPrompt}
-              onChange={(e) => setMainPrompt(e.target.value)}
-              className="border-border/50 font-mono"
-            />
+            <div className="flex gap-2">
+              <Input
+                id="mainPrompt"
+                placeholder="e.g., best vegan protein powder for athletes"
+                value={mainPrompt}
+                onChange={(e) => setMainPrompt(e.target.value)}
+                className="border-border/50 font-mono flex-1"
+              />
+              <Button 
+                type="button" 
+                onClick={handleGenerateSuggestions}
+                disabled={isGenerating || !mainPrompt.trim()}
+                className="gradient-primary"
+              >
+                {isGenerating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground">
-              The primary search query you want to track
+              Enter your main prompt, then click the ✨ button to auto-generate group name and variants
             </p>
           </div>
 
