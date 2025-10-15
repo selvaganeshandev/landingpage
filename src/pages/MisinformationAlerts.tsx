@@ -7,6 +7,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { MisinformationDetailDialog } from "@/components/MisinformationDetailDialog";
 import { MisinformationActionDialog } from "@/components/MisinformationActionDialog";
+import { AddMonitoringRuleDialog } from "@/components/AddMonitoringRuleDialog";
+import { ConfigureDetectionDialog } from "@/components/ConfigureDetectionDialog";
+import { StartScanDialog } from "@/components/StartScanDialog";
 import { 
   AlertTriangle, 
   CheckCircle, 
@@ -204,7 +207,12 @@ const MisinformationAlerts = () => {
   const [selectedTab, setSelectedTab] = useState("active");
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [actionDialogOpen, setActionDialogOpen] = useState(false);
+  const [addRuleDialogOpen, setAddRuleDialogOpen] = useState(false);
+  const [configureDialogOpen, setConfigureDialogOpen] = useState(false);
+  const [startScanDialogOpen, setStartScanDialogOpen] = useState(false);
   const [selectedCase, setSelectedCase] = useState<typeof activeMisinformation[0] | null>(null);
+  const [selectedRule, setSelectedRule] = useState<typeof monitoringRules[0] | null>(null);
+  const [rules, setRules] = useState(monitoringRules);
 
   const handleViewDetails = (misinformationCase: typeof activeMisinformation[0]) => {
     setSelectedCase(misinformationCase);
@@ -217,23 +225,48 @@ const MisinformationAlerts = () => {
   };
 
   const handleConfigureRules = () => {
+    setConfigureDialogOpen(true);
+  };
+
+  const handleStartMonitoring = () => {
+    setStartScanDialogOpen(true);
+  };
+
+  const handleAddRule = () => {
+    setSelectedRule(null);
+    setAddRuleDialogOpen(true);
+  };
+
+  const handleEditRule = (rule: typeof monitoringRules[0]) => {
+    setSelectedRule(rule);
+    setAddRuleDialogOpen(true);
+  };
+
+  const handleToggleRuleStatus = (ruleId: number) => {
+    setRules(rules.map(rule => 
+      rule.id === ruleId 
+        ? { ...rule, status: rule.status === "active" ? "paused" : "active" }
+        : rule
+    ));
+    const rule = rules.find(r => r.id === ruleId);
     toast({
-      title: "Configure Detection Rules",
-      description: "Opening rule configuration panel...",
+      title: "Rule status updated",
+      description: `${rule?.name} has been ${rule?.status === "active" ? "paused" : "activated"}`,
     });
+  };
+
+  const handleSaveRule = (rule: typeof monitoringRules[0]) => {
+    if (rule.id) {
+      setRules(rules.map(r => r.id === rule.id ? rule : r));
+    } else {
+      setRules([...rules, { ...rule, id: rules.length + 1, detections: 0, lastTriggered: "Never" }]);
+    }
   };
 
   const handleExportReport = () => {
     toast({
       title: "Exporting Report",
       description: "Generating misinformation report...",
-    });
-  };
-
-  const handleStartMonitoring = () => {
-    toast({
-      title: "Starting Monitoring",
-      description: "Initiating new monitoring scan...",
     });
   };
 
@@ -459,14 +492,14 @@ const MisinformationAlerts = () => {
                     Configure what to monitor and how to detect issues
                   </CardDescription>
                 </div>
-                <Button onClick={handleConfigureRules}>
+                <Button onClick={handleAddRule}>
                   <Settings className="h-4 w-4 mr-2" />
                   Add Rule
                 </Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {monitoringRules.map((rule) => (
+              {rules.map((rule) => (
                 <div
                   key={rule.id}
                   className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors"
@@ -494,10 +527,14 @@ const MisinformationAlerts = () => {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button size="sm" variant="outline">
+                      <Button size="sm" variant="outline" onClick={() => handleEditRule(rule)}>
                         Edit
                       </Button>
-                      <Button size="sm" variant="ghost">
+                      <Button 
+                        size="sm" 
+                        variant="ghost"
+                        onClick={() => handleToggleRuleStatus(rule.id)}
+                      >
                         {rule.status === "active" ? "Pause" : "Activate"}
                       </Button>
                     </div>
@@ -570,6 +607,20 @@ const MisinformationAlerts = () => {
         open={actionDialogOpen}
         onOpenChange={setActionDialogOpen}
         misinformationCase={selectedCase}
+      />
+      <AddMonitoringRuleDialog
+        open={addRuleDialogOpen}
+        onOpenChange={setAddRuleDialogOpen}
+        rule={selectedRule}
+        onSave={handleSaveRule}
+      />
+      <ConfigureDetectionDialog
+        open={configureDialogOpen}
+        onOpenChange={setConfigureDialogOpen}
+      />
+      <StartScanDialog
+        open={startScanDialogOpen}
+        onOpenChange={setStartScanDialogOpen}
       />
     </div>
   );
