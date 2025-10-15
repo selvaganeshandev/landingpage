@@ -1,0 +1,115 @@
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { ExternalLink } from "lucide-react";
+
+interface Mention {
+  id: number;
+  platform: string;
+  prompt: string;
+  position: number;
+  sentiment: "positive" | "neutral" | "negative";
+  timestamp: string;
+  url: string;
+}
+
+const mentions: Mention[] = [
+  {
+    id: 1,
+    platform: "ChatGPT",
+    prompt: "best vegan protein powder for athletes",
+    position: 1,
+    sentiment: "positive",
+    timestamp: "2 hours ago",
+    url: "#"
+  },
+  {
+    id: 2,
+    platform: "Claude",
+    prompt: "top vegan protein supplement for sports",
+    position: 2,
+    sentiment: "positive",
+    timestamp: "5 hours ago",
+    url: "#"
+  },
+  {
+    id: 3,
+    platform: "Perplexity",
+    prompt: "affordable plant-based protein",
+    position: 1,
+    sentiment: "neutral",
+    timestamp: "8 hours ago",
+    url: "#"
+  },
+  {
+    id: 4,
+    platform: "Gemini",
+    prompt: "clean vegan protein for runners",
+    position: 3,
+    sentiment: "positive",
+    timestamp: "12 hours ago",
+    url: "#"
+  },
+];
+
+const getSentimentColor = (sentiment: string) => {
+  switch (sentiment) {
+    case "positive":
+      return "bg-success text-success-foreground";
+    case "neutral":
+      return "bg-warning text-warning-foreground";
+    case "negative":
+      return "bg-destructive text-destructive-foreground";
+    default:
+      return "bg-muted";
+  }
+};
+
+export const MentionTable = () => {
+  return (
+    <Card className="p-6">
+      <h3 className="text-lg font-semibold mb-4">Recent Mentions</h3>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Platform</TableHead>
+            <TableHead>Prompt</TableHead>
+            <TableHead className="text-center">Position</TableHead>
+            <TableHead className="text-center">Sentiment</TableHead>
+            <TableHead>Time</TableHead>
+            <TableHead className="text-right">Source</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {mentions.map((mention) => (
+            <TableRow key={mention.id}>
+              <TableCell className="font-medium">{mention.platform}</TableCell>
+              <TableCell className="max-w-xs truncate">{mention.prompt}</TableCell>
+              <TableCell className="text-center">
+                <Badge variant="outline" className="font-bold">#{mention.position}</Badge>
+              </TableCell>
+              <TableCell className="text-center">
+                <Badge className={getSentimentColor(mention.sentiment)}>
+                  {mention.sentiment}
+                </Badge>
+              </TableCell>
+              <TableCell className="text-muted-foreground">{mention.timestamp}</TableCell>
+              <TableCell className="text-right">
+                <a href={mention.url} className="inline-flex items-center gap-1 text-primary hover:underline">
+                  View <ExternalLink className="h-3 w-3" />
+                </a>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
+  );
+};
