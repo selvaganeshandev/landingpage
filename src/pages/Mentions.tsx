@@ -98,29 +98,29 @@ const Mentions = () => {
 
   return (
     <div className="p-8 space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between pb-4 border-b border-border/50">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight">Real-Time Mention Tracking</h1>
+          <h1 className="text-4xl font-bold tracking-tight font-outfit">Real-Time Mention Tracking</h1>
           <p className="text-muted-foreground mt-2">
             Monitor brand mentions and citations across AI platforms
           </p>
         </div>
-        <Button onClick={handleExport}>Export Mentions</Button>
+        <Button onClick={handleExport} className="gradient-primary shadow-md shadow-primary/20">Export Mentions</Button>
       </div>
 
       {/* Platform Tabs */}
-      <Card className="p-6">
+      <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
         <Tabs value={selectedPlatform} onValueChange={setSelectedPlatform}>
-          <div className="flex items-center justify-between mb-4">
-            <TabsList className="bg-muted/50">
-              <TabsTrigger value="all">All Platforms</TabsTrigger>
-              <TabsTrigger value="grok">Grok</TabsTrigger>
-              <TabsTrigger value="claude">Claude</TabsTrigger>
-              <TabsTrigger value="chatgpt">ChatGPT</TabsTrigger>
-              <TabsTrigger value="perplexity">Perplexity</TabsTrigger>
-              <TabsTrigger value="gemini">Google Gemini</TabsTrigger>
+          <div className="flex items-center justify-between mb-6">
+            <TabsList className="bg-muted/50 p-1 border border-border/50">
+              <TabsTrigger value="all" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">All Platforms</TabsTrigger>
+              <TabsTrigger value="grok" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">Grok</TabsTrigger>
+              <TabsTrigger value="claude" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">Claude</TabsTrigger>
+              <TabsTrigger value="chatgpt" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">ChatGPT</TabsTrigger>
+              <TabsTrigger value="perplexity" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">Perplexity</TabsTrigger>
+              <TabsTrigger value="gemini" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">Google Gemini</TabsTrigger>
             </TabsList>
-            <Button variant="outline" onClick={handleMoreFilters}>
+            <Button variant="outline" onClick={handleMoreFilters} className="border-border/50">
               <Filter className="h-4 w-4 mr-2" />
               More Filters
             </Button>
@@ -148,16 +148,16 @@ const Mentions = () => {
 
       <div className="grid gap-6">
         {mentions.map((mention) => (
-          <Card key={mention.id} className="p-6 hover:shadow-lg transition-shadow">
-            <div className="space-y-4">
+          <Card key={mention.id} className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.01] border-border/50 backdrop-blur-sm bg-card/80">
+            <div className="space-y-5">
               <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-primary to-secondary text-primary-foreground flex items-center justify-center font-bold">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl gradient-primary shadow-glow flex items-center justify-center font-bold text-white text-lg font-outfit">
                     #{mention.position}
                   </div>
                   <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant="outline">{mention.platform}</Badge>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Badge variant="outline" className="font-medium">{mention.platform}</Badge>
                       <Badge className={getSentimentColor(mention.sentiment)}>
                         {mention.sentiment}
                       </Badge>
@@ -170,25 +170,25 @@ const Mentions = () => {
                 <span className="text-xs text-muted-foreground">{mention.timestamp}</span>
               </div>
 
-              <div className="bg-muted/50 rounded-lg p-4 border border-border">
+              <div className="bg-gradient-to-br from-muted/30 to-muted/50 rounded-xl p-5 border border-border/50 backdrop-blur-sm">
                 <p className="text-sm leading-relaxed">{mention.snippet}</p>
               </div>
 
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center justify-between pt-3 border-t border-border/50">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Sources:</span>
+                  <span className="text-sm text-muted-foreground font-medium">Sources:</span>
                   {mention.sources.map((source, idx) => (
-                    <Badge key={idx} variant="secondary" className="text-xs">
+                    <Badge key={idx} variant="secondary" className="text-xs font-medium">
                       {source}
                     </Badge>
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => handleCopy(mention.snippet)}>
+                  <Button variant="outline" size="sm" onClick={() => handleCopy(mention.snippet)} className="border-border/50">
                     <Copy className="h-3 w-3 mr-1" />
                     Copy
                   </Button>
-                  <Button variant="outline" size="sm" onClick={handleViewFull}>
+                  <Button variant="outline" size="sm" onClick={handleViewFull} className="border-border/50">
                     <ExternalLink className="h-3 w-3 mr-1" />
                     View Full
                   </Button>

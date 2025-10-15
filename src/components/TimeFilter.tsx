@@ -17,16 +17,16 @@ export const TimeFilter = ({
   ]
 }: TimeFilterProps) => {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 p-1 bg-muted/50 rounded-xl border border-border/50">
       {periods.map((period) => (
         <Button
           key={period.value}
-          variant={selected === period.value ? "default" : "outline"}
+          variant={selected === period.value ? "default" : "ghost"}
           size="sm"
           onClick={() => onSelect(period.value)}
           className={cn(
-            "transition-all",
-            selected === period.value && "bg-primary text-primary-foreground"
+            "transition-all rounded-lg font-medium",
+            selected === period.value && "gradient-primary shadow-md shadow-primary/20"
           )}
         >
           {period.label}

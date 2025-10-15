@@ -6,7 +6,7 @@ interface LayoutProps {
 
 export const Layout = ({ children }: LayoutProps) => {
   return (
-    <div className="flex min-h-screen bg-gradient-to-b from-background to-accent/20">
+    <div className="flex min-h-screen gradient-subtle">
       <Sidebar />
       <main className="flex-1 overflow-auto">
         {children}

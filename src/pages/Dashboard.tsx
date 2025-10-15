@@ -31,16 +31,16 @@ const Dashboard = () => {
   return (
     <div className="p-8 space-y-8">
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between pb-4 border-b border-border/50">
           <div>
-            <h1 className="text-4xl font-bold tracking-tight">Dashboard</h1>
+            <h1 className="text-4xl font-bold tracking-tight font-outfit bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">Dashboard</h1>
             <p className="text-muted-foreground mt-2">
               Overview of your brand's AI search visibility performance
             </p>
           </div>
           <div className="flex gap-3">
-            <Button variant="outline" onClick={handleExportReport}>Export Report</Button>
-            <Button onClick={handleRefreshData}>Refresh Data</Button>
+            <Button variant="outline" onClick={handleExportReport} className="border-border/50">Export Report</Button>
+            <Button onClick={handleRefreshData} className="gradient-primary shadow-md shadow-primary/20">Refresh Data</Button>
           </div>
         </div>
         <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />

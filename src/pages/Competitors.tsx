@@ -214,22 +214,22 @@ const Competitors = () => {
         </Tabs>
 
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Competitor Analysis</h1>
-            <p className="text-muted-foreground mt-1">
-              Compare your brand's AI visibility against competitors
-            </p>
-          </div>
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={handleExportReport}>
-              <FileText className="h-4 w-4 mr-2" />
-              Export Report
-            </Button>
-            <Button onClick={handleAddCompetitor}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Competitor
-            </Button>
-          </div>
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight font-outfit">Competitor Analysis</h1>
+          <p className="text-muted-foreground mt-1">
+            Compare your brand's AI visibility against competitors
+          </p>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={handleExportReport} className="border-border/50">
+            <FileText className="h-4 w-4 mr-2" />
+            Export Report
+          </Button>
+          <Button onClick={handleAddCompetitor} className="gradient-primary shadow-md shadow-primary/20">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Competitor
+          </Button>
+        </div>
         </div>
 
         {/* Filters */}
@@ -314,11 +314,11 @@ const Competitors = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           {/* Brand Visibility Over Time */}
-          <Card className="p-6">
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5" />
+          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+            <div className="space-y-6">
+              <div className="pb-4 border-b border-border/50">
+                <h3 className="text-lg font-semibold flex items-center gap-2 font-outfit">
+                  <TrendingUp className="h-5 w-5 text-primary" />
                   Brand Visibility Over Time
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">
@@ -420,31 +420,27 @@ const Competitors = () => {
           </ResponsiveContainer>
         </Card>
 
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-6">Competitive Intelligence</h3>
+        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <h3 className="text-lg font-semibold mb-6 font-outfit">Competitive Intelligence</h3>
           <div className="space-y-3">
             {competitiveInsights.map((insight, idx) => (
-              <div key={idx} className="p-4 rounded-lg border border-border">
+              <div key={idx} className="p-5 rounded-xl border border-border/50 hover:shadow-md transition-all duration-300 hover:scale-[1.01] bg-card/50">
                 <div className="flex items-start gap-3">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                    insight.type === 'success' ? 'bg-success/10' :
-                    insight.type === 'warning' ? 'bg-warning/10' :
-                    'bg-primary/10'
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md ${
+                    insight.type === 'success' ? 'bg-success/10 text-success' :
+                    insight.type === 'warning' ? 'bg-warning/10 text-warning' :
+                    'gradient-primary text-white'
                   }`}>
-                    <Target className={`h-4 w-4 ${
-                      insight.type === 'success' ? 'text-success' :
-                      insight.type === 'warning' ? 'text-warning' :
-                      'text-primary'
-                    }`} />
+                    <Target className="h-5 w-5" />
                   </div>
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h4 className="font-semibold text-sm">{insight.title}</h4>
+                    <div className="flex items-center gap-2 mb-2">
+                      <h4 className="font-semibold text-sm font-outfit">{insight.title}</h4>
                       <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
                         {insight.impact}
                       </Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground">{insight.description}</p>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{insight.description}</p>
                   </div>
                 </div>
               </div>

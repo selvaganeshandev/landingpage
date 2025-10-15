@@ -24,11 +24,11 @@ const getHeatmapColor = (value: number) => {
 
 export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) => {
   return (
-    <Card className="p-6">
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold flex items-center gap-2">
-            <Building2 className="h-5 w-5" />
+    <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+      <div className="space-y-6">
+        <div className="pb-4 border-b border-border/50">
+          <h3 className="text-lg font-semibold flex items-center gap-2 font-outfit">
+            <Building2 className="h-5 w-5 text-primary" />
             Competitor Analysis Heatmap
           </h3>
           <p className="text-sm text-muted-foreground mt-1">
@@ -39,33 +39,37 @@ export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) =
         <div className="overflow-x-auto">
           <div className="min-w-[800px]">
             {/* Header */}
-            <div className="grid gap-2 mb-2" style={{ gridTemplateColumns: `200px repeat(${platforms.length}, 1fr)` }}>
-              <div className="font-semibold text-sm">Competitor</div>
+            <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: `220px repeat(${platforms.length}, 1fr)` }}>
+              <div className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">Competitor</div>
               {platforms.map((platform) => (
-                <div key={platform} className="font-semibold text-sm text-center">
+                <div key={platform} className="font-semibold text-sm text-center text-muted-foreground uppercase tracking-wider">
                   {platform}
                 </div>
               ))}
             </div>
 
             {/* Rows */}
-            <div className="space-y-2">
+            <div className="space-y-3">
               {data.map((row) => (
                 <div
                   key={row.competitor}
-                  className={`grid gap-2 ${row.isYou ? "ring-2 ring-primary rounded-lg p-2" : ""}`}
-                  style={{ gridTemplateColumns: `200px repeat(${platforms.length}, 1fr)` }}
+                  className={`grid gap-3 transition-all duration-300 ${
+                    row.isYou 
+                      ? "ring-2 ring-primary/30 rounded-xl p-3 bg-gradient-to-br from-primary/5 to-secondary/5" 
+                      : "p-2"
+                  }`}
+                  style={{ gridTemplateColumns: `220px repeat(${platforms.length}, 1fr)` }}
                 >
-                  <div className="flex items-center gap-2 font-medium text-sm">
-                    <div className="w-6 h-6 rounded bg-gradient-to-br from-primary to-secondary text-primary-foreground flex items-center justify-center text-xs">
-                      <Building2 className="h-3 w-3" />
+                  <div className="flex items-center gap-3 font-medium text-sm">
+                    <div className="w-8 h-8 rounded-xl gradient-primary shadow-md flex items-center justify-center">
+                      <Building2 className="h-4 w-4 text-white" />
                     </div>
-                    <span className="truncate">{row.competitor}</span>
+                    <span className="truncate font-outfit font-semibold">{row.competitor}</span>
                   </div>
                   {platforms.map((platform) => (
                     <div
                       key={platform}
-                      className={`p-3 rounded-lg text-center font-semibold text-sm transition-all hover:scale-105 ${getHeatmapColor(
+                      className={`p-3 rounded-xl text-center font-semibold text-sm transition-all duration-300 hover:scale-105 hover:shadow-md ${getHeatmapColor(
                         row.platforms[platform] || 0
                       )}`}
                     >
