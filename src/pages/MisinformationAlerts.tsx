@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { MisinformationDetailDialog } from "@/components/MisinformationDetailDialog";
+import { MisinformationActionDialog } from "@/components/MisinformationActionDialog";
 import { 
   AlertTriangle, 
   CheckCircle, 
@@ -200,19 +202,18 @@ const getStatusIcon = (status: string) => {
 const MisinformationAlerts = () => {
   const { toast } = useToast();
   const [selectedTab, setSelectedTab] = useState("active");
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [actionDialogOpen, setActionDialogOpen] = useState(false);
+  const [selectedCase, setSelectedCase] = useState<typeof activeMisinformation[0] | null>(null);
 
-  const handleViewDetails = (caseId: number) => {
-    toast({
-      title: "Opening case details",
-      description: `Loading full details for case #${caseId}...`,
-    });
+  const handleViewDetails = (misinformationCase: typeof activeMisinformation[0]) => {
+    setSelectedCase(misinformationCase);
+    setDetailDialogOpen(true);
   };
 
-  const handleTakeAction = (caseId: number) => {
-    toast({
-      title: "Action initiated",
-      description: "Opening correction workflow...",
-    });
+  const handleTakeAction = (misinformationCase: typeof activeMisinformation[0]) => {
+    setSelectedCase(misinformationCase);
+    setActionDialogOpen(true);
   };
 
   const handleConfigureRules = () => {
@@ -377,11 +378,11 @@ const MisinformationAlerts = () => {
                       </div>
                     </div>
                     <div className="flex gap-2 pt-3 border-t border-border">
-                      <Button size="sm" onClick={() => handleViewDetails(item.id)}>
+                      <Button size="sm" onClick={() => handleViewDetails(item)}>
                         <Eye className="h-3 w-3 mr-1" />
                         View Details
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleTakeAction(item.id)}>
+                      <Button size="sm" variant="outline" onClick={() => handleTakeAction(item)}>
                         <Settings className="h-3 w-3 mr-1" />
                         Take Action
                       </Button>
@@ -433,7 +434,10 @@ const MisinformationAlerts = () => {
                         <p className="text-sm font-medium">Resolution Time</p>
                         <p className="text-sm text-muted-foreground">{item.resolutionTime}</p>
                       </div>
-                      <Button size="sm" variant="outline" onClick={() => handleViewDetails(item.id)}>
+                      <Button size="sm" variant="outline" onClick={() => {
+                        const fullCase = activeMisinformation.find(c => c.id === item.id);
+                        if (fullCase) handleViewDetails(fullCase);
+                      }}>
                         View Details
                       </Button>
                     </div>
@@ -555,6 +559,18 @@ const MisinformationAlerts = () => {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Dialogs */}
+      <MisinformationDetailDialog
+        open={detailDialogOpen}
+        onOpenChange={setDetailDialogOpen}
+        misinformationCase={selectedCase}
+      />
+      <MisinformationActionDialog
+        open={actionDialogOpen}
+        onOpenChange={setActionDialogOpen}
+        misinformationCase={selectedCase}
+      />
     </div>
   );
 };
