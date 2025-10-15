@@ -1,15 +1,12 @@
 import { Sidebar } from "./Sidebar";
+import { Outlet } from "react-router-dom";
 
-interface LayoutProps {
-  children: React.ReactNode;
-}
-
-export const Layout = ({ children }: LayoutProps) => {
+export const Layout = () => {
   return (
     <div className="flex min-h-screen gradient-subtle">
       <Sidebar />
       <main className="flex-1 overflow-auto">
-        {children}
+        <Outlet />
       </main>
     </div>
   );

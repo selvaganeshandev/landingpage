@@ -23,6 +23,8 @@ import PromptInsights from "./pages/PromptInsights";
 import AgentAnalytics from "./pages/AgentAnalytics";
 import AICrawler from "./pages/AICrawler";
 import TrafficAttribution from "./pages/TrafficAttribution";
+import Auth from "./pages/Auth";
+import OrganizationSettings from "./pages/OrganizationSettings";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
 
@@ -34,8 +36,9 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Layout>
-          <Routes>
+        <Routes>
+          <Route path="/auth" element={<Auth />} />
+          <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/prompts" element={<Prompts />} />
             <Route path="/prompts/:id" element={<PromptDetail />} />
@@ -55,6 +58,7 @@ const App = () => (
             <Route path="/agent-analytics" element={<AgentAnalytics />} />
             <Route path="/crawler" element={<AICrawler />} />
             <Route path="/traffic" element={<TrafficAttribution />} />
+            <Route path="/organization-settings" element={<OrganizationSettings />} />
             <Route 
               path="/copilot" 
               element={
@@ -96,8 +100,8 @@ const App = () => (
             />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Layout>
+          </Route>
+        </Routes>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

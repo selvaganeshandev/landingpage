@@ -24,7 +24,10 @@ import {
   Activity,
   Lightbulb,
   Zap,
+  LogOut,
 } from "lucide-react";
+import { DomainSelector } from "./DomainSelector";
+import { Separator } from "@/components/ui/separator";
 
 const navGroups = [
   {
@@ -165,28 +168,38 @@ export const Sidebar = () => {
   const location = useLocation();
 
   return (
-    <aside className="w-64 bg-card border-r border-border h-screen sticky top-0 overflow-y-auto">
+    <aside className="w-64 bg-card border-r border-border h-screen sticky top-0 overflow-y-auto flex flex-col">
       <div className="p-6 border-b border-border">
         <h2 className="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
           AI Visibility Pro
         </h2>
         <p className="text-xs text-muted-foreground mt-1">Brand Intelligence Platform</p>
+        <div className="mt-4">
+          <DomainSelector />
+        </div>
       </div>
       
-      <nav className="p-4 space-y-2">
+      <nav className="p-4 space-y-2 flex-1">
         {navGroups.map((group, index) => (
           <NavGroup key={index} group={group} location={location} />
         ))}
       </nav>
       
-      <div className="p-4 border-t border-border mt-auto">
+      <div className="p-4 border-t border-border mt-auto space-y-2">
         <Link
-          to="/settings"
+          to="/organization-settings"
           className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
         >
           <Settings className="h-4 w-4" />
-          Settings
+          Organization
         </Link>
+        <button
+          onClick={() => {/* TODO: Add logout */}}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+        >
+          <LogOut className="h-4 w-4" />
+          Sign Out
+        </button>
       </div>
     </aside>
   );
