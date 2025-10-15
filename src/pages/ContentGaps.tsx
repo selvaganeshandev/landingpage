@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +15,7 @@ import {
   CheckCircle2
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
+import { ContentGapDetailDialog } from "@/components/ContentGapDetailDialog";
 
 const contentGaps = [
   {
@@ -170,6 +172,8 @@ const getPriorityColor = (priority: string) => {
 
 const ContentGaps = () => {
   const { toast } = useToast();
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [selectedGap, setSelectedGap] = useState<typeof contentGaps[0] | null>(null);
 
   const handleGenerateContentPlan = () => {
     toast({
@@ -185,11 +189,9 @@ const ContentGaps = () => {
     });
   };
 
-  const handleViewDetails = () => {
-    toast({
-      title: "Loading Details",
-      description: "Opening detailed gap analysis...",
-    });
+  const handleViewDetails = (gap: typeof contentGaps[0]) => {
+    setSelectedGap(gap);
+    setDetailDialogOpen(true);
   };
 
   return (
@@ -318,7 +320,7 @@ const ContentGaps = () => {
                   <Sparkles className="h-3 w-3 mr-1" />
                   Generate Content Brief
                 </Button>
-                <Button size="sm" variant="outline" onClick={handleViewDetails}>View Details</Button>
+                <Button size="sm" variant="outline" onClick={() => handleViewDetails(gap)}>View Details</Button>
               </div>
             </div>
           ))}
@@ -396,6 +398,13 @@ const ContentGaps = () => {
           ))}
         </div>
       </Card>
+
+      {/* Detail Dialog */}
+      <ContentGapDetailDialog
+        open={detailDialogOpen}
+        onOpenChange={setDetailDialogOpen}
+        gap={selectedGap}
+      />
     </div>
   );
 };
