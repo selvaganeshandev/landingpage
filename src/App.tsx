@@ -23,6 +23,7 @@ import PromptInsights from "./pages/PromptInsights";
 import AgentAnalytics from "./pages/AgentAnalytics";
 import AICrawler from "./pages/AICrawler";
 import AICopilot from "./pages/AICopilot";
+import ContentCalendar from "./pages/ContentCalendar";
 import TrafficAttribution from "./pages/TrafficAttribution";
 import Auth from "./pages/Auth";
 import OrganizationSettings from "./pages/OrganizationSettings";
@@ -64,6 +65,7 @@ const App = () => (
             <Route path="/organization-settings" element={<OrganizationSettings />} />
             <Route path="/organization-settings/members/:memberId" element={<TeamMemberPermissions />} />
             <Route path="/copilot" element={<AICopilot />} />
+            <Route path="/content-calendar" element={<ContentCalendar />} />
             <Route path="/misinformation" element={<MisinformationAlerts />} />
             <Route 
               path="/settings" 

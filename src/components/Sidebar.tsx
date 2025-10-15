@@ -25,6 +25,7 @@ import {
   Lightbulb,
   Zap,
   LogOut,
+  Calendar,
 } from "lucide-react";
 import { DomainSelector } from "./DomainSelector";
 import { Separator } from "@/components/ui/separator";
@@ -60,6 +61,7 @@ const navGroups = [
     icon: Lightbulb,
     items: [
       { name: "Content Gaps", path: "/content-gaps", icon: Target },
+      { name: "Content Calendar", path: "/content-calendar", icon: Calendar },
       { name: "Competitors", path: "/competitors", icon: Users },
     ],
   },
