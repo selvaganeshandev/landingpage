@@ -8,6 +8,9 @@ import Dashboard from "./pages/Dashboard";
 import Prompts from "./pages/Prompts";
 import Mentions from "./pages/Mentions";
 import Sentiment from "./pages/Sentiment";
+import ShareOfVoice from "./pages/ShareOfVoice";
+import ContentGaps from "./pages/ContentGaps";
+import HistoricalTrends from "./pages/HistoricalTrends";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
 
@@ -25,66 +28,9 @@ const App = () => (
             <Route path="/prompts" element={<Prompts />} />
             <Route path="/mentions" element={<Mentions />} />
             <Route path="/sentiment" element={<Sentiment />} />
-            <Route 
-              path="/share-of-voice" 
-              element={
-                <PlaceholderPage 
-                  title="Share of Voice" 
-                  description="Competitive benchmarking and market position analysis"
-                  features={[
-                    "Real-time share of voice tracking across platforms",
-                    "Competitive positioning insights",
-                    "Market opportunity identification",
-                    "Brand dominance scoring"
-                  ]}
-                />
-              } 
-            />
-            <Route 
-              path="/content-gaps" 
-              element={
-                <PlaceholderPage 
-                  title="Content Gap Detection" 
-                  description="Discover untapped opportunities and content recommendations"
-                  features={[
-                    "AI-powered content gap identification",
-                    "Question mining from AI platforms",
-                    "Content optimization recommendations",
-                    "Priority scoring for content creation"
-                  ]}
-                />
-              } 
-            />
-            <Route 
-              path="/traffic" 
-              element={
-                <PlaceholderPage 
-                  title="Traffic Attribution" 
-                  description="Track conversions from AI-powered searches"
-                  features={[
-                    "GA4 integration for traffic tracking",
-                    "Attribution modeling for AI sources",
-                    "Conversion funnel analysis",
-                    "ROI calculation from AI visibility"
-                  ]}
-                />
-              } 
-            />
-            <Route 
-              path="/trends" 
-              element={
-                <PlaceholderPage 
-                  title="Historical Trends" 
-                  description="Long-term performance tracking and forecasting"
-                  features={[
-                    "Time-series analysis of visibility metrics",
-                    "Predictive trend forecasting",
-                    "Seasonal pattern identification",
-                    "Performance milestone tracking"
-                  ]}
-                />
-              } 
-            />
+            <Route path="/share-of-voice" element={<ShareOfVoice />} />
+            <Route path="/content-gaps" element={<ContentGaps />} />
+            <Route path="/trends" element={<HistoricalTrends />} />
             <Route 
               path="/crawler" 
               element={
