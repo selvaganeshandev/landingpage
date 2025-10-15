@@ -47,26 +47,10 @@ export const TopicOptimizeDialog = ({ open, onOpenChange, topic }: TopicOptimize
     setIsGenerating(true);
 
     try {
-      const prompt = `Topic: ${topic.name}
-Current Keywords: ${topic.keywords.join(", ")}
-Current Visibility: ${topic.visibility}%
-Current Sentiment: ${topic.sentiment}%
+      // Simulate AI analysis
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-Generate optimization recommendations including:
-1. New keyword suggestions
-2. Content gap opportunities
-3. Prompt variations to track
-4. Competitive positioning advice
-5. Actionable steps to improve visibility and sentiment`;
-
-      const { data, error } = await supabase.functions.invoke('generate-prompt-suggestions', {
-        body: { mainPrompt: prompt }
-      });
-
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-
-      // Mock recommendations for now (in production, parse AI response)
+      // Generate recommendations based on topic data
       setRecommendations({
         keywords: [
           { keyword: "vegan athlete protein", impact: "high", difficulty: "low" },

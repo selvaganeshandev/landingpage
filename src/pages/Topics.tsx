@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { TopicDetailDialog } from "@/components/TopicDetailDialog";
 import { TopicOptimizeDialog } from "@/components/TopicOptimizeDialog";
+import { GenerateTopicsDialog } from "@/components/GenerateTopicsDialog";
+import { AddTopicDialog } from "@/components/AddTopicDialog";
 import { 
   PieChart,
   Pie,
@@ -137,20 +139,16 @@ const Topics = () => {
   const { toast } = useToast();
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [optimizeDialogOpen, setOptimizeDialogOpen] = useState(false);
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState<typeof topics[0] | null>(null);
 
   const handleGenerateTopics = () => {
-    toast({
-      title: "Generating Topics",
-      description: "AI is analyzing your data to suggest topics...",
-    });
+    setGenerateDialogOpen(true);
   };
 
   const handleAddTopic = () => {
-    toast({
-      title: "Add Topic",
-      description: "Opening topic creation dialog...",
-    });
+    setAddDialogOpen(true);
   };
 
   const handleViewDetails = (topic: typeof topics[0]) => {
@@ -394,6 +392,14 @@ const Topics = () => {
         open={optimizeDialogOpen}
         onOpenChange={setOptimizeDialogOpen}
         topic={selectedTopic}
+      />
+      <GenerateTopicsDialog
+        open={generateDialogOpen}
+        onOpenChange={setGenerateDialogOpen}
+      />
+      <AddTopicDialog
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
       />
     </div>
   );
