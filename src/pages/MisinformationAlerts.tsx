@@ -10,6 +10,7 @@ import { MisinformationActionDialog } from "@/components/MisinformationActionDia
 import { AddMonitoringRuleDialog } from "@/components/AddMonitoringRuleDialog";
 import { ConfigureDetectionDialog } from "@/components/ConfigureDetectionDialog";
 import { StartScanDialog } from "@/components/StartScanDialog";
+import { ContentComparisonDialog } from "@/components/ContentComparisonDialog";
 import { 
   AlertTriangle, 
   CheckCircle, 
@@ -210,6 +211,7 @@ const MisinformationAlerts = () => {
   const [addRuleDialogOpen, setAddRuleDialogOpen] = useState(false);
   const [configureDialogOpen, setConfigureDialogOpen] = useState(false);
   const [startScanDialogOpen, setStartScanDialogOpen] = useState(false);
+  const [comparisonDialogOpen, setComparisonDialogOpen] = useState(false);
   const [selectedCase, setSelectedCase] = useState<typeof activeMisinformation[0] | null>(null);
   const [selectedRule, setSelectedRule] = useState<typeof monitoringRules[0] | null>(null);
   const [rules, setRules] = useState(monitoringRules);
@@ -280,6 +282,10 @@ const MisinformationAlerts = () => {
           </p>
         </div>
         <div className="flex gap-3">
+          <Button variant="outline" onClick={() => setComparisonDialogOpen(true)}>
+            <Search className="h-4 w-4 mr-2" />
+            Compare Content
+          </Button>
           <Button variant="outline" onClick={handleConfigureRules}>
             <Settings className="h-4 w-4 mr-2" />
             Configure Rules
@@ -621,6 +627,10 @@ const MisinformationAlerts = () => {
       <StartScanDialog
         open={startScanDialogOpen}
         onOpenChange={setStartScanDialogOpen}
+      />
+      <ContentComparisonDialog
+        open={comparisonDialogOpen}
+        onOpenChange={setComparisonDialogOpen}
       />
     </div>
   );
