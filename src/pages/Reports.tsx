@@ -5,6 +5,10 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { CreateReportDialog } from "@/components/CreateReportDialog";
+import { ReportPreviewDialog } from "@/components/ReportPreviewDialog";
+import { EditReportDialog } from "@/components/EditReportDialog";
+import { GenerateNowDialog } from "@/components/GenerateNowDialog";
+import { ScheduleReportDialog } from "@/components/ScheduleReportDialog";
 import { 
   FileText,
   Plus,
@@ -128,6 +132,12 @@ const templates = [
 const Reports = () => {
   const { toast } = useToast();
   const [createReportDialogOpen, setCreateReportDialogOpen] = useState(false);
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [generateNowDialogOpen, setGenerateNowDialogOpen] = useState(false);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<typeof reports[0] | null>(null);
+  const [scheduledReports, setScheduledReports] = useState(reports);
 
   const handleManageTemplates = () => {
     toast({
@@ -141,17 +151,21 @@ const Reports = () => {
   };
 
   const handleGenerateNow = () => {
-    toast({
-      title: "Generating Report",
-      description: "Your report is being created...",
-    });
+    setGenerateNowDialogOpen(true);
   };
 
   const handleScheduleReport = () => {
-    toast({
-      title: "Schedule Report",
-      description: "Opening scheduling options...",
-    });
+    setScheduleDialogOpen(true);
+  };
+
+  const handleAddScheduledReport = (newReport: any) => {
+    setScheduledReports([...scheduledReports, newReport]);
+  };
+
+  const handleUpdateReport = (updatedReport: any) => {
+    setScheduledReports(scheduledReports.map(r => 
+      r.id === updatedReport.id ? updatedReport : r
+    ));
   };
 
   const handleDownloadAll = () => {
@@ -168,24 +182,20 @@ const Reports = () => {
     });
   };
 
-  const handlePreview = () => {
-    toast({
-      title: "Loading Preview",
-      description: "Opening report preview...",
-    });
+  const handlePreview = (report: typeof reports[0]) => {
+    setSelectedReport(report);
+    setPreviewDialogOpen(true);
   };
 
-  const handleEdit = () => {
-    toast({
-      title: "Edit Report",
-      description: "Opening report editor...",
-    });
+  const handleEdit = (report: typeof reports[0]) => {
+    setSelectedReport(report);
+    setEditDialogOpen(true);
   };
 
-  const handleRunNow = () => {
+  const handleRunNow = (report: typeof reports[0]) => {
     toast({
       title: "Running Report",
-      description: "Executing scheduled report now...",
+      description: `Generating ${report.name} now...`,
     });
   };
 
@@ -269,7 +279,7 @@ const Reports = () => {
       <Card className="p-6">
         <h3 className="text-lg font-semibold mb-6">Scheduled Reports</h3>
         <div className="space-y-4">
-          {reports.map((report) => (
+          {scheduledReports.map((report) => (
             <div key={report.id} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
@@ -292,12 +302,12 @@ const Reports = () => {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={handlePreview}>
+                  <Button size="sm" variant="outline" onClick={() => handlePreview(report)}>
                     <Eye className="h-3 w-3 mr-1" />
                     Preview
                   </Button>
-                  <Button size="sm" variant="outline" onClick={handleEdit}>Edit</Button>
-                  <Button size="sm" onClick={handleRunNow}>Run Now</Button>
+                  <Button size="sm" variant="outline" onClick={() => handleEdit(report)}>Edit</Button>
+                  <Button size="sm" onClick={() => handleRunNow(report)}>Run Now</Button>
                 </div>
               </div>
               <div className="flex items-center gap-4 pt-3 border-t border-border">
@@ -367,7 +377,20 @@ const Reports = () => {
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs text-muted-foreground">{template.sections} sections</span>
                 {template.preview && (
-                  <Button size="sm" variant="outline" onClick={handlePreview}>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => handlePreview({ 
+                      id: template.id, 
+                      name: template.name, 
+                      description: template.description,
+                      format: ["PDF"],
+                      schedule: "",
+                      lastGenerated: "",
+                      recipients: [],
+                      status: "active"
+                    })}
+                  >
                     <Eye className="h-3 w-3 mr-1" />
                     Preview
                   </Button>
@@ -402,10 +425,30 @@ const Reports = () => {
         </div>
       </Card>
 
-      {/* Create Report Dialog */}
+      {/* Dialogs */}
       <CreateReportDialog
         open={createReportDialogOpen}
         onOpenChange={setCreateReportDialogOpen}
+      />
+      <ReportPreviewDialog
+        open={previewDialogOpen}
+        onOpenChange={setPreviewDialogOpen}
+        report={selectedReport}
+      />
+      <EditReportDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        report={selectedReport}
+        onSave={handleUpdateReport}
+      />
+      <GenerateNowDialog
+        open={generateNowDialogOpen}
+        onOpenChange={setGenerateNowDialogOpen}
+      />
+      <ScheduleReportDialog
+        open={scheduleDialogOpen}
+        onOpenChange={setScheduleDialogOpen}
+        onSchedule={handleAddScheduledReport}
       />
     </div>
   );
