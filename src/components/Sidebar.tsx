@@ -62,6 +62,7 @@ const navGroups = [
     items: [
       { name: "Content Gaps", path: "/content-gaps", icon: Target },
       { name: "Content Calendar", path: "/content-calendar", icon: Calendar },
+      { name: "Automation", path: "/automation", icon: Zap },
       { name: "Competitors", path: "/competitors", icon: Users },
     ],
   },

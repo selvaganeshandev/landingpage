@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +16,8 @@ import {
   TrendingUp,
   AlertCircle,
   CheckCircle2,
-  Edit
+  Edit,
+  Settings
 } from "lucide-react";
 import {
   Select,
@@ -41,6 +43,7 @@ interface ContentItem {
 
 const ContentCalendar = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [selectedView, setSelectedView] = useState("calendar");
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
@@ -162,6 +165,14 @@ const ContentCalendar = () => {
           </p>
         </div>
         <div className="flex gap-3">
+          <Button 
+            variant="outline" 
+            onClick={() => navigate('/automation')}
+            className="border-border/50"
+          >
+            <Settings className="h-4 w-4 mr-2" />
+            Automation Settings
+          </Button>
           <Select defaultValue="weekly">
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Frequency" />
