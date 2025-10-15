@@ -26,6 +26,7 @@ import TrafficAttribution from "./pages/TrafficAttribution";
 import Auth from "./pages/Auth";
 import OrganizationSettings from "./pages/OrganizationSettings";
 import TeamMemberPermissions from "./pages/TeamMemberPermissions";
+import MisinformationAlerts from "./pages/MisinformationAlerts";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
 
@@ -76,21 +77,7 @@ const App = () => (
                 />
               } 
             />
-            <Route 
-              path="/misinformation" 
-              element={
-                <PlaceholderPage 
-                  title="Misinformation Alerts" 
-                  description="Detect and flag AI hallucinations about your brand"
-                  features={[
-                    "Automated hallucination detection",
-                    "Brand misinformation alerts",
-                    "Fact-checking assistance",
-                    "Correction tracking and verification"
-                  ]}
-                />
-              } 
-            />
+            <Route path="/misinformation" element={<MisinformationAlerts />} />
             <Route 
               path="/settings" 
               element={
