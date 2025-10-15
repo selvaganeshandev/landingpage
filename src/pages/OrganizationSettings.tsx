@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -61,6 +61,45 @@ export default function OrganizationSettings() {
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "user">("user");
+
+  // Mock integrations data
+  const [integrations, setIntegrations] = useState([
+    {
+      id: "1",
+      domainId: "1",
+      domain: "acme.com",
+      type: "google_analytics" as const,
+      propertyId: "GA-123456789",
+      connectedAt: "2024-01-20",
+      status: "active" as const,
+      lastSync: "2024-03-14T10:30:00Z"
+    },
+    {
+      id: "2",
+      domainId: "1",
+      domain: "acme.com",
+      type: "search_console" as const,
+      propertyUrl: "https://acme.com",
+      connectedAt: "2024-01-20",
+      status: "active" as const,
+      lastSync: "2024-03-14T09:15:00Z"
+    },
+    {
+      id: "3",
+      domainId: "2",
+      domain: "acmecorp.com",
+      type: "google_analytics" as const,
+      propertyId: "GA-987654321",
+      connectedAt: "2024-02-10",
+      status: "error" as const,
+      lastSync: "2024-03-13T14:20:00Z",
+      error: "Authentication expired"
+    }
+  ]);
+
+  const [connectIntegrationDialog, setConnectIntegrationDialog] = useState(false);
+  const [selectedDomainForIntegration, setSelectedDomainForIntegration] = useState("");
+  const [integrationType, setIntegrationType] = useState<"google_analytics" | "search_console">("google_analytics");
 
   const handleAddDomain = () => {
     if (!newDomain.trim()) return;
@@ -148,6 +187,64 @@ export default function OrganizationSettings() {
     return role === "admin" ? "default" : "secondary";
   };
 
+  const handleConnectIntegration = () => {
+    if (!selectedDomainForIntegration) {
+      toast({
+        title: "Domain required",
+        description: "Please select a domain to connect the integration to.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // TODO: Connect to OAuth flow for GA/GSC
+    const domain = domains.find(d => d.id === selectedDomainForIntegration);
+    
+    const newIntegration = integrationType === "google_analytics" 
+      ? {
+          id: Date.now().toString(),
+          domainId: selectedDomainForIntegration,
+          domain: domain?.domain || "",
+          type: "google_analytics" as const,
+          propertyId: `GA-${Math.floor(Math.random() * 1000000000)}`,
+          connectedAt: new Date().toISOString().split("T")[0],
+          status: "active" as const,
+          lastSync: new Date().toISOString()
+        }
+      : {
+          id: Date.now().toString(),
+          domainId: selectedDomainForIntegration,
+          domain: domain?.domain || "",
+          type: "search_console" as const,
+          propertyUrl: `https://${domain?.domain}`,
+          connectedAt: new Date().toISOString().split("T")[0],
+          status: "active" as const,
+          lastSync: new Date().toISOString()
+        };
+
+    setIntegrations([...integrations, newIntegration]);
+    setConnectIntegrationDialog(false);
+    setSelectedDomainForIntegration("");
+    
+    toast({
+      title: "Integration connected",
+      description: `${integrationType === "google_analytics" ? "Google Analytics" : "Search Console"} has been connected to ${domain?.domain}`,
+    });
+  };
+
+  const handleDisconnectIntegration = (id: string) => {
+    const integration = integrations.find(i => i.id === id);
+    setIntegrations(integrations.filter(i => i.id !== id));
+    toast({
+      title: "Integration disconnected",
+      description: `${integration?.type === "google_analytics" ? "Google Analytics" : "Search Console"} has been disconnected from ${integration?.domain}`,
+    });
+  };
+
+  const getIntegrationsByDomain = (domainId: string) => {
+    return integrations.filter(i => i.domainId === domainId);
+  };
+
   return (
     <div className="p-8 space-y-6">
       <div>
@@ -233,6 +330,105 @@ export default function OrganizationSettings() {
                 </div>
               ))
             )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Integrations</CardTitle>
+          <CardDescription>
+            Connect Google Analytics and Search Console for each domain to track traffic attribution
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Button onClick={() => setConnectIntegrationDialog(true)}>
+            <Link2 className="h-4 w-4 mr-2" />
+            Connect Integration
+          </Button>
+
+          <Separator />
+
+          <div className="space-y-4">
+            {domains.map((domain) => {
+              const domainIntegrations = getIntegrationsByDomain(domain.id);
+              return (
+                <div key={domain.id} className="p-4 border rounded-lg space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">{domain.domain}</span>
+                      <Badge variant={domain.verified ? "default" : "secondary"}>
+                        {domain.verified ? "Verified" : "Pending"}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  {domainIntegrations.length === 0 ? (
+                    <div className="text-sm text-muted-foreground bg-muted/30 rounded p-3">
+                      No integrations connected for this domain
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {domainIntegrations.map((integration) => (
+                        <div
+                          key={integration.id}
+                          className="flex items-center justify-between p-3 bg-muted/30 rounded"
+                        >
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-sm">
+                                {integration.type === "google_analytics"
+                                  ? "Google Analytics"
+                                  : "Google Search Console"}
+                              </span>
+                              {integration.status === "active" ? (
+                                <Badge variant="default" className="gap-1">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Active
+                                </Badge>
+                              ) : (
+                                <Badge variant="destructive" className="gap-1">
+                                  <AlertCircle className="h-3 w-3" />
+                                  Error
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {integration.type === "google_analytics"
+                                ? `Property: ${integration.propertyId}`
+                                : `URL: ${integration.propertyUrl}`}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Last sync: {new Date(integration.lastSync).toLocaleString()}
+                            </div>
+                            {integration.error && (
+                              <div className="text-xs text-destructive mt-1">
+                                Error: {integration.error}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {integration.status === "error" && (
+                              <Button variant="outline" size="sm">
+                                Reconnect
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDisconnectIntegration(integration.id)}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </CardContent>
       </Card>
@@ -389,6 +585,94 @@ export default function OrganizationSettings() {
             </Button>
             <Button onClick={handleInviteMember}>
               Send Invitation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={connectIntegrationDialog} onOpenChange={setConnectIntegrationDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Connect Integration</DialogTitle>
+            <DialogDescription>
+              Connect Google Analytics or Search Console to a domain
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="integration-domain">Domain</Label>
+              <Select
+                value={selectedDomainForIntegration}
+                onValueChange={setSelectedDomainForIntegration}
+              >
+                <SelectTrigger id="integration-domain">
+                  <SelectValue placeholder="Select a domain" />
+                </SelectTrigger>
+                <SelectContent>
+                  {domains.map((domain) => (
+                    <SelectItem key={domain.id} value={domain.id}>
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-4 w-4" />
+                        {domain.domain}
+                        {!domain.verified && (
+                          <Badge variant="secondary" className="ml-2">Pending</Badge>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="integration-type">Integration Type</Label>
+              <Select
+                value={integrationType}
+                onValueChange={(value: "google_analytics" | "search_console") =>
+                  setIntegrationType(value)
+                }
+              >
+                <SelectTrigger id="integration-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="google_analytics">
+                    <div className="flex flex-col">
+                      <p className="font-medium">Google Analytics</p>
+                      <p className="text-xs text-muted-foreground">
+                        Track user behavior and conversions
+                      </p>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="search_console">
+                    <div className="flex flex-col">
+                      <p className="font-medium">Google Search Console</p>
+                      <p className="text-xs text-muted-foreground">
+                        Monitor search performance and queries
+                      </p>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="bg-muted/50 p-3 rounded text-sm">
+              <p className="font-medium mb-1">Next Steps:</p>
+              <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+                <li>You'll be redirected to Google to authenticate</li>
+                <li>Select the property you want to connect</li>
+                <li>Grant required permissions</li>
+                <li>Data will start syncing automatically</li>
+              </ol>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConnectIntegrationDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConnectIntegration}>
+              Connect with Google
             </Button>
           </DialogFooter>
         </DialogContent>
