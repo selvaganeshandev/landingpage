@@ -22,6 +22,7 @@ import Multilingual from "./pages/Multilingual";
 import PromptInsights from "./pages/PromptInsights";
 import AgentAnalytics from "./pages/AgentAnalytics";
 import AICrawler from "./pages/AICrawler";
+import AICopilot from "./pages/AICopilot";
 import TrafficAttribution from "./pages/TrafficAttribution";
 import Auth from "./pages/Auth";
 import OrganizationSettings from "./pages/OrganizationSettings";
@@ -62,21 +63,7 @@ const App = () => (
             <Route path="/traffic" element={<TrafficAttribution />} />
             <Route path="/organization-settings" element={<OrganizationSettings />} />
             <Route path="/organization-settings/members/:memberId" element={<TeamMemberPermissions />} />
-            <Route
-              path="/copilot" 
-              element={
-                <PlaceholderPage 
-                  title="AI Copilot" 
-                  description="Strategic recommendations powered by AI"
-                  features={[
-                    "AI-powered strategic recommendations",
-                    "Optimization opportunity identification",
-                    "Content strategy suggestions",
-                    "Competitive positioning advice"
-                  ]}
-                />
-              } 
-            />
+            <Route path="/copilot" element={<AICopilot />} />
             <Route path="/misinformation" element={<MisinformationAlerts />} />
             <Route 
               path="/settings" 
