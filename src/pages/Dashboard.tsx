@@ -6,7 +6,7 @@ import { CompetitorComparison } from "@/components/CompetitorComparison";
 import { MentionTable } from "@/components/MentionTable";
 import { TrendChart } from "@/components/TrendChart";
 import { TimeFilter } from "@/components/TimeFilter";
-import { Eye, TrendingUp, Target, Bell } from "lucide-react";
+import { Eye, TrendingUp, Target, Bell, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
@@ -47,13 +47,20 @@ const Dashboard = () => {
       </div>
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <MetricCard
           title="Total Mentions"
           value="221"
           change={15.2}
           trend="up"
           icon={<Eye className="h-6 w-6" />}
+        />
+        <MetricCard
+          title="Total Citations"
+          value="487"
+          change={23.4}
+          trend="up"
+          icon={<Link2 className="h-6 w-6" />}
         />
         <MetricCard
           title="Visibility Score"

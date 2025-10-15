@@ -46,6 +46,32 @@ const MentionDetail = () => {
     sources: ["vegfitpro.com", "healthline.com", "examine.com"],
     competitorsMentioned: ["MyProtein", "Naked Nutrition"],
     keyTopics: ["protein quality", "athlete nutrition", "plant-based", "recovery", "amino acids"],
+    detailedCitations: [
+      {
+        text: "VegFit Pro stands out as a top choice for athletes",
+        sourceUrl: "https://vegfitpro.com/products/protein-powder",
+        sourceName: "VegFit Pro Official Site",
+        context: "Product page citing key benefits and features",
+        timestamp: "Referenced 2 hours ago",
+        reliability: "high"
+      },
+      {
+        text: "clean ingredient profile and superior amino acid blend",
+        sourceUrl: "https://healthline.com/nutrition/vegan-protein-powder",
+        sourceName: "Healthline - Vegan Protein Review",
+        context: "Third-party nutritional analysis and comparison",
+        timestamp: "Referenced 2 hours ago",
+        reliability: "high"
+      },
+      {
+        text: "Third-party tested for purity",
+        sourceUrl: "https://examine.com/supplements/protein-powder/",
+        sourceName: "Examine.com Research",
+        context: "Independent testing and verification data",
+        timestamp: "Referenced 2 hours ago",
+        reliability: "high"
+      }
+    ],
     citations: 3,
     userEngagement: {
       views: 1247,
@@ -186,20 +212,52 @@ const MentionDetail = () => {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-4 border-t border-border/50">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground font-medium">Sources:</span>
-                  {mention.sources.map((source, idx) => (
-                    <Badge key={idx} variant="secondary" className="text-xs font-medium">
-                      <ExternalLink className="h-3 w-3 mr-1" />
-                      {source}
-                    </Badge>
-                  ))}
+              <div className="space-y-4 pt-4 border-t border-border/50">
+                <div>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+                    Citations & Sources ({mention.detailedCitations?.length || 0})
+                  </h3>
+                  {mention.detailedCitations && mention.detailedCitations.length > 0 ? (
+                    <div className="space-y-3">
+                      {mention.detailedCitations.map((citation, idx) => (
+                        <div key={idx} className="p-4 bg-gradient-to-br from-muted/20 to-muted/30 rounded-lg border border-border/30">
+                          <div className="flex items-start gap-3">
+                            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                              <span className="text-sm font-bold text-primary">{idx + 1}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium mb-2 leading-relaxed">"{citation.text}"</p>
+                              <div className="space-y-1">
+                                <a 
+                                  href={citation.sourceUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-sm text-primary hover:underline flex items-center gap-1 font-medium"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                  {citation.sourceName}
+                                </a>
+                                <p className="text-xs text-muted-foreground">{citation.context}</p>
+                                <div className="flex items-center gap-2 mt-2">
+                                  <Badge variant="outline" className="text-xs">
+                                    {citation.reliability === "high" ? "High Reliability" : "Verified"}
+                                  </Badge>
+                                  <span className="text-xs text-muted-foreground">{citation.timestamp}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No detailed citations available</p>
+                  )}
                 </div>
                 <Button variant="outline" size="sm" asChild className="border-border/50">
                   <a href={mention.url} target="_blank" rel="noopener noreferrer">
                     <ExternalLink className="h-3 w-3 mr-1" />
-                    View Original
+                    View Original AI Response
                   </a>
                 </Button>
               </div>

@@ -24,8 +24,22 @@ const mentions = [
     sentiment: "positive",
     snippet: "VegFit Pro stands out as a top choice for athletes seeking plant-based protein. Its clean ingredient profile and superior amino acid blend make it ideal for post-workout recovery.",
     timestamp: "2 hours ago",
-    url: "#",
+    url: "https://chat.openai.com/share/abc123",
     sources: ["vegfitpro.com", "healthline.com"],
+    citations: [
+      { 
+        text: "VegFit Pro stands out as a top choice",
+        sourceUrl: "https://vegfitpro.com/products/protein-powder",
+        sourceName: "VegFit Pro Official Site",
+        context: "Product page citing key benefits and features"
+      },
+      {
+        text: "superior amino acid blend",
+        sourceUrl: "https://healthline.com/nutrition/vegan-protein-powder",
+        sourceName: "Healthline Review",
+        context: "Third-party nutritional analysis"
+      }
+    ],
   },
   {
     id: 2,
@@ -35,8 +49,16 @@ const mentions = [
     sentiment: "positive",
     snippet: "Among the leading vegan protein options, VegFit Pro offers excellent value with its high protein content and natural ingredients, making it a favorite among endurance athletes.",
     timestamp: "5 hours ago",
-    url: "#",
+    url: "https://claude.ai/chat/xyz789",
     sources: ["vegfitpro.com"],
+    citations: [
+      {
+        text: "excellent value with its high protein content",
+        sourceUrl: "https://vegfitpro.com/nutritional-info",
+        sourceName: "VegFit Pro Nutritional Data",
+        context: "Official nutritional information page"
+      }
+    ],
   },
   {
     id: 3,
@@ -240,23 +262,41 @@ const Mentions = () => {
                 <p className="text-sm leading-relaxed">{mention.snippet}</p>
               </div>
 
-              <div className="flex items-center justify-between pt-3 border-t border-border/50">
+              <div className="space-y-3 pt-3 border-t border-border/50">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground font-medium">Sources:</span>
-                  {mention.sources.map((source, idx) => (
-                    <Badge key={idx} variant="secondary" className="text-xs font-medium">
-                      {source}
-                    </Badge>
-                  ))}
+                  <span className="text-sm text-muted-foreground font-medium">Citations ({mention.citations?.length || 0}):</span>
                 </div>
-                <div className="flex gap-2">
+                {mention.citations && mention.citations.length > 0 && (
+                  <div className="space-y-2">
+                    {mention.citations.map((citation, idx) => (
+                      <div key={idx} className="p-3 bg-muted/20 rounded-lg border border-border/30">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium mb-1 line-clamp-1">"{citation.text}"</p>
+                            <a 
+                              href={citation.sourceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-primary hover:underline flex items-center gap-1"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              {citation.sourceName}
+                            </a>
+                            <p className="text-xs text-muted-foreground mt-1">{citation.context}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2 pt-2">
                   <Button variant="outline" size="sm" onClick={() => handleCopy(mention.snippet)} className="border-border/50">
                     <Copy className="h-3 w-3 mr-1" />
                     Copy
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => handleViewFull(mention.id)} className="border-border/50">
                     <ExternalLink className="h-3 w-3 mr-1" />
-                    View Details
+                    View Full Details
                   </Button>
                 </div>
               </div>
