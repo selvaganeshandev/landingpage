@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { CreateReportDialog } from "@/components/CreateReportDialog";
 import { 
   FileText,
   Plus,
@@ -125,6 +127,7 @@ const templates = [
 
 const Reports = () => {
   const { toast } = useToast();
+  const [createReportDialogOpen, setCreateReportDialogOpen] = useState(false);
 
   const handleManageTemplates = () => {
     toast({
@@ -134,10 +137,7 @@ const Reports = () => {
   };
 
   const handleCreateReport = () => {
-    toast({
-      title: "Create New Report",
-      description: "Opening report builder...",
-    });
+    setCreateReportDialogOpen(true);
   };
 
   const handleGenerateNow = () => {
@@ -401,6 +401,12 @@ const Reports = () => {
           </div>
         </div>
       </Card>
+
+      {/* Create Report Dialog */}
+      <CreateReportDialog
+        open={createReportDialogOpen}
+        onOpenChange={setCreateReportDialogOpen}
+      />
     </div>
   );
 };

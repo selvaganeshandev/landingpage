@@ -9,6 +9,7 @@ import { TimeFilter } from "@/components/TimeFilter";
 import { TopBrandsList } from "@/components/TopBrandsList";
 import { CompetitorHeatmap } from "@/components/CompetitorHeatmap";
 import { useToast } from "@/hooks/use-toast";
+import { AddCompetitorDialog } from "@/components/AddCompetitorDialog";
 import {
   Select,
   SelectContent,
@@ -163,6 +164,7 @@ const Competitors = () => {
   const [timePeriod, setTimePeriod] = useState("90");
   const [selectedTab, setSelectedTab] = useState("overview");
   const { toast } = useToast();
+  const [addCompetitorDialogOpen, setAddCompetitorDialogOpen] = useState(false);
 
   const handleExportReport = () => {
     toast({
@@ -172,10 +174,7 @@ const Competitors = () => {
   };
 
   const handleAddCompetitor = () => {
-    toast({
-      title: "Add Competitor",
-      description: "Opening competitor setup dialog...",
-    });
+    setAddCompetitorDialogOpen(true);
   };
 
   const heatmapData = [
@@ -524,6 +523,12 @@ const Competitors = () => {
           ))}
         </div>
       </Card>
+
+      {/* Add Competitor Dialog */}
+      <AddCompetitorDialog
+        open={addCompetitorDialogOpen}
+        onOpenChange={setAddCompetitorDialogOpen}
+      />
     </div>
   );
 };
