@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { useContentGeneration } from "@/hooks/useContentGeneration";
 import { 
   Target,
   Sparkles,
@@ -171,21 +173,26 @@ const getPriorityColor = (priority: string) => {
 };
 
 const ContentGaps = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
+  const { navigateToContentGeneration } = useContentGeneration();
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [selectedGap, setSelectedGap] = useState<typeof contentGaps[0] | null>(null);
 
   const handleGenerateContentPlan = () => {
-    toast({
-      title: "Generating Content Plan",
-      description: "AI is creating a comprehensive content strategy...",
+    navigateToContentGeneration({
+      source: "Content Gap Analysis",
+      priority: "high"
     });
   };
 
-  const handleGenerateContentBrief = () => {
-    toast({
-      title: "Generating Content Brief",
-      description: "AI is creating a detailed content brief for this opportunity...",
+  const handleGenerateContentBrief = (gap: typeof contentGaps[0]) => {
+    navigateToContentGeneration({
+      topic: gap.question,
+      keywords: gap.question.toLowerCase().split(' '),
+      source: "Content Gap - " + gap.question,
+      priority: gap.priority as any,
+      articleType: "guide"
     });
   };
 
@@ -316,9 +323,9 @@ const ContentGaps = () => {
               </div>
 
               <div className="flex gap-2 mt-4 pt-3 border-t border-border">
-                <Button size="sm" variant="default" onClick={handleGenerateContentBrief}>
+                <Button size="sm" variant="default" onClick={() => handleGenerateContentBrief(gap)}>
                   <Sparkles className="h-3 w-3 mr-1" />
-                  Generate Content Brief
+                  Generate Content
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => handleViewDetails(gap)}>View Details</Button>
               </div>

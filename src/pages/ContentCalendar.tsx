@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -121,6 +121,33 @@ const ContentCalendar = () => {
     setSelectedContent(item);
     setGenerateDialogOpen(true);
   };
+
+  // Listen for content generation requests from other pages
+  useEffect(() => {
+    const handleOpenGeneration = (event: CustomEvent) => {
+      const params = event.detail;
+      if (params) {
+        setSelectedContent({
+          id: Date.now().toString(),
+          title: params.topic || "",
+          type: params.articleType || "blog",
+          status: "draft",
+          priority: params.priority || "medium",
+          scheduledDate: new Date(),
+          targetKeywords: params.keywords || [],
+          opportunitySource: params.source || "Manual",
+          estimatedImpact: 75,
+          wordCount: 1500
+        });
+      }
+      setGenerateDialogOpen(true);
+    };
+
+    window.addEventListener('openContentGeneration' as any, handleOpenGeneration);
+    return () => {
+      window.removeEventListener('openContentGeneration' as any, handleOpenGeneration);
+    };
+  }, []);
 
   const getStatusColor = (status: string) => {
     switch (status) {

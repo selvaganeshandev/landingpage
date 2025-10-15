@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
+import { useContentGeneration } from "@/hooks/useContentGeneration";
 import { 
   Brain,
   Plus,
@@ -136,7 +138,9 @@ const keywordPerformance = [
 ];
 
 const Topics = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
+  const { navigateToContentGeneration } = useContentGeneration();
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [optimizeDialogOpen, setOptimizeDialogOpen] = useState(false);
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
@@ -145,6 +149,16 @@ const Topics = () => {
 
   const handleGenerateTopics = () => {
     setGenerateDialogOpen(true);
+  };
+
+  const handleGenerateContent = (topic: typeof topics[0]) => {
+    navigateToContentGeneration({
+      topic: topic.name,
+      keywords: topic.keywords,
+      source: "Topic Analysis",
+      priority: topic.trend > 10 ? "high" : "medium",
+      articleType: "guide"
+    });
   };
 
   const handleAddTopic = () => {
@@ -309,6 +323,15 @@ const Topics = () => {
               </div>
 
               <div className="flex gap-2">
+                <Button 
+                  size="sm" 
+                  variant="default" 
+                  onClick={() => handleGenerateContent(topic)}
+                  className="gradient-primary"
+                >
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  Generate Content
+                </Button>
                 <Button size="sm" variant="outline" onClick={() => handleViewDetails(topic)}>View Details</Button>
                 <Button size="sm" variant="outline" onClick={() => handleOptimize(topic)}>
                   <Target className="h-3 w-3 mr-1" />

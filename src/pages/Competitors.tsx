@@ -9,6 +9,7 @@ import { TimeFilter } from "@/components/TimeFilter";
 import { TopBrandsList } from "@/components/TopBrandsList";
 import { CompetitorHeatmap } from "@/components/CompetitorHeatmap";
 import { useToast } from "@/hooks/use-toast";
+import { useContentGeneration } from "@/hooks/useContentGeneration";
 import { AddCompetitorDialog } from "@/components/AddCompetitorDialog";
 import {
   Select,
@@ -26,7 +27,8 @@ import {
   Eye,
   MessageSquare,
   AlertCircle,
-  Search
+  Search,
+  Sparkles
 } from "lucide-react";
 import { 
   RadarChart,
@@ -252,6 +254,7 @@ const Competitors = () => {
   const [timePeriod, setTimePeriod] = useState("90");
   const [selectedTab, setSelectedTab] = useState("overview");
   const { toast } = useToast();
+  const { navigateToContentGeneration } = useContentGeneration();
   const [addCompetitorDialogOpen, setAddCompetitorDialogOpen] = useState(false);
 
   const handleExportReport = () => {
@@ -263,6 +266,16 @@ const Competitors = () => {
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
+  };
+
+  const handleGenerateForGap = (gap: typeof answerGapData[0]) => {
+    navigateToContentGeneration({
+      topic: gap.query,
+      keywords: gap.query.toLowerCase().split(' '),
+      source: `Answer Gap - Competitor: ${gap.competitor}`,
+      priority: gap.opportunity as any,
+      articleType: "guide"
+    });
   };
 
   const heatmapData = [
@@ -751,8 +764,14 @@ const Competitors = () => {
                         </div>
 
                         <div className="pt-3 border-t border-border/50">
-                          <Button variant="outline" size="sm" className="w-full">
-                            Create Content Strategy
+                          <Button 
+                            variant="default" 
+                            size="sm" 
+                            className="w-full gradient-primary"
+                            onClick={() => handleGenerateForGap(gap)}
+                          >
+                            <Sparkles className="h-3 w-3 mr-1" />
+                            Generate Content
                           </Button>
                         </div>
                       </div>
