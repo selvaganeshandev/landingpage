@@ -25,6 +25,7 @@ import AICrawler from "./pages/AICrawler";
 import TrafficAttribution from "./pages/TrafficAttribution";
 import Auth from "./pages/Auth";
 import OrganizationSettings from "./pages/OrganizationSettings";
+import TeamMemberPermissions from "./pages/TeamMemberPermissions";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
 
@@ -59,7 +60,8 @@ const App = () => (
             <Route path="/crawler" element={<AICrawler />} />
             <Route path="/traffic" element={<TrafficAttribution />} />
             <Route path="/organization-settings" element={<OrganizationSettings />} />
-            <Route 
+            <Route path="/organization-settings/members/:memberId" element={<TeamMemberPermissions />} />
+            <Route
               path="/copilot" 
               element={
                 <PlaceholderPage 

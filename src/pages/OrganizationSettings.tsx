@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -24,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 
 export default function OrganizationSettings() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [orgName, setOrgName] = useState("Acme Corp");
   const [domains, setDomains] = useState([
@@ -301,6 +303,14 @@ export default function OrganizationSettings() {
                             <SelectItem value="user">User</SelectItem>
                           </SelectContent>
                         </Select>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => navigate(`/organization-settings/members/${member.id}`)}
+                          title="Manage Permissions"
+                        >
+                          <Settings className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
