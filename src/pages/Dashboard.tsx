@@ -1,14 +1,17 @@
+import { useState } from "react";
 import { MetricCard } from "@/components/MetricCard";
 import { VisibilityScore } from "@/components/VisibilityScore";
 import { PlatformMentions } from "@/components/PlatformMentions";
 import { CompetitorComparison } from "@/components/CompetitorComparison";
 import { MentionTable } from "@/components/MentionTable";
 import { TrendChart } from "@/components/TrendChart";
+import { TimeFilter } from "@/components/TimeFilter";
 import { Eye, TrendingUp, Target, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
 const Dashboard = () => {
+  const [timePeriod, setTimePeriod] = useState("30");
   const { toast } = useToast();
 
   const handleExportReport = () => {
@@ -27,17 +30,20 @@ const Dashboard = () => {
 
   return (
     <div className="p-8 space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground mt-2">
-            Overview of your brand's AI search visibility performance
-          </p>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight">Dashboard</h1>
+            <p className="text-muted-foreground mt-2">
+              Overview of your brand's AI search visibility performance
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={handleExportReport}>Export Report</Button>
+            <Button onClick={handleRefreshData}>Refresh Data</Button>
+          </div>
         </div>
-        <div className="flex gap-3">
-          <Button variant="outline" onClick={handleExportReport}>Export Report</Button>
-          <Button onClick={handleRefreshData}>Refresh Data</Button>
-        </div>
+        <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
       </div>
 
       {/* Key Metrics */}

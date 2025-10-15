@@ -1,9 +1,20 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TimeFilter } from "@/components/TimeFilter";
+import { TopBrandsList } from "@/components/TopBrandsList";
+import { CompetitorHeatmap } from "@/components/CompetitorHeatmap";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { 
   Users,
   Plus,
@@ -147,6 +158,8 @@ const competitiveInsights = [
 ];
 
 const Competitors = () => {
+  const [timePeriod, setTimePeriod] = useState("90");
+  const [selectedTab, setSelectedTab] = useState("overview");
   const { toast } = useToast();
 
   const handleExportReport = () => {
@@ -163,24 +176,76 @@ const Competitors = () => {
     });
   };
 
+  const heatmapData = [
+    {
+      competitor: "VegFit Pro",
+      platforms: { Grok: 22.5, Claude: 20.0, ChatGPT: 28.5, Perplexity: 19.0, "Google Gemini": 10.0 },
+      isYou: true
+    },
+    {
+      competitor: "MyProtein",
+      platforms: { Grok: 18.0, Claude: 22.0, ChatGPT: 24.0, Perplexity: 21.0, "Google Gemini": 15.0 },
+    },
+    {
+      competitor: "Naked Nutrition",
+      platforms: { Grok: 15.0, Claude: 18.0, ChatGPT: 20.0, Perplexity: 22.0, "Google Gemini": 25.0 },
+    },
+  ];
+
+  const topBrands = [
+    { name: "VegFit Pro", url: "vegfitpro.com", mentions: 221, percentage: 10.9, isYou: true },
+    { name: "MyProtein", url: "myprotein.com", mentions: 187, percentage: 30.1 },
+    { name: "Naked Nutrition", url: "nakednutrition.com", mentions: 123, percentage: 17.5 },
+    { name: "Marketmuse", url: "marketmuse.com", mentions: 110, percentage: 11.1 },
+    { name: "Clearscope", url: "clearscope.io", mentions: 109, percentage: 11.0 },
+  ];
+
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-bold tracking-tight">Competitor Tracking</h1>
-          <p className="text-muted-foreground mt-2">
-            Monitor and analyze competitor performance
-          </p>
+    <div className="p-8 space-y-6">
+      {/* Header with Tabs */}
+      <div className="space-y-4">
+        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
+          <TabsList className="bg-muted/50">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="prompts">Prompts</TabsTrigger>
+            <TabsTrigger value="competitors">Competitors</TabsTrigger>
+            <TabsTrigger value="answer-gap">Answer Gap</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Competitor Analysis</h1>
+            <p className="text-muted-foreground mt-1">
+              Compare your brand's AI visibility against competitors
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={handleExportReport}>
+              <FileText className="h-4 w-4 mr-2" />
+              Export Report
+            </Button>
+            <Button onClick={handleAddCompetitor}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Competitor
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-3">
-          <Button variant="outline" onClick={handleExportReport}>
-            <FileText className="h-4 w-4 mr-2" />
-            Export Report
-          </Button>
-          <Button onClick={handleAddCompetitor}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Competitor
-          </Button>
+
+        {/* Filters */}
+        <div className="flex items-center justify-between">
+          <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
+          <Select defaultValue="all">
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="All Competitors" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Competitors</SelectItem>
+              <SelectItem value="vegfit">VegFit Pro</SelectItem>
+              <SelectItem value="myprotein">MyProtein</SelectItem>
+              <SelectItem value="naked">Naked Nutrition</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -245,6 +310,76 @@ const Competitors = () => {
         ))}
       </div>
 
+      {/* Main Grid with Charts and Top Brands */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          {/* Brand Visibility Over Time */}
+          <Card className="p-6">
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5" />
+                  Brand Visibility Over Time
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Track how often each brand is mentioned by AI providers
+                </p>
+              </div>
+              <ResponsiveContainer width="100%" height={350}>
+                <LineChart data={mentionHistory}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <Tooltip 
+                    contentStyle={{
+                      backgroundColor: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "var(--radius)",
+                    }}
+                  />
+                  <Legend />
+                  <Line 
+                    type="monotone" 
+                    dataKey="vegfit" 
+                    name="VegFit Pro"
+                    stroke="hsl(var(--primary))" 
+                    strokeWidth={3}
+                    dot={{ fill: "hsl(var(--primary))", r: 4 }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="myprotein" 
+                    name="MyProtein"
+                    stroke="hsl(var(--chart-2))" 
+                    strokeWidth={2}
+                    dot={{ fill: "hsl(var(--chart-2))", r: 3 }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="naked" 
+                    name="Naked Nutrition"
+                    stroke="hsl(var(--chart-3))" 
+                    strokeWidth={2}
+                    dot={{ fill: "hsl(var(--chart-3))", r: 3 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          {/* Heatmap */}
+          <CompetitorHeatmap 
+            data={heatmapData} 
+            platforms={["Grok", "Claude", "ChatGPT", "Perplexity", "Google Gemini"]} 
+          />
+        </div>
+
+        {/* Top Brands Sidebar */}
+        <div>
+          <TopBrandsList brands={topBrands} totalMentions={989} />
+        </div>
+      </div>
+
       {/* Competitive Analysis */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="p-6">
@@ -286,46 +421,35 @@ const Competitors = () => {
         </Card>
 
         <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-6">Mention Volume Trends</h3>
-          <ResponsiveContainer width="100%" height={350}>
-            <LineChart data={mentionHistory}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-              <Tooltip 
-                contentStyle={{
-                  backgroundColor: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border))",
-                  borderRadius: "var(--radius)",
-                }}
-              />
-              <Legend />
-              <Line 
-                type="monotone" 
-                dataKey="vegfit" 
-                name="VegFit Pro"
-                stroke="hsl(var(--primary))" 
-                strokeWidth={3}
-                dot={{ fill: "hsl(var(--primary))", r: 4 }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey="myprotein" 
-                name="MyProtein"
-                stroke="hsl(var(--chart-2))" 
-                strokeWidth={2}
-                dot={{ fill: "hsl(var(--chart-2))", r: 3 }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey="naked" 
-                name="Naked Nutrition"
-                stroke="hsl(var(--chart-3))" 
-                strokeWidth={2}
-                dot={{ fill: "hsl(var(--chart-3))", r: 3 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          <h3 className="text-lg font-semibold mb-6">Competitive Intelligence</h3>
+          <div className="space-y-3">
+            {competitiveInsights.map((insight, idx) => (
+              <div key={idx} className="p-4 rounded-lg border border-border">
+                <div className="flex items-start gap-3">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                    insight.type === 'success' ? 'bg-success/10' :
+                    insight.type === 'warning' ? 'bg-warning/10' :
+                    'bg-primary/10'
+                  }`}>
+                    <Target className={`h-4 w-4 ${
+                      insight.type === 'success' ? 'text-success' :
+                      insight.type === 'warning' ? 'text-warning' :
+                      'text-primary'
+                    }`} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="font-semibold text-sm">{insight.title}</h4>
+                      <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
+                        {insight.impact}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">{insight.description}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </Card>
       </div>
 

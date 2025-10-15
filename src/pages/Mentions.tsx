@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, Filter, ExternalLink, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -62,6 +64,7 @@ const getSentimentColor = (sentiment: string) => {
 };
 
 const Mentions = () => {
+  const [selectedPlatform, setSelectedPlatform] = useState("all");
   const { toast } = useToast();
 
   const handleExport = () => {
@@ -105,40 +108,42 @@ const Mentions = () => {
         <Button onClick={handleExport}>Export Mentions</Button>
       </div>
 
+      {/* Platform Tabs */}
       <Card className="p-6">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search mentions..." className="pl-10" />
+        <Tabs value={selectedPlatform} onValueChange={setSelectedPlatform}>
+          <div className="flex items-center justify-between mb-4">
+            <TabsList className="bg-muted/50">
+              <TabsTrigger value="all">All Platforms</TabsTrigger>
+              <TabsTrigger value="grok">Grok</TabsTrigger>
+              <TabsTrigger value="claude">Claude</TabsTrigger>
+              <TabsTrigger value="chatgpt">ChatGPT</TabsTrigger>
+              <TabsTrigger value="perplexity">Perplexity</TabsTrigger>
+              <TabsTrigger value="gemini">Google Gemini</TabsTrigger>
+            </TabsList>
+            <Button variant="outline" onClick={handleMoreFilters}>
+              <Filter className="h-4 w-4 mr-2" />
+              More Filters
+            </Button>
           </div>
-          <Select defaultValue="all">
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Platform" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Platforms</SelectItem>
-              <SelectItem value="chatgpt">ChatGPT</SelectItem>
-              <SelectItem value="claude">Claude</SelectItem>
-              <SelectItem value="perplexity">Perplexity</SelectItem>
-              <SelectItem value="gemini">Gemini</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select defaultValue="all">
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Sentiment" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Sentiments</SelectItem>
-              <SelectItem value="positive">Positive</SelectItem>
-              <SelectItem value="neutral">Neutral</SelectItem>
-              <SelectItem value="negative">Negative</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button variant="outline" onClick={handleMoreFilters}>
-            <Filter className="h-4 w-4 mr-2" />
-            More Filters
-          </Button>
-        </div>
+
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input placeholder="Search mentions..." className="pl-10" />
+            </div>
+            <Select defaultValue="all">
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Sentiment" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sentiments</SelectItem>
+                <SelectItem value="positive">Positive</SelectItem>
+                <SelectItem value="neutral">Neutral</SelectItem>
+                <SelectItem value="negative">Negative</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </Tabs>
       </Card>
 
       <div className="grid gap-6">
