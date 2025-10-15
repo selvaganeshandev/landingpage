@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +19,8 @@ import {
   MessageSquare,
   Smartphone
 } from "lucide-react";
+import { NewAlertRuleDialog } from "@/components/NewAlertRuleDialog";
+import { AlertConfigDialog } from "@/components/AlertConfigDialog";
 
 const activeAlerts = [
   {
@@ -170,19 +173,15 @@ const getStatusColor = (status: string) => {
 
 const Alerts = () => {
   const { toast } = useToast();
+  const [configDialogOpen, setConfigDialogOpen] = useState(false);
+  const [newRuleDialogOpen, setNewRuleDialogOpen] = useState(false);
 
   const handleConfigure = () => {
-    toast({
-      title: "Opening Configuration",
-      description: "Loading alert settings...",
-    });
+    setConfigDialogOpen(true);
   };
 
   const handleNewAlertRule = () => {
-    toast({
-      title: "Create Alert Rule",
-      description: "Opening alert rule builder...",
-    });
+    setNewRuleDialogOpen(true);
   };
 
   const handleInvestigate = () => {
@@ -444,6 +443,16 @@ const Alerts = () => {
           </div>
         </div>
       </Card>
+
+      {/* Dialogs */}
+      <NewAlertRuleDialog 
+        open={newRuleDialogOpen} 
+        onOpenChange={setNewRuleDialogOpen}
+      />
+      <AlertConfigDialog 
+        open={configDialogOpen} 
+        onOpenChange={setConfigDialogOpen}
+      />
     </div>
   );
 };
