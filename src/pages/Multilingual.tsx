@@ -2,6 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/hooks/use-toast";
 import { 
   Globe,
   Plus,
@@ -101,6 +102,22 @@ const topPromptsByLanguage = {
 };
 
 const Multilingual = () => {
+  const { toast } = useToast();
+
+  const handleConfigureLanguages = () => {
+    toast({
+      title: "Language Configuration",
+      description: "Opening language settings...",
+    });
+  };
+
+  const handleAddLanguage = () => {
+    toast({
+      title: "Add Language",
+      description: "Select a new language to monitor...",
+    });
+  };
+
   const pieData = languages.map(l => ({
     name: l.name,
     value: l.mentions,
@@ -117,11 +134,11 @@ const Multilingual = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleConfigureLanguages}>
             <Languages className="h-4 w-4 mr-2" />
             Configure Languages
           </Button>
-          <Button>
+          <Button onClick={handleAddLanguage}>
             <Plus className="h-4 w-4 mr-2" />
             Add Language
           </Button>

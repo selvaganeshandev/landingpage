@@ -2,6 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
 import {
   Select,
   SelectContent,
@@ -107,6 +108,15 @@ const forecast = [
 ];
 
 const HistoricalTrends = () => {
+  const { toast } = useToast();
+
+  const handleExportReport = () => {
+    toast({
+      title: "Exporting Report",
+      description: "Your historical trends report is being generated...",
+    });
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -128,7 +138,7 @@ const HistoricalTrends = () => {
               <SelectItem value="24">Last 24 Months</SelectItem>
             </SelectContent>
           </Select>
-          <Button>
+          <Button onClick={handleExportReport}>
             <Download className="h-4 w-4 mr-2" />
             Export Report
           </Button>

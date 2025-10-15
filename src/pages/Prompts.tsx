@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Search, FolderOpen, TrendingUp } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 const promptGroups = [
   {
@@ -32,6 +33,43 @@ const promptGroups = [
 ];
 
 const Prompts = () => {
+  const { toast } = useToast();
+
+  const handleAddPromptGroup = () => {
+    toast({
+      title: "Add Prompt Group",
+      description: "Opening dialog to create new prompt group...",
+    });
+  };
+
+  const handleOrganizeGroups = () => {
+    toast({
+      title: "Organize Groups",
+      description: "Opening group organization panel...",
+    });
+  };
+
+  const handleViewDetails = () => {
+    toast({
+      title: "Loading Details",
+      description: "Opening detailed prompt analysis...",
+    });
+  };
+
+  const handleEditGroup = () => {
+    toast({
+      title: "Edit Group",
+      description: "Opening group editor...",
+    });
+  };
+
+  const handleGenerateVariants = () => {
+    toast({
+      title: "Generating Variants",
+      description: "AI is generating prompt variants...",
+    });
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -41,7 +79,7 @@ const Prompts = () => {
             Track and group prompts to monitor brand visibility
           </p>
         </div>
-        <Button>
+        <Button onClick={handleAddPromptGroup}>
           <Plus className="h-4 w-4 mr-2" />
           Add Prompt Group
         </Button>
@@ -53,7 +91,7 @@ const Prompts = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input placeholder="Search prompt groups..." className="pl-10" />
           </div>
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleOrganizeGroups}>
             <FolderOpen className="h-4 w-4 mr-2" />
             Organize Groups
           </Button>
@@ -95,9 +133,9 @@ const Prompts = () => {
               </div>
 
               <div className="flex gap-2 pt-2">
-                <Button variant="outline" size="sm">View Details</Button>
-                <Button variant="outline" size="sm">Edit Group</Button>
-                <Button variant="outline" size="sm">Generate Variants</Button>
+                <Button variant="outline" size="sm" onClick={handleViewDetails}>View Details</Button>
+                <Button variant="outline" size="sm" onClick={handleEditGroup}>Edit Group</Button>
+                <Button variant="outline" size="sm" onClick={handleGenerateVariants}>Generate Variants</Button>
               </div>
             </div>
           </Card>

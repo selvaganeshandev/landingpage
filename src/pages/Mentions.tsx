@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Search, Filter, ExternalLink, Copy } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import {
   Select,
   SelectContent,
@@ -61,6 +62,37 @@ const getSentimentColor = (sentiment: string) => {
 };
 
 const Mentions = () => {
+  const { toast } = useToast();
+
+  const handleExport = () => {
+    toast({
+      title: "Exporting Mentions",
+      description: "Your mentions data is being exported...",
+    });
+  };
+
+  const handleMoreFilters = () => {
+    toast({
+      title: "Advanced Filters",
+      description: "Opening advanced filter options...",
+    });
+  };
+
+  const handleCopy = (snippet: string) => {
+    navigator.clipboard.writeText(snippet);
+    toast({
+      title: "Copied to Clipboard",
+      description: "Mention snippet has been copied.",
+    });
+  };
+
+  const handleViewFull = () => {
+    toast({
+      title: "Opening Full View",
+      description: "Loading complete mention details...",
+    });
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -70,7 +102,7 @@ const Mentions = () => {
             Monitor brand mentions and citations across AI platforms
           </p>
         </div>
-        <Button>Export Mentions</Button>
+        <Button onClick={handleExport}>Export Mentions</Button>
       </div>
 
       <Card className="p-6">
@@ -102,7 +134,7 @@ const Mentions = () => {
               <SelectItem value="negative">Negative</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleMoreFilters}>
             <Filter className="h-4 w-4 mr-2" />
             More Filters
           </Button>
@@ -147,11 +179,11 @@ const Mentions = () => {
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="sm" onClick={() => handleCopy(mention.snippet)}>
                     <Copy className="h-3 w-3 mr-1" />
                     Copy
                   </Button>
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="sm" onClick={handleViewFull}>
                     <ExternalLink className="h-3 w-3 mr-1" />
                     View Full
                   </Button>

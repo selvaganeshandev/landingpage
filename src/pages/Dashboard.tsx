@@ -6,8 +6,25 @@ import { MentionTable } from "@/components/MentionTable";
 import { TrendChart } from "@/components/TrendChart";
 import { Eye, TrendingUp, Target, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 const Dashboard = () => {
+  const { toast } = useToast();
+
+  const handleExportReport = () => {
+    toast({
+      title: "Exporting Report",
+      description: "Your dashboard report is being generated...",
+    });
+  };
+
+  const handleRefreshData = () => {
+    toast({
+      title: "Data Refreshed",
+      description: "Dashboard data has been updated successfully.",
+    });
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -18,8 +35,8 @@ const Dashboard = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline">Export Report</Button>
-          <Button>Refresh Data</Button>
+          <Button variant="outline" onClick={handleExportReport}>Export Report</Button>
+          <Button onClick={handleRefreshData}>Refresh Data</Button>
         </div>
       </div>
 

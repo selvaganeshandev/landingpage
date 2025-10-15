@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
 import { 
   TrendingUp, 
   TrendingDown,
@@ -111,6 +112,15 @@ const opportunities = [
 ];
 
 const ShareOfVoice = () => {
+  const { toast } = useToast();
+
+  const handleExportReport = () => {
+    toast({
+      title: "Exporting Report",
+      description: "Your market report is being generated...",
+    });
+  };
+
   const dominanceScore = 94;
   const marketPosition = 1;
 
@@ -123,7 +133,7 @@ const ShareOfVoice = () => {
             Competitive benchmarking and market position analysis
           </p>
         </div>
-        <Button>
+        <Button onClick={handleExportReport}>
           <FileText className="h-4 w-4 mr-2" />
           Export Market Report
         </Button>

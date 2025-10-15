@@ -2,6 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
 import { 
   FileText,
   Plus,
@@ -123,6 +124,106 @@ const templates = [
 ];
 
 const Reports = () => {
+  const { toast } = useToast();
+
+  const handleManageTemplates = () => {
+    toast({
+      title: "Opening Template Manager",
+      description: "Loading report template settings...",
+    });
+  };
+
+  const handleCreateReport = () => {
+    toast({
+      title: "Create New Report",
+      description: "Opening report builder...",
+    });
+  };
+
+  const handleGenerateNow = () => {
+    toast({
+      title: "Generating Report",
+      description: "Your report is being created...",
+    });
+  };
+
+  const handleScheduleReport = () => {
+    toast({
+      title: "Schedule Report",
+      description: "Opening scheduling options...",
+    });
+  };
+
+  const handleDownloadAll = () => {
+    toast({
+      title: "Downloading Reports",
+      description: "Preparing all reports for download...",
+    });
+  };
+
+  const handleShareReport = () => {
+    toast({
+      title: "Share Report",
+      description: "Opening sharing options...",
+    });
+  };
+
+  const handlePreview = () => {
+    toast({
+      title: "Loading Preview",
+      description: "Opening report preview...",
+    });
+  };
+
+  const handleEdit = () => {
+    toast({
+      title: "Edit Report",
+      description: "Opening report editor...",
+    });
+  };
+
+  const handleRunNow = () => {
+    toast({
+      title: "Running Report",
+      description: "Executing scheduled report now...",
+    });
+  };
+
+  const handleView = () => {
+    toast({
+      title: "Opening Report",
+      description: "Loading report viewer...",
+    });
+  };
+
+  const handleDownload = () => {
+    toast({
+      title: "Downloading",
+      description: "Report download started...",
+    });
+  };
+
+  const handleUseTemplate = () => {
+    toast({
+      title: "Using Template",
+      description: "Creating report from template...",
+    });
+  };
+
+  const handleViewDocumentation = () => {
+    toast({
+      title: "Opening Documentation",
+      description: "Loading API documentation...",
+    });
+  };
+
+  const handleGenerateAPIKey = () => {
+    toast({
+      title: "Generating API Key",
+      description: "Creating new API key...",
+    });
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -133,11 +234,11 @@ const Reports = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleManageTemplates}>
             <Settings className="h-4 w-4 mr-2" />
             Manage Templates
           </Button>
-          <Button>
+          <Button onClick={handleCreateReport}>
             <Plus className="h-4 w-4 mr-2" />
             Create Report
           </Button>
@@ -146,19 +247,19 @@ const Reports = () => {
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Button variant="outline" className="h-24 flex flex-col gap-2">
+        <Button variant="outline" className="h-24 flex flex-col gap-2" onClick={handleGenerateNow}>
           <FileText className="h-6 w-6" />
           <span className="font-medium">Generate Now</span>
         </Button>
-        <Button variant="outline" className="h-24 flex flex-col gap-2">
+        <Button variant="outline" className="h-24 flex flex-col gap-2" onClick={handleScheduleReport}>
           <Calendar className="h-6 w-6" />
           <span className="font-medium">Schedule Report</span>
         </Button>
-        <Button variant="outline" className="h-24 flex flex-col gap-2">
+        <Button variant="outline" className="h-24 flex flex-col gap-2" onClick={handleDownloadAll}>
           <Download className="h-6 w-6" />
           <span className="font-medium">Download All</span>
         </Button>
-        <Button variant="outline" className="h-24 flex flex-col gap-2">
+        <Button variant="outline" className="h-24 flex flex-col gap-2" onClick={handleShareReport}>
           <Share2 className="h-6 w-6" />
           <span className="font-medium">Share Report</span>
         </Button>
@@ -191,12 +292,12 @@ const Reports = () => {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm" variant="outline">
+                  <Button size="sm" variant="outline" onClick={handlePreview}>
                     <Eye className="h-3 w-3 mr-1" />
                     Preview
                   </Button>
-                  <Button size="sm" variant="outline">Edit</Button>
-                  <Button size="sm">Run Now</Button>
+                  <Button size="sm" variant="outline" onClick={handleEdit}>Edit</Button>
+                  <Button size="sm" onClick={handleRunNow}>Run Now</Button>
                 </div>
               </div>
               <div className="flex items-center gap-4 pt-3 border-t border-border">
@@ -238,11 +339,11 @@ const Reports = () => {
                 <p>{report.pages} pages • {report.size}</p>
               </div>
               <div className="flex gap-2">
-                <Button size="sm" variant="outline" className="flex-1">
+                <Button size="sm" variant="outline" className="flex-1" onClick={handleView}>
                   <Eye className="h-3 w-3 mr-1" />
                   View
                 </Button>
-                <Button size="sm" variant="outline" className="flex-1">
+                <Button size="sm" variant="outline" className="flex-1" onClick={handleDownload}>
                   <Download className="h-3 w-3 mr-1" />
                   Download
                 </Button>
@@ -266,13 +367,13 @@ const Reports = () => {
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs text-muted-foreground">{template.sections} sections</span>
                 {template.preview && (
-                  <Button size="sm" variant="outline">
+                  <Button size="sm" variant="outline" onClick={handlePreview}>
                     <Eye className="h-3 w-3 mr-1" />
                     Preview
                   </Button>
                 )}
               </div>
-              <Button className="w-full" size="sm">Use Template</Button>
+              <Button className="w-full" size="sm" onClick={handleUseTemplate}>Use Template</Button>
             </div>
           ))}
         </div>
@@ -292,11 +393,11 @@ const Reports = () => {
             </code>
           </div>
           <div className="flex gap-3">
-            <Button variant="outline">
+            <Button variant="outline" onClick={handleViewDocumentation}>
               <FileText className="h-4 w-4 mr-2" />
               View Documentation
             </Button>
-            <Button variant="outline">Generate API Key</Button>
+            <Button variant="outline" onClick={handleGenerateAPIKey}>Generate API Key</Button>
           </div>
         </div>
       </Card>

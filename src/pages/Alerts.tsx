@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
 import { 
   Bell,
   Plus,
@@ -168,6 +169,64 @@ const getStatusColor = (status: string) => {
 };
 
 const Alerts = () => {
+  const { toast } = useToast();
+
+  const handleConfigure = () => {
+    toast({
+      title: "Opening Configuration",
+      description: "Loading alert settings...",
+    });
+  };
+
+  const handleNewAlertRule = () => {
+    toast({
+      title: "Create Alert Rule",
+      description: "Opening alert rule builder...",
+    });
+  };
+
+  const handleInvestigate = () => {
+    toast({
+      title: "Investigating",
+      description: "Opening detailed alert analysis...",
+    });
+  };
+
+  const handleMarkResolved = () => {
+    toast({
+      title: "Alert Resolved",
+      description: "Alert has been marked as resolved.",
+    });
+  };
+
+  const handleEdit = () => {
+    toast({
+      title: "Edit Rule",
+      description: "Opening alert rule editor...",
+    });
+  };
+
+  const handleUpdateEmail = () => {
+    toast({
+      title: "Updating Email",
+      description: "Email address updated successfully.",
+    });
+  };
+
+  const handleConfigureSlack = () => {
+    toast({
+      title: "Configure Slack",
+      description: "Opening Slack integration settings...",
+    });
+  };
+
+  const handleConnectSMS = () => {
+    toast({
+      title: "Connect SMS",
+      description: "Setting up SMS notifications...",
+    });
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -178,11 +237,11 @@ const Alerts = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleConfigure}>
             <Settings className="h-4 w-4 mr-2" />
             Configure
           </Button>
-          <Button>
+          <Button onClick={handleNewAlertRule}>
             <Plus className="h-4 w-4 mr-2" />
             New Alert Rule
           </Button>
@@ -272,8 +331,8 @@ const Alerts = () => {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm" variant="outline">Investigate</Button>
-                  <Button size="sm">Mark Resolved</Button>
+                  <Button size="sm" variant="outline" onClick={handleInvestigate}>Investigate</Button>
+                  <Button size="sm" onClick={handleMarkResolved}>Mark Resolved</Button>
                 </div>
               </div>
             </Card>
@@ -330,7 +389,7 @@ const Alerts = () => {
                       </div>
                     </div>
                   </div>
-                  <Button variant="outline" size="sm">Edit</Button>
+                  <Button variant="outline" size="sm" onClick={handleEdit}>Edit</Button>
                 </div>
               ))}
             </div>
@@ -353,7 +412,7 @@ const Alerts = () => {
               </div>
             </div>
             <Input placeholder="team@vegfitpro.com" className="mb-2" />
-            <Button variant="outline" size="sm" className="w-full">Update Email</Button>
+            <Button variant="outline" size="sm" className="w-full" onClick={handleUpdateEmail}>Update Email</Button>
           </div>
 
           <div className="p-4 rounded-lg border border-border">
@@ -367,7 +426,7 @@ const Alerts = () => {
               </div>
             </div>
             <p className="text-sm text-muted-foreground mb-2">#ai-monitoring</p>
-            <Button variant="outline" size="sm" className="w-full">Configure Slack</Button>
+            <Button variant="outline" size="sm" className="w-full" onClick={handleConfigureSlack}>Configure Slack</Button>
           </div>
 
           <div className="p-4 rounded-lg border border-border">
@@ -381,7 +440,7 @@ const Alerts = () => {
               </div>
             </div>
             <Input placeholder="+1 (555) 000-0000" className="mb-2" />
-            <Button variant="outline" size="sm" className="w-full">Connect SMS</Button>
+            <Button variant="outline" size="sm" className="w-full" onClick={handleConnectSMS}>Connect SMS</Button>
           </div>
         </div>
       </Card>

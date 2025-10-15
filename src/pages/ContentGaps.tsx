@@ -2,6 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
 import { 
   Target,
   Sparkles,
@@ -168,6 +169,29 @@ const getPriorityColor = (priority: string) => {
 };
 
 const ContentGaps = () => {
+  const { toast } = useToast();
+
+  const handleGenerateContentPlan = () => {
+    toast({
+      title: "Generating Content Plan",
+      description: "AI is creating a comprehensive content strategy...",
+    });
+  };
+
+  const handleGenerateContentBrief = () => {
+    toast({
+      title: "Generating Content Brief",
+      description: "AI is creating a detailed content brief for this opportunity...",
+    });
+  };
+
+  const handleViewDetails = () => {
+    toast({
+      title: "Loading Details",
+      description: "Opening detailed gap analysis...",
+    });
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -177,7 +201,7 @@ const ContentGaps = () => {
             Discover untapped opportunities and AI-powered recommendations
           </p>
         </div>
-        <Button>
+        <Button onClick={handleGenerateContentPlan}>
           <FileText className="h-4 w-4 mr-2" />
           Generate Content Plan
         </Button>
@@ -290,11 +314,11 @@ const ContentGaps = () => {
               </div>
 
               <div className="flex gap-2 mt-4 pt-3 border-t border-border">
-                <Button size="sm" variant="default">
+                <Button size="sm" variant="default" onClick={handleGenerateContentBrief}>
                   <Sparkles className="h-3 w-3 mr-1" />
                   Generate Content Brief
                 </Button>
-                <Button size="sm" variant="outline">View Details</Button>
+                <Button size="sm" variant="outline" onClick={handleViewDetails}>View Details</Button>
               </div>
             </div>
           ))}

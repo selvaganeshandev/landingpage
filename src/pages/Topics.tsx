@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/hooks/use-toast";
 import { 
   Brain,
   Plus,
@@ -130,6 +131,43 @@ const keywordPerformance = [
 ];
 
 const Topics = () => {
+  const { toast } = useToast();
+
+  const handleGenerateTopics = () => {
+    toast({
+      title: "Generating Topics",
+      description: "AI is analyzing your data to suggest topics...",
+    });
+  };
+
+  const handleAddTopic = () => {
+    toast({
+      title: "Add Topic",
+      description: "Opening topic creation dialog...",
+    });
+  };
+
+  const handleViewDetails = () => {
+    toast({
+      title: "Loading Details",
+      description: "Opening detailed topic analysis...",
+    });
+  };
+
+  const handleOptimize = () => {
+    toast({
+      title: "Optimizing Topic",
+      description: "AI is generating optimization recommendations...",
+    });
+  };
+
+  const handleGenerateMore = () => {
+    toast({
+      title: "Generating Prompts",
+      description: "AI is creating new prompt suggestions...",
+    });
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -140,11 +178,11 @@ const Topics = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleGenerateTopics}>
             <Sparkles className="h-4 w-4 mr-2" />
             Generate Topics
           </Button>
-          <Button>
+          <Button onClick={handleAddTopic}>
             <Plus className="h-4 w-4 mr-2" />
             Add Topic
           </Button>
@@ -271,8 +309,8 @@ const Topics = () => {
               </div>
 
               <div className="flex gap-2">
-                <Button size="sm" variant="outline">View Details</Button>
-                <Button size="sm" variant="outline">
+                <Button size="sm" variant="outline" onClick={handleViewDetails}>View Details</Button>
+                <Button size="sm" variant="outline" onClick={handleOptimize}>
                   <Target className="h-3 w-3 mr-1" />
                   Optimize
                 </Button>
@@ -286,7 +324,7 @@ const Topics = () => {
       <Card className="p-6">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold">AI-Generated Prompt Suggestions</h3>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={handleGenerateMore}>
             <Sparkles className="h-3 w-3 mr-1" />
             Generate More
           </Button>

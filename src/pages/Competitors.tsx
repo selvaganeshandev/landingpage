@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
 import { 
   Users,
   Plus,
@@ -146,6 +147,22 @@ const competitiveInsights = [
 ];
 
 const Competitors = () => {
+  const { toast } = useToast();
+
+  const handleExportReport = () => {
+    toast({
+      title: "Exporting Report",
+      description: "Your competitor analysis report is being generated...",
+    });
+  };
+
+  const handleAddCompetitor = () => {
+    toast({
+      title: "Add Competitor",
+      description: "Opening competitor setup dialog...",
+    });
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -156,11 +173,11 @@ const Competitors = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExportReport}>
             <FileText className="h-4 w-4 mr-2" />
             Export Report
           </Button>
-          <Button>
+          <Button onClick={handleAddCompetitor}>
             <Plus className="h-4 w-4 mr-2" />
             Add Competitor
           </Button>

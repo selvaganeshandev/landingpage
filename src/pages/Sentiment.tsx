@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -74,6 +75,15 @@ const COLORS = {
 };
 
 const Sentiment = () => {
+  const { toast } = useToast();
+
+  const handleExportReport = () => {
+    toast({
+      title: "Exporting Report",
+      description: "Your sentiment report is being generated...",
+    });
+  };
+
   const pieData = [
     { name: "Positive", value: sentimentOverview.positive, color: COLORS.positive },
     { name: "Neutral", value: sentimentOverview.neutral, color: COLORS.neutral },
@@ -89,7 +99,7 @@ const Sentiment = () => {
             Deep dive into brand sentiment across AI platforms
           </p>
         </div>
-        <Button>
+        <Button onClick={handleExportReport}>
           <FileText className="h-4 w-4 mr-2" />
           Export Sentiment Report
         </Button>
