@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +12,8 @@ import {
   MapPin,
   Languages
 } from "lucide-react";
+import { AddLanguageDialog } from "@/components/AddLanguageDialog";
+import { ConfigureLanguagesDialog } from "@/components/ConfigureLanguagesDialog";
 import { 
   BarChart,
   Bar,
@@ -103,19 +106,15 @@ const topPromptsByLanguage = {
 
 const Multilingual = () => {
   const { toast } = useToast();
+  const [configureDialogOpen, setConfigureDialogOpen] = useState(false);
+  const [addLanguageDialogOpen, setAddLanguageDialogOpen] = useState(false);
 
   const handleConfigureLanguages = () => {
-    toast({
-      title: "Language Configuration",
-      description: "Opening language settings...",
-    });
+    setConfigureDialogOpen(true);
   };
 
   const handleAddLanguage = () => {
-    toast({
-      title: "Add Language",
-      description: "Select a new language to monitor...",
-    });
+    setAddLanguageDialogOpen(true);
   };
 
   const pieData = languages.map(l => ({
@@ -354,6 +353,16 @@ const Multilingual = () => {
           ))}
         </div>
       </Card>
+
+      {/* Dialogs */}
+      <AddLanguageDialog
+        open={addLanguageDialogOpen}
+        onOpenChange={setAddLanguageDialogOpen}
+      />
+      <ConfigureLanguagesDialog
+        open={configureDialogOpen}
+        onOpenChange={setConfigureDialogOpen}
+      />
     </div>
   );
 };
