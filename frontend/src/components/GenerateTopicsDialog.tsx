@@ -12,7 +12,6 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { Sparkles, Loader2, Brain, Plus } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 
 interface GenerateTopicsDialogProps {
   open: boolean;

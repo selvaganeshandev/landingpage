@@ -2,7 +2,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider, ProtectedRoute } from "@/contexts/AuthContext";
 import { Layout } from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Prompts from "./pages/Prompts";
@@ -27,64 +28,173 @@ import ContentCalendar from "./pages/ContentCalendar";
 import AutomationSettings from "./pages/AutomationSettings";
 import TrafficAttribution from "./pages/TrafficAttribution";
 import SignIn from "./pages/Auth";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
+import AcceptInvitation from "./pages/AcceptInvitation";
 import OrganizationSettings from "./pages/OrganizationSettings";
 import TeamMemberPermissions from "./pages/TeamMemberPermissions";
 import MisinformationAlerts from "./pages/MisinformationAlerts";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
+import Profile from "./pages/Profile";
+import { MODULES } from "@/types/auth";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/signin" element={<SignIn />} />
-          <Route element={<Layout />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/prompts" element={<Prompts />} />
-            <Route path="/prompts/:id" element={<PromptDetail />} />
-            <Route path="/mentions" element={<Mentions />} />
-            <Route path="/mentions/:id" element={<MentionDetail />} />
-            <Route path="/sentiment" element={<Sentiment />} />
-            <Route path="/share-of-voice" element={<ShareOfVoice />} />
-            <Route path="/content-gaps" element={<ContentGaps />} />
-            <Route path="/trends" element={<HistoricalTrends />} />
-            <Route path="/topics" element={<Topics />} />
-            <Route path="/alerts" element={<Alerts />} />
-            <Route path="/competitors" element={<Competitors />} />
-            <Route path="/competitors/:id" element={<CompetitorDetail />} />
-            <Route path="/multilingual" element={<Multilingual />} />
-            <Route path="/reports" element={<Reports />} />
-            {/* Routes hidden per request */}
-            {/* <Route path="/prompt-insights" element={<PromptInsights />} /> */}
-            {/* <Route path="/agent-analytics" element={<AgentAnalytics />} /> */}
-            {/* <Route path="/crawler" element={<AICrawler />} /> */}
-            <Route path="/traffic" element={<TrafficAttribution />} />
-            <Route path="/organization-settings" element={<OrganizationSettings />} />
-            <Route path="/organization-settings/members/:memberId" element={<TeamMemberPermissions />} />
-            <Route path="/copilot" element={<AICopilot />} />
-            <Route path="/content-calendar" element={<ContentCalendar />} />
-            <Route path="/automation" element={<AutomationSettings />} />
-            <Route path="/misinformation" element={<MisinformationAlerts />} />
-            <Route 
-              path="/settings" 
-              element={
-                <PlaceholderPage 
-                  title="Settings" 
-                  description="Configure your tracking and preferences"
-                />
-              } 
-            />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
+    <AuthProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
+            <Route path="/signin" element={<SignIn />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password/:tokenId" element={<ResetPassword />} />
+            <Route path="/accept-invitation/:invitationId" element={<AcceptInvitation />} />
+            <Route element={<Layout />}>
+              {/* Overview */}
+              <Route path="/" element={
+                <ProtectedRoute requiredPermission={MODULES.DASHBOARD}>
+                  <Dashboard />
+                </ProtectedRoute>
+              } />
+              
+              {/* Tracking */}
+              <Route path="/mentions" element={
+                <ProtectedRoute requiredPermission={MODULES.MENTIONS}>
+                  <Mentions />
+                </ProtectedRoute>
+              } />
+              <Route path="/mentions/:id" element={
+                <ProtectedRoute requiredPermission={MODULES.MENTIONS}>
+                  <MentionDetail />
+                </ProtectedRoute>
+              } />
+              <Route path="/prompts" element={
+                <ProtectedRoute requiredPermission={MODULES.PROMPTS}>
+                  <Prompts />
+                </ProtectedRoute>
+              } />
+              <Route path="/prompts/:id" element={
+                <ProtectedRoute requiredPermission={MODULES.PROMPTS}>
+                  <PromptDetail />
+                </ProtectedRoute>
+              } />
+              <Route path="/alerts" element={
+                <ProtectedRoute requiredPermission={MODULES.ALERTS}>
+                  <Alerts />
+                </ProtectedRoute>
+              } />
+              
+              {/* Analytics */}
+              <Route path="/sentiment" element={
+                <ProtectedRoute requiredPermission={MODULES.SENTIMENT_ANALYSIS}>
+                  <Sentiment />
+                </ProtectedRoute>
+              } />
+              <Route path="/topics" element={
+                <ProtectedRoute requiredPermission={MODULES.TOPICS}>
+                  <Topics />
+                </ProtectedRoute>
+              } />
+              <Route path="/share-of-voice" element={
+                <ProtectedRoute requiredPermission={MODULES.SHARE_OF_VOICE}>
+                  <ShareOfVoice />
+                </ProtectedRoute>
+              } />
+              <Route path="/trends" element={
+                <ProtectedRoute requiredPermission={MODULES.HISTORICAL_TRENDS}>
+                  <HistoricalTrends />
+                </ProtectedRoute>
+              } />
+              
+              {/* Strategy */}
+              <Route path="/content-gaps" element={
+                <ProtectedRoute requiredPermission={MODULES.CONTENT_GAPS}>
+                  <ContentGaps />
+                </ProtectedRoute>
+              } />
+              <Route path="/competitors" element={
+                <ProtectedRoute requiredPermission={MODULES.COMPETITORS}>
+                  <Competitors />
+                </ProtectedRoute>
+              } />
+              <Route path="/competitors/:id" element={
+                <ProtectedRoute requiredPermission={MODULES.COMPETITORS}>
+                  <CompetitorDetail />
+                </ProtectedRoute>
+              } />
+              
+              {/* Advanced */}
+              <Route path="/multilingual" element={
+                <ProtectedRoute requiredPermission={MODULES.MULTILINGUAL}>
+                  <Multilingual />
+                </ProtectedRoute>
+              } />
+              <Route path="/copilot" element={
+                <ProtectedRoute requiredPermission={MODULES.AI_COPILOT}>
+                  <AICopilot />
+                </ProtectedRoute>
+              } />
+              <Route path="/traffic" element={
+                <ProtectedRoute requiredPermission={MODULES.TRAFFIC_ATTRIBUTION}>
+                  <TrafficAttribution />
+                </ProtectedRoute>
+              } />
+              <Route path="/misinformation" element={
+                <ProtectedRoute requiredPermission={MODULES.MISINFORMATION_ALERTS}>
+                  <MisinformationAlerts />
+                </ProtectedRoute>
+              } />
+              
+              {/* Reporting */}
+              <Route path="/reports" element={
+                <ProtectedRoute requiredPermission={MODULES.REPORTS}>
+                  <Reports />
+                </ProtectedRoute>
+              } />
+              
+              {/* Administration */}
+              <Route path="/organization-settings" element={
+                <ProtectedRoute requiredPermission={MODULES.ORGANIZATION_SETTINGS} requiredLevel="admin">
+                  <OrganizationSettings />
+                </ProtectedRoute>
+              } />
+              <Route path="/organization-settings/members/:memberId" element={
+                <ProtectedRoute requiredPermission={MODULES.TEAM_MANAGEMENT} requiredLevel="admin">
+                  <TeamMemberPermissions />
+                </ProtectedRoute>
+              } />
+              
+              {/* Profile */}
+              <Route path="/profile" element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              } />
+              
+              {/* Other routes */}
+              <Route path="/content-calendar" element={<ContentCalendar />} />
+              <Route path="/automation" element={<AutomationSettings />} />
+              <Route 
+                path="/settings" 
+                element={
+                  <PlaceholderPage 
+                    title="Settings" 
+                    description="Configure your tracking and preferences"
+                  />
+                } 
+              />
+              
+              {/* Catch-all route */}
+              <Route path="*" element={<NotFound />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+    </AuthProvider>
   </QueryClientProvider>
 );
 

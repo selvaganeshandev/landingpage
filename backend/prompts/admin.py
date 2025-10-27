@@ -1,21 +1,21 @@
 from django.contrib import admin
-from .models import PromptCluster, Prompt, PromptAnalytics
+from .models import PromptGroup, Prompt, PromptAnalytics
 
 
-@admin.register(PromptCluster)
-class PromptClusterAdmin(admin.ModelAdmin):
+@admin.register(PromptGroup)
+class PromptGroupAdmin(admin.ModelAdmin):
     list_display = [
-        'cluster_id', 'domain', 'organisation', 'total_mentions', 
+        'group_id', 'domain', 'organisation', 'total_mentions', 
         'total_citations', 'average_position', 'created_at'
     ]
     list_filter = ['organisation', 'created_at']
-    search_fields = ['cluster_id', 'domain__name', 'organisation__name']
+    search_fields = ['group_id', 'domain__name', 'organisation__name']
     readonly_fields = ['created_at', 'modified_at']
-    ordering = ['cluster_id']
+    ordering = ['group_id']
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('cluster_id', 'domain', 'organisation')
+            'fields': ('group_id', 'domain', 'organisation')
         }),
         ('Metrics', {
             'fields': ('total_mentions', 'total_citations', 'average_position')
@@ -30,11 +30,11 @@ class PromptClusterAdmin(admin.ModelAdmin):
 @admin.register(Prompt)
 class PromptAdmin(admin.ModelAdmin):
     list_display = [
-        'prompt_short', 'cluster', 'domain', 'track_status', 'type', 
+        'prompt_short', 'group', 'domain', 'track_status', 'type', 
         'last_tracked_at', 'created_at'
     ]
     list_filter = ['track_status', 'type', 'organisation', 'created_at']
-    search_fields = ['prompt', 'cluster__cluster_id', 'domain__name', 'organisation__name']
+    search_fields = ['prompt', 'group__group_id', 'domain__name', 'organisation__name']
     readonly_fields = ['created_at', 'modified_at']
     ordering = ['prompt']
     
@@ -44,7 +44,7 @@ class PromptAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('prompt', 'cluster', 'domain', 'organisation')
+            'fields': ('prompt', 'group', 'domain', 'organisation')
         }),
         ('Status & Type', {
             'fields': ('track_status', 'type')
@@ -63,7 +63,7 @@ class PromptAdmin(admin.ModelAdmin):
 class PromptAnalyticsAdmin(admin.ModelAdmin):
     list_display = [
         'prompt_short', 'platform', 'domain', 'is_mention', 'total_mentions', 
-        'sentiment', 'sentiment_score', 'position', 'created_at'
+        'sentiment', 'sentiment_score', 'position', 'views', 'shares', 'created_at'
     ]
     list_filter = ['sentiment', 'platform', 'is_mention', 'organisation', 'created_at']
     search_fields = ['prompt__prompt', 'platform', 'domain__name', 'organisation__name']
@@ -81,8 +81,15 @@ class PromptAnalyticsAdmin(admin.ModelAdmin):
         ('Metrics', {
             'fields': ('total_mentions', 'total_citations', 'position')
         }),
+        ('Engagement', {
+            'fields': ('views', 'shares', 'engagement_score')
+        }),
         ('Sentiment Analysis', {
             'fields': ('sentiment', 'sentiment_score', 'context_summary', 'citations')
+        }),
+        ('Advanced Analytics', {
+            'fields': ('competitor_mentions', 'key_topics', 'position_history'),
+            'classes': ('collapse',)
         }),
         ('Timestamps', {
             'fields': ('created_at', 'modified_at'),

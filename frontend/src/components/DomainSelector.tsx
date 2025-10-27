@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Check, Globe } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Check, Globe, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -15,15 +15,76 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-
-const mockDomains = [
-  { id: "1", domain: "acme.com", verified: true },
-  { id: "2", domain: "acmecorp.com", verified: false },
-];
+import { useDomainStore } from "@/stores/domainStore";
+import { useToast } from "@/hooks/use-toast";
 
 export const DomainSelector = () => {
   const [open, setOpen] = useState(false);
-  const [selectedDomain, setSelectedDomain] = useState(mockDomains[0]);
+  const { toast } = useToast();
+  
+  const {
+    domains,
+    selectedDomain,
+    isLoading,
+    error,
+    loadDomains,
+    setSelectedDomain,
+    selectDefaultDomain,
+    clearDomainStore
+  } = useDomainStore();
+
+  // Load domains on component mount
+  useEffect(() => {
+    // Clear any cached data first
+    clearDomainStore();
+    // Then load fresh data
+    loadDomains();
+  }, [loadDomains, clearDomainStore]);
+
+  // Show error if domain loading failed
+  useEffect(() => {
+    if (error) {
+      toast({
+        title: "Error loading domains",
+        description: error,
+        variant: "destructive",
+      });
+    }
+  }, [error, toast]);
+
+  const handleDomainSelect = (domainId: number) => {
+    const domain = domains.find(d => d.id === domainId);
+    if (domain) {
+      setSelectedDomain(domain);
+      setOpen(false);
+    }
+  };
+
+  if (isLoading && domains.length === 0) {
+    return (
+      <Button
+        variant="outline"
+        className="w-[200px] justify-between"
+        disabled
+      >
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        Loading domains...
+      </Button>
+    );
+  }
+
+  if (domains.length === 0) {
+    return (
+      <Button
+        variant="outline"
+        className="w-[200px] justify-between"
+        disabled
+      >
+        <Globe className="mr-2 h-4 w-4" />
+        No domain added
+      </Button>
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -35,7 +96,7 @@ export const DomainSelector = () => {
           className="w-[200px] justify-between"
         >
           <Globe className="mr-2 h-4 w-4" />
-          {selectedDomain.domain}
+          {selectedDomain ? selectedDomain.name : "Select domain"}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[200px] p-0">
@@ -44,22 +105,24 @@ export const DomainSelector = () => {
           <CommandList>
             <CommandEmpty>No domains found.</CommandEmpty>
             <CommandGroup heading="Your Domains">
-              {mockDomains.map((domain) => (
+              {domains.map((domain) => (
                 <CommandItem
                   key={domain.id}
-                  value={domain.domain}
-                  onSelect={() => {
-                    setSelectedDomain(domain);
-                    setOpen(false);
-                  }}
+                  value={domain.name}
+                  onSelect={() => handleDomainSelect(domain.id)}
                 >
                   <Check
                     className={cn(
                       "mr-2 h-4 w-4",
-                      selectedDomain.id === domain.id ? "opacity-100" : "opacity-0"
+                      selectedDomain?.id === domain.id ? "opacity-100" : "opacity-0"
                     )}
                   />
-                  {domain.domain}
+                  <div className="flex flex-col">
+                    <span>{domain.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {domain.total_mentions} mentions
+                    </span>
+                  </div>
                 </CommandItem>
               ))}
             </CommandGroup>

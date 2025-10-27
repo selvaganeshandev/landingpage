@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,15 +15,24 @@ import { useToast } from "@/hooks/use-toast";
 interface GenerateVariantsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  mainPrompt: string;
+  promptGroup: {
+    id: number;
+    group_id: string;
+    domain_name: string;
+    prompts_count: number;
+  } | null;
   onAdd?: (variants: string[]) => void;
 }
 
-export const GenerateVariantsDialog = ({ open, onOpenChange, mainPrompt, onAdd }: GenerateVariantsDialogProps) => {
+export const GenerateVariantsDialog = ({ open, onOpenChange, promptGroup, onAdd }: GenerateVariantsDialogProps) => {
   const { toast } = useToast();
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedVariants, setGeneratedVariants] = useState<string[]>([]);
   const [selectedVariants, setSelectedVariants] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    console.log("GenerateVariantsDialog - promptGroup received:", promptGroup);
+  }, [promptGroup]);
 
   const handleGenerate = async () => {
     setIsGenerating(true);
@@ -34,13 +43,17 @@ export const GenerateVariantsDialog = ({ open, onOpenChange, mainPrompt, onAdd }
       // Simulate AI generation - in real app, call your AI backend
       await new Promise(resolve => setTimeout(resolve, 2000));
 
+      // Generate variants based on the group ID and domain
+      const basePrompt = promptGroup?.group_id || "prompt";
       const mockVariants = [
-        `top ${mainPrompt.replace("best", "").trim()}`,
-        `affordable ${mainPrompt.replace("best", "").trim()}`,
-        `premium ${mainPrompt.replace("best", "").trim()}`,
-        `organic ${mainPrompt.replace("best", "").trim()}`,
-        `${mainPrompt} reviews`,
-        `${mainPrompt} comparison`,
+        `best ${basePrompt}`,
+        `top ${basePrompt}`,
+        `affordable ${basePrompt}`,
+        `premium ${basePrompt}`,
+        `${basePrompt} reviews`,
+        `${basePrompt} comparison`,
+        `${basePrompt} guide`,
+        `${basePrompt} tips`,
       ];
 
       setGeneratedVariants(mockVariants);
@@ -109,11 +122,13 @@ export const GenerateVariantsDialog = ({ open, onOpenChange, mainPrompt, onAdd }
         </DialogHeader>
 
         <div className="space-y-6 py-4">
-          {/* Main Prompt Display */}
+          {/* Group Information */}
           <div className="space-y-2">
-            <p className="text-sm font-medium">Main Prompt</p>
+            <p className="text-sm font-medium">Prompt Group</p>
             <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
-              <p className="font-mono text-sm">{mainPrompt}</p>
+              <p className="font-mono text-sm">Group ID: {promptGroup?.group_id}</p>
+              <p className="text-xs text-muted-foreground mt-1">Domain: {promptGroup?.domain_name}</p>
+              <p className="text-xs text-muted-foreground">Current Prompts: {promptGroup?.prompts_count}</p>
             </div>
           </div>
 

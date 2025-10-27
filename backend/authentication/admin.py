@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import Organisation, Account, TeamInvitation, UserPermission
+from .models import Organisation, Account, TeamInvitation, UserPermission, PasswordResetToken
 
 
 @admin.register(Organisation)
@@ -79,6 +79,27 @@ class UserPermissionAdmin(admin.ModelAdmin):
         }),
         ('Metadata', {
             'fields': ('granted_by', 'created_at', 'modified_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+
+@admin.register(PasswordResetToken)
+class PasswordResetTokenAdmin(admin.ModelAdmin):
+    list_display = [
+        'user', 'status', 'expires_at', 'used_at', 'created_at'
+    ]
+    list_filter = ['status', 'created_at', 'expires_at']
+    search_fields = ['user__email']
+    readonly_fields = ['id', 'created_at', 'modified_at']
+    ordering = ['-created_at']
+    
+    fieldsets = (
+        ('Token Details', {
+            'fields': ('user', 'status', 'expires_at', 'used_at')
+        }),
+        ('Metadata', {
+            'fields': ('id', 'created_at', 'modified_at'),
             'classes': ('collapse',)
         }),
     )

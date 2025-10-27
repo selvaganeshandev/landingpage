@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,9 +9,11 @@ import {
   Sparkles,
   Share2,
   FileText,
-  Copy
+  Copy,
+  Loader2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/services/api";
 import {
   LineChart,
   Line,
@@ -29,21 +31,42 @@ const PromptDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [promptGroup, setPromptGroup] = useState<any>(null);
+  const [prompts, setPrompts] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Mock data based on id
-  const promptGroup = {
-    id: id || "1",
-    name: "Vegan Protein - Athletes",
-    mainPrompt: "best vegan protein powder for athletes",
-    variants: [
-      "top vegan protein supplement for sports",
-      "affordable plant-based protein",
-      "clean vegan protein for runners",
-      "vegan protein for muscle gain"
-    ],
-    mentions: 89,
-    trend: 15,
-    description: "Track mentions for vegan protein products targeted at athletic performance and recovery."
+  useEffect(() => {
+    if (id) {
+      loadPromptGroupDetail();
+      loadPrompts();
+    }
+  }, [id]);
+
+  const loadPromptGroupDetail = async () => {
+    try {
+      setIsLoading(true);
+      const response = await apiClient.getPromptGroupDetail(parseInt(id!));
+      setPromptGroup(response.group);
+    } catch (error: any) {
+      toast({
+        title: "Error loading prompt group",
+        description: error.message || "Failed to load prompt group details",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadPrompts = async () => {
+    try {
+      const response = await apiClient.getPrompts({
+        group_id: parseInt(id!)
+      });
+      setPrompts(response.prompts);
+    } catch (error: any) {
+      console.error("Failed to load prompts:", error);
+    }
   };
 
   const mentionTrend = [
@@ -91,6 +114,29 @@ const PromptDetail = () => {
     });
   };
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!promptGroup) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <Card className="p-8 text-center">
+          <h2 className="text-2xl font-bold mb-4">Prompt Group Not Found</h2>
+          <p className="text-gray-600 mb-4">The prompt group you're looking for doesn't exist.</p>
+          <Button onClick={() => navigate("/prompts")}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Prompts
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8 space-y-6">
       {/* Header */}
@@ -105,9 +151,9 @@ const PromptDetail = () => {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight font-outfit">{promptGroup.name}</h1>
+            <h1 className="text-3xl font-bold tracking-tight font-outfit">Group {promptGroup?.group_id || 'N/A'}</h1>
             <p className="text-muted-foreground mt-1">
-              {promptGroup.description}
+              Domain: {promptGroup?.domain_name || 'N/A'}
             </p>
           </div>
         </div>
@@ -128,11 +174,10 @@ const PromptDetail = () => {
         <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Mentions</p>
-            <p className="text-4xl font-bold font-outfit">{promptGroup.mentions}</p>
+            <p className="text-4xl font-bold font-outfit">{promptGroup?.total_mentions || 0}</p>
             <div className="flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-success" />
-              <span className="text-sm font-semibold text-success">+{promptGroup.trend}%</span>
-              <span className="text-sm text-muted-foreground">vs last month</span>
+              <span className="text-sm font-semibold text-success">Created: {promptGroup?.created_at ? new Date(promptGroup.created_at).toLocaleDateString() : 'N/A'}</span>
             </div>
           </div>
         </Card>
@@ -140,16 +185,16 @@ const PromptDetail = () => {
         <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Active Variants</p>
-            <p className="text-4xl font-bold font-outfit">{promptGroup.variants.length}</p>
-            <p className="text-sm text-muted-foreground">Prompt variations being tracked</p>
+            <p className="text-4xl font-bold font-outfit">{prompts?.length || 0}</p>
+            <p className="text-sm text-muted-foreground">Prompts in this group</p>
           </div>
         </Card>
 
         <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Avg Position</p>
-            <p className="text-4xl font-bold font-outfit">1.4</p>
-            <p className="text-sm text-muted-foreground">Across all platforms</p>
+            <p className="text-4xl font-bold font-outfit">{promptGroup?.average_position || 0}</p>
+            <p className="text-sm text-muted-foreground">Average position across platforms</p>
           </div>
         </Card>
       </div>
@@ -161,14 +206,24 @@ const PromptDetail = () => {
           <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold font-outfit">Main Prompt</h3>
-                <Button variant="ghost" size="sm" onClick={() => handleCopy(promptGroup.mainPrompt)}>
-                  <Copy className="h-4 w-4 mr-1" />
-                  Copy
-                </Button>
+                <h3 className="text-lg font-semibold font-outfit">Prompts in Group</h3>
               </div>
-              <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
-                <p className="font-mono text-lg">{promptGroup.mainPrompt}</p>
+              <div className="space-y-3">
+                {prompts && prompts.length > 0 ? (
+                  prompts.map((prompt, idx) => (
+                    <div key={prompt.id} className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
+                      <div className="flex items-center justify-between">
+                        <p className="font-mono text-sm">{prompt.prompt_text}</p>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">{prompt.track_status}</Badge>
+                          <Badge variant="secondary">{prompt.type}</Badge>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-muted-foreground text-center py-4">No prompts found in this group</p>
+                )}
               </div>
             </div>
           </Card>
@@ -254,27 +309,33 @@ const PromptDetail = () => {
             <div className="space-y-4">
               <div className="flex items-center justify-between pb-4 border-b border-border/50">
                 <h3 className="text-lg font-semibold font-outfit">Prompt Variants</h3>
-                <Badge variant="secondary">{promptGroup.variants.length}</Badge>
+                <Badge variant="secondary">{promptGroup.prompts?.length || 0}</Badge>
               </div>
               <div className="space-y-3">
-                {promptGroup.variants.map((variant, idx) => (
+                {promptGroup.prompts?.map((prompt, idx) => (
                   <div
-                    key={idx}
+                    key={prompt.id}
                     className="group p-3 rounded-xl bg-muted/30 border border-border/50 hover:shadow-md transition-all"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-mono flex-1">{variant}</p>
+                      <div className="flex-1">
+                        <p className="text-sm font-mono mb-2">{prompt.prompt_text}</p>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs">{prompt.type}</Badge>
+                          <Badge variant="secondary" className="text-xs">{prompt.track_status}</Badge>
+                        </div>
+                      </div>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleCopy(variant)}
+                        onClick={() => handleCopy(prompt.prompt_text)}
                         className="opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         <Copy className="h-3 w-3" />
                       </Button>
                     </div>
                   </div>
-                ))}
+                )) || []}
               </div>
             </div>
           </Card>

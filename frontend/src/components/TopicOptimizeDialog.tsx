@@ -21,7 +21,6 @@ import {
   Plus,
   Loader2
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 
 interface TopicOptimizeDialogProps {
   open: boolean;

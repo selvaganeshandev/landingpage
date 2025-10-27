@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Organisation, Account, TeamInvitation, UserPermission
+from .models import Organisation, Account, TeamInvitation, UserPermission, PasswordResetToken
 
 
 class OrganisationSerializer(serializers.ModelSerializer):
@@ -149,3 +149,59 @@ class UserPermissionCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("You cannot assign permissions to yourself")
         
         return data
+
+
+class PasswordResetTokenSerializer(serializers.ModelSerializer):
+    """Serializer for PasswordResetToken model"""
+    user_email = serializers.CharField(source='user.email', read_only=True)
+    can_be_used = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = PasswordResetToken
+        fields = [
+            'id', 'user', 'user_email', 'status', 'expires_at', 
+            'used_at', 'can_be_used', 'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at']
+    
+    def get_can_be_used(self, obj):
+        return obj.can_be_used()
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    """Serializer for forgot password request"""
+    email = serializers.EmailField()
+    
+    def validate_email(self, value):
+        """Check if user exists"""
+        if not Account.objects.filter(email=value, is_active=True).exists():
+            raise serializers.ValidationError("No active account found with this email address")
+        return value
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    """Serializer for password reset"""
+    token = serializers.UUIDField()
+    new_password = serializers.CharField(min_length=8, write_only=True)
+    confirm_password = serializers.CharField(write_only=True)
+    
+    def validate(self, data):
+        """Validate password reset data"""
+        new_password = data.get('new_password')
+        confirm_password = data.get('confirm_password')
+        
+        if new_password != confirm_password:
+            raise serializers.ValidationError("Passwords do not match")
+        
+        return data
+    
+    def validate_token(self, value):
+        """Validate reset token"""
+        try:
+            reset_token = PasswordResetToken.objects.get(id=value)
+            if not reset_token.can_be_used():
+                raise serializers.ValidationError("Invalid or expired reset token")
+        except PasswordResetToken.DoesNotExist:
+            raise serializers.ValidationError("Invalid reset token")
+        
+        return value

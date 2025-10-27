@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Filter, ExternalLink, Copy } from "lucide-react";
+import { Search, Filter, ExternalLink, Copy, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Select,
@@ -14,127 +14,88 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { apiClient } from "@/services/api";
 
-const mentions = [
-  {
-    id: 1,
-    platform: "ChatGPT",
-    prompt: "best vegan protein powder for athletes",
-    position: 1,
-    sentiment: "positive",
-    snippet: "VegFit Pro stands out as a top choice for athletes seeking plant-based protein. Its clean ingredient profile and superior amino acid blend make it ideal for post-workout recovery.",
-    timestamp: "2 hours ago",
-    url: "https://chat.openai.com/share/abc123",
-    sources: ["vegfitpro.com", "healthline.com"],
-    citations: [
-      { 
-        text: "VegFit Pro stands out as a top choice",
-        sourceUrl: "https://vegfitpro.com/products/protein-powder",
-        sourceName: "VegFit Pro Official Site",
-        context: "Product page citing key benefits and features"
-      },
-      {
-        text: "superior amino acid blend",
-        sourceUrl: "https://healthline.com/nutrition/vegan-protein-powder",
-        sourceName: "Healthline Review",
-        context: "Third-party nutritional analysis"
-      }
-    ],
-  },
-  {
-    id: 2,
-    platform: "Claude",
-    prompt: "top vegan protein supplement for sports",
-    position: 2,
-    sentiment: "positive",
-    snippet: "Among the leading vegan protein options, VegFit Pro offers excellent value with its high protein content and natural ingredients, making it a favorite among endurance athletes.",
-    timestamp: "5 hours ago",
-    url: "https://claude.ai/chat/xyz789",
-    sources: ["vegfitpro.com"],
-    citations: [
-      {
-        text: "excellent value with its high protein content",
-        sourceUrl: "https://vegfitpro.com/nutritional-info",
-        sourceName: "VegFit Pro Nutritional Data",
-        context: "Official nutritional information page"
-      }
-    ],
-  },
-  {
-    id: 3,
-    platform: "Perplexity",
-    prompt: "affordable plant-based protein",
-    position: 1,
-    sentiment: "neutral",
-    snippet: "VegFit Pro provides a cost-effective solution for plant-based protein supplementation. While slightly more expensive than some alternatives, users report good results.",
-    timestamp: "8 hours ago",
-    url: "#",
-    sources: ["vegfitpro.com", "amazon.com"],
-  },
-  {
-    id: 4,
-    platform: "Grok",
-    prompt: "best protein powder for vegans",
-    position: 1,
-    sentiment: "positive",
-    snippet: "VegFit Pro is highly recommended for vegans looking for quality protein. The formula is clean, effective, and backed by positive user reviews.",
-    timestamp: "10 hours ago",
-    url: "#",
-    sources: ["vegfitpro.com", "reddit.com"],
-  },
-  {
-    id: 5,
-    platform: "Gemini",
-    prompt: "plant protein comparison",
-    position: 3,
-    sentiment: "neutral",
-    snippet: "When comparing plant-based proteins, VegFit Pro ranks well for quality but comes at a premium price point compared to competitors.",
-    timestamp: "12 hours ago",
-    url: "#",
-    sources: ["vegfitpro.com", "consumerreports.com"],
-  },
-  {
-    id: 6,
-    platform: "ChatGPT",
-    prompt: "organic vegan protein powder",
-    position: 2,
-    sentiment: "positive",
-    snippet: "For those seeking organic options, VegFit Pro delivers with certified organic ingredients and exceptional taste that doesn't compromise on nutrition.",
-    timestamp: "14 hours ago",
-    url: "#",
-    sources: ["vegfitpro.com", "organicfacts.com"],
-  },
-  {
-    id: 7,
-    platform: "Grok",
-    prompt: "vegan protein powder side effects",
-    position: 2,
-    sentiment: "neutral",
-    snippet: "Users report minimal digestive issues with VegFit Pro compared to other brands, though individual results may vary based on dietary sensitivities.",
-    timestamp: "16 hours ago",
-    url: "#",
-    sources: ["vegfitpro.com"],
-  },
-];
-
-const getSentimentColor = (sentiment: string) => {
-  switch (sentiment) {
-    case "positive":
-      return "bg-success text-success-foreground";
-    case "neutral":
-      return "bg-warning text-warning-foreground";
-    case "negative":
-      return "bg-destructive text-destructive-foreground";
-    default:
-      return "bg-muted";
-  }
-};
+interface Mention {
+  id: number;
+  rank: number;
+  mention_text_short: string;
+  mention_text_long: string;
+  description: string;
+  platform: string;
+  sentiment: string;
+  sentiment_score: number;
+  total_mentions: number;
+  total_citations: number;
+  position: number;
+  timestamp: string;
+  time_ago: string;
+  domain_name: string;
+  domain_url: string;
+  group_id: string;
+  track_status: string;
+  type: string;
+  citations: Array<{
+    id: number;
+    text: string;
+    source: string;
+    url: string;
+    description: string;
+  }>;
+  citations_count: number;
+  views: number;
+  shares: number;
+  engagement_score: number;
+  competitor_mentions: string[];
+  key_topics: string[];
+}
 
 const Mentions = () => {
   const navigate = useNavigate();
   const [selectedPlatform, setSelectedPlatform] = useState("all");
   const [selectedSentiment, setSelectedSentiment] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [mentions, setMentions] = useState<Mention[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [availablePlatforms, setAvailablePlatforms] = useState<string[]>([]);
+  const [availableSentiments, setAvailableSentiments] = useState<string[]>([]);
   const { toast } = useToast();
+
+  // Load mentions data
+  useEffect(() => {
+    loadMentions();
+    loadFilters();
+  }, [selectedPlatform, selectedSentiment, searchQuery]);
+
+  const loadMentions = async () => {
+    try {
+      setIsLoading(true);
+      const response = await apiClient.getMentions({
+        search: searchQuery || undefined,
+        platform: selectedPlatform !== "all" ? selectedPlatform : undefined,
+        sentiment: selectedSentiment !== "all" ? selectedSentiment : undefined,
+      });
+      setMentions(response.mentions);
+    } catch (error: any) {
+      toast({
+        title: "Error loading mentions",
+        description: error.message || "Failed to load mentions",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadFilters = async () => {
+    try {
+      const response = await apiClient.getMentionFilters();
+      setAvailablePlatforms(response.platforms.map(p => p.name));
+      setAvailableSentiments(response.sentiments.map(s => s.name));
+    } catch (error: any) {
+      console.error("Failed to load filters:", error);
+    }
+  };
 
   // Filter mentions based on selected platform and sentiment
   const filteredMentions = mentions.filter((mention) => {
@@ -143,11 +104,25 @@ const Mentions = () => {
     return platformMatch && sentimentMatch;
   });
 
-  const handleExport = () => {
-    toast({
-      title: "Exporting Mentions",
-      description: "Your mentions data is being exported...",
-    });
+  const handleExport = async () => {
+    try {
+      const response = await apiClient.exportMentions({
+        platform: selectedPlatform !== "all" ? selectedPlatform : undefined,
+        sentiment: selectedSentiment !== "all" ? selectedSentiment : undefined,
+        format: "csv"
+      });
+      
+      toast({
+        title: "Export Complete",
+        description: `Exported ${response.count} mentions successfully.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export Failed",
+        description: error.message || "Failed to export mentions",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleMoreFilters = () => {
@@ -169,6 +144,19 @@ const Mentions = () => {
     navigate(`/mentions/${mentionId}`);
   };
 
+  const getSentimentColor = (sentiment: string) => {
+    switch (sentiment) {
+      case "positive":
+        return "bg-success text-success-foreground";
+      case "neutral":
+        return "bg-warning text-warning-foreground";
+      case "negative":
+        return "bg-destructive text-destructive-foreground";
+      default:
+        return "bg-muted";
+    }
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between pb-4 border-b border-border/50">
@@ -187,11 +175,15 @@ const Mentions = () => {
           <div className="flex items-center justify-between mb-6">
             <TabsList className="bg-muted/50 p-1 border border-border/50">
               <TabsTrigger value="all" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">All Platforms</TabsTrigger>
-              <TabsTrigger value="grok" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">Grok</TabsTrigger>
-              <TabsTrigger value="claude" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">Claude</TabsTrigger>
-              <TabsTrigger value="chatgpt" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">ChatGPT</TabsTrigger>
-              <TabsTrigger value="perplexity" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">Perplexity</TabsTrigger>
-              <TabsTrigger value="gemini" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">Google Gemini</TabsTrigger>
+              {availablePlatforms.map(platform => (
+                <TabsTrigger 
+                  key={platform} 
+                  value={platform.toLowerCase()} 
+                  className="data-[state=active]:gradient-primary data-[state=active]:shadow-md"
+                >
+                  {platform}
+                </TabsTrigger>
+              ))}
             </TabsList>
             <Button variant="outline" onClick={handleMoreFilters} className="border-border/50">
               <Filter className="h-4 w-4 mr-2" />
@@ -202,7 +194,12 @@ const Mentions = () => {
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search mentions..." className="pl-10" />
+              <Input 
+                placeholder="Search mentions..." 
+                className="pl-10" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
             </div>
             <Select value={selectedSentiment} onValueChange={setSelectedSentiment}>
               <SelectTrigger className="w-[180px]">
@@ -210,9 +207,11 @@ const Mentions = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Sentiments</SelectItem>
-                <SelectItem value="positive">Positive</SelectItem>
-                <SelectItem value="neutral">Neutral</SelectItem>
-                <SelectItem value="negative">Negative</SelectItem>
+                {availableSentiments.map(sentiment => (
+                  <SelectItem key={sentiment} value={sentiment}>
+                    {sentiment.charAt(0).toUpperCase() + sentiment.slice(1)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -220,7 +219,19 @@ const Mentions = () => {
       </Card>
 
       <div className="grid gap-6">
-        {filteredMentions.length === 0 ? (
+        {isLoading ? (
+          <Card className="p-12 text-center shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <div>
+                <h3 className="text-lg font-semibold mb-2 font-outfit">Loading mentions...</h3>
+                <p className="text-muted-foreground">
+                  Please wait while we fetch your mentions
+                </p>
+              </div>
+            </div>
+          </Card>
+        ) : filteredMentions.length === 0 ? (
           <Card className="p-12 text-center shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
             <div className="flex flex-col items-center gap-4">
               <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
@@ -251,20 +262,20 @@ const Mentions = () => {
                       </Badge>
                     </div>
                     <p className="text-sm text-muted-foreground font-mono">
-                      {mention.prompt}
+                      {mention.mention_text_short}
                     </p>
                   </div>
                 </div>
-                <span className="text-xs text-muted-foreground">{mention.timestamp}</span>
+                <span className="text-xs text-muted-foreground">{mention.time_ago}</span>
               </div>
 
               <div className="bg-gradient-to-br from-muted/30 to-muted/50 rounded-xl p-5 border border-border/50 backdrop-blur-sm">
-                <p className="text-sm leading-relaxed">{mention.snippet}</p>
+                <p className="text-sm leading-relaxed">{mention.description}</p>
               </div>
 
               <div className="space-y-3 pt-3 border-t border-border/50">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground font-medium">Citations ({mention.citations?.length || 0}):</span>
+                  <span className="text-sm text-muted-foreground font-medium">Citations ({mention.citations_count}):</span>
                 </div>
                 {mention.citations && mention.citations.length > 0 && (
                   <div className="space-y-2">
@@ -274,15 +285,15 @@ const Mentions = () => {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium mb-1 line-clamp-1">"{citation.text}"</p>
                             <a 
-                              href={citation.sourceUrl}
+                              href={citation.url}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-xs text-primary hover:underline flex items-center gap-1"
                             >
                               <ExternalLink className="h-3 w-3" />
-                              {citation.sourceName}
+                              {citation.source}
                             </a>
-                            <p className="text-xs text-muted-foreground mt-1">{citation.context}</p>
+                            <p className="text-xs text-muted-foreground mt-1">{citation.description}</p>
                           </div>
                         </div>
                       </div>
@@ -290,7 +301,7 @@ const Mentions = () => {
                   </div>
                 )}
                 <div className="flex gap-2 pt-2">
-                  <Button variant="outline" size="sm" onClick={() => handleCopy(mention.snippet)} className="border-border/50">
+                  <Button variant="outline" size="sm" onClick={() => handleCopy(mention.description)} className="border-border/50">
                     <Copy className="h-3 w-3 mr-1" />
                     Copy
                   </Button>

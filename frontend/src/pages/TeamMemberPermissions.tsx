@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { apiClient } from "@/services/api";
 import { 
   ArrowLeft, 
   User, 
@@ -28,6 +30,7 @@ import {
   AlertTriangle,
   FileText,
   Settings,
+  Loader2,
 } from "lucide-react";
 
 const featureCategories = [
@@ -48,16 +51,16 @@ const featureCategories = [
   {
     name: "Analytics",
     features: [
-      { id: "sentiment", name: "Sentiment Analysis", icon: TrendingUp, description: "View sentiment trends and analysis" },
+      { id: "sentiment_analysis", name: "Sentiment Analysis", icon: TrendingUp, description: "View sentiment trends and analysis" },
       { id: "topics", name: "Topics", icon: Brain, description: "Access topic analysis and trends" },
-      { id: "share-of-voice", name: "Share of Voice", icon: BarChart3, description: "View competitive share of voice" },
-      { id: "trends", name: "Historical Trends", icon: BarChart3, description: "Access historical trend data" },
+      { id: "share_of_voice", name: "Share of Voice", icon: BarChart3, description: "View competitive share of voice" },
+      { id: "historical_trends", name: "Historical Trends", icon: BarChart3, description: "Access historical trend data" },
     ]
   },
   {
     name: "Strategy",
     features: [
-      { id: "content-gaps", name: "Content Gaps", icon: Target, description: "Identify content opportunities" },
+      { id: "content_gaps", name: "Content Gaps", icon: Target, description: "Identify content opportunities" },
       { id: "competitors", name: "Competitors", icon: Users, description: "Manage competitor tracking" },
     ]
   },
@@ -65,12 +68,12 @@ const featureCategories = [
     name: "Advanced",
     features: [
       { id: "multilingual", name: "Multilingual", icon: Globe, description: "Manage multilingual monitoring" },
-      { id: "copilot", name: "AI Copilot", icon: Sparkles, description: "Access AI recommendations" },
-      { id: "prompt-insights", name: "Prompt Insights", icon: TrendingUp, description: "Advanced prompt analytics" },
-      { id: "agent-analytics", name: "Agent Analytics", icon: Network, description: "View agent performance metrics" },
-      { id: "crawler", name: "AI Crawler", icon: Network, description: "Manage AI crawler settings" },
-      { id: "traffic", name: "Traffic Attribution", icon: Link2, description: "Track traffic sources" },
-      { id: "misinformation", name: "Misinformation Alerts", icon: AlertTriangle, description: "Monitor brand misinformation" },
+      { id: "ai_copilot", name: "AI Copilot", icon: Sparkles, description: "Access AI recommendations" },
+      { id: "prompt_insights", name: "Prompt Insights", icon: TrendingUp, description: "Advanced prompt analytics" },
+      { id: "agent_analytics", name: "Agent Analytics", icon: Network, description: "View agent performance metrics" },
+      { id: "ai_crawler", name: "AI Crawler", icon: Network, description: "Manage AI crawler settings" },
+      { id: "traffic_attribution", name: "Traffic Attribution", icon: Link2, description: "Track traffic sources" },
+      { id: "misinformation_alerts", name: "Misinformation Alerts", icon: AlertTriangle, description: "Monitor brand misinformation" },
     ]
   },
   {
@@ -82,63 +85,98 @@ const featureCategories = [
   {
     name: "Administration",
     features: [
-      { id: "org-settings", name: "Organization Settings", icon: Settings, description: "Manage organization settings" },
-      { id: "team-management", name: "Team Management", icon: Users, description: "Manage team members and permissions" },
+      { id: "organization_settings", name: "Organization Settings", icon: Settings, description: "Manage organization settings" },
+      { id: "team_management", name: "Team Management", icon: Users, description: "Manage team members and permissions" },
     ]
   }
 ];
 
-// Mock team member data
-const mockTeamMembers = [
-  { 
-    id: "1", 
-    email: "john@acme.com", 
-    name: "John Doe", 
-    role: "admin",
-    joinedAt: "2024-01-15"
-  },
-  { 
-    id: "2", 
-    email: "sarah@acme.com", 
-    name: "Sarah Smith", 
-    role: "user",
-    joinedAt: "2024-02-20"
-  },
-  { 
-    id: "3", 
-    email: "mike@acme.com", 
-    name: "Mike Johnson", 
-    role: "user",
-    joinedAt: "2024-03-10"
-  },
-];
 
 export default function TeamMemberPermissions() {
   const { memberId } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
   
-  const member = mockTeamMembers.find(m => m.id === memberId);
+  // State management
+  const [member, setMember] = useState<{
+    id: number;
+    email: string;
+    first_name: string;
+    last_name: string;
+    role: 'admin' | 'user';
+    organisation: number;
+    organisation_name: string;
+    is_active: boolean;
+    created_at: string;
+    modified_at: string;
+  } | null>(null);
   
-  // Initialize all permissions based on role
-  const initializePermissions = () => {
+  const [permissions, setPermissions] = useState<Record<string, boolean>>({});
+  const [userPermissions, setUserPermissions] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Load member data and permissions
+  useEffect(() => {
+    if (memberId) {
+      loadMemberData();
+    }
+  }, [memberId]);
+  
+  const loadMemberData = async () => {
+    try {
+      setIsLoading(true);
+      
+      // Load team members to find the specific member
+      const teamData = await apiClient.getTeamMembers();
+      const foundMember = teamData.members.find(m => m.id === parseInt(memberId!));
+      
+      if (!foundMember) {
+        toast({
+          title: "Member not found",
+          description: "The requested team member could not be found.",
+          variant: "destructive",
+        });
+        navigate("/organization-settings");
+        return;
+      }
+      
+      setMember(foundMember);
+      
+      // Load user permissions
+      const permissionsData = await apiClient.listUserPermissions(foundMember.id);
+      setUserPermissions(permissionsData.permissions);
+      
+      // Initialize permissions state
+      initializePermissions(permissionsData.permissions);
+      
+    } catch (error: any) {
+      toast({
+        title: "Error loading member data",
+        description: error.message || "Failed to load member information.",
+        variant: "destructive",
+      });
+      navigate("/organization-settings");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const initializePermissions = (userPerms: any[]) => {
     const allFeatureIds = featureCategories.flatMap(cat => 
       cat.features.map(f => f.id)
     );
     
-    if (member?.role === "admin") {
-      // Admins get all permissions by default
-      return Object.fromEntries(allFeatureIds.map(id => [id, true]));
-    } else {
-      // Regular users get basic permissions
-      return Object.fromEntries(allFeatureIds.map(id => [
-        id, 
-        ["dashboard", "mentions", "sentiment", "topics", "trends", "reports"].includes(id)
-      ]));
-    }
+    const permissionsMap: Record<string, boolean> = {};
+    
+    allFeatureIds.forEach(featureId => {
+      const userPerm = userPerms.find(p => p.module === featureId);
+      permissionsMap[featureId] = !!userPerm; // true if permission exists, false otherwise
+    });
+    
+    setPermissions(permissionsMap);
   };
-  
-  const [permissions, setPermissions] = useState(initializePermissions());
 
   if (!member) {
     return (
@@ -160,36 +198,157 @@ export default function TeamMemberPermissions() {
     }));
   };
 
-  const handleSavePermissions = () => {
-    // TODO: Connect to Supabase
-    toast({
-      title: "Permissions updated",
-      description: `Permissions for ${member.name} have been updated successfully.`,
-    });
+  const handleSavePermissions = async () => {
+    if (!member) return;
+    
+    try {
+      setIsSaving(true);
+      
+      // Get current permissions
+      const currentPerms = userPermissions;
+      const newPerms = permissions;
+      
+      // Find permissions to add and remove
+      const permissionsToAdd: string[] = [];
+      const permissionsToRemove: number[] = [];
+      
+      Object.keys(newPerms).forEach(module => {
+        const hasPermission = newPerms[module];
+        const existingPerm = currentPerms.find(p => p.module === module);
+        
+        if (hasPermission && !existingPerm) {
+          permissionsToAdd.push(module);
+        } else if (!hasPermission && existingPerm) {
+          permissionsToRemove.push(existingPerm.id);
+        }
+      });
+      
+      // Remove permissions
+      for (const permId of permissionsToRemove) {
+        await apiClient.deletePermission(permId);
+      }
+      
+      // Add new permissions
+      if (permissionsToAdd.length > 0) {
+        await apiClient.bulkAssignPermissions(permissionsToAdd.map(module => ({
+          user: member.id,
+          module,
+          permission_level: 'read'
+        })));
+      }
+      
+      // Reload permissions to get updated data
+      await loadMemberData();
+      
+      toast({
+        title: "Permissions updated",
+        description: `Permissions for ${member.first_name} ${member.last_name} have been updated successfully.`,
+      });
+      
+    } catch (error: any) {
+      toast({
+        title: "Error updating permissions",
+        description: error.message || "Failed to update permissions. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleGrantAll = () => {
-    const allFeatureIds = featureCategories.flatMap(cat => 
-      cat.features.map(f => f.id)
+  const handleGrantAll = async () => {
+    if (!member) return;
+    
+    try {
+      setIsSaving(true);
+      
+      const allFeatureIds = featureCategories.flatMap(cat => 
+        cat.features.map(f => f.id)
+      );
+      
+      await apiClient.grantAllPermissions(member.id);
+      
+      // Update local state
+      setPermissions(Object.fromEntries(allFeatureIds.map(id => [id, true])));
+      
+      // Reload permissions
+      await loadMemberData();
+      
+      toast({
+        title: "All permissions granted",
+        description: "All features have been enabled.",
+      });
+      
+    } catch (error: any) {
+      toast({
+        title: "Error granting permissions",
+        description: error.message || "Failed to grant all permissions. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRevokeAll = async () => {
+    if (!member) return;
+    
+    try {
+      setIsSaving(true);
+      
+      const allFeatureIds = featureCategories.flatMap(cat => 
+        cat.features.map(f => f.id)
+      );
+      
+      await apiClient.revokeAllPermissions(member.id);
+      
+      // Update local state
+      setPermissions(Object.fromEntries(allFeatureIds.map(id => [id, false])));
+      
+      // Reload permissions
+      await loadMemberData();
+      
+      toast({
+        title: "All permissions revoked",
+        description: "All features have been disabled.",
+      });
+      
+    } catch (error: any) {
+      toast({
+        title: "Error revoking permissions",
+        description: error.message || "Failed to revoke all permissions. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="p-8 flex items-center justify-center min-h-[400px]">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          <span>Loading member permissions...</span>
+        </div>
+      </div>
     );
-    setPermissions(Object.fromEntries(allFeatureIds.map(id => [id, true])));
-    toast({
-      title: "All permissions granted",
-      description: "All features have been enabled.",
-    });
-  };
+  }
 
-  const handleRevokeAll = () => {
-    const allFeatureIds = featureCategories.flatMap(cat => 
-      cat.features.map(f => f.id)
+  if (!member) {
+    return (
+      <div className="p-8">
+        <div className="max-w-2xl mx-auto text-center">
+          <h1 className="text-2xl font-bold mb-4">Team Member Not Found</h1>
+          <Button onClick={() => navigate("/organization-settings")}>
+            Back to Organization Settings
+          </Button>
+        </div>
+      </div>
     );
-    setPermissions(Object.fromEntries(allFeatureIds.map(id => [id, false])));
-    toast({
-      title: "All permissions revoked",
-      description: "All features have been disabled.",
-    });
-  };
+  }
 
+  const memberName = `${member.first_name} ${member.last_name}`.trim() || member.email.split('@')[0];
   const enabledCount = Object.values(permissions).filter(Boolean).length;
   const totalCount = Object.keys(permissions).length;
 
@@ -220,17 +379,20 @@ export default function TeamMemberPermissions() {
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <CardTitle>{member.name}</CardTitle>
+                  <CardTitle>{memberName}</CardTitle>
                   <Badge variant={member.role === "admin" ? "default" : "secondary"}>
                     {member.role}
                   </Badge>
+                  {!member.is_active && (
+                    <Badge variant="secondary">Inactive</Badge>
+                  )}
                 </div>
                 <CardDescription className="flex items-center gap-2 mt-1">
                   <Mail className="h-3 w-3" />
                   {member.email}
                 </CardDescription>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Joined {new Date(member.joinedAt).toLocaleDateString()}
+                  Joined {new Date(member.created_at).toLocaleDateString()}
                 </p>
               </div>
             </div>
@@ -255,10 +417,12 @@ export default function TeamMemberPermissions() {
               </CardDescription>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleRevokeAll}>
+              <Button variant="outline" size="sm" onClick={handleRevokeAll} disabled={isSaving}>
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Revoke All
               </Button>
-              <Button variant="outline" size="sm" onClick={handleGrantAll}>
+              <Button variant="outline" size="sm" onClick={handleGrantAll} disabled={isSaving}>
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Grant All
               </Button>
             </div>
@@ -313,10 +477,11 @@ export default function TeamMemberPermissions() {
       </Card>
 
       <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={() => navigate("/organization-settings")}>
+        <Button variant="outline" onClick={() => navigate("/organization-settings")} disabled={isSaving}>
           Cancel
         </Button>
-        <Button onClick={handleSavePermissions}>
+        <Button onClick={handleSavePermissions} disabled={isSaving}>
+          {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
           Save Permissions
         </Button>
       </div>

@@ -1,31 +1,65 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { Building2 } from "lucide-react";
+import { Building2, AlertCircle } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Auth() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(false);
+  const { login, isLoading } = useAuth();
+  const [formData, setFormData] = useState({
+    email: "",
+    password: "",
+  });
+  const [error, setError] = useState<string | null>(null);
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value,
+    }));
+    // Clear error when user starts typing
+    if (error) setError(null);
+  };
 
   const handleSignIn = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setIsLoading(true);
+    setError(null);
 
-    // TODO: Connect to Supabase
-    setTimeout(() => {
+    if (!formData.email || !formData.password) {
+      setError("Please fill in all fields");
+      return;
+    }
+
+    try {
+      await login({
+        email: formData.email,
+        password: formData.password,
+      });
+
       toast({
         title: "Welcome back!",
         description: "You have successfully signed in.",
       });
-      setIsLoading(false);
+      
       navigate("/");
-    }, 1000);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Login failed. Please try again.";
+      setError(errorMessage);
+      
+      toast({
+        title: "Login Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -43,6 +77,13 @@ export default function Auth() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {error && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          
           <form onSubmit={handleSignIn} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -51,7 +92,10 @@ export default function Auth() {
                 name="email"
                 type="email"
                 placeholder="you@company.com"
+                value={formData.email}
+                onChange={handleInputChange}
                 required
+                disabled={isLoading}
               />
             </div>
             <div className="space-y-2">
@@ -60,7 +104,10 @@ export default function Auth() {
                 id="password"
                 name="password"
                 type="password"
+                value={formData.password}
+                onChange={handleInputChange}
                 required
+                disabled={isLoading}
               />
             </div>
             <Button type="submit" className="w-full" disabled={isLoading}>
@@ -68,6 +115,13 @@ export default function Auth() {
             </Button>
           </form>
         </CardContent>
+        <CardFooter className="text-center text-sm text-muted-foreground">
+          <p>
+            <Link to="/forgot-password" className="text-primary hover:underline">
+              Forgot your password?
+            </Link>
+          </p>
+        </CardFooter>
       </Card>
     </div>
   );

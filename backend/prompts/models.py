@@ -1,22 +1,22 @@
 from django.db import models
 
 
-class PromptCluster(models.Model):
+class PromptGroup(models.Model):
     """
-    PromptCluster model representing clusters of prompts for domains
+    PromptGroup model representing groups of prompts for domains
     """
-    cluster_id = models.CharField(max_length=100, unique=True, help_text="Unique identifier for the cluster")
+    group_id = models.CharField(max_length=100, unique=True, help_text="Unique identifier for the group")
     domain = models.ForeignKey(
         'domains.Domain', 
         on_delete=models.CASCADE, 
-        related_name='prompt_clusters',
-        help_text="Domain this cluster belongs to"
+        related_name='prompt_groups',
+        help_text="Domain this group belongs to"
     )
     organisation = models.ForeignKey(
         'authentication.Organisation', 
         on_delete=models.CASCADE, 
-        related_name='prompt_clusters',
-        help_text="Organisation this cluster belongs to"
+        related_name='prompt_groups',
+        help_text="Organisation this group belongs to"
     )
     total_mentions = models.PositiveIntegerField(default=0, help_text="Total number of mentions")
     total_citations = models.PositiveIntegerField(default=0, help_text="Total number of citations")
@@ -26,23 +26,23 @@ class PromptCluster(models.Model):
         default=0.00,
         help_text="Average position in search results"
     )
-    created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the cluster was created")
-    modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the cluster was last modified")
+    created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the group was created")
+    modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the group was last modified")
     
     class Meta:
-        db_table = 'prompt_clusters'
-        verbose_name = 'Prompt Cluster'
-        verbose_name_plural = 'Prompt Clusters'
-        ordering = ['cluster_id']
-        unique_together = ['cluster_id', 'domain']
+        db_table = 'prompt_groups'
+        verbose_name = 'Prompt Group'
+        verbose_name_plural = 'Prompt Groups'
+        ordering = ['group_id']
+        unique_together = ['group_id', 'domain']
     
     def __str__(self):
-        return f"Cluster {self.cluster_id} ({self.domain.name})"
+        return f"Group {self.group_id} ({self.domain.name})"
 
 
 class Prompt(models.Model):
     """
-    Prompt model representing individual prompts within clusters
+    Prompt model representing individual prompts within groups
     """
     TRACK_STATUS_CHOICES = [
         ('active', 'Active'),
@@ -56,11 +56,13 @@ class Prompt(models.Model):
     ]
     
     prompt = models.TextField(help_text="The actual prompt text")
-    cluster = models.ForeignKey(
-        PromptCluster, 
+    group = models.ForeignKey(
+        PromptGroup, 
         on_delete=models.CASCADE, 
         related_name='prompts',
-        help_text="Cluster this prompt belongs to"
+        help_text="Group this prompt belongs to",
+        null=True,
+        blank=True
     )
     domain = models.ForeignKey(
         'domains.Domain', 
@@ -103,7 +105,7 @@ class Prompt(models.Model):
         verbose_name = 'Prompt'
         verbose_name_plural = 'Prompts'
         ordering = ['prompt']
-        unique_together = ['prompt', 'cluster']
+        unique_together = ['prompt', 'group']
     
     def __str__(self):
         return f"{self.prompt[:50]}... ({self.type})"
@@ -167,6 +169,30 @@ class PromptAnalytics(models.Model):
         default=list,
         blank=True,
         help_text="List of citations with text and source URLs"
+    )
+    # Enhanced fields for better functionality
+    views = models.PositiveIntegerField(default=0, help_text="Number of views")
+    shares = models.PositiveIntegerField(default=0, help_text="Number of shares")
+    engagement_score = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Engagement score"
+    )
+    competitor_mentions = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of competitor mentions"
+    )
+    key_topics = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of key topics extracted"
+    )
+    position_history = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Historical position data"
     )
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the analytics was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the analytics was last modified")

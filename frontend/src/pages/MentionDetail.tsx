@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,9 +13,11 @@ import {
   Clock,
   Target,
   Share2,
-  FileText
+  FileText,
+  Loader2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/services/api";
 import {
   LineChart,
   Line,
@@ -31,54 +33,138 @@ const MentionDetail = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("overview");
+  const [mention, setMention] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [relatedMentions, setRelatedMentions] = useState<any[]>([]);
 
-  // Mock data - in real app, fetch based on id
-  const mention = {
-    id: id || "1",
-    platform: "ChatGPT",
-    prompt: "best vegan protein powder for athletes",
-    position: 1,
-    sentiment: "positive",
-    fullResponse: "VegFit Pro stands out as a top choice for athletes seeking plant-based protein. Its clean ingredient profile and superior amino acid blend make it ideal for post-workout recovery.\n\nKey Features:\n• 25g of plant-based protein per serving\n• Complete amino acid profile from pea and rice protein\n• Added BCAAs for muscle recovery\n• No artificial sweeteners or additives\n• Third-party tested for purity\n\nMany professional athletes have switched to VegFit Pro for its effectiveness and digestibility. The natural vanilla flavor is well-received, and it mixes smoothly with both water and plant-based milk.\n\nCompared to other options like MyProtein or Naked Nutrition, VegFit Pro offers superior protein quality and better ingredient transparency. While it's priced slightly higher, the quality justifies the cost for serious athletes.",
-    timestamp: "2 hours ago",
-    date: "2024-01-15 14:30:00",
-    url: "https://chat.openai.com/share/abc123",
-    sources: ["vegfitpro.com", "healthline.com", "examine.com"],
-    competitorsMentioned: ["MyProtein", "Naked Nutrition"],
-    keyTopics: ["protein quality", "athlete nutrition", "plant-based", "recovery", "amino acids"],
-    detailedCitations: [
-      {
-        text: "VegFit Pro stands out as a top choice for athletes",
-        sourceUrl: "https://vegfitpro.com/products/protein-powder",
-        sourceName: "VegFit Pro Official Site",
-        context: "Product page citing key benefits and features",
-        timestamp: "Referenced 2 hours ago",
-        reliability: "high"
-      },
-      {
-        text: "clean ingredient profile and superior amino acid blend",
-        sourceUrl: "https://healthline.com/nutrition/vegan-protein-powder",
-        sourceName: "Healthline - Vegan Protein Review",
-        context: "Third-party nutritional analysis and comparison",
-        timestamp: "Referenced 2 hours ago",
-        reliability: "high"
-      },
-      {
-        text: "Third-party tested for purity",
-        sourceUrl: "https://examine.com/supplements/protein-powder/",
-        sourceName: "Examine.com Research",
-        context: "Independent testing and verification data",
-        timestamp: "Referenced 2 hours ago",
-        reliability: "high"
-      }
-    ],
-    citations: 3,
-    userEngagement: {
-      views: 1247,
-      shares: 89,
-      citations: 12
+  useEffect(() => {
+    if (id) {
+      loadMentionDetail();
+      loadRelatedMentions();
+    }
+  }, [id]);
+
+  const loadMentionDetail = async () => {
+    try {
+      setIsLoading(true);
+      const response = await apiClient.getMentionDetail(parseInt(id!));
+      setMention(response);
+    } catch (error: any) {
+      toast({
+        title: "Error loading mention",
+        description: error.message || "Failed to load mention details",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
+
+  const loadRelatedMentions = async () => {
+    try {
+      const response = await apiClient.getRelatedMentions(parseInt(id!));
+      setRelatedMentions(response.related_mentions);
+    } catch (error: any) {
+      console.error("Failed to load related mentions:", error);
+    }
+  };
+
+  const handleCopy = () => {
+    if (mention?.full_ai_response) {
+      navigator.clipboard.writeText(mention.full_ai_response);
+      toast({
+        title: "Copied to Clipboard",
+        description: "AI response has been copied.",
+      });
+    }
+  };
+
+  const handleShare = () => {
+    if (navigator.share) {
+      navigator.share({
+        title: `Mention on ${mention?.platform}`,
+        text: mention?.prompt_text,
+        url: window.location.href,
+      });
+    } else {
+      navigator.clipboard.writeText(window.location.href);
+      toast({
+        title: "Link Copied",
+        description: "Share link has been copied to clipboard.",
+      });
+    }
+  };
+
+  const handleExport = () => {
+    if (!mention) return;
+    
+    const exportData = {
+      mention_id: mention.id,
+      platform: mention.platform,
+      sentiment: mention.sentiment,
+      sentiment_score: mention.sentiment_score,
+      prompt_text: mention.prompt_text,
+      full_ai_response: mention.full_ai_response,
+      total_mentions: mention.total_mentions,
+      total_citations: mention.total_citations,
+      position: mention.position,
+      created_at: mention.created_at,
+      domain_name: mention.domain_name,
+      citations: mention.citations || [],
+      key_topics: mention.key_topics || []
+    };
+    
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mention-${mention.id}-${mention.platform.toLowerCase()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    toast({
+      title: "Export Successful",
+      description: "Mention data has been exported.",
+    });
+  };
+
+  const getSentimentColor = (sentiment: string) => {
+    switch (sentiment) {
+      case "positive":
+        return "bg-green-100 text-green-800";
+      case "negative":
+        return "bg-red-100 text-red-800";
+      case "neutral":
+        return "bg-gray-100 text-gray-800";
+      default:
+        return "bg-gray-100 text-gray-800";
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!mention) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <Card className="p-8 text-center">
+          <h2 className="text-2xl font-bold mb-4">Mention Not Found</h2>
+          <p className="text-gray-600 mb-4">The mention you're looking for doesn't exist.</p>
+          <Button onClick={() => navigate("/mentions")}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Mentions
+          </Button>
+        </Card>
+      </div>
+    );
+  }
 
   const trendData = [
     { date: "Jan 10", mentions: 4, position: 2.1 },
@@ -88,47 +174,6 @@ const MentionDetail = () => {
     { date: "Jan 14", mentions: 7, position: 1.5 },
     { date: "Jan 15", mentions: 9, position: 1.4 },
   ];
-
-  const relatedMentions = [
-    { platform: "Claude", position: 2, prompt: "top vegan protein for sports" },
-    { platform: "Perplexity", position: 1, prompt: "affordable plant-based protein" },
-    { platform: "Gemini", position: 3, prompt: "best protein powder reviews" },
-  ];
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(mention.fullResponse);
-    toast({
-      title: "Copied to Clipboard",
-      description: "Full response has been copied.",
-    });
-  };
-
-  const handleShare = () => {
-    toast({
-      title: "Share Link Generated",
-      description: "Mention link copied to clipboard.",
-    });
-  };
-
-  const handleExport = () => {
-    toast({
-      title: "Exporting Report",
-      description: "Detailed mention report is being generated...",
-    });
-  };
-
-  const getSentimentColor = (sentiment: string) => {
-    switch (sentiment) {
-      case "positive":
-        return "bg-success/10 text-success border-success/20";
-      case "neutral":
-        return "bg-warning/10 text-warning border-warning/20";
-      case "negative":
-        return "bg-destructive/10 text-destructive border-destructive/20";
-      default:
-        return "bg-muted";
-    }
-  };
 
   return (
     <div className="p-8 space-y-6">
@@ -182,7 +227,7 @@ const MentionDetail = () => {
                     </div>
                     <p className="text-sm text-muted-foreground">
                       <Clock className="h-3 w-3 inline mr-1" />
-                      {mention.timestamp} • {mention.date}
+                      {mention.time_ago} • {mention.created_at}
                     </p>
                   </div>
                 </div>
@@ -198,7 +243,7 @@ const MentionDetail = () => {
                     User Prompt
                   </h3>
                   <p className="text-lg font-mono bg-muted/30 p-4 rounded-xl border border-border/50">
-                    {mention.prompt}
+                    {mention.prompt_text}
                   </p>
                 </div>
 
@@ -207,7 +252,7 @@ const MentionDetail = () => {
                     Full AI Response
                   </h3>
                   <div className="bg-gradient-to-br from-muted/30 to-muted/50 p-6 rounded-xl border border-border/50 backdrop-blur-sm">
-                    <p className="text-sm leading-relaxed whitespace-pre-line">{mention.fullResponse}</p>
+                    <p className="text-sm leading-relaxed whitespace-pre-line">{mention.full_ai_response}</p>
                   </div>
                 </div>
               </div>
@@ -215,11 +260,11 @@ const MentionDetail = () => {
               <div className="space-y-4 pt-4 border-t border-border/50">
                 <div>
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                    Citations & Sources ({mention.detailedCitations?.length || 0})
+                    Citations & Sources ({mention.citations?.length || 0})
                   </h3>
-                  {mention.detailedCitations && mention.detailedCitations.length > 0 ? (
+                  {mention.citations && mention.citations.length > 0 ? (
                     <div className="space-y-3">
-                      {mention.detailedCitations.map((citation, idx) => (
+                      {mention.citations.map((citation, idx) => (
                         <div key={idx} className="p-4 bg-gradient-to-br from-muted/20 to-muted/30 rounded-lg border border-border/30">
                           <div className="flex items-start gap-3">
                             <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -228,21 +273,25 @@ const MentionDetail = () => {
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium mb-2 leading-relaxed">"{citation.text}"</p>
                               <div className="space-y-1">
-                                <a 
-                                  href={citation.sourceUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-sm text-primary hover:underline flex items-center gap-1 font-medium"
-                                >
-                                  <ExternalLink className="h-3 w-3" />
-                                  {citation.sourceName}
-                                </a>
-                                <p className="text-xs text-muted-foreground">{citation.context}</p>
+                                {citation.url && (
+                                  <a 
+                                    href={citation.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-sm text-primary hover:underline flex items-center gap-1 font-medium"
+                                  >
+                                    <ExternalLink className="h-3 w-3" />
+                                    {citation.source || citation.source_name || "Source"}
+                                  </a>
+                                )}
+                                {citation.description && (
+                                  <p className="text-xs text-muted-foreground">{citation.description}</p>
+                                )}
                                 <div className="flex items-center gap-2 mt-2">
                                   <Badge variant="outline" className="text-xs">
-                                    {citation.reliability === "high" ? "High Reliability" : "Verified"}
+                                    {citation.reliability || "Verified"}
                                   </Badge>
-                                  <span className="text-xs text-muted-foreground">{citation.timestamp}</span>
+                                  <span className="text-xs text-muted-foreground">{citation.referenced_at || "Recently referenced"}</span>
                                 </div>
                               </div>
                             </div>
@@ -283,11 +332,15 @@ const MentionDetail = () => {
                 <div>
                   <h3 className="text-lg font-semibold mb-4 font-outfit">Key Topics Mentioned</h3>
                   <div className="flex flex-wrap gap-2">
-                    {mention.keyTopics.map((topic, idx) => (
-                      <Badge key={idx} variant="outline" className="text-sm px-3 py-1">
-                        {topic}
-                      </Badge>
-                    ))}
+                    {mention.key_topics && mention.key_topics.length > 0 ? (
+                      mention.key_topics.map((topic, idx) => (
+                        <Badge key={idx} variant="outline" className="text-sm px-3 py-1">
+                          {topic}
+                        </Badge>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No key topics identified</p>
+                    )}
                   </div>
                 </div>
 
@@ -325,7 +378,7 @@ const MentionDetail = () => {
                       <MessageSquare className="h-4 w-4 text-primary" />
                       <p className="text-sm text-muted-foreground">Citations</p>
                     </div>
-                    <p className="text-3xl font-bold font-outfit">{mention.citations}</p>
+                    <p className="text-3xl font-bold font-outfit">{mention.total_citations}</p>
                   </div>
                   <div className="p-4 rounded-xl bg-gradient-to-br from-success/5 to-success/10 border border-border/50">
                     <div className="flex items-center gap-2 mb-2">
@@ -339,7 +392,10 @@ const MentionDetail = () => {
                 <div className="p-5 rounded-xl border border-border/50 bg-muted/30">
                   <h4 className="font-semibold mb-3 font-outfit">Sentiment Analysis</h4>
                   <p className="text-sm text-muted-foreground leading-relaxed">
-                    This mention shows strong positive sentiment towards VegFit Pro, highlighting key differentiators like ingredient quality, amino acid profile, and third-party testing. The response positions the brand as a premium option worth the investment.
+                    This mention shows {mention.sentiment} sentiment with a score of {mention.sentiment_score}. 
+                    {mention.sentiment === 'positive' && ' The response highlights positive aspects and benefits.'}
+                    {mention.sentiment === 'negative' && ' The response contains critical or unfavorable content.'}
+                    {mention.sentiment === 'neutral' && ' The response maintains a balanced, factual tone.'}
                   </p>
                 </div>
               </TabsContent>
@@ -348,33 +404,48 @@ const MentionDetail = () => {
                 <div>
                   <h3 className="text-lg font-semibold mb-3 font-outfit">Competitors Mentioned</h3>
                   <div className="flex flex-wrap gap-2 mb-6">
-                    {mention.competitorsMentioned.map((competitor, idx) => (
-                      <Badge key={idx} variant="secondary" className="text-sm px-3 py-1">
-                        {competitor}
-                      </Badge>
-                    ))}
+                    {mention.competitor_mentions && mention.competitor_mentions.length > 0 ? (
+                      mention.competitor_mentions.map((competitor, idx) => (
+                        <Badge key={idx} variant="secondary" className="text-sm px-3 py-1">
+                          {competitor}
+                        </Badge>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No competitors mentioned</p>
+                    )}
                   </div>
                 </div>
 
                 <div>
                   <h3 className="text-lg font-semibold mb-3 font-outfit">Related Mentions</h3>
                   <div className="space-y-3">
-                    {relatedMentions.map((related, idx) => (
-                      <div key={idx} className="p-4 rounded-xl border border-border/50 hover:shadow-md transition-all bg-card/50">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl gradient-primary shadow-md flex items-center justify-center font-bold text-white font-outfit">
-                              #{related.position}
+                    {relatedMentions && relatedMentions.length > 0 ? (
+                      relatedMentions.map((related, idx) => (
+                        <div key={idx} className="p-4 rounded-xl border border-border/50 hover:shadow-md transition-all bg-card/50">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl gradient-primary shadow-md flex items-center justify-center font-bold text-white font-outfit">
+                                #{related.position}
+                              </div>
+                              <div>
+                                <Badge variant="outline" className="mb-1">{related.platform}</Badge>
+                                <p className="text-sm text-muted-foreground font-mono">{related.prompt_text}</p>
+                                <p className="text-xs text-muted-foreground">{related.time_ago}</p>
+                              </div>
                             </div>
-                            <div>
-                              <Badge variant="outline" className="mb-1">{related.platform}</Badge>
-                              <p className="text-sm text-muted-foreground font-mono">{related.prompt}</p>
-                            </div>
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => navigate(`/mentions/${related.id}`)}
+                            >
+                              View
+                            </Button>
                           </div>
-                          <Button variant="ghost" size="sm">View</Button>
                         </div>
-                      </div>
-                    ))}
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No related mentions found</p>
+                    )}
                   </div>
                 </div>
               </TabsContent>
@@ -390,15 +461,15 @@ const MentionDetail = () => {
             <div className="space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-border/50">
                 <span className="text-sm text-muted-foreground">Views</span>
-                <span className="text-lg font-bold font-outfit">{mention.userEngagement.views.toLocaleString()}</span>
+                <span className="text-lg font-bold font-outfit">{mention.views ? mention.views.toLocaleString() : '0'}</span>
               </div>
               <div className="flex items-center justify-between pb-3 border-b border-border/50">
                 <span className="text-sm text-muted-foreground">Shares</span>
-                <span className="text-lg font-bold font-outfit">{mention.userEngagement.shares}</span>
+                <span className="text-lg font-bold font-outfit">{mention.shares || '0'}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Citations</span>
-                <span className="text-lg font-bold font-outfit">{mention.userEngagement.citations}</span>
+                <span className="text-lg font-bold font-outfit">{mention.total_citations || '0'}</span>
               </div>
             </div>
           </Card>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { apiClient } from "@/services/api";
+import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -27,42 +29,64 @@ import {
 export default function OrganizationSettings() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [orgName, setOrgName] = useState("Acme Corp");
-  const [domains, setDomains] = useState([
-    { id: "1", domain: "acme.com", verified: true },
-    { id: "2", domain: "acmecorp.com", verified: false },
-  ]);
+  const { user } = useAuth();
+  
+  // Organization state
+  const [organization, setOrganization] = useState({
+    id: 0,
+    name: "",
+    industry: "",
+    team_count: 0,
+    created_at: "",
+    modified_at: "",
+  });
+  
+  // Domains state
+  const [domains, setDomains] = useState<Array<{
+    id: number;
+    name: string;
+    url: string;
+    organisation: number;
+    total_mentions: number;
+    total_citations: number;
+    visibility_score: string;
+    average_position: string;
+    active_alerts: number;
+    sentiment: string;
+    sentiment_score: string;
+    created_at: string;
+    modified_at: string;
+  }>>([]);
+  
   const [newDomain, setNewDomain] = useState("");
   
-  const [teamMembers, setTeamMembers] = useState([
-    { 
-      id: "1", 
-      email: "john@acme.com", 
-      name: "John Doe", 
-      role: "admin" as const,
-      joinedAt: "2024-01-15"
-    },
-    { 
-      id: "2", 
-      email: "sarah@acme.com", 
-      name: "Sarah Smith", 
-      role: "user" as const,
-      joinedAt: "2024-02-20"
-    },
-    { 
-      id: "3", 
-      email: "mike@acme.com", 
-      name: "Mike Johnson", 
-      role: "user" as const,
-      joinedAt: "2024-03-10"
-    },
-  ]);
+  // Team members state
+  const [teamMembers, setTeamMembers] = useState<Array<{
+    id: number;
+    email: string;
+    first_name: string;
+    last_name: string;
+    role: 'admin' | 'user';
+    organisation: number;
+    organisation_name: string;
+    is_active: boolean;
+    created_at: string;
+    modified_at: string;
+  }>>([]);
   
+  // Loading states
+  const [isLoading, setIsLoading] = useState(true);
+  const [isUpdatingOrg, setIsUpdatingOrg] = useState(false);
+  const [isAddingDomain, setIsAddingDomain] = useState(false);
+  const [isUpdatingMember, setIsUpdatingMember] = useState<number | null>(null);
+  
+  // Dialog states
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "user">("user");
+  const [addDomainDialogOpen, setAddDomainDialogOpen] = useState(false);
 
-  // Mock integrations data
+  // Mock integrations data (keeping for now)
   const [integrations, setIntegrations] = useState([
     {
       id: "1",
@@ -74,109 +98,215 @@ export default function OrganizationSettings() {
       status: "active" as const,
       lastSync: "2024-03-14T10:30:00Z"
     },
-    {
-      id: "2",
-      domainId: "1",
-      domain: "acme.com",
-      type: "search_console" as const,
-      propertyUrl: "https://acme.com",
-      connectedAt: "2024-01-20",
-      status: "active" as const,
-      lastSync: "2024-03-14T09:15:00Z"
-    },
-    {
-      id: "3",
-      domainId: "2",
-      domain: "acmecorp.com",
-      type: "google_analytics" as const,
-      propertyId: "GA-987654321",
-      connectedAt: "2024-02-10",
-      status: "error" as const,
-      lastSync: "2024-03-13T14:20:00Z",
-      error: "Authentication expired"
-    }
   ]);
 
   const [connectIntegrationDialog, setConnectIntegrationDialog] = useState(false);
   const [selectedDomainForIntegration, setSelectedDomainForIntegration] = useState("");
   const [integrationType, setIntegrationType] = useState<"google_analytics" | "search_console">("google_analytics");
 
-  const handleAddDomain = () => {
-    if (!newDomain.trim()) return;
+  // Load data on component mount
+  useEffect(() => {
+    loadData();
+  }, []);
 
-    // TODO: Connect to Supabase
-    const domain = {
-      id: Date.now().toString(),
-      domain: newDomain.trim(),
-      verified: false,
-    };
-    setDomains([...domains, domain]);
-    setNewDomain("");
-    toast({
-      title: "Domain added",
-      description: `${domain.domain} has been added to your organization.`,
-    });
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      await Promise.all([
+        loadOrganization(),
+        loadDomains(),
+        loadTeamMembers(),
+      ]);
+    } catch (error) {
+      toast({
+        title: "Error loading data",
+        description: "Failed to load organization data. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleRemoveDomain = (id: string) => {
-    // TODO: Connect to Supabase
-    setDomains(domains.filter(d => d.id !== id));
-    toast({
-      title: "Domain removed",
-      description: "The domain has been removed from your organization.",
-    });
+  const loadOrganization = async () => {
+    try {
+      const data = await apiClient.getOrganization();
+      setOrganization(data);
+    } catch (error) {
+      console.error("Error loading organization:", error);
+    }
   };
 
-  const handleUpdateOrgName = () => {
-    // TODO: Connect to Supabase
-    toast({
-      title: "Organization updated",
-      description: "Your organization name has been updated.",
-    });
+  const loadDomains = async () => {
+    try {
+      const data = await apiClient.getDomains();
+      setDomains(data.domains);
+    } catch (error) {
+      console.error("Error loading domains:", error);
+    }
   };
 
-  const handleInviteMember = () => {
+  const loadTeamMembers = async () => {
+    try {
+      const data = await apiClient.getTeamMembers();
+      setTeamMembers(data.members);
+    } catch (error) {
+      console.error("Error loading team members:", error);
+    }
+  };
+
+  const handleAddDomain = async () => {
+    if (!newDomain.trim()) {
+      toast({
+        title: "Domain required",
+        description: "Please enter a domain name.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setIsAddingDomain(true);
+      const domainName = newDomain.trim();
+      const domainUrl = domainName.startsWith('http') ? domainName : `https://${domainName}`;
+      
+      const response = await apiClient.createDomain({
+        name: domainName,
+        url: domainUrl,
+      });
+      
+      // Reload domains to get the updated list
+      await loadDomains();
+      setNewDomain("");
+      setAddDomainDialogOpen(false);
+      
+      toast({
+        title: "Domain added",
+        description: `${domainName} has been added to your organization.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error adding domain",
+        description: error.message || "Failed to add domain. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAddingDomain(false);
+    }
+  };
+
+  const handleRemoveDomain = async (id: number) => {
+    try {
+      await apiClient.deleteDomain(id);
+      
+      // Reload domains to get the updated list
+      await loadDomains();
+      
+      toast({
+        title: "Domain removed",
+        description: "The domain has been removed from your organization.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error removing domain",
+        description: error.message || "Failed to remove domain. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleUpdateOrgName = async () => {
+    try {
+      setIsUpdatingOrg(true);
+      
+      await apiClient.updateOrganization({
+        name: organization.name,
+        industry: organization.industry,
+      });
+      
+      toast({
+        title: "Organization updated",
+        description: "Your organization details have been updated.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error updating organization",
+        description: error.message || "Failed to update organization. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdatingOrg(false);
+    }
+  };
+
+  const handleInviteMember = async () => {
     if (!inviteEmail.trim()) return;
 
-    // TODO: Connect to Supabase
-    const newMember = {
-      id: Date.now().toString(),
-      email: inviteEmail.trim(),
-      name: inviteEmail.split("@")[0],
-      role: inviteRole,
-      joinedAt: new Date().toISOString().split("T")[0],
-    };
-    
-    setTeamMembers([...teamMembers, newMember]);
-    setInviteEmail("");
-    setInviteRole("user");
-    setInviteDialogOpen(false);
-    
-    toast({
-      title: "Invitation sent",
-      description: `An invitation has been sent to ${newMember.email}`,
-    });
+    try {
+      await apiClient.sendInvitation({
+        email: inviteEmail.trim(),
+        role: inviteRole,
+      });
+      
+      setInviteEmail("");
+      setInviteRole("user");
+      setInviteDialogOpen(false);
+      
+      toast({
+        title: "Invitation sent",
+        description: `An invitation has been sent to ${inviteEmail.trim()}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error sending invitation",
+        description: error.message || "Failed to send invitation. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleRemoveMember = (id: string) => {
-    // TODO: Connect to Supabase
-    const member = teamMembers.find(m => m.id === id);
-    setTeamMembers(teamMembers.filter(m => m.id !== id));
-    toast({
-      title: "Member removed",
-      description: `${member?.name} has been removed from the organization.`,
-    });
+  const handleRemoveMember = async (id: number) => {
+    try {
+      await apiClient.removeTeamMember(id);
+      
+      // Reload team members to get the updated list
+      await loadTeamMembers();
+      
+      toast({
+        title: "Member removed",
+        description: "Team member has been removed from the organization.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error removing member",
+        description: error.message || "Failed to remove team member. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleUpdateRole = (id: string, newRole: "admin" | "user") => {
-    // TODO: Connect to Supabase
-    setTeamMembers(teamMembers.map(m => 
-      m.id === id ? { ...m, role: newRole } : m
-    ));
-    toast({
-      title: "Role updated",
-      description: "Team member role has been updated.",
-    });
+  const handleUpdateRole = async (id: number, newRole: "admin" | "user") => {
+    try {
+      setIsUpdatingMember(id);
+      
+      await apiClient.updateTeamMemberRole(id, newRole);
+      
+      // Reload team members to get the updated list
+      await loadTeamMembers();
+      
+      toast({
+        title: "Role updated",
+        description: "Team member role has been updated.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error updating role",
+        description: error.message || "Failed to update team member role. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdatingMember(null);
+    }
   };
 
   const getRoleIcon = (role: "admin" | "user") => {
@@ -245,6 +375,17 @@ export default function OrganizationSettings() {
     return integrations.filter(i => i.domainId === domainId);
   };
 
+  if (isLoading) {
+    return (
+      <div className="p-8 flex items-center justify-center min-h-[400px]">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          <span>Loading organization data...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8 space-y-6">
       <div>
@@ -267,10 +408,23 @@ export default function OrganizationSettings() {
             <div className="flex gap-2">
               <Input
                 id="org-name"
-                value={orgName}
-                onChange={(e) => setOrgName(e.target.value)}
+                value={organization.name}
+                onChange={(e) => setOrganization({...organization, name: e.target.value})}
               />
-              <Button onClick={handleUpdateOrgName}>Save</Button>
+              <Button onClick={handleUpdateOrgName} disabled={isUpdatingOrg}>
+                {isUpdatingOrg ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="org-industry">Industry</Label>
+            <div className="flex gap-2">
+              <Input
+                id="org-industry"
+                value={organization.industry}
+                onChange={(e) => setOrganization({...organization, industry: e.target.value})}
+                placeholder="e.g., Technology, Healthcare, Finance"
+              />
             </div>
           </div>
         </CardContent>
@@ -285,13 +439,7 @@ export default function OrganizationSettings() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex gap-2">
-            <Input
-              placeholder="example.com"
-              value={newDomain}
-              onChange={(e) => setNewDomain(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && handleAddDomain()}
-            />
-            <Button onClick={handleAddDomain}>
+            <Button onClick={() => setAddDomainDialogOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
               Add Domain
             </Button>
@@ -314,10 +462,16 @@ export default function OrganizationSettings() {
                   <div className="flex items-center gap-3">
                     <Globe className="h-4 w-4 text-muted-foreground" />
                     <div>
-                      <p className="font-medium">{domain.domain}</p>
-                      <Badge variant={domain.verified ? "default" : "secondary"} className="mt-1">
-                        {domain.verified ? "Verified" : "Pending"}
-                      </Badge>
+                      <p className="font-medium">{domain.name}</p>
+                      <p className="text-sm text-muted-foreground">{domain.url}</p>
+                      <div className="flex gap-2 mt-1">
+                        <Badge variant="default" className="text-xs">
+                          {domain.total_mentions} mentions
+                        </Badge>
+                        <Badge variant="secondary" className="text-xs">
+                          Score: {domain.visibility_score}
+                        </Badge>
+                      </div>
                     </div>
                   </div>
                   <Button
@@ -457,6 +611,7 @@ export default function OrganizationSettings() {
             ) : (
               teamMembers.map((member) => {
                 const RoleIcon = getRoleIcon(member.role);
+                const memberName = `${member.first_name} ${member.last_name}`.trim() || member.email.split('@')[0];
                 return (
                   <div
                     key={member.id}
@@ -468,11 +623,16 @@ export default function OrganizationSettings() {
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
-                          <p className="font-medium">{member.name}</p>
+                          <p className="font-medium">{memberName}</p>
                           {member.role === "admin" && (
                             <Badge variant="default" className="gap-1">
                               <Crown className="h-3 w-3" />
                               Admin
+                            </Badge>
+                          )}
+                          {!member.is_active && (
+                            <Badge variant="secondary" className="gap-1">
+                              Inactive
                             </Badge>
                           )}
                         </div>
@@ -481,7 +641,7 @@ export default function OrganizationSettings() {
                           {member.email}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
-                          Joined {new Date(member.joinedAt).toLocaleDateString()}
+                          Joined {new Date(member.created_at).toLocaleDateString()}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -490,6 +650,7 @@ export default function OrganizationSettings() {
                           onValueChange={(value: "admin" | "user") =>
                             handleUpdateRole(member.id, value)
                           }
+                          disabled={isUpdatingMember === member.id}
                         >
                           <SelectTrigger className="w-[120px]">
                             <SelectValue />
@@ -511,6 +672,7 @@ export default function OrganizationSettings() {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleRemoveMember(member.id)}
+                          disabled={isUpdatingMember === member.id}
                         >
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
@@ -673,6 +835,41 @@ export default function OrganizationSettings() {
             </Button>
             <Button onClick={handleConnectIntegration}>
               Connect with Google
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addDomainDialogOpen} onOpenChange={setAddDomainDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Domain</DialogTitle>
+            <DialogDescription>
+              Add a new domain to monitor for your organization
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="domain-name">Domain Name</Label>
+              <Input
+                id="domain-name"
+                placeholder="example.com"
+                value={newDomain}
+                onChange={(e) => setNewDomain(e.target.value)}
+                onKeyPress={(e) => e.key === "Enter" && handleAddDomain()}
+              />
+              <p className="text-xs text-muted-foreground">
+                Enter the domain name without http:// or https://
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddDomainDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddDomain} disabled={isAddingDomain}>
+              {isAddingDomain ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+              Add Domain
             </Button>
           </DialogFooter>
         </DialogContent>

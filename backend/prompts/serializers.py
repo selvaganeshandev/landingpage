@@ -1,18 +1,18 @@
 from rest_framework import serializers
-from .models import PromptCluster, Prompt, PromptAnalytics
+from .models import PromptGroup, Prompt, PromptAnalytics
 
 
-class PromptClusterSerializer(serializers.ModelSerializer):
-    """Serializer for PromptCluster model"""
+class PromptGroupSerializer(serializers.ModelSerializer):
+    """Serializer for PromptGroup model"""
     domain_name = serializers.CharField(source='domain.name', read_only=True)
     organisation_name = serializers.CharField(source='organisation.name', read_only=True)
     
     class Meta:
-        model = PromptCluster
+        model = PromptGroup
         fields = [
-            'id', 'cluster_id', 'domain', 'domain_name', 
+            'id', 'group_id', 'domain', 'domain_name', 
             'organisation', 'organisation_name',
-            'total_mentions', 'total_citations', 'visibility_score', 
+            'total_mentions', 'total_citations', 
             'average_position', 'created_at', 'modified_at'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
@@ -20,17 +20,16 @@ class PromptClusterSerializer(serializers.ModelSerializer):
 
 class PromptSerializer(serializers.ModelSerializer):
     """Serializer for Prompt model"""
-    cluster_id = serializers.CharField(source='cluster.cluster_id', read_only=True)
+    group_id = serializers.CharField(source='group.group_id', read_only=True)
     domain_name = serializers.CharField(source='domain.name', read_only=True)
     organisation_name = serializers.CharField(source='organisation.name', read_only=True)
     
     class Meta:
         model = Prompt
         fields = [
-            'id', 'prompt', 'cluster', 'cluster_id', 'domain', 'domain_name',
+            'id', 'prompt', 'group', 'group_id', 'domain', 'domain_name',
             'organisation', 'organisation_name', 'track_status', 'type',
-            'total_mentions', 'total_citations', 'visibility_score', 
-            'average_position', 'created_at', 'modified_at'
+            'last_tracked_at', 'track_message', 'created_at', 'modified_at'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
 
@@ -40,25 +39,27 @@ class PromptAnalyticsSerializer(serializers.ModelSerializer):
     prompt_text = serializers.CharField(source='prompt.prompt', read_only=True)
     domain_name = serializers.CharField(source='domain.name', read_only=True)
     organisation_name = serializers.CharField(source='organisation.name', read_only=True)
+    group_id = serializers.CharField(source='prompt.group.group_id', read_only=True)
     
     class Meta:
         model = PromptAnalytics
         fields = [
-            'id', 'prompt', 'prompt_text', 'domain', 'domain_name',
+            'id', 'prompt', 'prompt_text', 'group_id', 'domain', 'domain_name',
             'organisation', 'organisation_name', 'platform', 'is_mention',
             'total_mentions', 'total_citations', 'position', 
             'sentiment', 'sentiment_score', 'context_summary', 'citations',
-            'created_at', 'modified_at'
+            'views', 'shares', 'engagement_score', 'competitor_mentions',
+            'key_topics', 'position_history', 'created_at', 'modified_at'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
 
 
-class PromptClusterDetailSerializer(PromptClusterSerializer):
-    """Detailed serializer for PromptCluster with related prompts"""
+class PromptGroupDetailSerializer(PromptGroupSerializer):
+    """Detailed serializer for PromptGroup with related prompts"""
     prompts = PromptSerializer(many=True, read_only=True)
     
-    class Meta(PromptClusterSerializer.Meta):
-        fields = PromptClusterSerializer.Meta.fields + ['prompts']
+    class Meta(PromptGroupSerializer.Meta):
+        fields = PromptGroupSerializer.Meta.fields + ['prompts']
 
 
 class PromptDetailSerializer(PromptSerializer):

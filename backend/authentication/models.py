@@ -137,14 +137,39 @@ class UserPermission(models.Model):
     User permission model for module access control
     """
     MODULE_CHOICES = [
+        # Overview
         ('dashboard', 'Dashboard'),
-        ('domains', 'Domains'),
-        ('keywords', 'Keywords'),
+        
+        # Tracking
+        ('mentions', 'Mentions'),
         ('prompts', 'Prompts'),
-        ('analytics', 'Analytics'),
+        ('alerts', 'Alerts'),
+        
+        # Analytics
+        ('sentiment_analysis', 'Sentiment Analysis'),
+        ('topics', 'Topics'),
+        ('share_of_voice', 'Share of Voice'),
+        ('historical_trends', 'Historical Trends'),
+        
+        # Strategy
+        ('content_gaps', 'Content Gaps'),
+        ('competitors', 'Competitors'),
+        
+        # Advanced
+        ('multilingual', 'Multilingual'),
+        ('ai_copilot', 'AI Copilot'),
+        ('prompt_insights', 'Prompt Insights'),
+        ('agent_analytics', 'Agent Analytics'),
+        ('ai_crawler', 'AI Crawler'),
+        ('traffic_attribution', 'Traffic Attribution'),
+        ('misinformation_alerts', 'Misinformation Alerts'),
+        
+        # Reporting
         ('reports', 'Reports'),
-        ('settings', 'Settings'),
-        ('team', 'Team Management'),
+        
+        # Administration
+        ('organization_settings', 'Organization Settings'),
+        ('team_management', 'Team Management'),
     ]
     
     PERMISSION_CHOICES = [
@@ -160,7 +185,7 @@ class UserPermission(models.Model):
         help_text="User the permission is assigned to"
     )
     module = models.CharField(
-        max_length=20, 
+        max_length=30, 
         choices=MODULE_CHOICES,
         help_text="Module the permission applies to"
     )
@@ -187,3 +212,51 @@ class UserPermission(models.Model):
     
     def __str__(self):
         return f"{self.user.email} - {self.module} ({self.permission_level})"
+
+class PasswordResetToken(models.Model):
+    """
+    Password reset token model for handling password reset requests
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('used', 'Used'),
+        ('expired', 'Expired'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        Account, 
+        on_delete=models.CASCADE, 
+        related_name='password_reset_tokens',
+        help_text="User requesting password reset"
+    )
+    status = models.CharField(
+        max_length=10, 
+        choices=STATUS_CHOICES, 
+        default='pending',
+        help_text="Current status of the reset token"
+    )
+    expires_at = models.DateTimeField(
+        default=timezone.now() + timezone.timedelta(hours=1),
+        help_text="When the reset token expires"
+    )
+    used_at = models.DateTimeField(null=True, blank=True, help_text="When the token was used")
+    created_at = models.DateTimeField(auto_now_add=True, help_text="When the token was created")
+    modified_at = models.DateTimeField(auto_now=True, help_text="When the token was last modified")
+    
+    class Meta:
+        db_table = 'password_reset_tokens'
+        verbose_name = 'Password Reset Token'
+        verbose_name_plural = 'Password Reset Tokens'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"Password reset for {self.user.email}"
+    
+    def is_expired(self):
+        """Check if the reset token has expired"""
+        return timezone.now() > self.expires_at
+    
+    def can_be_used(self):
+        """Check if the reset token can be used"""
+        return self.status == 'pending' and not self.is_expired()
