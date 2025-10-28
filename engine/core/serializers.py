@@ -1,0 +1,126 @@
+from rest_framework import serializers
+from shared_models.models import Domain, Keyword, PromptGroup, Prompt, PromptAnalytics
+
+
+class DomainSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Domain model
+    """
+    organisation_name = serializers.CharField(source='organisation.name', read_only=True)
+    keywords_count = serializers.SerializerMethodField()
+    prompt_groups_count = serializers.SerializerMethodField()
+    prompts_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Domain
+        fields = [
+            'id', 'name', 'url', 'organisation', 'organisation_name',
+            'total_mentions', 'total_citations', 'visibility_score', 'average_position',
+            'active_alerts', 'sentiment', 'sentiment_score',
+            'processing_status', 'track_status', 'track_message',
+            'keywords_count', 'prompt_groups_count', 'prompts_count',
+            'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at']
+    
+    def get_keywords_count(self, obj):
+        return obj.keywords.count()
+    
+    def get_prompt_groups_count(self, obj):
+        return obj.prompt_groups.count()
+    
+    def get_prompts_count(self, obj):
+        return obj.prompts.count()
+
+
+class KeywordSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Keyword model
+    """
+    domain_name = serializers.CharField(source='domain.name', read_only=True)
+    
+    class Meta:
+        model = Keyword
+        fields = ['id', 'keyword', 'domain', 'domain_name', 'organisation', 'created_at', 'modified_at']
+        read_only_fields = ['id', 'created_at', 'modified_at']
+
+
+class PromptGroupSerializer(serializers.ModelSerializer):
+    """
+    Serializer for PromptGroup model
+    """
+    domain_name = serializers.CharField(source='domain.name', read_only=True)
+    prompts_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = PromptGroup
+        fields = [
+            'id', 'group_id', 'domain', 'domain_name', 'organisation',
+            'total_mentions', 'total_citations', 'average_position',
+            'prompts_count', 'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at']
+    
+    def get_prompts_count(self, obj):
+        return obj.prompts.count()
+
+
+class PromptSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Prompt model
+    """
+    domain_name = serializers.CharField(source='domain.name', read_only=True)
+    group_id = serializers.CharField(source='group.group_id', read_only=True)
+    
+    class Meta:
+        model = Prompt
+        fields = [
+            'id', 'prompt', 'group', 'group_id', 'domain', 'domain_name', 'organisation',
+            'track_status', 'type', 'last_tracked_at', 'track_message',
+            'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at']
+
+
+class PromptAnalyticsSerializer(serializers.ModelSerializer):
+    """
+    Serializer for PromptAnalytics model
+    """
+    domain_name = serializers.CharField(source='domain.name', read_only=True)
+    prompt_text = serializers.CharField(source='prompt.prompt', read_only=True)
+    
+    class Meta:
+        model = PromptAnalytics
+        fields = [
+            'id', 'prompt', 'prompt_text', 'domain', 'domain_name', 'organisation',
+            'platform', 'is_mention', 'total_mentions', 'total_citations', 'position',
+            'sentiment', 'sentiment_score', 'context_summary', 'citations',
+            'views', 'shares', 'engagement_score', 'competitor_mentions',
+            'key_topics', 'position_history', 'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at']
+
+
+class ProcessingStatusSerializer(serializers.Serializer):
+    """
+    Serializer for processing status
+    """
+    active_threads = serializers.IntegerField()
+    max_concurrent = serializers.IntegerField()
+    available_slots = serializers.IntegerField()
+    active_domain_ids = serializers.ListField(child=serializers.IntegerField())
+    domain_counts = serializers.DictField()
+
+
+class DomainProcessingRequestSerializer(serializers.Serializer):
+    """
+    Serializer for domain processing requests
+    """
+    domain_id = serializers.IntegerField(required=True)
+    
+    def validate_domain_id(self, value):
+        try:
+            Domain.objects.get(id=value)
+        except Domain.DoesNotExist:
+            raise serializers.ValidationError("Domain with this ID does not exist")
+        return value

@@ -435,6 +435,101 @@ class ApiClient {
     });
   }
 
+  // Domain Access Management methods
+  async getDomainAccess(domainId: number): Promise<{
+    access_list: Array<{
+      id: number;
+      user: {
+        id: number;
+        email: string;
+        first_name: string;
+        last_name: string;
+      };
+      access_level: 'viewer' | 'editor' | 'admin';
+      granted_by: {
+        id: number;
+        email: string;
+      };
+      created_at: string;
+    }>;
+  }> {
+    return await this.request(`/domains/${domainId}/access/`);
+  }
+
+  async grantDomainAccess(domainId: number, data: {
+    user_id: number;
+    access_level: 'viewer' | 'editor' | 'admin';
+  }): Promise<{
+    message: string;
+    access: any;
+  }> {
+    return await this.request(`/domains/${domainId}/access/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateDomainAccess(domainId: number, userId: number, data: {
+    access_level: 'viewer' | 'editor' | 'admin';
+  }): Promise<{
+    message: string;
+    access: any;
+  }> {
+    return await this.request(`/domains/${domainId}/access/${userId}/`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async revokeDomainAccess(domainId: number, userId: number): Promise<{
+    message: string;
+  }> {
+    return await this.request(`/domains/${domainId}/access/${userId}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getAvailableUsersForDomain(domainId: number): Promise<{
+    available_users: Array<{
+      id: number;
+      email: string;
+      first_name: string;
+      last_name: string;
+      role: 'admin' | 'user';
+    }>;
+  }> {
+    return await this.request(`/domains/${domainId}/access/available-users/`);
+  }
+
+  // Detected Models methods
+  async getDetectedModels(): Promise<{
+    detected_models: Array<{
+      id: number;
+      name: string;
+      domain: number;
+      domain_name: string;
+      organisation: number;
+      detection_count: number;
+      first_detected: string;
+      last_detected: string;
+      is_active: boolean;
+    }>;
+  }> {
+    return await this.request('/domains/detected-models/');
+  }
+
+  async updateDetectedModel(modelId: number, data: {
+    is_active?: boolean;
+  }): Promise<{
+    message: string;
+    detected_model: any;
+  }> {
+    return await this.request(`/domains/detected-models/${modelId}/`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Team Management methods
   async getTeamMembers(): Promise<{
     members: Array<{

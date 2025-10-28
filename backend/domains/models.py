@@ -58,3 +58,104 @@ class Domain(models.Model):
     
     def __str__(self):
         return f"{self.name} ({self.url})"
+
+
+class DetectedModel(models.Model):
+    """
+    Model for tracking detected AI models from mentions
+    """
+    MODEL_CHOICES = [
+        ('ChatGPT', 'ChatGPT'),
+        ('Google Gemini', 'Google Gemini'),
+        ('Perplexity', 'Perplexity'),
+        ('Claude', 'Claude'),
+        ('Copilot', 'Copilot'),
+        ('Other', 'Other'),
+    ]
+    
+    name = models.CharField(
+        max_length=50,
+        choices=MODEL_CHOICES,
+        help_text="Name of the detected AI model"
+    )
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='detected_models',
+        help_text="Domain where this model was detected"
+    )
+    organisation = models.ForeignKey(
+        'authentication.Organisation',
+        on_delete=models.CASCADE,
+        related_name='detected_models',
+        help_text="Organisation this detection belongs to"
+    )
+    detection_count = models.PositiveIntegerField(
+        default=1,
+        help_text="Number of times this model was detected"
+    )
+    first_detected = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this model was first detected"
+    )
+    last_detected = models.DateTimeField(
+        auto_now=True,
+        help_text="When this model was last detected"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this model detection is active"
+    )
+    
+    class Meta:
+        db_table = 'detected_models'
+        verbose_name = 'Detected Model'
+        verbose_name_plural = 'Detected Models'
+        ordering = ['-last_detected']
+        unique_together = ['name', 'domain']
+    
+    def __str__(self):
+        return f"{self.name} - {self.domain.name}"
+
+
+class DomainAccess(models.Model):
+    """
+    Controls which users can access specific domains
+    """
+    ACCESS_LEVEL_CHOICES = [
+        ('viewer', 'Viewer'),
+        ('editor', 'Editor'),
+        ('admin', 'Admin'),
+    ]
+    
+    user = models.ForeignKey(
+        'authentication.Account',
+        on_delete=models.CASCADE,
+        related_name='domain_access'
+    )
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='user_access'
+    )
+    access_level = models.CharField(
+        max_length=10,
+        choices=ACCESS_LEVEL_CHOICES,
+        default='viewer'
+    )
+    granted_by = models.ForeignKey(
+        'authentication.Account',
+        on_delete=models.CASCADE,
+        related_name='granted_domain_access'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ['user', 'domain']
+        db_table = 'domain_access'
+        verbose_name = 'Domain Access'
+        verbose_name_plural = 'Domain Access'
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.domain.name} ({self.access_level})"

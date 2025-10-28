@@ -25,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ProjectAccessManager } from "@/components/ProjectAccessManager";
 
 export default function OrganizationSettings() {
   const navigate = useNavigate();
@@ -85,6 +86,14 @@ export default function OrganizationSettings() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "user">("user");
   const [addDomainDialogOpen, setAddDomainDialogOpen] = useState(false);
+  
+  // Project Access Manager states
+  const [projectAccessDialogOpen, setProjectAccessDialogOpen] = useState(false);
+  const [selectedMemberForAccess, setSelectedMemberForAccess] = useState<{
+    id: number;
+    name: string;
+    email: string;
+  } | null>(null);
 
   // Mock integrations data (keeping for now)
   const [integrations, setIntegrations] = useState([
@@ -307,6 +316,24 @@ export default function OrganizationSettings() {
     } finally {
       setIsUpdatingMember(null);
     }
+  };
+
+  const handleOpenProjectAccess = (member: any) => {
+    const memberName = `${member.first_name} ${member.last_name}`.trim() || member.email.split('@')[0];
+    setSelectedMemberForAccess({
+      id: member.id,
+      name: memberName,
+      email: member.email
+    });
+    setProjectAccessDialogOpen(true);
+  };
+
+  const handleProjectAccessUpdated = () => {
+    // Optionally reload team members or show a success message
+    toast({
+      title: "Project access updated",
+      description: "Project access has been updated successfully.",
+    });
   };
 
   const getRoleIcon = (role: "admin" | "user") => {
@@ -663,8 +690,16 @@ export default function OrganizationSettings() {
                         <Button
                           variant="outline"
                           size="icon"
+                          onClick={() => handleOpenProjectAccess(member)}
+                          title="Manage Project Access"
+                        >
+                          <Globe className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
                           onClick={() => navigate(`/organization-settings/members/${member.id}`)}
-                          title="Manage Permissions"
+                          title="Manage Module Permissions"
                         >
                           <Settings className="h-4 w-4" />
                         </Button>
@@ -874,6 +909,18 @@ export default function OrganizationSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Project Access Manager */}
+      {selectedMemberForAccess && (
+        <ProjectAccessManager
+          userId={selectedMemberForAccess.id}
+          userName={selectedMemberForAccess.name}
+          userEmail={selectedMemberForAccess.email}
+          open={projectAccessDialogOpen}
+          onOpenChange={setProjectAccessDialogOpen}
+          onAccessUpdated={handleProjectAccessUpdated}
+        />
+      )}
     </div>
   );
 }
