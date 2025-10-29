@@ -6,7 +6,7 @@ class Organisation(models.Model):
     Organisation model representing companies or organizations
     """
     name = models.CharField(max_length=255, help_text="Name of the organisation")
-    industry = models.CharField(max_length=100, help_text="Industry sector of the organisation")
+    industry = models.CharField(max_length=100, null=True, blank=True, default=None, help_text="Industry sector of the organisation")
     team_count = models.PositiveIntegerField(default=1, help_text="Number of team members")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the organisation was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the organisation was last modified")
@@ -219,12 +219,6 @@ class PromptGroup(models.Model):
         default='INIT',
         help_text="Detailed tracking status of the group"
     )
-    processing_status = models.CharField(
-        max_length=10,
-        choices=PROCESSING_STATUS_CHOICES,
-        default='INIT',
-        help_text="Current processing status of the group"
-    )
     track_message = models.TextField(
         blank=True, 
         null=True,
@@ -234,6 +228,10 @@ class PromptGroup(models.Model):
         blank=True, 
         null=True,
         help_text="Timestamp when tracking status was last updated"
+    )
+    is_published = models.BooleanField(
+        default=False,
+        help_text="Whether this group is published and visible to users"
     )
     
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the group was created")
@@ -254,10 +252,13 @@ class Prompt(models.Model):
     """
     Prompt model representing individual prompts within groups
     """
+    # Standardized processing status choices
     TRACK_STATUS_CHOICES = [
-        ('active', 'Active'),
-        ('paused', 'Paused'),
-        ('archived', 'Archived'),
+        ('INIT', 'Initial'),
+        ('SCHD', 'Scheduled'),
+        ('PROC', 'Processing'),
+        ('COMP', 'Completed'),
+        ('FAIL', 'Failed'),
     ]
     
     TYPE_CHOICES = [
@@ -286,24 +287,11 @@ class Prompt(models.Model):
         related_name='prompts',
         help_text="Organisation this prompt belongs to"
     )
-    # Align status fields with Domain
-    PROCESSING_STATUS_CHOICES = [
-        ('INIT', 'Initial'),
-        ('SCHD', 'Scheduled'),
-        ('PROC', 'Processing'),
-        ('COMP', 'Completed'),
-        ('FAIL', 'Failed'),
-    ]
     track_status = models.CharField(
-        max_length=50,
-        default='INIT',
-        help_text="Detailed tracking status"
-    )
-    processing_status = models.CharField(
         max_length=10,
-        choices=PROCESSING_STATUS_CHOICES,
+        choices=TRACK_STATUS_CHOICES,
         default='INIT',
-        help_text="Current processing status of the prompt"
+        help_text="Processing tracking status of the prompt"
     )
     type = models.CharField(
         max_length=10, 
@@ -418,41 +406,11 @@ class PromptAnalytics(models.Model):
         help_text="Historical position data"
     )
     
-    # Platform-specific status tracking
-    chatgpt_status = models.CharField(
-        max_length=20, 
-        default='pending',
-        help_text="ChatGPT processing status"
-    )
-    gemini_status = models.CharField(
-        max_length=20, 
-        default='pending',
-        help_text="Google Gemini processing status"
-    )
-    perplexity_status = models.CharField(
-        max_length=20, 
-        default='pending',
-        help_text="Perplexity processing status"
-    )
     
-    # Tracking fields (aligned with Domain)
-    PROCESSING_STATUS_CHOICES = [
-        ('INIT', 'Initial'),
-        ('SCHD', 'Scheduled'),
-        ('PROC', 'Processing'),
-        ('COMP', 'Completed'),
-        ('FAIL', 'Failed'),
-    ]
     track_status = models.CharField(
         max_length=50,
         default='INIT',
         help_text="Detailed tracking status of the analytics"
-    )
-    processing_status = models.CharField(
-        max_length=10,
-        choices=PROCESSING_STATUS_CHOICES,
-        default='INIT',
-        help_text="Current processing status of the analytics"
     )
     track_message = models.TextField(
         blank=True, 
@@ -463,6 +421,10 @@ class PromptAnalytics(models.Model):
         blank=True, 
         null=True,
         help_text="Timestamp when tracking status was last updated"
+    )
+    is_published = models.BooleanField(
+        default=False,
+        help_text="Whether this analytics is published and visible to users"
     )
     
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the analytics was created")

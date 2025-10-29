@@ -14,6 +14,15 @@ except Exception:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 
+def process_prompt_with_gemini(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
+    """Direct Gemini processor; currently delegates to wrapper implementation."""
+    return process_prompt_with_gemini_wrapper(prompt_text, user_domain, client, group)
+
+
+def process_prompt_with_perplexity(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
+    """Direct Perplexity processor; currently delegates to wrapper implementation."""
+    return process_prompt_with_perplexity_wrapper(prompt_text, user_domain, client, group)
+
 def get_openai_client():
 	"""Return OpenAI client if configured in Django settings; else raise."""
 	api_key = getattr(settings, "OPENAI_API_KEY", None)
@@ -142,29 +151,151 @@ def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
 
 
 def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any, group: Any = None) -> Dict[str, Any]:
-	"""Lightweight processing: call OpenAI if desired later; for now echo and analyze."""
-	try:
-		# For environments without outbound calls, simply echo the prompt as summary
-		text = f"{prompt_text}"
-		return _basic_text_metrics(text, user_domain)
-	except Exception as e:
-		logger.error(f"ChatGPT processing failed: {e}")
-		raise
+    try:
+        country_text = "India"
+        system_prompt = f"You are a helpful assistant with access to current web search results. When answering questions, analyze the provided search results and combine them with your knowledge to provide comprehensive, up-to-date responses with current citations and links. Always prioritize the most recent and relevant information from the search results. Always provide answers in the context of {country_text} unless the user specifies another country."
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": (
+                    "Original Question: " + prompt_text +
+                    "\n\nBased on your knowledge, please provide a comprehensive and detailed response with:\n\n"
+                    "1. A thorough answer incorporating the latest information\n"
+                    "2. Include all relevant URLs and links\n"
+                    "3. Mention specific companies, tools, platforms, and services\n"
+                    "4. Provide detailed citations with current sources and dates where possible\n"
+                    "5. Include pricing information, features, and comparisons from the most recent data\n"
+                    "6. Add any additional current resources, alternatives, or related tools\n"
+                    "7. Highlight which information comes from recent sources vs general knowledge\n\n"
+                    "Format your response with proper current links, detailed descriptions, and up-to-date references. "
+                    "Focus on providing the most current and relevant information available."
+                )}
+            ],
+            temperature=0.7,
+            max_tokens=3000,
+            timeout=60
+        )
+
+        text = response.choices[0].message.content
+
+        domain_clean = _get_domain_from_url(user_domain)
+        sld = domain_clean.split('.') [0] if domain_clean else ""
+
+        escaped_domain = re.escape(domain_clean.replace('.', r'\.'))
+        direct_citation_pattern = r"https?://[^\s\)\]]*" + escaped_domain + r"[^\s\)\]]*"
+        direct_citation_matches = re.findall(direct_citation_pattern, text, flags=re.IGNORECASE)
+
+        escaped_sld = re.escape(sld.replace(' ', '[-_]?'))
+        brand_in_url_pattern = r"https?://[^\s\)\]]*" + escaped_sld + r"[^\s\)\]]*"
+        brand_url_matches = re.findall(brand_in_url_pattern, text, flags=re.IGNORECASE)
+
+        all_citation_matches = list(set(direct_citation_matches + brand_url_matches))
+        has_citation = len(all_citation_matches) > 0
+
+        mention_patterns = [p for p in [
+            domain_clean,
+            sld,
+            domain_clean.replace('.com','').replace('.org','').replace('.net','').replace('.io',''),
+            sld.replace(' ', ''), sld.replace(' ', '-'), sld.replace(' ', '_')
+        ] if p and len(p) >= 3]
+
+        all_urls = re.findall(r"https?://[^\s\)\]]+", text, flags=re.IGNORECASE)
+        citation_count = len(all_urls)
+        mention_count = sum(1 for pattern in mention_patterns if pattern.lower() in text.lower())
+
+        polarity = 0.0
+        sentiment = "neutral"
+        if TextBlob is not None:
+            blob = TextBlob(text)
+            polarity = float(getattr(getattr(blob, 'sentiment', None), 'polarity', 0.0) or 0.0)
+            if polarity > 0.1:
+                sentiment = "positive"
+            elif polarity < -0.1:
+                sentiment = "negative"
+
+        print({
+            "response_text": text,
+            "is_mention": (mention_count > 0) or has_citation,
+            "mention_count": mention_count,
+            "citations": all_citation_matches,
+            "sentiment": sentiment,
+            "sentiment_score": round(polarity, 3),
+            "context_summary": text,
+            "citation_count": citation_count,
+            "has_citation": has_citation,
+            "all_urls": all_urls,
+        })
+        
+        return {
+            "response_text": text,
+            "is_mention": (mention_count > 0) or has_citation,
+            "mention_count": mention_count,
+            "citations": all_citation_matches,
+            "sentiment": sentiment,
+            "sentiment_score": round(polarity, 3),
+            "context_summary": text,
+            "citation_count": citation_count,
+            "has_citation": has_citation,
+            "all_urls": all_urls,
+        }
+        
+        
+    except Exception as e:
+        logger.error(f"ChatGPT processing failed: {e}")
+        raise
 
 
 def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
-	try:
-		text = f"{prompt_text}"
-		return _basic_text_metrics(text, user_domain)
-	except Exception as e:
-		logger.error(f"Gemini processing failed: {e}")
-		raise
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=(client or {}).get('api_key'), transport="rest")
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        prompt = (
+            f"Original Question: {prompt_text}\n\nBased on your knowledge, please provide a comprehensive and detailed response with:\n\n"
+            "1. A thorough answer incorporating the latest information\n"
+            "2. Include all relevant URLs and links\n"
+            "3. Mention specific companies, tools, platforms, and services\n"
+            "4. Provide detailed citations with current sources and dates where possible\n"
+            "5. Include pricing information, features, and comparisons from the most recent data\n"
+            "6. Add any additional current resources, alternatives, or related tools\n"
+            "7. Highlight which information comes from recent sources vs general knowledge\n\n"
+            "Format your response with proper current links, detailed descriptions, and up-to-date references. "
+            "Focus on providing the most current and relevant information available."
+        )
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.7,
+                top_k=40,
+                top_p=0.95,
+                max_output_tokens=3000,
+            )
+        )
+        text = response.text if getattr(response, 'text', None) else ""
+        return _basic_text_metrics(text, user_domain)
+    except Exception as e:
+        logger.error(f"Gemini processing failed: {e}")
+        raise
 
 
 def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
-	try:
-		text = f"{prompt_text}"
-		return _basic_text_metrics(text, user_domain)
-	except Exception as e:
-		logger.error(f"Perplexity processing failed: {e}")
-		raise
+    try:
+        try:
+            from perplexity import Perplexity
+            perplexity_client = Perplexity(api_key=(client or {}).get('api_key'))
+            user_message = prompt_text
+            if len(user_message) > 250:
+                user_message = user_message[:250].rsplit(' ', 1)[0] + "..."
+            search_response = perplexity_client.search.create(query=user_message)
+            if hasattr(search_response, 'results') and search_response.results:
+                text = "\n".join([getattr(r, 'snippet', '') for r in search_response.results if getattr(r, 'snippet', '')])
+            else:
+                text = user_message
+        except Exception:
+            text = prompt_text
+        return _basic_text_metrics(text, user_domain)
+    except Exception as e:
+        logger.error(f"Perplexity processing failed: {e}")
+        raise

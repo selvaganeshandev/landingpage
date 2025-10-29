@@ -1,7 +1,10 @@
 from django.urls import path
 from . import views
+from . import test_views
 
 urlpatterns = [
+    # Test endpoint
+    path('test/', test_views.test_view, name='test_view'),
     # Mentions endpoints
     path('mentions/', views.get_mentions, name='get_mentions'),
     path('mentions/filters/', views.get_mention_filters, name='get_mention_filters'),

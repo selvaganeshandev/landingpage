@@ -586,7 +586,16 @@ class ApiClient {
     if (params?.limit) queryParams.append('limit', params.limit.toString());
     
     const queryString = queryParams.toString();
-    return await this.request(`/prompts/mentions/${queryString ? `?${queryString}` : ''}`);
+    const response = await this.request(`/prompts/mentions/${queryString ? `?${queryString}` : ''}`);
+    
+    // Transform the response to match expected structure
+    return {
+      mentions: response.mentions || [],
+      total_count: response.total_count || 0,
+      filters_applied: response.filters_applied || {},
+      available_platforms: response.available_platforms || [],
+      available_sentiments: response.available_sentiments || []
+    };
   }
 
   async getMentionDetail(id: number): Promise<any> {

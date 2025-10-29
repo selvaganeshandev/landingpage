@@ -213,7 +213,7 @@ const PromptDetail = () => {
                   prompts.map((prompt, idx) => (
                     <div key={prompt.id} className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
                       <div className="flex items-center justify-between">
-                        <p className="font-mono text-sm">{prompt.prompt_text}</p>
+                        <p className="font-mono text-sm">{prompt.prompt_text || prompt.prompt || 'No prompt text'}</p>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline">{prompt.track_status}</Badge>
                           <Badge variant="secondary">{prompt.type}</Badge>
@@ -319,7 +319,7 @@ const PromptDetail = () => {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
-                        <p className="text-sm font-mono mb-2">{prompt.prompt_text}</p>
+                        <p className="text-sm font-mono mb-2">{prompt.prompt_text || prompt.prompt || 'No prompt text'}</p>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline" className="text-xs">{prompt.type}</Badge>
                           <Badge variant="secondary" className="text-xs">{prompt.track_status}</Badge>

@@ -221,7 +221,7 @@ class DomainProcessor:
                             domain=domain,
                             organisation=domain.organisation,
                             type='primary',
-                            track_status='active'
+                            track_status='INIT'
                         )
                         print(f"Created primary prompt: {prompt_text[:50]}...")
                         self._create_default_analytics_for_prompt(prompt, domain)
@@ -236,7 +236,7 @@ class DomainProcessor:
                             domain=domain,
                             organisation=domain.organisation,
                             type='secondary',
-                            track_status='active'
+                            track_status='INIT'
                         )
                         print(f"Created secondary prompt: {prompt_text[:50]}...")
                         self._create_default_analytics_for_prompt(prompt, domain)
@@ -257,9 +257,7 @@ class DomainProcessor:
 
     def _create_default_analytics_for_prompt(self, prompt: Prompt, domain: Domain) -> None:
         for platform in [
-            'ChatGPT',
-            'Google Gemini',
-            'Perplexity'
+            'ChatGPT'
         ]:
             PromptAnalytics.objects.get_or_create(
                 prompt=prompt,

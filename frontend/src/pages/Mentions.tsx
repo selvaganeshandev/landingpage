@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiClient } from "@/services/api";
+import DOMPurify from 'dompurify';
 
 interface Mention {
   id: number;
@@ -48,6 +49,12 @@ interface Mention {
   engagement_score: number;
   competitor_mentions: string[];
   key_topics: string[];
+  // Additional fields from API response
+  prompt_text?: string;
+  full_ai_response?: string;
+  context_summary?: string;
+  created_at?: string;
+  modified_at?: string;
 }
 
 const Mentions = () => {
@@ -57,9 +64,50 @@ const Mentions = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [availablePlatforms, setAvailablePlatforms] = useState<string[]>([]);
-  const [availableSentiments, setAvailableSentiments] = useState<string[]>([]);
+  const [availablePlatforms, setAvailablePlatforms] = useState<string[]>(["ChatGPT", "Google Gemini", "Perplexity"]);
+  const [availableSentiments, setAvailableSentiments] = useState<string[]>(["Positive", "Negative", "Neutral"]);
   const { toast } = useToast();
+
+  // Function to process content and convert markdown-like syntax to HTML
+  const processContent = (content: string) => {
+    if (!content) return '';
+    
+    let processedContent = content;
+    
+    // Replace ### with <h3> tags
+    processedContent = processedContent.replace(/^###\s*(.+)$/gm, '<h3>$1</h3>');
+    
+    // Replace **text** with <strong>text</strong> for bold
+    processedContent = processedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // Convert markdown links [text](url) to HTML links first
+    processedContent = processedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    
+    // Convert standalone URLs to clickable links
+    const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/g;
+    processedContent = processedContent.replace(urlRegex, (match, url) => {
+      // Check if this URL is already inside an HTML tag
+      if (processedContent.includes(`href="${url}"`) || processedContent.includes(`href='${url}'`)) {
+        return match; // Don't process if already in an href attribute
+      }
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    });
+    
+    // Also handle www. links
+    const wwwRegex = /(www\.[^\s<>"{}|\\^`\[\]]+)/g;
+    processedContent = processedContent.replace(wwwRegex, (match, url) => {
+      // Check if this www. URL is already inside an HTML tag
+      if (processedContent.includes(`href="https://${url}"`) || processedContent.includes(`href='https://${url}'`)) {
+        return match; // Don't process if already in an href attribute
+      }
+      return `<a href="https://${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    });
+    
+    // Convert line breaks to <br> tags
+    processedContent = processedContent.replace(/\n/g, '<br>');
+    
+    return processedContent;
+  };
 
   // Load mentions data
   useEffect(() => {
@@ -89,9 +137,10 @@ const Mentions = () => {
 
   const loadFilters = async () => {
     try {
-      const response = await apiClient.getMentionFilters();
-      setAvailablePlatforms(response.platforms.map(p => p.name));
-      setAvailableSentiments(response.sentiments.map(s => s.name));
+      // Use predefined platforms and sentiments instead of API
+      // const response = await apiClient.getMentionFilters();
+      // setAvailablePlatforms(response.platforms.map(p => p.name));
+      // setAvailableSentiments(response.sentiments.map(s => s.name));
     } catch (error: any) {
       console.error("Failed to load filters:", error);
     }
@@ -99,8 +148,8 @@ const Mentions = () => {
 
   // Filter mentions based on selected platform and sentiment
   const filteredMentions = mentions.filter((mention) => {
-    const platformMatch = selectedPlatform === "all" || mention.platform.toLowerCase() === selectedPlatform.toLowerCase();
-    const sentimentMatch = selectedSentiment === "all" || mention.sentiment === selectedSentiment;
+    const platformMatch = selectedPlatform === "all" || mention.platform === selectedPlatform;
+    const sentimentMatch = selectedSentiment === "all" || mention.sentiment.toLowerCase() === selectedSentiment.toLowerCase();
     return platformMatch && sentimentMatch;
   });
 
@@ -174,12 +223,12 @@ const Mentions = () => {
         <Tabs value={selectedPlatform} onValueChange={setSelectedPlatform}>
           <div className="flex items-center justify-between mb-6">
             <TabsList className="bg-muted/50 p-1 border border-border/50">
-              <TabsTrigger value="all" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">All Platforms</TabsTrigger>
+              <TabsTrigger value="all" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">All Platforms</TabsTrigger>
               {availablePlatforms.map(platform => (
                 <TabsTrigger 
                   key={platform} 
-                  value={platform.toLowerCase()} 
-                  className="data-[state=active]:gradient-primary data-[state=active]:shadow-md"
+                  value={platform} 
+                  className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white"
                 >
                   {platform}
                 </TabsTrigger>
@@ -209,7 +258,7 @@ const Mentions = () => {
                 <SelectItem value="all">All Sentiments</SelectItem>
                 {availableSentiments.map(sentiment => (
                   <SelectItem key={sentiment} value={sentiment}>
-                    {sentiment.charAt(0).toUpperCase() + sentiment.slice(1)}
+                    {sentiment}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -262,7 +311,7 @@ const Mentions = () => {
                       </Badge>
                     </div>
                     <p className="text-sm text-muted-foreground font-mono">
-                      {mention.mention_text_short}
+                      {mention.prompt_text || mention.mention_text_long || mention.mention_text_short || 'No prompt text available'}
                     </p>
                   </div>
                 </div>
@@ -270,7 +319,15 @@ const Mentions = () => {
               </div>
 
               <div className="bg-gradient-to-br from-muted/30 to-muted/50 rounded-xl p-5 border border-border/50 backdrop-blur-sm">
-                <p className="text-sm leading-relaxed">{mention.description}</p>
+                <div 
+                  className="text-sm leading-relaxed prose prose-sm max-w-none [&_h1]:font-semibold [&_h1]:text-lg [&_h1]:mt-4 [&_h1]:mb-2 [&_h1]:text-foreground [&_h2]:font-semibold [&_h2]:text-base [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-foreground [&_h3]:font-semibold [&_h3]:text-sm [&_h3]:mt-4 [&_h3]:mb-2 [&_h3]:text-foreground [&_a]:text-primary [&_a]:underline [&_a]:hover:no-underline [&_strong]:font-semibold [&_strong]:text-foreground [&_b]:font-semibold [&_b]:text-foreground"
+                  dangerouslySetInnerHTML={{
+                    __html: DOMPurify.sanitize(processContent(mention.description || mention.context_summary || 'No description available'), {
+                      ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'blockquote', 'code', 'pre', 'br', 'div', 'span'],
+                      ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'id']
+                    })
+                  }}
+                />
               </div>
 
               <div className="space-y-3 pt-3 border-t border-border/50">
@@ -283,7 +340,7 @@ const Mentions = () => {
                       <div key={idx} className="p-3 bg-muted/20 rounded-lg border border-border/30">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium mb-1 line-clamp-1">"{citation.text}"</p>
+                            <p className="text-sm font-medium mb-1">"{citation.text}"</p>
                             <a 
                               href={citation.url}
                               target="_blank"

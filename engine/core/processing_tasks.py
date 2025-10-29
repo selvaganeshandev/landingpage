@@ -47,9 +47,9 @@ def scheduler_tick(self):
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
-def process_prompt_analytics_task(self, domain_id):
+def process_prompt_analytics_task(self, prompt_id):
     processor = PromptAnalyticsProcessor(max_concurrent_prompts=getattr(settings, 'MAX_CONCURRENT_PROMPT_ANALYTICS', 10))
-    return processor.process_domain(domain_id)
+    return processor.process_single_prompt(prompt_id)
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)

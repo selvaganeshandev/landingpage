@@ -1,0 +1,796 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TimeFilter } from "@/components/TimeFilter";
+import { TopBrandsList } from "@/components/TopBrandsList";
+import { CompetitorHeatmap } from "@/components/CompetitorHeatmap";
+import { useToast } from "@/hooks/use-toast";
+import { useContentGeneration } from "@/hooks/useContentGeneration";
+import { AddCompetitorDialog } from "@/components/AddCompetitorDialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { 
+  Plus,
+  TrendingUp,
+  TrendingDown,
+  Target,
+  FileText,
+  Eye,
+  MessageSquare,
+  AlertCircle,
+  Search,
+  Sparkles
+} from "lucide-react";
+import { 
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  Legend,
+  Cell
+} from "recharts";
+
+const competitors = [
+  {
+    id: 1,
+    name: "VegFit Pro",
+    url: "vegfitpro.com",
+    mentions: 221,
+    visibility: 94,
+    sentiment: 74,
+    avgPosition: 1.6,
+    shareOfVoice: 42,
+    trend: 15,
+    color: "hsl(var(--primary))",
+    isYou: true
+  },
+  {
+    id: 2,
+    name: "MyProtein",
+    url: "myprotein.com",
+    mentions: 187,
+    visibility: 85,
+    sentiment: 68,
+    avgPosition: 2.1,
+    shareOfVoice: 35,
+    trend: 8,
+    color: "hsl(var(--chart-2))",
+    isYou: false
+  },
+  {
+    id: 3,
+    name: "Naked Nutrition",
+    url: "nakednutrition.com",
+    mentions: 123,
+    visibility: 78,
+    sentiment: 71,
+    avgPosition: 2.3,
+    shareOfVoice: 23,
+    trend: -3,
+    color: "hsl(var(--chart-3))",
+    isYou: false
+  },
+];
+
+const competitiveMetrics = [
+  { metric: "Visibility", vegfit: 94, myprotein: 85, naked: 78 },
+  { metric: "Sentiment", vegfit: 74, myprotein: 68, naked: 71 },
+  { metric: "Position", vegfit: 88, myprotein: 75, naked: 70 },
+  { metric: "Coverage", vegfit: 82, myprotein: 78, naked: 68 },
+  { metric: "Growth", vegfit: 85, myprotein: 72, naked: 65 },
+];
+
+const mentionHistory = [
+  { month: "Jul", vegfit: 145, myprotein: 178, naked: 132 },
+  { month: "Aug", vegfit: 158, myprotein: 182, naked: 135 },
+  { month: "Sep", vegfit: 172, myprotein: 185, naked: 138 },
+  { month: "Oct", vegfit: 184, myprotein: 188, naked: 140 },
+  { month: "Nov", vegfit: 193, myprotein: 190, naked: 138 },
+  { month: "Dec", vegfit: 205, myprotein: 191, naked: 135 },
+  { month: "Jan", vegfit: 212, myprotein: 189, naked: 132 },
+  { month: "Feb", vegfit: 218, myprotein: 188, naked: 128 },
+  { month: "Mar", vegfit: 219, myprotein: 186, naked: 125 },
+  { month: "Apr", vegfit: 221, myprotein: 187, naked: 123 },
+];
+
+const platformComparison = {
+  "ChatGPT": [
+    { brand: "VegFit Pro", mentions: 89 },
+    { brand: "MyProtein", mentions: 72 },
+    { brand: "Naked Nutrition", mentions: 45 },
+  ],
+  "Claude": [
+    { brand: "VegFit Pro", mentions: 64 },
+    { brand: "MyProtein", mentions: 58 },
+    { brand: "Naked Nutrition", mentions: 38 },
+  ],
+  "Perplexity": [
+    { brand: "VegFit Pro", mentions: 42 },
+    { brand: "MyProtein", mentions: 35 },
+    { brand: "Naked Nutrition", mentions: 25 },
+  ],
+  "Gemini": [
+    { brand: "VegFit Pro", mentions: 26 },
+    { brand: "MyProtein", mentions: 22 },
+    { brand: "Naked Nutrition", mentions: 15 },
+  ],
+};
+
+const competitiveInsights = [
+  {
+    title: "Market Leadership Maintained",
+    description: "VegFit Pro maintains #1 position with 42% market share, 7% ahead of nearest competitor",
+    type: "success",
+    impact: "high"
+  },
+  {
+    title: "Sentiment Advantage",
+    description: "6% higher positive sentiment than MyProtein, driven by ingredient quality mentions",
+    type: "success",
+    impact: "medium"
+  },
+  {
+    title: "MyProtein Gaining Momentum",
+    description: "MyProtein increased mentions by 8% this month, focused on pricing positioning",
+    type: "warning",
+    impact: "medium"
+  },
+  {
+    title: "Opportunity in Weight Loss",
+    description: "Naked Nutrition dominates weight loss category - opportunity to increase presence",
+    type: "opportunity",
+    impact: "high"
+  },
+];
+
+const promptData = [
+  {
+    id: 1,
+    prompt: "Best plant-based protein powder for weight loss",
+    vegfit: 89,
+    myprotein: 72,
+    naked: 45,
+    total: 206,
+    winner: "VegFit Pro"
+  },
+  {
+    id: 2,
+    prompt: "Vegan protein powder with best taste",
+    vegfit: 64,
+    myprotein: 78,
+    naked: 38,
+    total: 180,
+    winner: "MyProtein"
+  },
+  {
+    id: 3,
+    prompt: "Affordable plant protein supplements",
+    vegfit: 42,
+    myprotein: 85,
+    naked: 25,
+    total: 152,
+    winner: "MyProtein"
+  },
+  {
+    id: 4,
+    prompt: "Natural vegan protein without additives",
+    vegfit: 78,
+    myprotein: 45,
+    naked: 67,
+    total: 190,
+    winner: "VegFit Pro"
+  },
+  {
+    id: 5,
+    prompt: "Organic plant-based protein powder",
+    vegfit: 92,
+    myprotein: 56,
+    naked: 48,
+    total: 196,
+    winner: "VegFit Pro"
+  }
+];
+
+const answerGapData = [
+  {
+    id: 1,
+    query: "Best vegan BCAA supplements",
+    competitor: "MyProtein",
+    mentions: 45,
+    yourMentions: 0,
+    opportunity: "high",
+    platforms: ["ChatGPT", "Claude", "Perplexity"]
+  },
+  {
+    id: 2,
+    query: "Plant protein for muscle recovery",
+    competitor: "Naked Nutrition",
+    mentions: 38,
+    yourMentions: 12,
+    opportunity: "medium",
+    platforms: ["ChatGPT", "Gemini"]
+  },
+  {
+    id: 3,
+    query: "Vegan protein powder for athletes",
+    competitor: "MyProtein",
+    mentions: 67,
+    yourMentions: 8,
+    opportunity: "high",
+    platforms: ["ChatGPT", "Claude", "Perplexity", "Gemini"]
+  },
+  {
+    id: 4,
+    query: "Best tasting unflavored plant protein",
+    competitor: "Naked Nutrition",
+    mentions: 52,
+    yourMentions: 0,
+    opportunity: "high",
+    platforms: ["ChatGPT", "Perplexity"]
+  }
+];
+
+const Competitors = () => {
+  const navigate = useNavigate();
+  const [timePeriod, setTimePeriod] = useState("90");
+  const [selectedTab, setSelectedTab] = useState("overview");
+  const { toast } = useToast();
+  const { navigateToContentGeneration } = useContentGeneration();
+  const [addCompetitorDialogOpen, setAddCompetitorDialogOpen] = useState(false);
+
+  const handleExportReport = () => {
+    toast({
+      title: "Exporting Report",
+      description: "Your competitor analysis report is being generated...",
+    });
+  };
+
+  const handleAddCompetitor = () => {
+    setAddCompetitorDialogOpen(true);
+  };
+
+  const handleGenerateForGap = (gap: typeof answerGapData[0]) => {
+    navigateToContentGeneration({
+      topic: gap.query,
+      keywords: gap.query.toLowerCase().split(' '),
+      source: `Answer Gap - Competitor: ${gap.competitor}`,
+      priority: gap.opportunity as any,
+      articleType: "guide"
+    });
+  };
+
+  const heatmapData = [
+    {
+      competitor: "VegFit Pro",
+      platforms: { Grok: 22.5, Claude: 20.0, ChatGPT: 28.5, Perplexity: 19.0, "Google Gemini": 10.0 },
+      isYou: true
+    },
+    {
+      competitor: "MyProtein",
+      platforms: { Grok: 18.0, Claude: 22.0, ChatGPT: 24.0, Perplexity: 21.0, "Google Gemini": 15.0 },
+    },
+    {
+      competitor: "Naked Nutrition",
+      platforms: { Grok: 15.0, Claude: 18.0, ChatGPT: 20.0, Perplexity: 22.0, "Google Gemini": 25.0 },
+    },
+  ];
+
+  const topBrands = [
+    { name: "VegFit Pro", url: "vegfitpro.com", mentions: 221, percentage: 10.9, isYou: true },
+    { name: "MyProtein", url: "myprotein.com", mentions: 187, percentage: 30.1 },
+    { name: "Naked Nutrition", url: "nakednutrition.com", mentions: 123, percentage: 17.5 },
+    { name: "Marketmuse", url: "marketmuse.com", mentions: 110, percentage: 11.1 },
+    { name: "Clearscope", url: "clearscope.io", mentions: 109, percentage: 11.0 },
+  ];
+
+  return (
+    <div className="p-8 space-y-6">
+      {/* Header */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight font-outfit">Competitor Analysis</h1>
+            <p className="text-muted-foreground mt-1">
+              Compare your brand's AI visibility against competitors
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={handleExportReport} className="border-border/50">
+              <FileText className="h-4 w-4 mr-2" />
+              Export Report
+            </Button>
+            <Button onClick={handleAddCompetitor} className="gradient-primary shadow-md shadow-primary/20">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Competitor
+            </Button>
+          </div>
+        </div>
+
+        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
+          <TabsList className="bg-muted/50">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="prompts">Prompts</TabsTrigger>
+            <TabsTrigger value="competitors">Competitors</TabsTrigger>
+            <TabsTrigger value="answer-gap">Answer Gap</TabsTrigger>
+          </TabsList>
+
+          {/* Overview Tab */}
+          <TabsContent value="overview" className="space-y-6 mt-6">
+            <div className="flex items-center justify-between">
+              <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
+              <Select defaultValue="all">
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="All Competitors" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Competitors</SelectItem>
+                  <SelectItem value="vegfit">VegFit Pro</SelectItem>
+                  <SelectItem value="myprotein">MyProtein</SelectItem>
+                  <SelectItem value="naked">Naked Nutrition</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Competitor Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {competitors.map((competitor, idx) => (
+                <Card 
+                  key={competitor.id} 
+                  className={`p-6 hover:shadow-elegant transition-all duration-300 cursor-pointer border-border/50 backdrop-blur-sm bg-card/80 ${competitor.isYou ? 'ring-2 ring-primary/30' : ''}`}
+                  onClick={() => !competitor.isYou && navigate(`/competitors/${competitor.url.replace('.com', '')}`)}
+                >
+                  <div className="space-y-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="text-xl font-semibold font-outfit">{competitor.name}</h3>
+                          {competitor.isYou && (
+                            <Badge variant="default" className="gradient-primary border-0">You</Badge>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground">{competitor.url}</p>
+                      </div>
+                      <div className="w-12 h-12 rounded-xl gradient-primary shadow-glow flex items-center justify-center font-bold text-white text-lg font-outfit">
+                        #{idx + 1}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Mentions</p>
+                        <p className="text-2xl font-bold font-outfit">{competitor.mentions}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Share</p>
+                        <p className="text-2xl font-bold font-outfit">{competitor.shareOfVoice}%</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Visibility</p>
+                        <p className="text-lg font-bold font-outfit">{competitor.visibility}%</p>
+                        <Progress value={competitor.visibility} className="h-1.5 mt-2" />
+                      </div>
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Sentiment</p>
+                        <p className="text-lg font-bold font-outfit">{competitor.sentiment}%</p>
+                        <Progress value={competitor.sentiment} className="h-1.5 mt-2" />
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-border/50 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="text-muted-foreground">Trend</span>
+                        <div className="flex items-center gap-1">
+                          {competitor.trend > 0 ? (
+                            <TrendingUp className="h-4 w-4 text-success" />
+                          ) : (
+                            <TrendingDown className="h-4 w-4 text-destructive" />
+                          )}
+                          <span className={`font-semibold ${competitor.trend > 0 ? 'text-success' : 'text-destructive'}`}>
+                            {competitor.trend > 0 ? '+' : ''}{competitor.trend}%
+                          </span>
+                        </div>
+                      </div>
+                      {!competitor.isYou && (
+                        <Button variant="ghost" size="sm" className="text-primary">
+                          View Details →
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+
+            {/* Brand Visibility Over Time */}
+            <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+              <div className="space-y-6">
+                <div className="pb-4 border-b border-border/50">
+                  <h3 className="text-lg font-semibold flex items-center gap-2 font-outfit">
+                    <TrendingUp className="h-5 w-5 text-primary" />
+                    Brand Visibility Over Time
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Track how often each brand is mentioned by AI providers
+                  </p>
+                </div>
+                <ResponsiveContainer width="100%" height={350}>
+                  <LineChart data={mentionHistory}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "var(--radius)",
+                      }}
+                    />
+                    <Legend />
+                    <Line 
+                      type="monotone" 
+                      dataKey="vegfit" 
+                      name="VegFit Pro"
+                      stroke="hsl(var(--primary))" 
+                      strokeWidth={3}
+                      dot={{ fill: "hsl(var(--primary))", r: 4 }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="myprotein" 
+                      name="MyProtein"
+                      stroke="hsl(var(--chart-2))" 
+                      strokeWidth={2}
+                      dot={{ fill: "hsl(var(--chart-2))", r: 3 }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="naked" 
+                      name="Naked Nutrition"
+                      stroke="hsl(var(--chart-3))" 
+                      strokeWidth={2}
+                      dot={{ fill: "hsl(var(--chart-3))", r: 3 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+
+            {/* Heatmap and Top Brands */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2">
+                <CompetitorHeatmap 
+                  data={heatmapData} 
+                  platforms={["Grok", "Claude", "ChatGPT", "Perplexity", "Google Gemini"]} 
+                />
+              </div>
+              <div>
+                <TopBrandsList brands={topBrands} totalMentions={989} />
+              </div>
+            </div>
+
+            {/* Competitive Analysis */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card className="p-6">
+                <h3 className="text-lg font-semibold mb-6">Competitive Strength Analysis</h3>
+                <ResponsiveContainer width="100%" height={350}>
+                  <RadarChart data={competitiveMetrics}>
+                    <PolarGrid stroke="hsl(var(--border))" />
+                    <PolarAngleAxis 
+                      dataKey="metric" 
+                      stroke="hsl(var(--muted-foreground))"
+                      fontSize={12}
+                    />
+                    <PolarRadiusAxis angle={90} domain={[0, 100]} stroke="hsl(var(--muted-foreground))" />
+                    <Radar 
+                      name="VegFit Pro" 
+                      dataKey="vegfit" 
+                      stroke="hsl(var(--primary))" 
+                      fill="hsl(var(--primary))" 
+                      fillOpacity={0.3}
+                      strokeWidth={2}
+                    />
+                    <Radar 
+                      name="MyProtein" 
+                      dataKey="myprotein" 
+                      stroke="hsl(var(--chart-2))" 
+                      fill="hsl(var(--chart-2))" 
+                      fillOpacity={0.2}
+                    />
+                    <Radar 
+                      name="Naked Nutrition" 
+                      dataKey="naked" 
+                      stroke="hsl(var(--chart-3))" 
+                      fill="hsl(var(--chart-3))" 
+                      fillOpacity={0.2}
+                    />
+                    <Legend />
+                  </RadarChart>
+                </ResponsiveContainer>
+              </Card>
+
+              <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+                <h3 className="text-lg font-semibold mb-6 font-outfit">Competitive Intelligence</h3>
+                <div className="space-y-3">
+                  {competitiveInsights.map((insight, idx) => (
+                    <div key={idx} className="p-5 rounded-xl border border-border/50 hover:shadow-md transition-all duration-300 hover:scale-[1.01] bg-card/50">
+                      <div className="flex items-start gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md ${
+                          insight.type === 'success' ? 'bg-success/10 text-success' :
+                          insight.type === 'warning' ? 'bg-warning/10 text-warning' :
+                          'gradient-primary text-white'
+                        }`}>
+                          <Target className="h-5 w-5" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h4 className="font-semibold text-sm font-outfit">{insight.title}</h4>
+                            <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
+                              {insight.impact}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground leading-relaxed">{insight.description}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+
+            {/* Platform Breakdown */}
+            <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+              <h3 className="text-lg font-semibold mb-6 font-outfit">Platform-Specific Competition</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {Object.entries(platformComparison).map(([platform, data]) => (
+                  <div key={platform} className="space-y-4">
+                    <h4 className="font-medium text-center">{platform}</h4>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={data}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis 
+                          dataKey="brand" 
+                          stroke="hsl(var(--muted-foreground))" 
+                          fontSize={10}
+                          angle={-45}
+                          textAnchor="end"
+                          height={80}
+                        />
+                        <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} />
+                        <Tooltip />
+                        <Bar dataKey="mentions" radius={[8, 8, 0, 0]}>
+                          <Cell fill="hsl(var(--primary))" />
+                          <Cell fill="hsl(var(--chart-2))" />
+                          <Cell fill="hsl(var(--chart-3))" />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </TabsContent>
+
+          {/* Prompts Tab */}
+          <TabsContent value="prompts" className="space-y-6 mt-6">
+            <Card className="p-6">
+              <div className="space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-border/50">
+                  <div>
+                    <h3 className="text-lg font-semibold font-outfit">Prompt Performance Analysis</h3>
+                    <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
+                  </div>
+                  <Badge variant="secondary">
+                    <MessageSquare className="h-3 w-3 mr-1" />
+                    {promptData.length} Prompts Tracked
+                  </Badge>
+                </div>
+
+                <div className="space-y-4">
+                  {promptData.map((prompt) => (
+                    <Card key={prompt.id} className="p-5 border-border/50 hover:shadow-md transition-all">
+                      <div className="space-y-4">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <h4 className="font-medium mb-2">{prompt.prompt}</h4>
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Eye className="h-4 w-4" />
+                              <span>{prompt.total} total mentions</span>
+                              <span className="text-xs">•</span>
+                              <Badge variant="outline" className="text-xs">
+                                Winner: {prompt.winner}
+                              </Badge>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium">VegFit Pro</span>
+                              <span className="text-muted-foreground">{prompt.vegfit} mentions</span>
+                            </div>
+                            <Progress value={(prompt.vegfit / prompt.total) * 100} className="h-2" />
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium">MyProtein</span>
+                              <span className="text-muted-foreground">{prompt.myprotein} mentions</span>
+                            </div>
+                            <Progress value={(prompt.myprotein / prompt.total) * 100} className="h-2" />
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium">Naked Nutrition</span>
+                              <span className="text-muted-foreground">{prompt.naked} mentions</span>
+                            </div>
+                            <Progress value={(prompt.naked / prompt.total) * 100} className="h-2" />
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          </TabsContent>
+
+          {/* Competitors Tab */}
+          <TabsContent value="competitors" className="space-y-6 mt-6">
+            <div className="grid grid-cols-1 gap-6">
+              {competitors.map((competitor) => (
+                <Card key={competitor.id} className="p-6">
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="w-16 h-16 rounded-2xl gradient-primary shadow-glow flex items-center justify-center">
+                          <span className="text-2xl font-bold text-white font-outfit">
+                            {competitor.name.substring(0, 1)}
+                          </span>
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-2xl font-bold font-outfit">{competitor.name}</h3>
+                            {competitor.isYou && (
+                              <Badge className="gradient-primary border-0">You</Badge>
+                            )}
+                          </div>
+                          <p className="text-muted-foreground">{competitor.url}</p>
+                        </div>
+                      </div>
+                      {!competitor.isYou && (
+                        <Button onClick={() => navigate(`/competitors/${competitor.url.replace('.com', '')}`)}>
+                          View Full Analysis
+                        </Button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                      <div className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Mentions</p>
+                        <p className="text-3xl font-bold font-outfit">{competitor.mentions}</p>
+                      </div>
+                      <div className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Visibility</p>
+                        <p className="text-3xl font-bold font-outfit">{competitor.visibility}%</p>
+                      </div>
+                      <div className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Sentiment</p>
+                        <p className="text-3xl font-bold font-outfit">{competitor.sentiment}%</p>
+                      </div>
+                      <div className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Position</p>
+                        <p className="text-3xl font-bold font-outfit">{competitor.avgPosition}</p>
+                      </div>
+                      <div className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Share</p>
+                        <p className="text-3xl font-bold font-outfit">{competitor.shareOfVoice}%</p>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          {/* Answer Gap Tab */}
+          <TabsContent value="answer-gap" className="space-y-6 mt-6">
+            <Card className="p-6">
+              <div className="space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-border/50">
+                  <div>
+                    <h3 className="text-lg font-semibold font-outfit">Answer Gap Analysis</h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Queries where competitors appear but you don't
+                    </p>
+                  </div>
+                  <Badge variant="destructive">
+                    <AlertCircle className="h-3 w-3 mr-1" />
+                    {answerGapData.length} Gaps Identified
+                  </Badge>
+                </div>
+
+                <div className="space-y-4">
+                  {answerGapData.map((gap) => (
+                    <Card key={gap.id} className="p-5 border-border/50 hover:shadow-md transition-all">
+                      <div className="space-y-4">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Search className="h-4 w-4 text-muted-foreground" />
+                              <h4 className="font-medium">{gap.query}</h4>
+                            </div>
+                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                              <span>{gap.competitor} has {gap.mentions} mentions</span>
+                              <span className="text-xs">•</span>
+                              <span>You have {gap.yourMentions} mentions</span>
+                            </div>
+                          </div>
+                          <Badge 
+                            variant={gap.opportunity === 'high' ? 'destructive' : 'secondary'}
+                            className="ml-4"
+                          >
+                            {gap.opportunity} opportunity
+                          </Badge>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <span className="text-xs text-muted-foreground">Platforms:</span>
+                          {gap.platforms.map((platform) => (
+                            <Badge key={platform} variant="outline" className="text-xs">
+                              {platform}
+                            </Badge>
+                          ))}
+                        </div>
+
+                        <div className="pt-3 border-t border-border/50">
+                          <Button 
+                            variant="default" 
+                            size="sm" 
+                            className="w-full gradient-primary"
+                            onClick={() => handleGenerateForGap(gap)}
+                          >
+                            <Sparkles className="h-3 w-3 mr-1" />
+                            Generate Content
+                          </Button>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
+
+      {/* Add Competitor Dialog */}
+      <AddCompetitorDialog
+        open={addCompetitorDialogOpen}
+        onOpenChange={setAddCompetitorDialogOpen}
+      />
+    </div>
+  );
+};
+
+export default Competitors;

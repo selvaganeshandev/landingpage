@@ -26,6 +26,11 @@ class PromptGroup(models.Model):
         default=0.00,
         help_text="Average position in search results"
     )
+    # Tracking fields aligned with engine
+    track_status = models.CharField(max_length=10, default='INIT', help_text="Processing status: INIT/SCHD/PROC/COMP/FAIL")
+    track_message = models.TextField(blank=True, null=True, help_text="Status message for tracking")
+    tracked_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when tracking status was last updated")
+    is_published = models.BooleanField(default=False, help_text="Whether this group is published and visible to users")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the group was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the group was last modified")
     
@@ -45,9 +50,11 @@ class Prompt(models.Model):
     Prompt model representing individual prompts within groups
     """
     TRACK_STATUS_CHOICES = [
-        ('active', 'Active'),
-        ('paused', 'Paused'),
-        ('archived', 'Archived'),
+        ('INIT', 'Initial'),
+        ('SCHD', 'Scheduled'),
+        ('PROC', 'Processing'),
+        ('COMP', 'Completed'),
+        ('FAIL', 'Failed'),
     ]
     
     TYPE_CHOICES = [
@@ -77,10 +84,10 @@ class Prompt(models.Model):
         help_text="Organisation this prompt belongs to"
     )
     track_status = models.CharField(
-        max_length=10, 
-        choices=TRACK_STATUS_CHOICES, 
-        default='active',
-        help_text="Current tracking status of the prompt"
+        max_length=10,
+        choices=TRACK_STATUS_CHOICES,
+        default='INIT',
+        help_text="Processing tracking status of the prompt"
     )
     type = models.CharField(
         max_length=10, 
@@ -88,7 +95,7 @@ class Prompt(models.Model):
         default='primary',
         help_text="Type of prompt (primary or secondary)"
     )
-    last_tracked_at = models.DateTimeField(
+    tracked_at = models.DateTimeField(
         null=True, 
         blank=True,
         help_text="Timestamp when the prompt was last tracked"
@@ -194,6 +201,11 @@ class PromptAnalytics(models.Model):
         blank=True,
         help_text="Historical position data"
     )
+    # Tracking fields
+    track_status = models.CharField(max_length=10, default='INIT', help_text="Processing status: INIT/SCHD/PROC/COMP/FAIL")
+    track_message = models.TextField(blank=True, null=True, help_text="Status message for tracking")
+    tracked_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when tracking status was last updated")
+    is_published = models.BooleanField(default=False, help_text="Whether this analytics is published and visible to users")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the analytics was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the analytics was last modified")
     

@@ -32,7 +32,7 @@ const Prompts = () => {
       const response = await apiClient.getPromptGroups({
         search: searchQuery || undefined
       });
-      setPromptGroups(response.groups);
+      setPromptGroups(response.groups || []);
     } catch (error: any) {
       toast({
         title: "Error loading prompt groups",
@@ -120,12 +120,12 @@ const Prompts = () => {
                 </div>
                 <div className="flex items-center gap-6">
                   <div className="text-right">
-                    <p className="text-3xl font-bold font-outfit">{group.total_mentions}</p>
+                    <p className="text-3xl font-bold font-outfit">{group.total_mentions || 0}</p>
                     <p className="text-xs text-muted-foreground uppercase tracking-wider">mentions</p>
                   </div>
                   <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-success/10 border border-success/20">
                     <TrendingUp className="h-4 w-4 text-success" />
-                    <span className="text-sm font-semibold text-success">Avg: {group.average_position}</span>
+                    <span className="text-sm font-semibold text-success">Avg: {group.average_position || 0}</span>
                   </div>
                 </div>
               </div>
@@ -139,7 +139,7 @@ const Prompts = () => {
                     Created: {new Date(group.created_at).toLocaleDateString()}
                   </Badge>
                   <Badge variant="outline" className="font-mono text-xs px-3 py-1.5">
-                    Citations: {group.total_citations}
+                    Citations: {group.total_citations || 0}
                   </Badge>
                 </div>
               </div>

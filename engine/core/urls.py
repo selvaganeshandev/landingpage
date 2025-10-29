@@ -16,6 +16,8 @@ urlpatterns = [
     
     # Prompt analytics processing
     path('prompts/process/', views.start_prompt_analytics_processing, name='start_prompt_analytics_processing'),
+    path('prompts/process-single/', views.start_single_prompt_processing, name='start_single_prompt_processing'),
+    path('prompts/start/', views.start_prompt_processing, name='start_prompt_processing'),
     path('prompts/status/<int:domain_id>/', views.prompt_analytics_status, name='prompt_analytics_status'),
     path('prompts/summary/<int:domain_id>/', views.prompt_analytics_summary, name='prompt_analytics_summary'),
 ]

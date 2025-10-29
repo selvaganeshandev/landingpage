@@ -2,6 +2,13 @@ from django.db import models
 
 
 class Domain(models.Model):
+    PROCESSING_STATUS_CHOICES = [
+        ('INIT', 'Initial'),
+        ('SCHD', 'Scheduled'),
+        ('PROC', 'Processing'),
+        ('COMP', 'Completed'),
+        ('FAIL', 'Failed'),
+    ]
     """
     Domain model representing websites or domains being monitored
     """
@@ -45,6 +52,28 @@ class Domain(models.Model):
         decimal_places=2, 
         default=0.00,
         help_text="Sentiment score (-1.00 to 1.00)"
+    )
+    # Processing/tracking fields (to align with engine shared_models)
+    processing_status = models.CharField(
+        max_length=10,
+        choices=PROCESSING_STATUS_CHOICES,
+        default='INIT',
+        help_text="Current processing status of the domain"
+    )
+    track_status = models.CharField(
+        max_length=50,
+        default='INIT',
+        help_text="Detailed tracking status"
+    )
+    track_message = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Message or notes about the processing status"
+    )
+    tracked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the domain was last tracked"
     )
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the domain was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the domain was last modified")

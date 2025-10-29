@@ -6,9 +6,9 @@ from .models import PromptGroup, Prompt, PromptAnalytics
 class PromptGroupAdmin(admin.ModelAdmin):
     list_display = [
         'group_id', 'domain', 'organisation', 'total_mentions', 
-        'total_citations', 'average_position', 'created_at'
+        'total_citations', 'average_position', 'track_status', 'is_published', 'created_at'
     ]
-    list_filter = ['organisation', 'created_at']
+    list_filter = ['organisation', 'track_status', 'is_published', 'created_at']
     search_fields = ['group_id', 'domain__name', 'organisation__name']
     readonly_fields = ['created_at', 'modified_at']
     ordering = ['group_id']
@@ -19,6 +19,9 @@ class PromptGroupAdmin(admin.ModelAdmin):
         }),
         ('Metrics', {
             'fields': ('total_mentions', 'total_citations', 'average_position')
+        }),
+        ('Status & Publishing', {
+            'fields': ('track_status', 'track_message', 'tracked_at', 'is_published')
         }),
         ('Timestamps', {
             'fields': ('created_at', 'modified_at'),
@@ -31,7 +34,7 @@ class PromptGroupAdmin(admin.ModelAdmin):
 class PromptAdmin(admin.ModelAdmin):
     list_display = [
         'prompt_short', 'group', 'domain', 'track_status', 'type', 
-        'last_tracked_at', 'created_at'
+        'tracked_at', 'created_at'
     ]
     list_filter = ['track_status', 'type', 'organisation', 'created_at']
     search_fields = ['prompt', 'group__group_id', 'domain__name', 'organisation__name']
@@ -50,7 +53,7 @@ class PromptAdmin(admin.ModelAdmin):
             'fields': ('track_status', 'type')
         }),
         ('Tracking', {
-            'fields': ('last_tracked_at', 'track_message')
+            'fields': ('tracked_at', 'track_message')
         }),
         ('Timestamps', {
             'fields': ('created_at', 'modified_at'),
@@ -63,9 +66,9 @@ class PromptAdmin(admin.ModelAdmin):
 class PromptAnalyticsAdmin(admin.ModelAdmin):
     list_display = [
         'prompt_short', 'platform', 'domain', 'is_mention', 'total_mentions', 
-        'sentiment', 'sentiment_score', 'position', 'views', 'shares', 'created_at'
+        'sentiment', 'sentiment_score', 'position', 'track_status', 'is_published', 'views', 'shares', 'created_at'
     ]
-    list_filter = ['sentiment', 'platform', 'is_mention', 'organisation', 'created_at']
+    list_filter = ['sentiment', 'platform', 'is_mention', 'track_status', 'is_published', 'organisation', 'created_at']
     search_fields = ['prompt__prompt', 'platform', 'domain__name', 'organisation__name']
     readonly_fields = ['created_at', 'modified_at']
     ordering = ['-created_at']
@@ -86,6 +89,9 @@ class PromptAnalyticsAdmin(admin.ModelAdmin):
         }),
         ('Sentiment Analysis', {
             'fields': ('sentiment', 'sentiment_score', 'context_summary', 'citations')
+        }),
+        ('Status & Publishing', {
+            'fields': ('track_status', 'track_message', 'tracked_at', 'is_published')
         }),
         ('Advanced Analytics', {
             'fields': ('competitor_mentions', 'key_topics', 'position_history'),

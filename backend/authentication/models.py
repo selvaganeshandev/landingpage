@@ -9,7 +9,7 @@ class Organisation(models.Model):
     Organisation model representing companies or entities using the LLM Monitor
     """
     name = models.CharField(max_length=255, help_text="Name of the organisation")
-    industry = models.CharField(max_length=100, help_text="Industry sector of the organisation")
+    industry = models.CharField(max_length=100, null=True, blank=True, default=None, help_text="Industry sector of the organisation")
     team_count = models.PositiveIntegerField(default=1, help_text="Number of team members")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the organisation was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the organisation was last modified")

@@ -1,0 +1,325 @@
+import { useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { 
+  ArrowLeft, 
+  TrendingUp,
+  Sparkles,
+  Share2,
+  FileText,
+  Copy
+} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend
+} from "recharts";
+
+const PromptDetail = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
+  // Mock data based on id
+  const promptGroup = {
+    id: id || "1",
+    name: "Vegan Protein - Athletes",
+    mainPrompt: "best vegan protein powder for athletes",
+    variants: [
+      "top vegan protein supplement for sports",
+      "affordable plant-based protein",
+      "clean vegan protein for runners",
+      "vegan protein for muscle gain"
+    ],
+    mentions: 89,
+    trend: 15,
+    description: "Track mentions for vegan protein products targeted at athletic performance and recovery."
+  };
+
+  const mentionTrend = [
+    { month: "Jul", mentions: 65, avgPosition: 1.8 },
+    { month: "Aug", mentions: 71, avgPosition: 1.7 },
+    { month: "Sep", mentions: 76, avgPosition: 1.6 },
+    { month: "Oct", mentions: 82, avgPosition: 1.5 },
+    { month: "Nov", mentions: 85, avgPosition: 1.5 },
+    { month: "Dec", mentions: 89, avgPosition: 1.4 },
+  ];
+
+  const variantPerformance = [
+    { variant: "main prompt", mentions: 32, avgPosition: 1.2 },
+    { variant: "variant 1", mentions: 24, avgPosition: 1.5 },
+    { variant: "variant 2", mentions: 18, avgPosition: 1.8 },
+    { variant: "variant 3", mentions: 15, avgPosition: 1.6 },
+  ];
+
+  const platformBreakdown = [
+    { platform: "ChatGPT", mentions: 35 },
+    { platform: "Claude", mentions: 28 },
+    { platform: "Perplexity", mentions: 16 },
+    { platform: "Gemini", mentions: 10 },
+  ];
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copied to Clipboard",
+      description: "Prompt has been copied.",
+    });
+  };
+
+  const handleShare = () => {
+    toast({
+      title: "Share Link Generated",
+      description: "Prompt group link copied to clipboard.",
+    });
+  };
+
+  const handleExport = () => {
+    toast({
+      title: "Exporting Report",
+      description: "Prompt group report is being generated...",
+    });
+  };
+
+  return (
+    <div className="p-8 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-4 border-b border-border/50">
+        <div className="flex items-center gap-4">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => navigate(-1)}
+            className="border-border/50"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight font-outfit">{promptGroup.name}</h1>
+            <p className="text-muted-foreground mt-1">
+              {promptGroup.description}
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={handleShare} className="border-border/50">
+            <Share2 className="h-4 w-4 mr-2" />
+            Share
+          </Button>
+          <Button variant="outline" onClick={handleExport} className="border-border/50">
+            <FileText className="h-4 w-4 mr-2" />
+            Export
+          </Button>
+        </div>
+      </div>
+
+      {/* Key Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Mentions</p>
+            <p className="text-4xl font-bold font-outfit">{promptGroup.mentions}</p>
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-success" />
+              <span className="text-sm font-semibold text-success">+{promptGroup.trend}%</span>
+              <span className="text-sm text-muted-foreground">vs last month</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground uppercase tracking-wider">Active Variants</p>
+            <p className="text-4xl font-bold font-outfit">{promptGroup.variants.length}</p>
+            <p className="text-sm text-muted-foreground">Prompt variations being tracked</p>
+          </div>
+        </Card>
+
+        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground uppercase tracking-wider">Avg Position</p>
+            <p className="text-4xl font-bold font-outfit">1.4</p>
+            <p className="text-sm text-muted-foreground">Across all platforms</p>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Main Content */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Main Prompt */}
+          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold font-outfit">Main Prompt</h3>
+                <Button variant="ghost" size="sm" onClick={() => handleCopy(promptGroup.mainPrompt)}>
+                  <Copy className="h-4 w-4 mr-1" />
+                  Copy
+                </Button>
+              </div>
+              <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
+                <p className="font-mono text-lg">{promptGroup.mainPrompt}</p>
+              </div>
+            </div>
+          </Card>
+
+          {/* Mention Trends */}
+          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+            <div className="space-y-6">
+              <div className="pb-4 border-b border-border/50">
+                <h3 className="text-lg font-semibold font-outfit">Mention Volume Trends</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Track how mention frequency changes over time
+                </p>
+              </div>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={mentionTrend}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <YAxis yAxisId="left" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <YAxis yAxisId="right" orientation="right" stroke="hsl(var(--muted-foreground))" fontSize={12} reversed />
+                  <Tooltip 
+                    contentStyle={{
+                      backgroundColor: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "var(--radius)",
+                    }}
+                  />
+                  <Legend />
+                  <Line 
+                    yAxisId="left"
+                    type="monotone" 
+                    dataKey="mentions" 
+                    name="Mentions"
+                    stroke="hsl(var(--primary))" 
+                    strokeWidth={3}
+                    dot={{ fill: "hsl(var(--primary))", r: 4 }}
+                  />
+                  <Line 
+                    yAxisId="right"
+                    type="monotone" 
+                    dataKey="avgPosition" 
+                    name="Avg Position"
+                    stroke="hsl(var(--chart-2))" 
+                    strokeWidth={2}
+                    dot={{ fill: "hsl(var(--chart-2))", r: 3 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          {/* Variant Performance */}
+          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+            <div className="space-y-6">
+              <div className="pb-4 border-b border-border/50">
+                <h3 className="text-lg font-semibold font-outfit">Variant Performance</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Compare performance across prompt variations
+                </p>
+              </div>
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={variantPerformance}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="variant" stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <Tooltip 
+                    contentStyle={{
+                      backgroundColor: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "var(--radius)",
+                    }}
+                  />
+                  <Bar dataKey="mentions" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        </div>
+
+        {/* Sidebar */}
+        <div className="space-y-6">
+          {/* Prompt Variants */}
+          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between pb-4 border-b border-border/50">
+                <h3 className="text-lg font-semibold font-outfit">Prompt Variants</h3>
+                <Badge variant="secondary">{promptGroup.variants.length}</Badge>
+              </div>
+              <div className="space-y-3">
+                {promptGroup.variants.map((variant, idx) => (
+                  <div
+                    key={idx}
+                    className="group p-3 rounded-xl bg-muted/30 border border-border/50 hover:shadow-md transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-mono flex-1">{variant}</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleCopy(variant)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+
+          {/* Platform Distribution */}
+          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold font-outfit pb-4 border-b border-border/50">Platform Distribution</h3>
+              <div className="space-y-3">
+                {platformBreakdown.map((platform, idx) => (
+                  <div key={idx} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">{platform.platform}</span>
+                      <span className="text-sm font-bold font-outfit">{platform.mentions}</span>
+                    </div>
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className={`h-full bg-chart-${idx + 1} transition-all duration-500`}
+                        style={{ width: `${(platform.mentions / 89) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+
+          {/* Quick Actions */}
+          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold font-outfit pb-4 border-b border-border/50">Quick Actions</h3>
+              <Button variant="outline" className="w-full justify-start border-border/50">
+                <Sparkles className="h-4 w-4 mr-2" />
+                Generate More Variants
+              </Button>
+              <Button variant="outline" className="w-full justify-start border-border/50">
+                <TrendingUp className="h-4 w-4 mr-2" />
+                View All Mentions
+              </Button>
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default PromptDetail;
