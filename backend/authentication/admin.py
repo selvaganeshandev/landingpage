@@ -5,9 +5,9 @@ from .models import Organisation, Account, TeamInvitation, UserPermission, Passw
 
 @admin.register(Organisation)
 class OrganisationAdmin(admin.ModelAdmin):
-    list_display = ['name', 'industry', 'team_count', 'created_at', 'modified_at']
-    list_filter = ['industry', 'created_at']
-    search_fields = ['name', 'industry']
+    list_display = ['name', 'team_count', 'created_at', 'modified_at']
+    list_filter = ['created_at']
+    search_fields = ['name']
     readonly_fields = ['created_at', 'modified_at']
     ordering = ['name']
 

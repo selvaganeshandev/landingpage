@@ -3,7 +3,7 @@ from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
-from .simplified_auth_views import (
+from .auth_views import (
     login, profile, profile_update, logout,
     send_invitation, get_invitation_details, accept_invitation, 
     assign_permissions, check_permissions,

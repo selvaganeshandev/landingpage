@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta, datetime
 from .models import PromptGroup, Prompt, PromptAnalytics
-from domains.models import Domain
+from domains.models import Domain, DomainAccess
 from .serializers import PromptAnalyticsSerializer, PromptGroupSerializer, PromptSerializer
 import json
 
@@ -18,8 +18,34 @@ def get_mentions(request):
     """
     Get mentions from PromptAnalytics where is_mention=True and is_published=True
     """
-    # Get analytics records that are mentions and published
-    mentions = PromptAnalytics.objects.filter(is_mention=True, is_published=True)
+    # Require domain_id and access check
+    domain_id = request.GET.get('domain_id')
+    if not domain_id:
+        return Response({
+            'mentions': [],
+            'total_count': 0,
+            'filters_applied': {
+                'search': request.GET.get('search', ''),
+                'platform': request.GET.get('platform', ''),
+                'sentiment': request.GET.get('sentiment', ''),
+                'domain_id': None,
+            },
+            'available_platforms': ['ChatGPT', 'Google Gemini', 'Perplexity'],
+            'available_sentiments': ['Positive', 'Negative', 'Neutral']
+        })
+
+    user = getattr(request, 'user', None)
+    has_access = False
+    if user and getattr(user, 'is_authenticated', False):
+        if getattr(user, 'role', '') == 'super_admin':
+            has_access = True
+        else:
+            has_access = DomainAccess.objects.filter(user=user, domain_id=domain_id).exists()
+    if not has_access:
+        return Response({'error': 'Forbidden: no access to this domain.'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Get analytics records that are mentions and published for this domain
+    mentions = PromptAnalytics.objects.filter(is_mention=True, is_published=True, domain_id=domain_id)
     
     # Apply organization filter if user is authenticated and not superuser
     # Temporarily skip organization filtering for testing
@@ -42,11 +68,23 @@ def get_mentions(request):
     
     # Apply sentiment filter if provided
     sentiment = request.GET.get('sentiment', '')
-    if sentiment and sentiment != 'all' and sentiment != 'All Sentiments':
-        mentions = mentions.filter(sentiment=sentiment)
+    if sentiment and sentiment.lower() != 'all' and sentiment.lower() != 'all sentiments':
+        mentions = mentions.filter(sentiment__iexact=sentiment)
     
     # Order by most recent first
     mentions = mentions.order_by('-created_at')
+
+    # Pagination
+    try:
+        limit = int(request.GET.get('limit', 20))
+        offset = int(request.GET.get('offset', 0))
+    except ValueError:
+        limit = 20
+        offset = 0
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+    total_count = mentions.count()
+    mentions = mentions[offset:offset + limit]
     
     # Prepare response data
     mentions_data = []
@@ -85,11 +123,17 @@ def get_mentions(request):
     
     return Response({
         'mentions': mentions_data,
-        'total_count': len(mentions_data),
+        'total_count': total_count,
         'filters_applied': {
             'search': search_query,
             'platform': platform,
-            'sentiment': sentiment
+            'sentiment': sentiment,
+            'domain_id': domain_id
+        },
+        'pagination': {
+            'limit': limit,
+            'offset': offset,
+            'returned': len(mentions_data)
         },
         'available_platforms': _get_available_platforms(),
         'available_sentiments': _get_available_sentiments()
@@ -583,13 +627,23 @@ def prompt_groups_list(request):
     """
     if request.method == 'GET':
         try:
-            # Get prompt groups for the organization
-            groups = PromptGroup.objects.all()  # Temporarily disabled organization filtering for testing
-            
-            # Apply domain filter if provided
+            # Require domain_id and access
             domain_id = request.GET.get('domain_id')
-            if domain_id:
-                groups = groups.filter(domain_id=domain_id)
+            if not domain_id:
+                return Response({'groups': [], 'total_count': 0, 'filters_applied': {'domain_id': None, 'search': request.GET.get('search', '')}})
+
+            user = getattr(request, 'user', None)
+            has_access = False
+            if user and getattr(user, 'is_authenticated', False):
+                if getattr(user, 'role', '') == 'super_admin':
+                    has_access = True
+                else:
+                    has_access = DomainAccess.objects.filter(user=user, domain_id=domain_id).exists()
+            if not has_access:
+                return Response({'error': 'Forbidden: no access to this domain.'}, status=status.HTTP_403_FORBIDDEN)
+
+            # Get prompt groups scoped to domain
+            groups = PromptGroup.objects.filter(domain_id=domain_id)
             
             # Apply search filter if provided
             search_query = request.GET.get('search', '')
@@ -601,6 +655,18 @@ def prompt_groups_list(request):
             
             # Order by creation date
             groups = groups.order_by('-created_at')
+
+            # Pagination
+            try:
+                limit = int(request.GET.get('limit', 20))
+                offset = int(request.GET.get('offset', 0))
+            except ValueError:
+                limit = 20
+                offset = 0
+            limit = max(1, min(limit, 100))
+            offset = max(0, offset)
+            total_count = groups.count()
+            groups = groups[offset:offset + limit]
             
             # Prepare response data
             groups_data = []
@@ -608,6 +674,12 @@ def prompt_groups_list(request):
                 # Get analytics summary for the group
                 analytics = PromptAnalytics.objects.filter(
                     prompt__group=group
+                )
+                # Derive primary and secondary prompts
+                primary_prompt_obj = group.prompts.filter(type='primary').order_by('created_at').first()
+                primary_prompt_text = primary_prompt_obj.prompt if primary_prompt_obj else ''
+                secondary_prompts_list = list(
+                    group.prompts.filter(type='secondary').order_by('created_at').values_list('prompt', flat=True)
                 )
                 
                 groups_data.append({
@@ -621,6 +693,8 @@ def prompt_groups_list(request):
                     'created_at': group.created_at.isoformat(),
                     'modified_at': group.modified_at.isoformat(),
                     'prompts_count': group.prompts.count(),
+                    'primary_prompt': primary_prompt_text,
+                    'secondary_prompts': secondary_prompts_list,
                     'analytics_summary': {
                         'total_analytics': analytics.count(),
                         'mentions_count': analytics.filter(is_mention=True, is_published=True).count(),
@@ -631,10 +705,15 @@ def prompt_groups_list(request):
             
             return Response({
                 'groups': groups_data,
-                'total_count': len(groups_data),
+                'total_count': total_count,
                 'filters_applied': {
                     'domain_id': domain_id,
                     'search': search_query
+                },
+                'pagination': {
+                    'limit': limit,
+                    'offset': offset,
+                    'returned': len(groups_data)
                 }
             })
             
@@ -674,10 +753,11 @@ def prompt_groups_list(request):
             # Get domain
             domain = get_object_or_404(Domain, id=domain_id)
             
-            # Create new prompt group
+            # Create new prompt group (attach organisation)
             group = PromptGroup.objects.create(
                 group_id=group_id,
-                domain=domain
+                domain=domain,
+                organisation=domain.organisation
             )
             
             # Platforms to create analytics for
@@ -694,6 +774,7 @@ def prompt_groups_list(request):
                         prompt=prompt_text.strip(),
                         group=group,
                         domain=domain,
+                        organisation=domain.organisation,
                         track_status='active',
                         type='primary'
                     )
@@ -705,6 +786,7 @@ def prompt_groups_list(request):
                             prompt=prompt,
                             platform=platform,
                             domain=domain,
+                            organisation=domain.organisation,
                             is_mention=False,  # Initially not a mention
                             position=0.0,
                             sentiment='neutral',
@@ -721,6 +803,7 @@ def prompt_groups_list(request):
                         prompt=prompt_text.strip(),
                         group=group,
                         domain=domain,
+                        organisation=domain.organisation,
                         track_status='active',
                         type='secondary'
                     )
@@ -732,6 +815,7 @@ def prompt_groups_list(request):
                             prompt=prompt,
                             platform=platform,
                             domain=domain,
+                            organisation=domain.organisation,
                             is_mention=False,  # Initially not a mention
                             position=0.0,
                             sentiment='neutral',
@@ -777,6 +861,13 @@ def prompt_group_detail(request, group_id):
             analytics = PromptAnalytics.objects.filter(
                 prompt__group=group
             )
+
+            # Derive primary and secondary prompts for detail view
+            primary_prompt_obj = group.prompts.filter(type='primary').order_by('created_at').first()
+            primary_prompt_text = primary_prompt_obj.prompt if primary_prompt_obj else ''
+            secondary_prompts_list = list(
+                group.prompts.filter(type='secondary').order_by('created_at').values_list('prompt', flat=True)
+            )
             
             prompts_data = []
             for prompt in prompts:
@@ -800,6 +891,8 @@ def prompt_group_detail(request, group_id):
                     'group_id': group.group_id,
                     'domain_id': group.domain.id,
                     'domain_name': group.domain.name,
+                    'primary_prompt': primary_prompt_text,
+                    'secondary_prompts': secondary_prompts_list,
                     'total_mentions': group.total_mentions,
                     'total_citations': group.total_citations,
                     'average_position': float(group.average_position),
@@ -816,10 +909,12 @@ def prompt_group_detail(request, group_id):
             })
         
         elif request.method == 'PUT':
-            # Update group information
+            # Update group information and prompts (primary + variants)
             group_id_new = request.data.get('group_id', group.group_id)
             domain_id = request.data.get('domain_id', group.domain.id)
-            
+            primary_prompt_text = request.data.get('primary_prompt')
+            secondary_prompts_texts = request.data.get('secondary_prompts', []) or []
+
             # Check if new group_id already exists (if changed)
             if group_id_new != group.group_id:
                 if PromptGroup.objects.filter(group_id=group_id_new, domain_id=domain_id).exists():
@@ -827,11 +922,64 @@ def prompt_group_detail(request, group_id):
                         {'error': 'Prompt group with this ID already exists for this domain'},
                         status=status.HTTP_400_BAD_REQUEST
                     )
-            
+
+            # Update group fields
             group.group_id = group_id_new
             group.domain_id = domain_id
             group.save()
-            
+
+            # If primary/secondary provided, reconcile prompts to match
+            if primary_prompt_text is not None:
+                primary_prompt_text = str(primary_prompt_text).strip()
+                # Normalize secondary list (unique, trimmed, exclude empty and primary)
+                normalized_secondaries = []
+                for s in secondary_prompts_texts:
+                    s_norm = str(s).strip()
+                    if s_norm and s_norm != primary_prompt_text and s_norm not in normalized_secondaries:
+                        normalized_secondaries.append(s_norm)
+
+                # Ensure primary prompt exists and is marked primary
+                primary_prompt_obj = group.prompts.filter(prompt=primary_prompt_text).first()
+                if primary_prompt_obj:
+                    if primary_prompt_obj.type != 'primary':
+                        primary_prompt_obj.type = 'primary'
+                        primary_prompt_obj.save()
+                else:
+                    primary_prompt_obj = Prompt.objects.create(
+                        prompt=primary_prompt_text,
+                        group=group,
+                        domain=group.domain,
+                        organisation=group.domain.organisation,
+                        track_status='active',
+                        type='primary'
+                    )
+
+                # Upsert secondary prompts
+                existing_prompts = {p.prompt: p for p in group.prompts.all()}
+                for sec_text in normalized_secondaries:
+                    if sec_text in existing_prompts:
+                        p = existing_prompts[sec_text]
+                        if p.type != 'secondary':
+                            p.type = 'secondary'
+                            p.save()
+                    else:
+                        Prompt.objects.create(
+                            prompt=sec_text,
+                            group=group,
+                            domain=group.domain,
+                            organisation=group.domain.organisation,
+                            track_status='active',
+                            type='secondary'
+                        )
+
+                # Remove any prompts no longer in the provided set (except keep analytics integrity)
+                keep_set = set([primary_prompt_text] + normalized_secondaries)
+                for p in group.prompts.exclude(prompt__in=keep_set):
+                    p.delete()
+
+                # Ensure only one primary remains
+                group.prompts.exclude(id=primary_prompt_obj.id).filter(type='primary').update(type='secondary')
+
             return Response({
                 'message': 'Prompt group updated successfully',
                 'group': {
@@ -865,17 +1013,34 @@ def prompts_list(request):
     """
     if request.method == 'GET':
         try:
-            # Get prompts for the organization
-            prompts = Prompt.objects.filter()
+            # Require domain_id and access
+            domain_id = request.GET.get('domain_id')
+            if not domain_id:
+                return Response({'prompts': [], 'total_count': 0, 'filters_applied': {
+                    'group_id': request.GET.get('group_id'),
+                    'domain_id': None,
+                    'track_status': request.GET.get('track_status'),
+                    'type': request.GET.get('type'),
+                    'search': request.GET.get('search', '')
+                }})
+
+            user = getattr(request, 'user', None)
+            has_access = False
+            if user and getattr(user, 'is_authenticated', False):
+                if getattr(user, 'role', '') == 'super_admin':
+                    has_access = True
+                else:
+                    has_access = DomainAccess.objects.filter(user=user, domain_id=domain_id).exists()
+            if not has_access:
+                return Response({'error': 'Forbidden: no access to this domain.'}, status=status.HTTP_403_FORBIDDEN)
+
+            # Get prompts scoped to domain
+            prompts = Prompt.objects.filter(domain_id=domain_id)
             
             # Apply filters
             group_id = request.GET.get('group_id')
             if group_id:
                 prompts = prompts.filter(group_id=group_id)
-            
-            domain_id = request.GET.get('domain_id')
-            if domain_id:
-                prompts = prompts.filter(domain_id=domain_id)
             
             track_status = request.GET.get('track_status')
             if track_status:
@@ -892,6 +1057,18 @@ def prompts_list(request):
             
             # Order by creation date
             prompts = prompts.order_by('-created_at')
+
+            # Pagination
+            try:
+                limit = int(request.GET.get('limit', 20))
+                offset = int(request.GET.get('offset', 0))
+            except ValueError:
+                limit = 20
+                offset = 0
+            limit = max(1, min(limit, 100))
+            offset = max(0, offset)
+            total_count = prompts.count()
+            prompts = prompts[offset:offset + limit]
             
             # Prepare response data
             prompts_data = []
@@ -925,13 +1102,18 @@ def prompts_list(request):
             
             return Response({
                 'prompts': prompts_data,
-                'total_count': len(prompts_data),
+                'total_count': total_count,
                 'filters_applied': {
                     'group_id': group_id,
                     'domain_id': domain_id,
                     'track_status': track_status,
                     'type': prompt_type,
                     'search': search_query
+                },
+                'pagination': {
+                    'limit': limit,
+                    'offset': offset,
+                    'returned': len(prompts_data)
                 }
             })
             
@@ -959,11 +1141,13 @@ def prompts_list(request):
             prompt_type = request.data.get('type', 'primary')
             track_message = request.data.get('track_message', '')
             
-            # Create new prompt
+            # Create new prompt (attach organisation from domain)
+            domain = get_object_or_404(Domain, id=domain_id)
             prompt = Prompt.objects.create(
                 prompt=prompt_text,
                 group_id=group_id,
-                domain_id=domain_id,
+                domain=domain,
+                organisation=domain.organisation,
                 track_status=track_status,
                 type=prompt_type,
                 track_message=track_message

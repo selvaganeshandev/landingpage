@@ -87,10 +87,11 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
       return;
     }
 
-    if (primaryPrompts.length === 0 && secondaryPrompts.length === 0) {
+    // Treat the "Main Prompt" input as required primary prompt
+    if (primaryPrompts.length === 0) {
       toast({
-        title: "No Prompts",
-        description: "Please add at least one primary or secondary prompt.",
+        title: "Main Prompt required",
+        description: "Please add a main prompt.",
         variant: "destructive",
       });
       return;
@@ -139,17 +140,17 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
         <DialogHeader>
           <DialogTitle className="font-outfit text-2xl">Add Prompt Group</DialogTitle>
           <DialogDescription>
-            Create a new prompt group with primary and secondary prompts
+            Create a prompt group and variants like in the reference design
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6 py-4">
-          {/* Group ID */}
+          {/* Group Name */}
           <div className="space-y-2">
-            <Label htmlFor="groupId">Group ID*</Label>
+            <Label htmlFor="groupId">Group Name*</Label>
             <Input
               id="groupId"
-              placeholder="e.g., healthcare-ai-001"
+              placeholder="e.g., Vegan Protein - Athletes"
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
               className="border-border/50"
@@ -173,12 +174,12 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
             </Select>
           </div>
 
-          {/* Primary Prompts */}
+          {/* Main Prompt */}
           <div className="space-y-2">
-            <Label>Primary Prompts*</Label>
+            <Label>Main Prompt*</Label>
             <div className="flex gap-2">
               <Input
-                placeholder="Enter primary prompt"
+                placeholder="e.g., best vegan protein powder for athletes"
                 value={primaryInput}
                 onChange={(e) => setPrimaryInput(e.target.value)}
                 className="border-border/50 font-mono flex-1"
@@ -205,12 +206,12 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
             )}
           </div>
 
-          {/* Secondary Prompts */}
+          {/* Prompt Variants */}
           <div className="space-y-2">
-            <Label>Secondary Prompts</Label>
+            <Label>Prompt Variants (Optional)</Label>
             <div className="flex gap-2">
               <Input
-                placeholder="Enter secondary prompt"
+                placeholder="Add a variant prompt..."
                 value={secondaryInput}
                 onChange={(e) => setSecondaryInput(e.target.value)}
                 className="border-border/50 font-mono flex-1"

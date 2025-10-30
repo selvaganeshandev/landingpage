@@ -158,7 +158,7 @@ const App = () => (
               
               {/* Administration */}
               <Route path="/organization-settings" element={
-                <ProtectedRoute requiredPermission={MODULES.ORGANIZATION_SETTINGS} requiredLevel="admin">
+                <ProtectedRoute requiredPermission={MODULES.ORGANIZATION_SETTINGS} requiredLevel="read">
                   <OrganizationSettings />
                 </ProtectedRoute>
               } />

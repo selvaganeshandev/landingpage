@@ -9,7 +9,6 @@ class Organisation(models.Model):
     Organisation model representing companies or entities using the LLM Monitor
     """
     name = models.CharField(max_length=255, help_text="Name of the organisation")
-    industry = models.CharField(max_length=100, null=True, blank=True, default=None, help_text="Industry sector of the organisation")
     team_count = models.PositiveIntegerField(default=1, help_text="Number of team members")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the organisation was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the organisation was last modified")
@@ -29,16 +28,17 @@ class Account(AbstractUser):
     Account model extending Django's User model for custom user management
     """
     ROLE_CHOICES = [
+        ('super_admin', 'Super Administrator'),
         ('admin', 'Administrator'),
         ('user', 'User'),
     ]
     
     email = models.EmailField(unique=True, help_text="Email address of the account")
     role = models.CharField(
-        max_length=10, 
-        choices=ROLE_CHOICES, 
+        max_length=12,
+        choices=ROLE_CHOICES,
         default='user',
-        help_text="Role of the account (admin or user)"
+        help_text="Role of the account (super-admin, admin or user)"
     )
     organisation = models.ForeignKey(
         Organisation, 

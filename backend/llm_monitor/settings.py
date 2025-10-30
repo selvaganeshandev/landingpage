@@ -17,6 +17,7 @@ from decouple import config
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -47,6 +48,8 @@ INSTALLED_APPS = [
     'keywords',
     'prompts',
 ]
+# Site URL for building absolute links in emails
+SITE_URL = config('SITE_URL', default='http://localhost:8080')
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -86,9 +89,9 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': config('DB_NAME', default='llm_monitor'),
-        'USER': config('DB_USER', default='arun'),
-        'PASSWORD': config('DB_PASSWORD', default='admin'),
-        'HOST': config('DB_HOST', default='localhost'),
+        'USER': config('DB_USER', default='root'),
+        'PASSWORD': config('DB_PASSWORD', default='Monit@2025$'),
+        'HOST': config('DB_HOST', default='64.227.190.42'),
         'PORT': config('DB_PORT', default='5432'),
     }
 }
@@ -162,6 +165,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://localhost:8081",
     "http://127.0.0.1:8081",
+    "https://localhost:8080",
 ]
 
 CORS_ALLOW_CREDENTIALS = True

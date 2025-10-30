@@ -41,7 +41,6 @@ interface DomainAccess {
     first_name: string;
     last_name: string;
   };
-  access_level: 'viewer' | 'editor' | 'admin';
   granted_by: {
     id: number;
     email: string;
@@ -90,8 +89,8 @@ export const ProjectAccessManager = ({
     try {
       setIsLoading(true);
       
-      // Load all domains
-      const domainsResponse = await apiClient.getDomains();
+      // Load all domains (admin management scope)
+      const domainsResponse = await apiClient.getDomains({ manage: true });
       setDomains(domainsResponse.domains);
       
       // Load user's access for each domain
@@ -128,46 +127,75 @@ export const ProjectAccessManager = ({
       setIsUpdating(domainId);
       
       if (enabled) {
-        // Grant access with default 'viewer' level
+        // Grant access
         await apiClient.grantDomainAccess(domainId, {
           user_id: userId,
-          access_level: 'viewer'
         });
         
-        // Update local state
-        const domain = domains.find(d => d.id === domainId);
-        if (domain) {
-          setUserAccess(prev => ({
-            ...prev,
-            [domainId]: {
-              id: Date.now(), // Temporary ID
-              user: { id: userId, email: userEmail, first_name: userName.split(' ')[0], last_name: userName.split(' ')[1] || '' },
-              access_level: 'viewer',
-              granted_by: { id: 0, email: '' },
-              created_at: new Date().toISOString()
-            }
-          }));
+        // Optimistically mark as having access
+        setUserAccess(prev => ({
+          ...prev,
+          [domainId]: prev[domainId] || {
+            id: Date.now(),
+            user: { id: userId, email: userEmail, first_name: userName.split(' ')[0], last_name: userName.split(' ')[1] || '' },
+            granted_by: { id: 0, email: '' },
+            created_at: new Date().toISOString()
+          }
+        }));
+
+        // Refresh access map for this domain from server to ensure accuracy
+        try {
+          const refreshed = await apiClient.getDomainAccess(domainId);
+          const userAccessItem = refreshed.access_list.find(a => a.user.id === userId);
+          if (userAccessItem) {
+            setUserAccess(prev => ({ ...prev, [domainId]: userAccessItem }));
+          }
+          const domainObj = domains.find(d => d.id === domainId);
+          const domainName = userAccessItem?.domain_name || domainObj?.name || String(domainId);
+          toast({
+            title: "Access granted",
+            description: `${userName} now has access to ${domainName}`,
+          });
+        } catch (_) {
+          const domainObj = domains.find(d => d.id === domainId);
+          const domainName = domainObj?.name || String(domainId);
+          toast({
+            title: "Access granted",
+            description: `${userName} now has access to ${domainName}`,
+          });
         }
         
-        toast({
-          title: "Access granted",
-          description: `${userName} now has viewer access to ${domain?.name}`,
-        });
       } else {
         // Revoke access
         await apiClient.revokeDomainAccess(domainId, userId);
         
-        // Update local state
-        setUserAccess(prev => {
-          const newAccess = { ...prev };
-          delete newAccess[domainId];
-          return newAccess;
-        });
+        // Refresh access map for this domain from server to ensure accuracy
+        try {
+          const refreshed = await apiClient.getDomainAccess(domainId);
+          const userAccessItem = refreshed.access_list.find(a => a.user.id === userId);
+          setUserAccess(prev => {
+            const copy = { ...prev };
+            if (userAccessItem) {
+              copy[domainId] = userAccessItem;
+            } else {
+              delete copy[domainId];
+            }
+            return copy;
+          });
+        } catch (_) {
+          // Optimistically remove access on failure to refresh
+          setUserAccess(prev => {
+            const copy = { ...prev };
+            delete copy[domainId];
+            return copy;
+          });
+        }
         
-        const domain = domains.find(d => d.id === domainId);
+        const domainObj = domains.find(d => d.id === domainId);
+        const domainName = domainObj?.name || String(domainId);
         toast({
           title: "Access revoked",
-          description: `${userName}'s access to ${domain?.name} has been revoked`,
+          description: `${userName}'s access to ${domainName} has been revoked`,
         });
       }
       
@@ -186,52 +214,7 @@ export const ProjectAccessManager = ({
     }
   };
 
-  const handleAccessLevelChange = async (domainId: number, newLevel: 'viewer' | 'editor' | 'admin') => {
-    try {
-      setIsUpdating(domainId);
-      
-      await apiClient.updateDomainAccess(domainId, userId, {
-        access_level: newLevel
-      });
-      
-      // Update local state
-      setUserAccess(prev => ({
-        ...prev,
-        [domainId]: {
-          ...prev[domainId],
-          access_level: newLevel
-        }
-      }));
-      
-      const domain = domains.find(d => d.id === domainId);
-      toast({
-        title: "Access level updated",
-        description: `${userName}'s access to ${domain?.name} changed to ${newLevel}`,
-      });
-      
-      if (onAccessUpdated) {
-        onAccessUpdated();
-      }
-      
-    } catch (error: any) {
-      toast({
-        title: "Error updating access level",
-        description: error.message || "Failed to update access level",
-        variant: "destructive",
-      });
-    } finally {
-      setIsUpdating(null);
-    }
-  };
-
-  const getAccessLevelColor = (level: string) => {
-    switch (level) {
-      case 'admin': return 'bg-red-100 text-red-800 border-red-200';
-      case 'editor': return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'viewer': return 'bg-green-100 text-green-800 border-green-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
+  // Access levels removed; toggles grant/revoke only
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -280,31 +263,7 @@ export const ProjectAccessManager = ({
                       </div>
                     </div>
 
-                    {/* Access Level Dropdown */}
-                    {hasAccess && (
-                      <div className="flex items-center gap-3 pl-8">
-                        <Label className="text-sm font-medium">Access Level:</Label>
-                        <Select
-                          value={hasAccess.access_level}
-                          onValueChange={(value: 'viewer' | 'editor' | 'admin') => 
-                            handleAccessLevelChange(domain.id, value)
-                          }
-                          disabled={isUpdatingThis}
-                        >
-                          <SelectTrigger className="w-32">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="viewer">Viewer</SelectItem>
-                            <SelectItem value="editor">Editor</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Badge className={getAccessLevelColor(hasAccess.access_level)}>
-                          {hasAccess.access_level}
-                        </Badge>
-                      </div>
-                    )}
+                    {/* Access levels UI removed */}
                   </div>
                 );
               })}

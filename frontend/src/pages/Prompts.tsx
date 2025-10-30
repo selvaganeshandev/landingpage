@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Search, FolderOpen, TrendingUp, Eye, Edit, Sparkles, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
+import { useDomainStore } from "@/stores/domainStore";
 import { AddPromptGroupDialog } from "@/components/AddPromptGroupDialog";
 import { EditPromptGroupDialog } from "@/components/EditPromptGroupDialog";
 import { GenerateVariantsDialog } from "@/components/GenerateVariantsDialog";
@@ -19,20 +20,33 @@ const Prompts = () => {
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<any>(null);
   const [promptGroups, setPromptGroups] = useState<any[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const limit = 1; // testing limit
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
-  useEffect(() => {
-    loadPromptGroups();
-  }, [searchQuery]);
+  const { selectedDomain } = useDomainStore();
 
-  const loadPromptGroups = async () => {
+  useEffect(() => {
+    // reset pagination on filters/domain change
+    setPromptGroups([]);
+    setOffset(0);
+    setTotalCount(0);
+    loadPromptGroups(0, true);
+  }, [searchQuery, selectedDomain?.id]);
+
+  const loadPromptGroups = async (startOffset: number = offset, replace: boolean = false) => {
     try {
       setIsLoading(true);
       const response = await apiClient.getPromptGroups({
-        search: searchQuery || undefined
+        search: searchQuery || undefined,
+        domain_id: selectedDomain?.id,
+        limit,
+        offset: startOffset,
       });
-      setPromptGroups(response.groups || []);
+      setTotalCount(response.total_count || 0);
+      setPromptGroups(replace ? (response.groups || []) : [...promptGroups, ...(response.groups || [])]);
     } catch (error: any) {
       toast({
         title: "Error loading prompt groups",
@@ -42,6 +56,13 @@ const Prompts = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const canLoadMore = promptGroups.length < totalCount;
+  const handleLoadMore = async () => {
+    const nextOffset = offset + limit;
+    setOffset(nextOffset);
+    await loadPromptGroups(nextOffset);
   };
 
   const handleViewDetails = (groupId: number) => {
@@ -108,15 +129,18 @@ const Prompts = () => {
             <Loader2 className="h-8 w-8 animate-spin" />
           </div>
         ) : promptGroups.length > 0 ? (
-          promptGroups.map((group) => (
+          <>
+          {promptGroups.map((group) => (
           <Card key={group.id} className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.01] border-border/50 backdrop-blur-sm bg-card/80">
             <div className="space-y-5">
               <div className="flex items-start justify-between">
                 <div className="space-y-2">
-                  <h3 className="text-xl font-semibold font-outfit">Group {group.group_id}</h3>
-                  <p className="text-sm text-muted-foreground font-mono bg-gradient-to-br from-muted/30 to-muted/50 px-3 py-2 rounded-xl inline-block border border-border/50">
-                    Domain: {group.domain_name}
-                  </p>
+                  <h3 className="text-xl font-semibold font-outfit">{group.group_id}</h3>
+                  {group.primary_prompt && (
+                    <p className="text-sm text-muted-foreground font-mono bg-gradient-to-br from-muted/30 to-muted/50 px-3 py-2 rounded-xl inline-block border border-border/50">
+                      {group.primary_prompt}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-6">
                   <div className="text-right">
@@ -132,15 +156,14 @@ const Prompts = () => {
 
               <div className="space-y-3">
                 <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-                  Prompts ({group.prompts_count || 0})
+                  Prompt Variants ({group.secondary_prompts?.length || 0})
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  <Badge variant="secondary" className="font-mono text-xs px-3 py-1.5">
-                    Created: {new Date(group.created_at).toLocaleDateString()}
-                  </Badge>
-                  <Badge variant="outline" className="font-mono text-xs px-3 py-1.5">
-                    Citations: {group.total_citations || 0}
-                  </Badge>
+                  {(group.secondary_prompts || []).map((variant: string, idx: number) => (
+                    <Badge key={idx} variant="secondary" className="font-mono text-xs px-3 py-1.5">
+                      {variant}
+                    </Badge>
+                  ))}
                 </div>
               </div>
 
@@ -153,14 +176,19 @@ const Prompts = () => {
                   <Edit className="h-4 w-4 mr-1" />
                   Edit Group
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => handleGenerateVariants(group)} className="border-border/50">
-                  <Sparkles className="h-4 w-4 mr-1" />
-                  Generate Variants
-                </Button>
+                {/* Generate Variants temporarily hidden */}
               </div>
             </div>
           </Card>
-        ))
+        ))}
+        {canLoadMore && (
+          <div className="flex justify-center">
+            <Button variant="outline" onClick={handleLoadMore} disabled={isLoading} className="border-border/50">
+              {isLoading ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin"/> Loading...</>) : 'Load More'}
+            </Button>
+          </div>
+        )}
+        </>
         ) : (
           <Card className="p-12 text-center">
             <FolderOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -179,11 +207,22 @@ const Prompts = () => {
       </div>
 
       {/* Dialogs */}
-      <AddPromptGroupDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} />
+      <AddPromptGroupDialog 
+        open={addDialogOpen} 
+        onOpenChange={setAddDialogOpen}
+        onAdd={(group) => {
+          // Prepend new group and reset pagination counts optimistically
+          setPromptGroups([group, ...promptGroups]);
+          setTotalCount(totalCount + 1);
+        }}
+      />
       <EditPromptGroupDialog 
         open={editDialogOpen} 
         onOpenChange={setEditDialogOpen}
         promptGroup={selectedGroup}
+        onEdit={(group) => {
+          setPromptGroups(promptGroups.map(g => g.id === group.id ? group : g));
+        }}
       />
       <GenerateVariantsDialog
         open={generateDialogOpen}

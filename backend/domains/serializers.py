@@ -54,7 +54,7 @@ class DomainAccessSerializer(serializers.ModelSerializer):
         model = DomainAccess
         fields = [
             'id', 'user', 'user_email', 'user_name', 'domain', 'domain_name',
-            'access_level', 'granted_by', 'granted_by_email', 'created_at', 'modified_at'
+            'granted_by', 'granted_by_email', 'created_at', 'modified_at'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
     
@@ -68,7 +68,7 @@ class DomainAccessCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = DomainAccess
-        fields = ['user_id', 'access_level']
+        fields = ['user_id']
     
     def create(self, validated_data):
         # Convert user_id to user object

@@ -4,7 +4,7 @@ from authentication.models import Organisation, Account, UserPermission
 
 
 class Command(BaseCommand):
-    help = 'Create a simple admin account with email and password'
+    help = 'Create a super-admin account with email and password'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -46,7 +46,7 @@ class Command(BaseCommand):
         organisation_name = options['organisation_name']
 
         self.stdout.write(
-            self.style.SUCCESS(f'Creating admin account: {email}')
+            self.style.SUCCESS(f'Creating super-admin account: {email}')
         )
 
         try:
@@ -69,27 +69,27 @@ class Command(BaseCommand):
                         self.style.WARNING(f'Using existing organisation: {organisation.name}')
                     )
 
-                # Remove existing admin account if it exists
+                # Remove existing account if it exists
                 existing_accounts = Account.objects.filter(email=email)
                 if existing_accounts.exists():
                     self.stdout.write(
-                        self.style.WARNING(f'Removing existing admin account with email {email}...')
+                        self.style.WARNING(f'Removing existing account with email {email}...')
                     )
                     # Delete user permissions first (due to foreign key constraints)
                     UserPermission.objects.filter(user__email=email).delete()
                     existing_accounts.delete()
                     self.stdout.write(
-                        self.style.SUCCESS(f'Removed existing admin account')
+                        self.style.SUCCESS(f'Removed existing account')
                     )
 
-                # Create admin account
+                # Create super_admin account
                 admin_user = Account.objects.create_user(
                     username=email,
                     email=email,
                     password=password,
                     first_name=first_name,
                     last_name=last_name,
-                    role='admin',
+                    role='super_admin',
                     organisation=organisation,
                     is_staff=True,
                     is_superuser=True,
@@ -101,7 +101,7 @@ class Command(BaseCommand):
 
                 self.stdout.write(
                     self.style.SUCCESS(
-                        f'Successfully created admin account with all permissions!\n'
+                        f'Successfully created super_admin account with all permissions!\n'
                         f'Email: {admin_user.email}\n'
                         f'Password: {password}\n'
                         f'Organisation: {organisation.name}\n'

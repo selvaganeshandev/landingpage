@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiClient } from "@/services/api";
+import { useDomainStore } from "@/stores/domainStore";
 import DOMPurify from 'dompurify';
 
 interface Mention {
@@ -63,6 +64,9 @@ const Mentions = () => {
   const [selectedSentiment, setSelectedSentiment] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [mentions, setMentions] = useState<Mention[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const limit = 1; // testing limit
   const [isLoading, setIsLoading] = useState(true);
   const [availablePlatforms, setAvailablePlatforms] = useState<string[]>(["ChatGPT", "Google Gemini", "Perplexity"]);
   const [availableSentiments, setAvailableSentiments] = useState<string[]>(["Positive", "Negative", "Neutral"]);
@@ -109,21 +113,31 @@ const Mentions = () => {
     return processedContent;
   };
 
+  const { selectedDomain } = useDomainStore();
+
   // Load mentions data
   useEffect(() => {
-    loadMentions();
+    // reset pagination when filters/domain change
+    setMentions([]);
+    setOffset(0);
+    setTotalCount(0);
+    loadMentions(0, true);
     loadFilters();
-  }, [selectedPlatform, selectedSentiment, searchQuery]);
+  }, [selectedPlatform, selectedSentiment, searchQuery, selectedDomain?.id]);
 
-  const loadMentions = async () => {
+  const loadMentions = async (startOffset: number = offset, replace: boolean = false) => {
     try {
       setIsLoading(true);
       const response = await apiClient.getMentions({
         search: searchQuery || undefined,
         platform: selectedPlatform !== "all" ? selectedPlatform : undefined,
         sentiment: selectedSentiment !== "all" ? selectedSentiment : undefined,
+        domain_id: selectedDomain?.id,
+        limit,
+        offset: startOffset,
       });
-      setMentions(response.mentions);
+      setTotalCount(response.total_count || 0);
+      setMentions(replace ? (response.mentions || []) : [...mentions, ...(response.mentions || [])]);
     } catch (error: any) {
       toast({
         title: "Error loading mentions",
@@ -133,6 +147,13 @@ const Mentions = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const canLoadMore = mentions.length < totalCount;
+  const handleLoadMore = async () => {
+    const nextOffset = offset + limit;
+    setOffset(nextOffset);
+    await loadMentions(nextOffset);
   };
 
   const loadFilters = async () => {
@@ -295,7 +316,8 @@ const Mentions = () => {
             </div>
           </Card>
         ) : (
-          filteredMentions.map((mention) => (
+          <>
+          {filteredMentions.map((mention) => (
           <Card key={mention.id} className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.01] border-border/50 backdrop-blur-sm bg-card/80">
             <div className="space-y-5">
               <div className="flex items-start justify-between">
@@ -370,7 +392,15 @@ const Mentions = () => {
               </div>
             </div>
           </Card>
-          ))
+          ))}
+          {canLoadMore && (
+            <div className="flex justify-center">
+              <Button variant="outline" onClick={handleLoadMore} disabled={isLoading} className="border-border/50">
+                {isLoading ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin"/> Loading...</>) : 'Load More'}
+              </Button>
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>

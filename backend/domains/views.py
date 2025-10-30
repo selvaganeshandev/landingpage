@@ -18,12 +18,14 @@ from authentication.models import Account
 def domain_list(request):
     """List all domains for the organization or create a new one"""
     if request.method == 'GET':
+        # Optional management scope: allow admins to fetch all org domains when managing access
+        manage_scope = request.query_params.get('manage') in ['1', 'true', 'True']
         # Filter domains by organization and user access
-        if request.user.role == 'admin':
-            # Admins can see all domains in their organization
+        if request.user.role == 'super_admin' or (request.user.role == 'admin' and manage_scope):
+            # Super admins see all; admins see all when managing
             domains = Domain.objects.filter(organisation=request.user.organisation)
         else:
-            # Regular users can only see domains they have access to
+            # Admins and users can only see domains they have explicit access to
             domain_ids = DomainAccess.objects.filter(
                 user=request.user,
                 domain__organisation=request.user.organisation
@@ -37,7 +39,7 @@ def domain_list(request):
     
     elif request.method == 'POST':
         # Only admins can create domains
-        if request.user.role != 'admin':
+        if request.user.role not in ['admin', 'super_admin']:
             return Response(
                 {'error': 'Only organization administrators can add domains'}, 
                 status=status.HTTP_403_FORBIDDEN
@@ -46,6 +48,27 @@ def domain_list(request):
         # Add organization to the data
         data = request.data.copy()
         data['organisation'] = request.user.organisation.id
+
+        # Normalize domain name (strip scheme, www, path, port)
+        raw_input = data.get('name') or data.get('url') or ''
+        if isinstance(raw_input, str):
+            normalized = raw_input.strip().lower()
+            # Remove scheme
+            if normalized.startswith('http://'):
+                normalized = normalized[len('http://'):]
+            elif normalized.startswith('https://'):
+                normalized = normalized[len('https://'):]
+            # Strip leading www.
+            if normalized.startswith('www.'):
+                normalized = normalized[4:]
+            # Keep only host part before path or query
+            for sep in ['/', '?', '#']:
+                if sep in normalized:
+                    normalized = normalized.split(sep, 1)[0]
+            # Remove port if present
+            if ':' in normalized:
+                normalized = normalized.split(':', 1)[0]
+            data['name'] = normalized
         
         serializer = DomainSerializer(data=data)
         if serializer.is_valid():
@@ -62,7 +85,7 @@ def domain_list(request):
 def domain_detail(request, pk):
     """Retrieve, update or delete a domain"""
     try:
-        if request.user.role == 'admin':
+        if request.user.role == 'super_admin':
             domain = Domain.objects.get(pk=pk, organisation=request.user.organisation)
         else:
             # Check if user has access to this domain
@@ -84,7 +107,7 @@ def domain_detail(request, pk):
     
     elif request.method == 'PUT':
         # Only admins can update domains
-        if request.user.role != 'admin':
+        if request.user.role not in ['admin', 'super_admin']:
             return Response(
                 {'error': 'Only organization administrators can update domains'}, 
                 status=status.HTTP_403_FORBIDDEN
@@ -101,7 +124,7 @@ def domain_detail(request, pk):
     
     elif request.method == 'DELETE':
         # Only admins can delete domains
-        if request.user.role != 'admin':
+        if request.user.role not in ['admin', 'super_admin']:
             return Response(
                 {'error': 'Only organization administrators can delete domains'}, 
                 status=status.HTTP_403_FORBIDDEN
@@ -118,7 +141,7 @@ def domain_detail(request, pk):
 def domain_keywords(request, pk):
     """Get all keywords for a domain"""
     try:
-        if request.user.role == 'admin':
+        if request.user.role == 'super_admin':
             domain = Domain.objects.get(pk=pk, organisation=request.user.organisation)
         else:
             domain_access = DomainAccess.objects.get(
@@ -139,140 +162,91 @@ def domain_keywords(request, pk):
     return Response(serializer.data)
 
 
-# Domain Access Management Views
+# Domain Access Management
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def domain_access_list(request, domain_id):
-    """Get all users with access to a domain or grant access to a user"""
-    # Only admins can manage domain access
-    if request.user.role != 'admin':
-        return Response(
-            {'error': 'Only organization administrators can manage domain access'}, 
-            status=status.HTTP_403_FORBIDDEN
-        )
-    
+    """List or grant domain access (no access levels)."""
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response({'error': 'Only organization administrators can manage domain access'}, status=status.HTTP_403_FORBIDDEN)
     try:
         domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
     except Domain.DoesNotExist:
-        return Response(
-            {'error': 'Domain not found or not in your organization'}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
-    
+        return Response({'error': 'Domain not found or not in your organization'}, status=status.HTTP_404_NOT_FOUND)
+
     if request.method == 'GET':
         access_list = DomainAccess.objects.filter(domain=domain)
-        serializer = DomainAccessSerializer(access_list, many=True)
-        return Response({
-            'access_list': serializer.data
-        })
-    
-    elif request.method == 'POST':
-        serializer = DomainAccessCreateSerializer(data=request.data, context={'request': request})
-        if serializer.is_valid():
-            # Check if user is in the same organization
-            user_id = serializer.validated_data['user_id']
-            try:
-                user = Account.objects.get(id=user_id)
-                if user.organisation != request.user.organisation:
-                    return Response(
-                        {'error': 'User must be in the same organization'}, 
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            except Account.DoesNotExist:
-                return Response(
-                    {'error': 'User not found'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Set domain
-            serializer.validated_data['domain'] = domain
-            
-            access = serializer.save()
-            return Response({
-                'message': 'Access granted successfully',
-                'access': DomainAccessSerializer(access).data
-            }, status=status.HTTP_201_CREATED)
+        return Response({'access_list': DomainAccessSerializer(access_list, many=True).data})
+
+    serializer = DomainAccessCreateSerializer(data=request.data, context={'request': request})
+    if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validate target user
+    user_id = serializer.validated_data['user_id']
+    try:
+        user = Account.objects.get(id=user_id)
+        if user.organisation != request.user.organisation:
+            return Response({'error': 'User must be in the same organization'}, status=status.HTTP_400_BAD_REQUEST)
+    except Account.DoesNotExist:
+        return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Grant access idempotently to avoid unique constraint violation
+    access, created = DomainAccess.objects.get_or_create(
+        domain=domain,
+        user=user,
+        defaults={'granted_by': request.user}
+    )
+    if not created:
+        return Response({'message': 'Access already exists', 'access': DomainAccessSerializer(access).data}, status=status.HTTP_200_OK)
+
+    return Response({'message': 'Access granted successfully', 'access': DomainAccessSerializer(access).data}, status=status.HTTP_201_CREATED)
 
 
 @api_view(['PUT', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def domain_access_detail(request, domain_id, user_id):
-    """Update or revoke domain access for a user"""
-    # Only admins can manage domain access
-    if request.user.role != 'admin':
-        return Response(
-            {'error': 'Only organization administrators can manage domain access'}, 
-            status=status.HTTP_403_FORBIDDEN
-        )
-    
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response({'error': 'Only organization administrators can manage domain access'}, status=status.HTTP_403_FORBIDDEN)
     try:
         domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
-        domain_access = DomainAccess.objects.get(domain=domain, user_id=user_id)
+        access = DomainAccess.objects.get(domain=domain, user_id=user_id)
     except Domain.DoesNotExist:
-        return Response(
-            {'error': 'Domain not found or not in your organization'}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
+        return Response({'error': 'Domain not found or not in your organization'}, status=status.HTTP_404_NOT_FOUND)
     except DomainAccess.DoesNotExist:
-        return Response(
-            {'error': 'User does not have access to this domain'}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
-    
+        return Response({'error': 'User does not have access to this domain'}, status=status.HTTP_404_NOT_FOUND)
+
     if request.method == 'PUT':
-        serializer = DomainAccessSerializer(domain_access, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response({
-                'message': 'Access updated successfully',
-                'access': serializer.data
-            })
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    elif request.method == 'DELETE':
-        domain_access.delete()
-        return Response({
-            'message': 'Access revoked successfully'
-        })
+        # Nothing to update; return current
+        return Response({'access': DomainAccessSerializer(access).data})
+
+    access.delete()
+    return Response({'message': 'Access revoked successfully'})
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def available_users_for_domain(request, domain_id):
-    """Get users available for domain access (users in organization not already granted access)"""
-    # Only admins can view available users
-    if request.user.role != 'admin':
-        return Response(
-            {'error': 'Only organization administrators can view available users'}, 
-            status=status.HTTP_403_FORBIDDEN
-        )
-    
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response({'error': 'Only organization administrators can view available users'}, status=status.HTTP_403_FORBIDDEN)
     try:
         domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
     except Domain.DoesNotExist:
-        return Response(
-            {'error': 'Domain not found or not in your organization'}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
-    
-    # Get users in organization who don't already have access to this domain
+        return Response({'error': 'Domain not found or not in your organization'}, status=status.HTTP_404_NOT_FOUND)
+
     users_with_access = DomainAccess.objects.filter(domain=domain).values_list('user_id', flat=True)
-    available_users = request.user.organisation.accounts.exclude(id__in=users_with_access)
-    
-    users_data = []
-    for user in available_users:
-        users_data.append({
-            'id': user.id,
-            'email': user.email,
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-            'role': user.role,
-        })
-    
-    return Response({
-        'available_users': users_data
-    })
+    available = request.user.organisation.accounts.exclude(id__in=users_with_access)
+    data = [{
+        'id': u.id,
+        'email': u.email,
+        'first_name': u.first_name,
+        'last_name': u.last_name,
+        'role': u.role,
+    } for u in available]
+    return Response({'available_users': data})
+
+
+    # Domain Access Management views removed
 
 
 # Detected Models Views
@@ -280,18 +254,18 @@ def available_users_for_domain(request, domain_id):
 @permission_classes([IsAuthenticated])
 def detected_models_list(request):
     """Get all detected models for the organization"""
-    if request.user.role == 'admin':
+    if request.user.role == 'super_admin':
         # Admins can see all detected models in their organization
         detected_models = DetectedModel.objects.filter(organisation=request.user.organisation)
     else:
-        # Regular users can only see detected models for domains they have access to
+        # Admins and users can see detected models only for domains they have access to
         domain_ids = DomainAccess.objects.filter(
             user=request.user,
             domain__organisation=request.user.organisation
         ).values_list('domain_id', flat=True)
         detected_models = DetectedModel.objects.filter(
-            domain_id__in=domain_ids,
-            organisation=request.user.organisation
+            organisation=request.user.organisation,
+            domain_id__in=domain_ids
         )
     
     serializer = DetectedModelSerializer(detected_models, many=True)
@@ -305,15 +279,12 @@ def detected_models_list(request):
 def detected_model_detail(request, pk):
     """Get or update a detected model"""
     try:
-        if request.user.role == 'admin':
+        if request.user.role == 'super_admin':
             detected_model = DetectedModel.objects.get(pk=pk, organisation=request.user.organisation)
         else:
-            # Check if user has access to the domain
-            detected_model = DetectedModel.objects.get(pk=pk, organisation=request.user.organisation)
-            DomainAccess.objects.get(
-                user=request.user,
-                domain=detected_model.domain
-            )
+            dm = DetectedModel.objects.get(pk=pk, organisation=request.user.organisation)
+            DomainAccess.objects.get(user=request.user, domain=dm.domain)
+            detected_model = dm
     except (DetectedModel.DoesNotExist, DomainAccess.DoesNotExist):
         return Response(
             {'error': 'Detected model not found or you do not have access'}, 
@@ -326,7 +297,7 @@ def detected_model_detail(request, pk):
     
     elif request.method == 'PUT':
         # Only admins can update detected models
-        if request.user.role != 'admin':
+        if request.user.role not in ['admin', 'super_admin']:
             return Response(
                 {'error': 'Only organization administrators can update detected models'}, 
                 status=status.HTTP_403_FORBIDDEN

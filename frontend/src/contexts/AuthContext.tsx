@@ -213,6 +213,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Permission checking functions
   const checkPermission = (module: string, requiredLevel: 'read' | 'write' | 'admin' = 'read'): boolean => {
     const permission = state.permissions.find(p => p.module === module);
+
+    // Super admin shortcut: full access
+    if (state.user?.role === 'super_admin') {
+      return true;
+    }
+
+    // Organization settings default for admin: allow unless explicitly restricted
+    if (module === 'organization_settings' && state.user?.role === 'admin') {
+      if (!permission) {
+        return true;
+      }
+      // fall through to normal level check when explicit permission exists
+    }
+
     if (!permission) return false;
 
     const levelHierarchy = { read: 1, write: 2, admin: 3 };

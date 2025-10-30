@@ -208,26 +208,7 @@ class ApiClient {
     return response.json();
   }
 
-  async acceptInvitation(invitationId: string, userData: {
-    first_name: string;
-    last_name: string;
-    password: string;
-  }): Promise<{ message: string; user: any }> {
-    const response = await fetch(`${this.baseURL}/auth/accept-invitation/${invitationId}/`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(userData),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to accept invitation');
-    }
-
-    return response.json();
-  }
+  
 
   // Permission management methods
   async checkPermissions(module?: string): Promise<any> {
@@ -383,7 +364,7 @@ class ApiClient {
   }
 
   // Domain Management methods
-  async getDomains(): Promise<{
+  async getDomains(options?: { manage?: boolean }): Promise<{
     domains: Array<{
       id: number;
       name: string;
@@ -400,7 +381,8 @@ class ApiClient {
       modified_at: string;
     }>;
   }> {
-    return await this.request('/domains/');
+    const query = options?.manage ? '?manage=1' : '';
+    return await this.request(`/domains/${query}`);
   }
 
   async createDomain(data: {
@@ -445,7 +427,7 @@ class ApiClient {
         first_name: string;
         last_name: string;
       };
-      access_level: 'viewer' | 'editor' | 'admin';
+      // no access level
       granted_by: {
         id: number;
         email: string;
@@ -458,7 +440,6 @@ class ApiClient {
 
   async grantDomainAccess(domainId: number, data: {
     user_id: number;
-    access_level: 'viewer' | 'editor' | 'admin';
   }): Promise<{
     message: string;
     access: any;
@@ -469,15 +450,13 @@ class ApiClient {
     });
   }
 
-  async updateDomainAccess(domainId: number, userId: number, data: {
-    access_level: 'viewer' | 'editor' | 'admin';
-  }): Promise<{
+  async updateDomainAccess(domainId: number, userId: number, data: {}): Promise<{
     message: string;
     access: any;
   }> {
     return await this.request(`/domains/${domainId}/access/${userId}/`, {
       method: 'PUT',
-      body: JSON.stringify(data),
+      body: JSON.stringify(data || {}),
     });
   }
 
@@ -544,6 +523,17 @@ class ApiClient {
       created_at: string;
       modified_at: string;
     }>;
+    invitations: Array<{
+      id: string;
+      email: string;
+      role: 'admin' | 'user';
+      status: 'pending' | 'accepted' | 'declined' | 'expired';
+      invited_by: number;
+      invited_by_email: string;
+      expires_at: string;
+      accepted_at?: string | null;
+      created_at: string;
+    }>;
   }> {
     return await this.request('/auth/team-members/');
   }
@@ -569,12 +559,14 @@ class ApiClient {
     search?: string;
     platform?: string;
     sentiment?: string;
-    page?: number;
     limit?: number;
+    offset?: number;
+    domain_id?: number;
   }): Promise<{
     mentions: any[];
     total_count: number;
     filters_applied: any;
+    pagination?: { limit: number; offset: number; returned: number };
     available_platforms: string[];
     available_sentiments: string[];
   }> {
@@ -582,17 +574,19 @@ class ApiClient {
     if (params?.search) queryParams.append('search', params.search);
     if (params?.platform) queryParams.append('platform', params.platform);
     if (params?.sentiment) queryParams.append('sentiment', params.sentiment);
-    if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.offset) queryParams.append('offset', params.offset.toString());
+    if (params?.domain_id) queryParams.append('domain_id', params.domain_id.toString());
     
     const queryString = queryParams.toString();
-    const response = await this.request(`/prompts/mentions/${queryString ? `?${queryString}` : ''}`);
+    const response: any = await this.request(`/prompts/mentions/${queryString ? `?${queryString}` : ''}`);
     
     // Transform the response to match expected structure
     return {
       mentions: response.mentions || [],
       total_count: response.total_count || 0,
       filters_applied: response.filters_applied || {},
+      pagination: response.pagination || undefined,
       available_platforms: response.available_platforms || [],
       available_sentiments: response.available_sentiments || []
     };
@@ -662,14 +656,19 @@ class ApiClient {
   async getPromptGroups(params?: {
     domain_id?: number;
     search?: string;
+    limit?: number;
+    offset?: number;
   }): Promise<{
     groups: any[];
     total_count: number;
     filters_applied: any;
+    pagination?: { limit: number; offset: number; returned: number };
   }> {
     const queryParams = new URLSearchParams();
     if (params?.domain_id) queryParams.append('domain_id', params.domain_id.toString());
     if (params?.search) queryParams.append('search', params.search);
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.offset) queryParams.append('offset', params.offset.toString());
     
     const queryString = queryParams.toString();
     return await this.request(`/prompts/groups/${queryString ? `?${queryString}` : ''}`);

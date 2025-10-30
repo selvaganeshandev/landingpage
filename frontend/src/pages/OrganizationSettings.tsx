@@ -31,7 +31,7 @@ export default function OrganizationSettings() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
-  
+
   // Organization state
   const [organization, setOrganization] = useState({
     id: 0,
@@ -41,7 +41,7 @@ export default function OrganizationSettings() {
     created_at: "",
     modified_at: "",
   });
-  
+
   // Domains state
   const [domains, setDomains] = useState<Array<{
     id: number;
@@ -58,9 +58,9 @@ export default function OrganizationSettings() {
     created_at: string;
     modified_at: string;
   }>>([]);
-  
+
   const [newDomain, setNewDomain] = useState("");
-  
+
   // Team members state
   const [teamMembers, setTeamMembers] = useState<Array<{
     id: number;
@@ -74,19 +74,37 @@ export default function OrganizationSettings() {
     created_at: string;
     modified_at: string;
   }>>([]);
-  
+  const [invitations, setInvitations] = useState<Array<{
+    id: string;
+    email: string;
+    role: 'admin' | 'user';
+    status: 'pending' | 'accepted' | 'declined' | 'expired';
+    invited_by: number;
+    invited_by_email: string;
+    expires_at: string;
+    accepted_at?: string | null;
+    created_at: string;
+  }>>([]);
+
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdatingOrg, setIsUpdatingOrg] = useState(false);
   const [isAddingDomain, setIsAddingDomain] = useState(false);
   const [isUpdatingMember, setIsUpdatingMember] = useState<number | null>(null);
-  
+  // Confirm dialogs
+  const [confirmDomainId, setConfirmDomainId] = useState<number | null>(null);
+  const [confirmMemberId, setConfirmMemberId] = useState<number | null>(null);
+
   // Dialog states
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "user">("user");
+  const roleMeta: Record<"admin" | "user", { label: string; description: string }> = {
+    user: { label: "User", description: "Can view and manage brand monitoring" },
+    admin: { label: "Admin", description: "Full access including team management" },
+  };
   const [addDomainDialogOpen, setAddDomainDialogOpen] = useState(false);
-  
+
   // Project Access Manager states
   const [projectAccessDialogOpen, setProjectAccessDialogOpen] = useState(false);
   const [selectedMemberForAccess, setSelectedMemberForAccess] = useState<{
@@ -158,7 +176,10 @@ export default function OrganizationSettings() {
   const loadTeamMembers = async () => {
     try {
       const data = await apiClient.getTeamMembers();
-      setTeamMembers(data.members);
+      // Exclude any super_admin accounts from team management UI
+      const filtered = (data.members || []).filter((m: any) => m.role !== 'super_admin');
+      setTeamMembers(filtered);
+      setInvitations(data.invitations || []);
     } catch (error) {
       console.error("Error loading team members:", error);
     }
@@ -178,17 +199,17 @@ export default function OrganizationSettings() {
       setIsAddingDomain(true);
       const domainName = newDomain.trim();
       const domainUrl = domainName.startsWith('http') ? domainName : `https://${domainName}`;
-      
+
       const response = await apiClient.createDomain({
         name: domainName,
         url: domainUrl,
       });
-      
+
       // Reload domains to get the updated list
       await loadDomains();
       setNewDomain("");
       setAddDomainDialogOpen(false);
-      
+
       toast({
         title: "Domain added",
         description: `${domainName} has been added to your organization.`,
@@ -204,13 +225,13 @@ export default function OrganizationSettings() {
     }
   };
 
-  const handleRemoveDomain = async (id: number) => {
+  const handleRemoveDomainConfirmed = async (id: number) => {
     try {
       await apiClient.deleteDomain(id);
-      
+
       // Reload domains to get the updated list
       await loadDomains();
-      
+
       toast({
         title: "Domain removed",
         description: "The domain has been removed from your organization.",
@@ -227,12 +248,12 @@ export default function OrganizationSettings() {
   const handleUpdateOrgName = async () => {
     try {
       setIsUpdatingOrg(true);
-      
+
       await apiClient.updateOrganization({
         name: organization.name,
         industry: organization.industry,
       });
-      
+
       toast({
         title: "Organization updated",
         description: "Your organization details have been updated.",
@@ -256,11 +277,11 @@ export default function OrganizationSettings() {
         email: inviteEmail.trim(),
         role: inviteRole,
       });
-      
+
       setInviteEmail("");
       setInviteRole("user");
       setInviteDialogOpen(false);
-      
+
       toast({
         title: "Invitation sent",
         description: `An invitation has been sent to ${inviteEmail.trim()}`,
@@ -274,13 +295,13 @@ export default function OrganizationSettings() {
     }
   };
 
-  const handleRemoveMember = async (id: number) => {
+  const handleRemoveMemberConfirmed = async (id: number) => {
     try {
       await apiClient.removeTeamMember(id);
-      
+
       // Reload team members to get the updated list
       await loadTeamMembers();
-      
+
       toast({
         title: "Member removed",
         description: "Team member has been removed from the organization.",
@@ -297,12 +318,12 @@ export default function OrganizationSettings() {
   const handleUpdateRole = async (id: number, newRole: "admin" | "user") => {
     try {
       setIsUpdatingMember(id);
-      
+
       await apiClient.updateTeamMemberRole(id, newRole);
-      
+
       // Reload team members to get the updated list
       await loadTeamMembers();
-      
+
       toast({
         title: "Role updated",
         description: "Team member role has been updated.",
@@ -356,33 +377,33 @@ export default function OrganizationSettings() {
 
     // TODO: Connect to OAuth flow for GA/GSC
     const domain = domains.find(d => d.id === selectedDomainForIntegration);
-    
-    const newIntegration = integrationType === "google_analytics" 
+
+    const newIntegration = integrationType === "google_analytics"
       ? {
-          id: Date.now().toString(),
-          domainId: selectedDomainForIntegration,
-          domain: domain?.domain || "",
-          type: "google_analytics" as const,
-          propertyId: `GA-${Math.floor(Math.random() * 1000000000)}`,
-          connectedAt: new Date().toISOString().split("T")[0],
-          status: "active" as const,
-          lastSync: new Date().toISOString()
-        }
+        id: Date.now().toString(),
+        domainId: selectedDomainForIntegration,
+        domain: domain?.domain || "",
+        type: "google_analytics" as const,
+        propertyId: `GA-${Math.floor(Math.random() * 1000000000)}`,
+        connectedAt: new Date().toISOString().split("T")[0],
+        status: "active" as const,
+        lastSync: new Date().toISOString()
+      }
       : {
-          id: Date.now().toString(),
-          domainId: selectedDomainForIntegration,
-          domain: domain?.domain || "",
-          type: "search_console" as const,
-          propertyUrl: `https://${domain?.domain}`,
-          connectedAt: new Date().toISOString().split("T")[0],
-          status: "active" as const,
-          lastSync: new Date().toISOString()
-        };
+        id: Date.now().toString(),
+        domainId: selectedDomainForIntegration,
+        domain: domain?.domain || "",
+        type: "search_console" as const,
+        propertyUrl: `https://${domain?.domain}`,
+        connectedAt: new Date().toISOString().split("T")[0],
+        status: "active" as const,
+        lastSync: new Date().toISOString()
+      };
 
     setIntegrations([...integrations, newIntegration]);
     setConnectIntegrationDialog(false);
     setSelectedDomainForIntegration("");
-    
+
     toast({
       title: "Integration connected",
       description: `${integrationType === "google_analytics" ? "Google Analytics" : "Search Console"} has been connected to ${domain?.domain}`,
@@ -436,22 +457,11 @@ export default function OrganizationSettings() {
               <Input
                 id="org-name"
                 value={organization.name}
-                onChange={(e) => setOrganization({...organization, name: e.target.value})}
+                onChange={(e) => setOrganization({ ...organization, name: e.target.value })}
               />
               <Button onClick={handleUpdateOrgName} disabled={isUpdatingOrg}>
                 {isUpdatingOrg ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
               </Button>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="org-industry">Industry</Label>
-            <div className="flex gap-2">
-              <Input
-                id="org-industry"
-                value={organization.industry}
-                onChange={(e) => setOrganization({...organization, industry: e.target.value})}
-                placeholder="e.g., Technology, Healthcare, Finance"
-              />
             </div>
           </div>
         </CardContent>
@@ -489,22 +499,15 @@ export default function OrganizationSettings() {
                   <div className="flex items-center gap-3">
                     <Globe className="h-4 w-4 text-muted-foreground" />
                     <div>
-                      <p className="font-medium">{domain.name}</p>
+                      <p className="font-medium capitalize">{domain.name}</p>
                       <p className="text-sm text-muted-foreground">{domain.url}</p>
-                      <div className="flex gap-2 mt-1">
-                        <Badge variant="default" className="text-xs">
-                          {domain.total_mentions} mentions
-                        </Badge>
-                        <Badge variant="secondary" className="text-xs">
-                          Score: {domain.visibility_score}
-                        </Badge>
-                      </div>
+
                     </div>
                   </div>
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => handleRemoveDomain(domain.id)}
+                    onClick={() => setConfirmDomainId(domain.id)}
                   >
                     <Trash2 className="h-4 w-4 text-destructive" />
                   </Button>
@@ -531,8 +534,8 @@ export default function OrganizationSettings() {
           <Separator />
 
           <div className="space-y-4">
-            {domains.map((domain) => {
-              const domainIntegrations = getIntegrationsByDomain(domain.id);
+            {/* {domains.map((domain) => {
+              const domainIntegrations: any[] = [];
               return (
                 <div key={domain.id} className="p-4 border rounded-lg space-y-3">
                   <div className="flex items-center justify-between">
@@ -609,7 +612,10 @@ export default function OrganizationSettings() {
                   )}
                 </div>
               );
-            })}
+            })} */}
+            <div className="text-sm text-muted-foreground bg-muted/30 rounded p-3">
+              No integrations connected for this domain
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -628,6 +634,50 @@ export default function OrganizationSettings() {
           </Button>
 
           <Separator />
+
+          {invitations.length > 0 && (
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium">Team Invitations</h4>
+              {invitations.map((inv) => (
+                <div
+                  key={inv.id}
+                  className="flex items-center justify-between p-4 border rounded-lg"
+                >
+                  <div className="flex items-center gap-4 flex-1">
+                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <Mail className="h-5 w-5 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium">{inv.email}</p>
+                        {inv.role === 'admin' ? (
+                          <Badge variant="default" className="gap-1">
+                            <Crown className="h-3 w-3" />
+                            Admin
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary">User</Badge>
+                        )}
+                        <Badge variant="secondary" className="gap-1">
+                          {inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
+                        {inv.status === 'pending' ? (
+                          <span>Expires {new Date(inv.expires_at).toLocaleDateString()}</span>
+                        ) : inv.accepted_at ? (
+                          <span>Accepted {new Date(inv.accepted_at).toLocaleDateString()}</span>
+                        ) : (
+                          <span>Created {new Date(inv.created_at).toLocaleDateString()}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <Separator />
+            </div>
+          )}
 
           <div className="space-y-3">
             {teamMembers.length === 0 ? (
@@ -650,7 +700,7 @@ export default function OrganizationSettings() {
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
-                          <p className="font-medium">{memberName}</p>
+                          <p className="font-medium capitalize">{memberName}</p>
                           {member.role === "admin" && (
                             <Badge variant="default" className="gap-1">
                               <Crown className="h-3 w-3" />
@@ -672,21 +722,6 @@ export default function OrganizationSettings() {
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Select
-                          value={member.role}
-                          onValueChange={(value: "admin" | "user") =>
-                            handleUpdateRole(member.id, value)
-                          }
-                          disabled={isUpdatingMember === member.id}
-                        >
-                          <SelectTrigger className="w-[120px]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="admin">Admin</SelectItem>
-                            <SelectItem value="user">User</SelectItem>
-                          </SelectContent>
-                        </Select>
                         <Button
                           variant="outline"
                           size="icon"
@@ -706,7 +741,7 @@ export default function OrganizationSettings() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => handleRemoveMember(member.id)}
+                          onClick={() => setConfirmMemberId(member.id)}
                           disabled={isUpdatingMember === member.id}
                         >
                           <Trash2 className="h-4 w-4 text-destructive" />
@@ -736,6 +771,7 @@ export default function OrganizationSettings() {
                 id="invite-email"
                 type="email"
                 placeholder="colleague@company.com"
+                className="placeholder:text-muted-foreground placeholder:opacity-70"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
               />
@@ -753,27 +789,25 @@ export default function OrganizationSettings() {
                   <SelectItem value="user">
                     <div className="flex items-center gap-2">
                       <User className="h-4 w-4" />
-                      <div>
-                        <p className="font-medium">User</p>
-                        <p className="text-xs text-muted-foreground">
-                          Can view and manage brand monitoring
-                        </p>
-                      </div>
+                      <span className="font-medium">User</span>
                     </div>
                   </SelectItem>
                   <SelectItem value="admin">
                     <div className="flex items-center gap-2">
                       <Crown className="h-4 w-4" />
-                      <div>
-                        <p className="font-medium">Admin</p>
-                        <p className="text-xs text-muted-foreground">
-                          Full access including team management
-                        </p>
-                      </div>
+                      <span className="font-medium">Admin</span>
                     </div>
                   </SelectItem>
                 </SelectContent>
               </Select>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                {inviteRole === 'admin' ? (
+                  <Crown className="h-3 w-3" />
+                ) : (
+                  <User className="h-3 w-3" />
+                )}
+                <span>{roleMeta[inviteRole].description}</span>
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -833,23 +867,25 @@ export default function OrganizationSettings() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="google_analytics">
-                    <div className="flex flex-col">
-                      <p className="font-medium">Google Analytics</p>
-                      <p className="text-xs text-muted-foreground">
-                        Track user behavior and conversions
-                      </p>
+                    <div className="flex items-center gap-2">
+                      <Link2 className="h-4 w-4" />
+                      <span className="font-medium">Google Analytics</span>
                     </div>
                   </SelectItem>
                   <SelectItem value="search_console">
-                    <div className="flex flex-col">
-                      <p className="font-medium">Google Search Console</p>
-                      <p className="text-xs text-muted-foreground">
-                        Monitor search performance and queries
-                      </p>
+                    <div className="flex items-center gap-2">
+                      <Link2 className="h-4 w-4" />
+                      <span className="font-medium">Google Search Console</span>
                     </div>
                   </SelectItem>
                 </SelectContent>
               </Select>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                <Link2 className="h-3 w-3" />
+                <span>
+                  {integrationType === 'google_analytics' ? 'Track user behavior and conversions' : 'Monitor search performance and queries'}
+                </span>
+              </div>
             </div>
             <div className="bg-muted/50 p-3 rounded text-sm">
               <p className="font-medium mb-1">Next Steps:</p>
@@ -905,6 +941,58 @@ export default function OrganizationSettings() {
             <Button onClick={handleAddDomain} disabled={isAddingDomain}>
               {isAddingDomain ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
               Add Domain
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm Delete Domain */}
+      <Dialog open={confirmDomainId !== null} onOpenChange={(open) => !open && setConfirmDomainId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Domain</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove this domain? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDomainId(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (confirmDomainId !== null) {
+                  await handleRemoveDomainConfirmed(confirmDomainId);
+                  setConfirmDomainId(null);
+                }
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm Remove Team Member */}
+      <Dialog open={confirmMemberId !== null} onOpenChange={(open) => !open && setConfirmMemberId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Team Member</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove this member? The account will be deactivated.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmMemberId(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (confirmMemberId !== null) {
+                  await handleRemoveMemberConfirmed(confirmMemberId);
+                  setConfirmMemberId(null);
+                }
+              }}
+            >
+              Remove
             </Button>
           </DialogFooter>
         </DialogContent>

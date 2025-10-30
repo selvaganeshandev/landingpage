@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useDomainStore } from "@/stores/domainStore";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 
 export const DomainSelector = () => {
@@ -32,14 +33,31 @@ export const DomainSelector = () => {
     selectDefaultDomain,
     clearDomainStore
   } = useDomainStore();
+  const { user } = useAuth();
 
   // Load domains on component mount
   useEffect(() => {
-    // Clear any cached data first
     clearDomainStore();
-    // Then load fresh data
     loadDomains();
   }, [loadDomains, clearDomainStore]);
+
+  // After domains load, restore last selected domain for this user
+  useEffect(() => {
+    if (!user) return;
+    if (domains.length === 0) return;
+    const key = `selected_domain_user_${user.id}`;
+    const savedId = parseInt(localStorage.getItem(key) || '', 10);
+    const exists = domains.find(d => d.id === savedId);
+    if (exists) {
+      setSelectedDomain(exists);
+    } else {
+      // if current selected not in list, pick first
+      if (!selectedDomain || !domains.find(d => d.id === selectedDomain.id)) {
+        setSelectedDomain(domains[0]);
+        localStorage.setItem(key, String(domains[0].id));
+      }
+    }
+  }, [domains, user, setSelectedDomain]);
 
   // Show error if domain loading failed
   useEffect(() => {
@@ -57,6 +75,9 @@ export const DomainSelector = () => {
     if (domain) {
       setSelectedDomain(domain);
       setOpen(false);
+      if (user) {
+        localStorage.setItem(`selected_domain_user_${user.id}`, String(domain.id));
+      }
     }
   };
 

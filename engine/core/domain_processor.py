@@ -211,8 +211,14 @@ class DomainProcessor:
                     average_position=0.00
                 )
                 
-                # Create primary prompts
+                # Create primary prompts (limit to 1) and convert the rest to secondary
                 primary_prompts = group_data.get('primary_prompts', [])
+                if len(primary_prompts) > 1:
+                    # Keep only the first as primary, move the rest to secondary list
+                    extra_primaries = primary_prompts[1:]
+                    primary_prompts = primary_prompts[:1]
+                    # Merge extras into secondary list
+                    group_data['secondary_prompts'] = extra_primaries + group_data.get('secondary_prompts', [])
                 for prompt_text in primary_prompts:
                     if prompt_text.strip():
                         prompt = Prompt.objects.create(

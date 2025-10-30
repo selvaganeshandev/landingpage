@@ -5,7 +5,7 @@ export interface User {
   email: string;
   first_name: string;
   last_name: string;
-  role: 'admin' | 'user';
+  role: 'super_admin' | 'admin' | 'user';
   organisation: number;
   organisation_name: string;
   is_active: boolean;

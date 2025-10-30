@@ -147,16 +147,11 @@ class DetectedModel(models.Model):
         return f"{self.name} - {self.domain.name}"
 
 
+# DomainAccess model removed - domain-level access management deprecated
 class DomainAccess(models.Model):
     """
-    Controls which users can access specific domains
+    Controls which users can access specific domains (no granular levels)
     """
-    ACCESS_LEVEL_CHOICES = [
-        ('viewer', 'Viewer'),
-        ('editor', 'Editor'),
-        ('admin', 'Admin'),
-    ]
-    
     user = models.ForeignKey(
         'authentication.Account',
         on_delete=models.CASCADE,
@@ -167,11 +162,6 @@ class DomainAccess(models.Model):
         on_delete=models.CASCADE,
         related_name='user_access'
     )
-    access_level = models.CharField(
-        max_length=10,
-        choices=ACCESS_LEVEL_CHOICES,
-        default='viewer'
-    )
     granted_by = models.ForeignKey(
         'authentication.Account',
         on_delete=models.CASCADE,
@@ -179,12 +169,12 @@ class DomainAccess(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         unique_together = ['user', 'domain']
         db_table = 'domain_access'
         verbose_name = 'Domain Access'
         verbose_name_plural = 'Domain Access'
-    
+
     def __str__(self):
-        return f"{self.user.email} - {self.domain.name} ({self.access_level})"
+        return f"{self.user.email} - {self.domain.name}"

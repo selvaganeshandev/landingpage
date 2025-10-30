@@ -38,6 +38,16 @@ const MentionDetail = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [relatedMentions, setRelatedMentions] = useState<any[]>([]);
 
+  const formatDateTime = (iso?: string) => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString();
+    } catch {
+      return iso;
+    }
+  };
+
   // Function to process content and convert markdown-like syntax to HTML
   const processContent = (content: string) => {
     if (!content) return '';
@@ -208,14 +218,7 @@ const MentionDetail = () => {
     );
   }
 
-  const trendData = [
-    { date: "Jan 10", mentions: 4, position: 2.1 },
-    { date: "Jan 11", mentions: 6, position: 1.8 },
-    { date: "Jan 12", mentions: 5, position: 1.9 },
-    { date: "Jan 13", mentions: 8, position: 1.6 },
-    { date: "Jan 14", mentions: 7, position: 1.5 },
-    { date: "Jan 15", mentions: 9, position: 1.4 },
-  ];
+  const trendData: Array<{ date: string; mentions: number; position: number }> = [];
 
   return (
     <div className="p-8 space-y-6">
@@ -269,7 +272,7 @@ const MentionDetail = () => {
                     </div>
                     <p className="text-sm text-muted-foreground">
                       <Clock className="h-3 w-3 inline mr-1" />
-                      {mention.time_ago} • {mention.created_at}
+                      {mention.time_ago} • {formatDateTime(mention.created_at)}
                     </p>
                   </div>
                 </div>
@@ -341,7 +344,7 @@ const MentionDetail = () => {
                                   <Badge variant="outline" className="text-xs">
                                     {citation.reliability || "Verified"}
                                   </Badge>
-                                  <span className="text-xs text-muted-foreground">{citation.referenced_at || "Recently referenced"}</span>
+                                  <span className="text-xs text-muted-foreground">{citation.referenced_at ? formatDateTime(citation.referenced_at) : "Recently referenced"}</span>
                                 </div>
                               </div>
                             </div>
@@ -396,28 +399,34 @@ const MentionDetail = () => {
 
                 <div className="pt-4">
                   <h3 className="text-lg font-semibold mb-4 font-outfit">Position Trend</h3>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={trendData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                      <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} reversed />
-                      <Tooltip 
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "var(--radius)",
-                        }}
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="position" 
-                        name="Avg Position"
-                        stroke="hsl(var(--primary))" 
-                        strokeWidth={3}
-                        dot={{ fill: "hsl(var(--primary))", r: 4 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  {trendData.length === 0 ? (
+                    <div className="h-[250px] flex items-center justify-center text-sm text-muted-foreground border border-border/50 rounded-md">
+                      No trend data available
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <LineChart data={trendData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                        <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} reversed />
+                        <Tooltip 
+                          contentStyle={{
+                            backgroundColor: "hsl(var(--card))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: "var(--radius)",
+                          }}
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="position" 
+                          name="Avg Position"
+                          stroke="hsl(var(--primary))" 
+                          strokeWidth={3}
+                          dot={{ fill: "hsl(var(--primary))", r: 4 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
               </TabsContent>
 

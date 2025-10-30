@@ -13,6 +13,7 @@ import {
   Globe,
   Bell,
   Users,
+  User,
   FileText,
   Brain,
   Sparkles,
@@ -34,28 +35,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { MODULES } from "@/types/auth";
 
-const iconMap = {
-  LayoutDashboard,
-  Search,
-  MessageSquare,
-  TrendingUp,
-  BarChart3,
-  Target,
-  Link2,
-  LineChart,
-  Globe,
-  Bell,
-  Users,
-  FileText,
-  Brain,
-  Sparkles,
-  AlertTriangle,
-  Network,
-  Activity,
-  Lightbulb,
-  Zap,
-  Calendar,
-};
+// Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
 
 const NavGroup = ({ group, location }: { group: any; location: any }) => {
   const [isOpen, setIsOpen] = useState(true);
@@ -66,7 +46,7 @@ const NavGroup = ({ group, location }: { group: any; location: any }) => {
   // If group has only one item, render it directly
   if (group.items.length === 1) {
     const item = group.items[0];
-    const Icon = iconMap[item.icon as keyof typeof iconMap] || LayoutDashboard;
+    const Icon = (item.icon as any) || LayoutDashboard;
     const isActive = location.pathname === item.path;
     
     return (
@@ -79,13 +59,13 @@ const NavGroup = ({ group, location }: { group: any; location: any }) => {
             : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
         )}
       >
-        <Icon className="h-4 w-4" />
+        <Icon className={cn("h-4 w-4", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
         {item.name}
       </Link>
     );
   }
   
-  const GroupIcon = group.icon ? iconMap[group.icon as keyof typeof iconMap] : null;
+  const GroupIcon = (group.icon as any) || LayoutDashboard;
   
   return (
     <div className="space-y-1">
@@ -99,7 +79,7 @@ const NavGroup = ({ group, location }: { group: any; location: any }) => {
         )}
       >
         <div className="flex items-center gap-3">
-          {GroupIcon && <GroupIcon className="h-4 w-4" />}
+          {GroupIcon && <GroupIcon className="h-4 w-4 text-foreground" />}
           <span>{group.name}</span>
         </div>
         {isOpen ? (
@@ -112,7 +92,7 @@ const NavGroup = ({ group, location }: { group: any; location: any }) => {
       {isOpen && (
         <div className="ml-4 space-y-1">
           {group.items.map((item: any) => {
-            const Icon = iconMap[item.icon as keyof typeof iconMap] || LayoutDashboard;
+            const Icon = (item.icon as any) || LayoutDashboard;
             const isActive = location.pathname === item.path;
             
             return (
@@ -126,7 +106,7 @@ const NavGroup = ({ group, location }: { group: any; location: any }) => {
                     : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                 )}
               >
-                <Icon className="h-3 w-3" />
+                <Icon className={cn("h-3 w-3", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
                 {item.name}
               </Link>
             );
@@ -187,15 +167,37 @@ export const Sidebar = () => {
       </nav>
       
       <div className="p-4 border-t border-border mt-auto space-y-2">
-        {/* Profile/Organization Settings */}
+        {/* Organization / Profile shortcuts */}
         {user && (
-          <Link
-            to={user.role === 'admin' ? "/organization-settings" : "/profile"}
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          >
-            <Settings className="h-4 w-4" />
-            {user.role === 'admin' ? 'Organization' : 'Profile'}
-          </Link>
+          <div className="space-y-2">
+            {(user.role === 'admin' || user.role === 'super_admin') && (
+              <Link
+                to="/organization-settings"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
+                <Settings className="h-4 w-4" />
+                Organization
+              </Link>
+            )}
+            {user.role === 'admin' && (
+              <Link
+                to="/profile"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
+                <User className="h-4 w-4 text-foreground" />
+                Profile
+              </Link>
+            )}
+            {user.role === 'user' && (
+              <Link
+                to="/profile"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
+                <User className="h-4 w-4 text-foreground" />
+                Profile
+              </Link>
+            )}
+          </div>
         )}
         
         <button

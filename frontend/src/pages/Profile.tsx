@@ -63,13 +63,13 @@ export default function Profile() {
   }
 
   return (
-    <div className="container mx-auto p-6 max-w-4xl">
-      <div className="mb-6">
+    <div className="p-8 space-y-6">
+      <div>
         <h1 className="text-3xl font-bold">Profile</h1>
         <p className="text-muted-foreground">Manage your account information and preferences</p>
       </div>
 
-      <div className="grid gap-6">
+      <div className="space-y-6">
         {/* Profile Information */}
         <Card>
           <CardHeader>
