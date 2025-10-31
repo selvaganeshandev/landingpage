@@ -38,7 +38,7 @@ class ApiClient {
         const errorData: ApiError = await response.json().catch(() => ({
           error: `HTTP ${response.status}: ${response.statusText}`,
         }));
-        throw new Error(errorData.error || errorData.detail || 'Request failed');
+        throw new Error(errorData.error || (errorData as any).detail || 'Request failed');
       }
 
       return await response.json();
@@ -824,6 +824,439 @@ class ApiClient {
     
     const queryString = queryParams.toString();
     return await this.request(`/prompts/prompts/${promptId}/analytics/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  // ==================== ALERTS API ====================
+  
+  async getAlerts(params?: {
+    domain_id?: number;
+    status?: 'active' | 'investigating' | 'resolved';
+    type?: string;
+    severity?: 'high' | 'medium' | 'low';
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.domain_id) queryParams.append('domain_id', params.domain_id.toString());
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.type) queryParams.append('type', params.type);
+    if (params?.severity) queryParams.append('severity', params.severity);
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/alerts/alerts/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getAlert(id: number): Promise<any> {
+    return await this.request(`/alerts/alerts/${id}/`);
+  }
+
+  async createAlert(data: {
+    domain: number;
+    type: string;
+    severity: string;
+    title: string;
+    message: string;
+    platform?: string;
+    metric?: number;
+  }): Promise<any> {
+    return await this.request('/alerts/alerts/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateAlert(id: number, data: any): Promise<any> {
+    return await this.request(`/alerts/alerts/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async resolveAlert(id: number): Promise<{ status: string }> {
+    return await this.request(`/alerts/alerts/${id}/resolve/`, {
+      method: 'POST',
+    });
+  }
+
+  async investigateAlert(id: number): Promise<{ status: string }> {
+    return await this.request(`/alerts/alerts/${id}/investigate/`, {
+      method: 'POST',
+    });
+  }
+
+  async getActiveAlerts(): Promise<any[]> {
+    return await this.request('/alerts/alerts/active/');
+  }
+
+  async getAlertSummary(domainId?: number): Promise<{
+    total: number;
+    active: number;
+    high_priority: number;
+    investigating: number;
+    resolved_today: number;
+  }> {
+    const queryParams = new URLSearchParams();
+    if (domainId) queryParams.append('domain_id', domainId.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/alerts/alerts/summary/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  // Alert Rules
+  async getAlertRules(params?: { domain_id?: number }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.domain_id) queryParams.append('domain_id', params.domain_id.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/alerts/alert-rules/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async createAlertRule(data: {
+    domain: number;
+    name: string;
+    description: string;
+    enabled: boolean;
+    conditions: any;
+    notification_channels: string[];
+  }): Promise<any> {
+    return await this.request('/alerts/alert-rules/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateAlertRule(id: number, data: any): Promise<any> {
+    return await this.request(`/alerts/alert-rules/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async toggleAlertRule(id: number): Promise<{ enabled: boolean }> {
+    return await this.request(`/alerts/alert-rules/${id}/toggle/`, {
+      method: 'POST',
+    });
+  }
+
+  // ==================== COMPETITORS API ====================
+  
+  async getCompetitors(params?: { domain_id?: number }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.domain_id) queryParams.append('domain_id', params.domain_id.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/competitors/competitors/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getCompetitorsByDomain(domainId: number): Promise<any[]> {
+    return await this.request(`/competitors/competitors/by_domain/?domain_id=${domainId}`);
+  }
+
+  async getCompetitor(id: number): Promise<any> {
+    return await this.request(`/competitors/competitors/${id}/`);
+  }
+
+  async createCompetitor(data: {
+    domain: number;
+    name: string;
+    url: string;
+    mentions?: number;
+    visibility_score?: number;
+    sentiment?: number;
+  }): Promise<any> {
+    return await this.request('/competitors/competitors/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateCompetitor(id: number, data: any): Promise<any> {
+    return await this.request(`/competitors/competitors/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteCompetitor(id: number): Promise<void> {
+    return await this.request(`/competitors/competitors/${id}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getCompetitorComparison(domainId: number): Promise<{
+    competitors: any[];
+    summary: {
+      total_competitors: number;
+      avg_mentions: number;
+      total_market_mentions: number;
+    };
+  }> {
+    return await this.request(`/competitors/competitors/comparison/?domain_id=${domainId}`);
+  }
+
+  // Competitor Analytics
+  async getCompetitorAnalytics(params?: {
+    competitor_id?: number;
+    days?: number;
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.competitor_id) queryParams.append('competitor_id', params.competitor_id.toString());
+    if (params?.days) queryParams.append('days', params.days.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/competitors/competitor-analytics/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getCompetitorTrends(competitorId: number, days: number = 30): Promise<any[]> {
+    return await this.request(`/competitors/competitor-analytics/trends/?competitor_id=${competitorId}&days=${days}`);
+  }
+
+  // Competitor Prompts
+  async getCompetitorPrompts(competitorId?: number): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (competitorId) queryParams.append('competitor_id', competitorId.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/competitors/competitor-prompts/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getAnswerGaps(domainId: number): Promise<any[]> {
+    return await this.request(`/competitors/competitor-prompts/answer_gaps/?domain_id=${domainId}`);
+  }
+
+  // ==================== TOPICS API ====================
+  
+  async getTopics(params?: { domain_id?: number }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.domain_id) queryParams.append('domain_id', params.domain_id.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/topics/topics/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getTopicsByDomain(domainId: number): Promise<any[]> {
+    return await this.request(`/topics/topics/by_domain/?domain_id=${domainId}`);
+  }
+
+  async getTopic(id: number): Promise<any> {
+    return await this.request(`/topics/topics/${id}/`);
+  }
+
+  async createTopic(data: {
+    domain: number;
+    name: string;
+    keywords: string[];
+    platforms?: string[];
+  }): Promise<any> {
+    return await this.request('/topics/topics/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateTopic(id: number, data: any): Promise<any> {
+    return await this.request(`/topics/topics/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteTopic(id: number): Promise<void> {
+    return await this.request(`/topics/topics/${id}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getTrendingTopics(domainId?: number): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (domainId) queryParams.append('domain_id', domainId.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/topics/topics/trending/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  // Topic Analytics
+  async getTopicAnalytics(params?: {
+    topic_id?: number;
+    days?: number;
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.topic_id) queryParams.append('topic_id', params.topic_id.toString());
+    if (params?.days) queryParams.append('days', params.days.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/topics/topic-analytics/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getTopicTrends(topicId: number, days: number = 30): Promise<any[]> {
+    return await this.request(`/topics/topic-analytics/trends/?topic_id=${topicId}&days=${days}`);
+  }
+
+  // Topic Prompts
+  async getTopicPrompts(topicId?: number): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (topicId) queryParams.append('topic_id', topicId.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/topics/topic-prompts/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getHighRelevancePrompts(params?: {
+    topic_id?: number;
+    min_score?: number;
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.topic_id) queryParams.append('topic_id', params.topic_id.toString());
+    if (params?.min_score) queryParams.append('min_score', params.min_score.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/topics/topic-prompts/high_relevance/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  // ==================== ANALYTICS API ====================
+  
+  // Sentiment Analytics
+  async getSentimentAnalytics(params?: {
+    domain_id?: number;
+    days?: number;
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.domain_id) queryParams.append('domain_id', params.domain_id.toString());
+    if (params?.days) queryParams.append('days', params.days.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/analytics/sentiment-analytics/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getSentimentByDomain(domainId: number, days: number = 30): Promise<any[]> {
+    return await this.request(`/analytics/sentiment-analytics/by_domain/?domain_id=${domainId}&days=${days}`);
+  }
+
+  async getSentimentSummary(domainId: number, days: number = 7): Promise<{
+    positive_percentage: number;
+    neutral_percentage: number;
+    negative_percentage: number;
+    total_mentions: number;
+    themes: any[];
+  }> {
+    return await this.request(`/analytics/sentiment-analytics/summary/?domain_id=${domainId}&days=${days}`);
+  }
+
+  // Share of Voice Analytics
+  async getShareOfVoice(params?: {
+    domain_id?: number;
+    days?: number;
+    platform?: string;
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.domain_id) queryParams.append('domain_id', params.domain_id.toString());
+    if (params?.days) queryParams.append('days', params.days.toString());
+    if (params?.platform) queryParams.append('platform', params.platform);
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/analytics/share-of-voice/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getShareOfVoiceByDomain(domainId: number, params?: {
+    days?: number;
+    platform?: string;
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    queryParams.append('domain_id', domainId.toString());
+    if (params?.days) queryParams.append('days', params.days.toString());
+    if (params?.platform) queryParams.append('platform', params.platform);
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/analytics/share-of-voice/by_domain/?${queryString}`);
+  }
+
+  async getShareOfVoiceComparison(domainId: number, params?: {
+    date?: string;
+    platform?: string;
+  }): Promise<{
+    your_brand: any;
+    competitors: any[];
+    total_market_mentions: number;
+  }> {
+    const queryParams = new URLSearchParams();
+    queryParams.append('domain_id', domainId.toString());
+    if (params?.date) queryParams.append('date', params.date);
+    if (params?.platform) queryParams.append('platform', params.platform);
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/analytics/share-of-voice/comparison/?${queryString}`);
+  }
+
+  // ==================== INTEGRATIONS API ====================
+  
+  async getIntegrations(params?: { domain_id?: number }): Promise<any[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.domain_id) queryParams.append('domain_id', params.domain_id.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/integrations/integrations/${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getIntegrationsByDomain(domainId: number): Promise<any[]> {
+    return await this.request(`/integrations/integrations/by_domain/?domain_id=${domainId}`);
+  }
+
+  async getIntegration(id: number): Promise<any> {
+    return await this.request(`/integrations/integrations/${id}/`);
+  }
+
+  async createIntegration(data: {
+    domain: number;
+    type: 'google_analytics' | 'search_console' | 'slack' | 'sms' | 'cms';
+    provider_id: string;
+    credentials: any;
+  }): Promise<any> {
+    return await this.request('/integrations/integrations/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateIntegration(id: number, data: any): Promise<any> {
+    return await this.request(`/integrations/integrations/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteIntegration(id: number): Promise<void> {
+    return await this.request(`/integrations/integrations/${id}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  async testIntegration(id: number): Promise<{ status: string; message: string }> {
+    return await this.request(`/integrations/integrations/${id}/test_connection/`, {
+      method: 'POST',
+    });
+  }
+
+  async disconnectIntegration(id: number): Promise<{ status: string; message: string }> {
+    return await this.request(`/integrations/integrations/${id}/disconnect/`, {
+      method: 'POST',
+    });
+  }
+
+  async syncIntegration(id: number): Promise<{ status: string; last_sync_at: string }> {
+    return await this.request(`/integrations/integrations/${id}/sync/`, {
+      method: 'POST',
+    });
+  }
+
+  async getIntegrationStatusSummary(domainId?: number): Promise<{
+    total: number;
+    active: number;
+    error: number;
+    disconnected: number;
+  }> {
+    const queryParams = new URLSearchParams();
+    if (domainId) queryParams.append('domain_id', domainId.toString());
+    
+    const queryString = queryParams.toString();
+    return await this.request(`/integrations/integrations/status_summary/${queryString ? `?${queryString}` : ''}`);
   }
 }
 

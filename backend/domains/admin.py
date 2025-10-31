@@ -6,9 +6,9 @@ from .models import Domain
 class DomainAdmin(admin.ModelAdmin):
     list_display = [
         'name', 'url', 'organisation', 'total_mentions', 'total_citations', 
-        'visibility_score', 'sentiment', 'sentiment_score', 'created_at'
+        'visibility_score', 'sentiment_category', 'sentiment_score', 'created_at'
     ]
-    list_filter = ['sentiment', 'organisation', 'created_at']
+    list_filter = ['sentiment_category', 'organisation', 'created_at']
     search_fields = ['name', 'url', 'organisation__name']
     readonly_fields = ['created_at', 'modified_at']
     ordering = ['name']
@@ -21,7 +21,7 @@ class DomainAdmin(admin.ModelAdmin):
             'fields': ('total_mentions', 'total_citations', 'visibility_score', 'average_position')
         }),
         ('Alerts & Sentiment', {
-            'fields': ('active_alerts', 'sentiment', 'sentiment_score')
+            'fields': ('active_alerts', 'sentiment_category', 'sentiment_score')
         }),
         ('Timestamps', {
             'fields': ('created_at', 'modified_at'),

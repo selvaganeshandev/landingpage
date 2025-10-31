@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Domain, DetectedModel, DomainAccess
+from .models import Domain, DomainAccess
 
 
 class DomainSerializer(serializers.ModelSerializer):
@@ -11,7 +11,7 @@ class DomainSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'url', 'organisation', 'organisation_name',
             'total_mentions', 'total_citations', 'visibility_score', 
-            'average_position', 'active_alerts', 'sentiment', 
+            'average_position', 'active_alerts', 'sentiment_category', 
             'sentiment_score', 'created_at', 'modified_at'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
@@ -29,18 +29,6 @@ class DomainDetailSerializer(DomainSerializer):
         keywords = obj.keywords.all()
         return KeywordSerializer(keywords, many=True).data
 
-
-class DetectedModelSerializer(serializers.ModelSerializer):
-    """Serializer for DetectedModel"""
-    domain_name = serializers.CharField(source='domain.name', read_only=True)
-    
-    class Meta:
-        model = DetectedModel
-        fields = [
-            'id', 'name', 'domain', 'domain_name', 'organisation',
-            'detection_count', 'first_detected', 'last_detected', 'is_active'
-        ]
-        read_only_fields = ['id', 'first_detected', 'last_detected']
 
 
 class DomainAccessSerializer(serializers.ModelSerializer):

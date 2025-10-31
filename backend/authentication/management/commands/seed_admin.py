@@ -55,7 +55,6 @@ class Command(BaseCommand):
                 organisation, org_created = Organisation.objects.get_or_create(
                     name=organisation_name,
                     defaults={
-                        'industry': 'Technology',
                         'team_count': 1
                     }
                 )

@@ -24,7 +24,9 @@ def login(request):
     password = request.data.get('password')
     if not email or not password:
         return Response({'error': 'Email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
-    user = authenticate(username=email, password=password)
+    
+    # Authenticate using email (USERNAME_FIELD is now 'email')
+    user = authenticate(request, email=email, password=password)
     if user and user.is_active:
         refresh = RefreshToken.for_user(user)
         access_token = refresh.access_token

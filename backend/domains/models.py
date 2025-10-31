@@ -41,11 +41,11 @@ class Domain(models.Model):
         help_text="Average position in search results"
     )
     active_alerts = models.PositiveIntegerField(default=0, help_text="Number of active alerts")
-    sentiment = models.CharField(
+    sentiment_category = models.CharField(
         max_length=10, 
         choices=SENTIMENT_CHOICES, 
         default='neutral',
-        help_text="Overall sentiment of mentions"
+        help_text="Overall sentiment category of mentions (positive/neutral/negative)"
     )
     sentiment_score = models.DecimalField(
         max_digits=3, 
@@ -59,11 +59,6 @@ class Domain(models.Model):
         choices=PROCESSING_STATUS_CHOICES,
         default='INIT',
         help_text="Current processing status of the domain"
-    )
-    track_status = models.CharField(
-        max_length=50,
-        default='INIT',
-        help_text="Detailed tracking status"
     )
     track_message = models.TextField(
         blank=True,
@@ -84,67 +79,15 @@ class Domain(models.Model):
         verbose_name_plural = 'Domains'
         ordering = ['name']
         unique_together = ['url', 'organisation']
+        indexes = [
+            models.Index(fields=['organisation', 'processing_status']),
+            models.Index(fields=['organisation', '-visibility_score']),
+            models.Index(fields=['processing_status', 'tracked_at']),
+            models.Index(fields=['sentiment_category', '-sentiment_score']),
+        ]
     
     def __str__(self):
         return f"{self.name} ({self.url})"
-
-
-class DetectedModel(models.Model):
-    """
-    Model for tracking detected AI models from mentions
-    """
-    MODEL_CHOICES = [
-        ('ChatGPT', 'ChatGPT'),
-        ('Google Gemini', 'Google Gemini'),
-        ('Perplexity', 'Perplexity'),
-        ('Claude', 'Claude'),
-        ('Copilot', 'Copilot'),
-        ('Other', 'Other'),
-    ]
-    
-    name = models.CharField(
-        max_length=50,
-        choices=MODEL_CHOICES,
-        help_text="Name of the detected AI model"
-    )
-    domain = models.ForeignKey(
-        Domain,
-        on_delete=models.CASCADE,
-        related_name='detected_models',
-        help_text="Domain where this model was detected"
-    )
-    organisation = models.ForeignKey(
-        'authentication.Organisation',
-        on_delete=models.CASCADE,
-        related_name='detected_models',
-        help_text="Organisation this detection belongs to"
-    )
-    detection_count = models.PositiveIntegerField(
-        default=1,
-        help_text="Number of times this model was detected"
-    )
-    first_detected = models.DateTimeField(
-        auto_now_add=True,
-        help_text="When this model was first detected"
-    )
-    last_detected = models.DateTimeField(
-        auto_now=True,
-        help_text="When this model was last detected"
-    )
-    is_active = models.BooleanField(
-        default=True,
-        help_text="Whether this model detection is active"
-    )
-    
-    class Meta:
-        db_table = 'detected_models'
-        verbose_name = 'Detected Model'
-        verbose_name_plural = 'Detected Models'
-        ordering = ['-last_detected']
-        unique_together = ['name', 'domain']
-    
-    def __str__(self):
-        return f"{self.name} - {self.domain.name}"
 
 
 # DomainAccess model removed - domain-level access management deprecated
@@ -175,6 +118,9 @@ class DomainAccess(models.Model):
         db_table = 'domain_access'
         verbose_name = 'Domain Access'
         verbose_name_plural = 'Domain Access'
+        indexes = [
+            models.Index(fields=['granted_by', 'created_at']),
+        ]
 
     def __str__(self):
         return f"{self.user.email} - {self.domain.name}"

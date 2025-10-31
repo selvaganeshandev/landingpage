@@ -4,9 +4,9 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
-from .models import Domain, DetectedModel, DomainAccess
+from .models import Domain, DomainAccess
 from .serializers import (
-    DomainSerializer, DomainDetailSerializer, DetectedModelSerializer,
+    DomainSerializer, DomainDetailSerializer,
     DomainAccessSerializer, DomainAccessCreateSerializer
 )
 from authentication.serializers import AccountSerializer
@@ -249,65 +249,4 @@ def available_users_for_domain(request, domain_id):
     # Domain Access Management views removed
 
 
-# Detected Models Views
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def detected_models_list(request):
-    """Get all detected models for the organization"""
-    if request.user.role == 'super_admin':
-        # Admins can see all detected models in their organization
-        detected_models = DetectedModel.objects.filter(organisation=request.user.organisation)
-    else:
-        # Admins and users can see detected models only for domains they have access to
-        domain_ids = DomainAccess.objects.filter(
-            user=request.user,
-            domain__organisation=request.user.organisation
-        ).values_list('domain_id', flat=True)
-        detected_models = DetectedModel.objects.filter(
-            organisation=request.user.organisation,
-            domain_id__in=domain_ids
-        )
-    
-    serializer = DetectedModelSerializer(detected_models, many=True)
-    return Response({
-        'detected_models': serializer.data
-    })
-
-
-@api_view(['GET', 'PUT'])
-@permission_classes([IsAuthenticated])
-def detected_model_detail(request, pk):
-    """Get or update a detected model"""
-    try:
-        if request.user.role == 'super_admin':
-            detected_model = DetectedModel.objects.get(pk=pk, organisation=request.user.organisation)
-        else:
-            dm = DetectedModel.objects.get(pk=pk, organisation=request.user.organisation)
-            DomainAccess.objects.get(user=request.user, domain=dm.domain)
-            detected_model = dm
-    except (DetectedModel.DoesNotExist, DomainAccess.DoesNotExist):
-        return Response(
-            {'error': 'Detected model not found or you do not have access'}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
-    
-    if request.method == 'GET':
-        serializer = DetectedModelSerializer(detected_model)
-        return Response(serializer.data)
-    
-    elif request.method == 'PUT':
-        # Only admins can update detected models
-        if request.user.role not in ['admin', 'super_admin']:
-            return Response(
-                {'error': 'Only organization administrators can update detected models'}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        serializer = DetectedModelSerializer(detected_model, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response({
-                'message': 'Detected model updated successfully',
-                'detected_model': serializer.data
-            })
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+# DetectedModel endpoints removed

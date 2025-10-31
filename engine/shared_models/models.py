@@ -160,12 +160,6 @@ class Keyword(models.Model):
         related_name='keywords',
         help_text="Domain this keyword belongs to"
     )
-    organisation = models.ForeignKey(
-        Organisation, 
-        on_delete=models.CASCADE, 
-        related_name='keywords',
-        help_text="Organisation this keyword belongs to"
-    )
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the keyword was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the keyword was last modified")
     
@@ -190,12 +184,6 @@ class PromptGroup(models.Model):
         on_delete=models.CASCADE, 
         related_name='prompt_groups',
         help_text="Domain this group belongs to"
-    )
-    organisation = models.ForeignKey(
-        Organisation, 
-        on_delete=models.CASCADE, 
-        related_name='prompt_groups',
-        help_text="Organisation this group belongs to"
     )
     total_mentions = models.PositiveIntegerField(default=0, help_text="Total number of mentions")
     total_citations = models.PositiveIntegerField(default=0, help_text="Total number of citations")
@@ -271,21 +259,7 @@ class Prompt(models.Model):
         PromptGroup, 
         on_delete=models.CASCADE, 
         related_name='prompts',
-        help_text="Group this prompt belongs to",
-        null=True,
-        blank=True
-    )
-    domain = models.ForeignKey(
-        Domain, 
-        on_delete=models.CASCADE, 
-        related_name='prompts',
-        help_text="Domain this prompt belongs to"
-    )
-    organisation = models.ForeignKey(
-        Organisation, 
-        on_delete=models.CASCADE, 
-        related_name='prompts',
-        help_text="Organisation this prompt belongs to"
+        help_text="Group this prompt belongs to"
     )
     track_status = models.CharField(
         max_length=10,
@@ -338,18 +312,7 @@ class PromptAnalytics(models.Model):
         related_name='analytics',
         help_text="Prompt this analytics data belongs to"
     )
-    domain = models.ForeignKey(
-        Domain, 
-        on_delete=models.CASCADE, 
-        related_name='prompt_analytics',
-        help_text="Domain this analytics belongs to"
-    )
-    organisation = models.ForeignKey(
-        Organisation, 
-        on_delete=models.CASCADE, 
-        related_name='prompt_analytics',
-        help_text="Organisation this analytics belongs to"
-    )
+    # domain/organisation removed; derive via prompt.group.domain
     platform = models.CharField(max_length=100, default='ChatGPT', help_text="Name of the AI platform used")
     is_mention = models.BooleanField(
         default=False,

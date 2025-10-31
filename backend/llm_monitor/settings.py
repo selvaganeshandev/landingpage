@@ -47,6 +47,11 @@ INSTALLED_APPS = [
     'domains',
     'keywords',
     'prompts',
+    'alerts',
+    'competitors',
+    'topics',
+    'analytics',
+    'integrations',
 ]
 # Site URL for building absolute links in emails
 SITE_URL = config('SITE_URL', default='http://localhost:8080')

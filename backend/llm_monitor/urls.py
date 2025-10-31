@@ -23,4 +23,9 @@ urlpatterns = [
     path('domains/', include('domains.urls')),
     path('keywords/', include('keywords.urls')),
     path('prompts/', include('prompts.urls')),
+    path('alerts/', include('alerts.urls')),
+    path('competitors/', include('competitors.urls')),
+    path('topics/', include('topics.urls')),
+    path('analytics/', include('analytics.urls')),
+    path('integrations/', include('integrations.urls')),
 ]

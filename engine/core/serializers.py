@@ -41,7 +41,7 @@ class KeywordSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Keyword
-        fields = ['id', 'keyword', 'domain', 'domain_name', 'organisation', 'created_at', 'modified_at']
+        fields = ['id', 'keyword', 'domain', 'domain_name', 'created_at', 'modified_at']
         read_only_fields = ['id', 'created_at', 'modified_at']
 
 
@@ -55,7 +55,7 @@ class PromptGroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = PromptGroup
         fields = [
-            'id', 'group_id', 'domain', 'domain_name', 'organisation',
+            'id', 'group_id', 'domain', 'domain_name',
             'total_mentions', 'total_citations', 'average_position',
             'prompts_count', 'created_at', 'modified_at'
         ]
@@ -69,14 +69,14 @@ class PromptSerializer(serializers.ModelSerializer):
     """
     Serializer for Prompt model
     """
-    domain_name = serializers.CharField(source='domain.name', read_only=True)
+    domain_name = serializers.CharField(source='group.domain.name', read_only=True)
     group_id = serializers.CharField(source='group.group_id', read_only=True)
     
     class Meta:
         model = Prompt
         fields = [
-            'id', 'prompt', 'group', 'group_id', 'domain', 'domain_name', 'organisation',
-            'track_status', 'type', 'last_tracked_at', 'track_message',
+            'id', 'prompt', 'group', 'group_id', 'domain_name',
+            'track_status', 'type', 'tracked_at', 'track_message',
             'created_at', 'modified_at'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
@@ -86,13 +86,13 @@ class PromptAnalyticsSerializer(serializers.ModelSerializer):
     """
     Serializer for PromptAnalytics model
     """
-    domain_name = serializers.CharField(source='domain.name', read_only=True)
+    domain_name = serializers.CharField(source='prompt.group.domain.name', read_only=True)
     prompt_text = serializers.CharField(source='prompt.prompt', read_only=True)
     
     class Meta:
         model = PromptAnalytics
         fields = [
-            'id', 'prompt', 'prompt_text', 'domain', 'domain_name', 'organisation',
+            'id', 'prompt', 'prompt_text', 'domain_name',
             'platform', 'is_mention', 'total_mentions', 'total_citations', 'position',
             'sentiment', 'sentiment_score', 'context_summary', 'citations',
             'views', 'shares', 'engagement_score', 'competitor_mentions',

@@ -12,12 +12,6 @@ class PromptGroup(models.Model):
         related_name='prompt_groups',
         help_text="Domain this group belongs to"
     )
-    organisation = models.ForeignKey(
-        'authentication.Organisation', 
-        on_delete=models.CASCADE, 
-        related_name='prompt_groups',
-        help_text="Organisation this group belongs to"
-    )
     total_mentions = models.PositiveIntegerField(default=0, help_text="Total number of mentions")
     total_citations = models.PositiveIntegerField(default=0, help_text="Total number of citations")
     average_position = models.DecimalField(
@@ -40,6 +34,11 @@ class PromptGroup(models.Model):
         verbose_name_plural = 'Prompt Groups'
         ordering = ['group_id']
         unique_together = ['group_id', 'domain']
+        indexes = [
+            models.Index(fields=['domain', 'is_published']),
+            models.Index(fields=['domain', 'track_status']),
+            models.Index(fields=['domain', '-total_mentions']),
+        ]
     
     def __str__(self):
         return f"Group {self.group_id} ({self.domain.name})"
@@ -67,21 +66,7 @@ class Prompt(models.Model):
         PromptGroup, 
         on_delete=models.CASCADE, 
         related_name='prompts',
-        help_text="Group this prompt belongs to",
-        null=True,
-        blank=True
-    )
-    domain = models.ForeignKey(
-        'domains.Domain', 
-        on_delete=models.CASCADE, 
-        related_name='prompts',
-        help_text="Domain this prompt belongs to"
-    )
-    organisation = models.ForeignKey(
-        'authentication.Organisation', 
-        on_delete=models.CASCADE, 
-        related_name='prompts',
-        help_text="Organisation this prompt belongs to"
+        help_text="Group this prompt belongs to"
     )
     track_status = models.CharField(
         max_length=10,
@@ -113,6 +98,11 @@ class Prompt(models.Model):
         verbose_name_plural = 'Prompts'
         ordering = ['prompt']
         unique_together = ['prompt', 'group']
+        indexes = [
+            models.Index(fields=['group', 'track_status']),
+            models.Index(fields=['group', 'type']),
+            models.Index(fields=['tracked_at']),
+        ]
     
     def __str__(self):
         return f"{self.prompt[:50]}... ({self.type})"
@@ -134,18 +124,6 @@ class PromptAnalytics(models.Model):
         related_name='analytics',
         help_text="Prompt this analytics data belongs to"
     )
-    domain = models.ForeignKey(
-        'domains.Domain', 
-        on_delete=models.CASCADE, 
-        related_name='prompt_analytics',
-        help_text="Domain this analytics belongs to"
-    )
-    organisation = models.ForeignKey(
-        'authentication.Organisation', 
-        on_delete=models.CASCADE, 
-        related_name='prompt_analytics',
-        help_text="Organisation this analytics belongs to"
-    )
     platform = models.CharField(max_length=100, default='ChatGPT', help_text="Name of the AI platform used")
     is_mention = models.BooleanField(
         default=False,
@@ -159,11 +137,11 @@ class PromptAnalytics(models.Model):
         default=0.00,
         help_text="Position in search results"
     )
-    sentiment = models.CharField(
+    sentiment_category = models.CharField(
         max_length=10, 
         choices=SENTIMENT_CHOICES, 
         default='neutral',
-        help_text="Sentiment of the analytics"
+        help_text="Sentiment category (positive/neutral/negative)"
     )
     sentiment_score = models.DecimalField(
         max_digits=3, 
@@ -172,7 +150,7 @@ class PromptAnalytics(models.Model):
         help_text="Sentiment score (-1.00 to 1.00)"
     )
     context_summary = models.TextField(blank=True, help_text="Summary of the context")
-    citations = models.JSONField(
+    citation_list = models.JSONField(
         default=list,
         blank=True,
         help_text="List of citations with text and source URLs"
@@ -186,17 +164,17 @@ class PromptAnalytics(models.Model):
         default=0.00,
         help_text="Engagement score"
     )
-    competitor_mentions = models.JSONField(
+    competitor_mention_list = models.JSONField(
         default=list,
         blank=True,
         help_text="List of competitor mentions"
     )
-    key_topics = models.JSONField(
+    topic_list = models.JSONField(
         default=list,
         blank=True,
         help_text="List of key topics extracted"
     )
-    position_history = models.JSONField(
+    position_history_list = models.JSONField(
         default=list,
         blank=True,
         help_text="Historical position data"
@@ -215,6 +193,12 @@ class PromptAnalytics(models.Model):
         verbose_name_plural = 'Prompt Analytics'
         ordering = ['-created_at']
         unique_together = ['prompt', 'platform']
+        indexes = [
+            models.Index(fields=['prompt', 'platform', 'created_at']),  # Time-series queries
+            models.Index(fields=['prompt', 'is_mention', '-position']),  # Mention analysis
+            models.Index(fields=['platform', 'is_mention', 'created_at']),  # Platform trends
+            models.Index(fields=['prompt', '-sentiment_score']),  # Sentiment analysis
+        ]
     
     def __str__(self):
         return f"Analytics for {self.prompt.prompt[:30]}... ({self.platform})"

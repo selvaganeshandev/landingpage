@@ -49,11 +49,19 @@ class Account(AbstractUser):
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the account was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the account was last modified")
     
+    # Use email as the unique identifier for authentication
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = ['username']  # username still required by Django, but email is primary
+    
     class Meta:
         db_table = 'accounts'
         verbose_name = 'Account'
         verbose_name_plural = 'Accounts'
         ordering = ['email']
+        indexes = [
+            models.Index(fields=['organisation', 'role', 'is_active']),
+            models.Index(fields=['organisation', 'created_at']),
+        ]
     
     def __str__(self):
         return f"{self.email} ({self.role})"
@@ -118,6 +126,11 @@ class TeamInvitation(models.Model):
         verbose_name = 'Team Invitation'
         verbose_name_plural = 'Team Invitations'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['email', 'status']),
+            models.Index(fields=['organisation', 'status', 'created_at']),
+            models.Index(fields=['expires_at']),
+        ]
         unique_together = ['email', 'organisation']
     
     def __str__(self):
@@ -209,6 +222,10 @@ class UserPermission(models.Model):
         verbose_name_plural = 'User Permissions'
         ordering = ['user', 'module']
         unique_together = ['user', 'module']
+        indexes = [
+            models.Index(fields=['user', 'module']),  # CRITICAL: Permission checks
+            models.Index(fields=['granted_by', 'created_at']),
+        ]
     
     def __str__(self):
         return f"{self.user.email} - {self.module} ({self.permission_level})"
