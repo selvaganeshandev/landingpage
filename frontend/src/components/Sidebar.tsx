@@ -399,7 +399,10 @@ export const Sidebar = () => {
                 <Link
                   to="/organization-settings"
                   className={cn(
-                    "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-150",
+                    "flex items-center transition-all duration-150",
+                    location.pathname === "/organization-settings"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                     isOpen
                       ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
                       : "rounded-md justify-center aspect-square w-9 h-9 p-0"
@@ -407,7 +410,7 @@ export const Sidebar = () => {
                   style={!isOpen ? { marginLeft: '5px' } : undefined}
                   title={!isOpen ? "Organization" : undefined}
                 >
-                  <Settings className="h-4 w-4 flex-shrink-0" />
+                  <Settings className={cn("h-4 w-4 flex-shrink-0", location.pathname === "/organization-settings" ? "text-primary-foreground" : "text-muted-foreground")} />
                   {isOpen && <span className="transition-opacity duration-150">Organization</span>}
                 </Link>
               )}
@@ -415,7 +418,10 @@ export const Sidebar = () => {
                 <Link
                   to="/profile"
                   className={cn(
-                    "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-150",
+                    "flex items-center transition-all duration-150",
+                    location.pathname === "/profile"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                     isOpen
                       ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
                       : "rounded-md justify-center aspect-square w-9 h-9 p-0"
@@ -423,7 +429,7 @@ export const Sidebar = () => {
                   style={!isOpen ? { marginLeft: '5px' } : undefined}
                   title={!isOpen ? "Profile" : undefined}
                 >
-                  <User className="h-4 w-4 flex-shrink-0" />
+                  <User className={cn("h-4 w-4 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
                   {isOpen && <span className="transition-opacity duration-150">Profile</span>}
                 </Link>
               )}
@@ -431,7 +437,10 @@ export const Sidebar = () => {
                 <Link
                   to="/profile"
                   className={cn(
-                    "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-150",
+                    "flex items-center transition-all duration-150",
+                    location.pathname === "/profile"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                     isOpen
                       ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
                       : "rounded-md justify-center aspect-square w-9 h-9 p-0"
@@ -439,7 +448,7 @@ export const Sidebar = () => {
                   style={!isOpen ? { marginLeft: '5px' } : undefined}
                   title={!isOpen ? "Profile" : undefined}
                 >
-                  <User className="h-4 w-4 flex-shrink-0" />
+                  <User className={cn("h-4 w-4 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
                   {isOpen && <span className="transition-opacity duration-150">Profile</span>}
                 </Link>
               )}
