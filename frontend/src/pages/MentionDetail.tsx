@@ -369,13 +369,13 @@ const MentionDetail = () => {
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <TabsList className="bg-muted/50 p-1 border border-border mb-6">
-                <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">
+                <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
                   Overview
                 </TabsTrigger>
-                <TabsTrigger value="analysis" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">
+                <TabsTrigger value="analysis" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
                   Analysis
                 </TabsTrigger>
-                <TabsTrigger value="competitors" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">
+                <TabsTrigger value="competitors" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
                   Competitors
                 </TabsTrigger>
               </TabsList>
