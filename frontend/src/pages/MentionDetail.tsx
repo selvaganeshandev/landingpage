@@ -309,7 +309,7 @@ const MentionDetail = () => {
                 </div>
               </div>
 
-              <div className="space-y-4 pt-4 border-t border border-border">
+              <div className="space-y-4 pt-4 border-t">
                 <div>
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
                     Citations & Sources ({mention.citations?.length || 0})

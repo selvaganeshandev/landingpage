@@ -395,7 +395,7 @@ const Competitors = () => {
                       </div>
                     </div>
 
-                    <div className="pt-3 border-t border border-border flex items-center justify-between">
+                    <div className="pt-3 border-t flex items-center justify-between">
                       <div className="flex items-center gap-2 text-sm">
                         <span className="text-muted-foreground">Trend</span>
                         <div className="flex items-center gap-1">
@@ -763,7 +763,7 @@ const Competitors = () => {
                           ))}
                         </div>
 
-                        <div className="pt-3 border-t border border-border">
+                        <div className="pt-3 border-t">
                           <Button 
                             variant="default" 
                             size="sm" 

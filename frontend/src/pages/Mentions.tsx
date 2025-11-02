@@ -354,7 +354,7 @@ const Mentions = () => {
                 />
               </div>
 
-              <div className="space-y-3 pt-3 border-t border border-border">
+              <div className="space-y-3 pt-3 border-t">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground font-medium">Citations ({mention.citations_count}):</span>
                 </div>

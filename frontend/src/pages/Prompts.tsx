@@ -167,12 +167,12 @@ const Prompts = () => {
                 </div>
               </div>
 
-              <div className="flex gap-2 pt-3 border-t border border-border">
-                <Button variant="outline" size="sm" onClick={() => handleViewDetails(group.id)} className="border border-border">
+              <div className="flex gap-2 pt-3 border-t">
+                <Button variant="outline" size="sm" onClick={() => handleViewDetails(group.id)}>
                   <Eye className="h-4 w-4 mr-1" />
                   View Details
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => handleEditGroup(group)} className="border border-border">
+                <Button variant="outline" size="sm" onClick={() => handleEditGroup(group)}>
                   <Edit className="h-4 w-4 mr-1" />
                   Edit Group
                 </Button>
