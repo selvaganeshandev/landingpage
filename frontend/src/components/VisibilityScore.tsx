@@ -14,8 +14,8 @@ interface VisibilityScoreProps {
 
 export const VisibilityScore = ({ brand, score, mentions, sentiment }: VisibilityScoreProps) => {
   return (
-    <Card className="p-6">
-      <div className="space-y-4">
+    <Card className="p-6 h-full">
+      <div className="space-y-4 h-full flex flex-col">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold">{brand}</h3>
           <div className="text-3xl font-bold text-primary">{score}</div>
