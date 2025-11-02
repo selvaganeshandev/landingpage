@@ -223,13 +223,12 @@ const MentionDetail = () => {
   return (
     <div className="p-8 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between pb-4 border-b border-border/50">
+      <div className="flex items-center justify-between pb-4">
         <div className="flex items-center gap-4">
           <Button
             variant="outline"
             size="icon"
             onClick={() => navigate(-1)}
-            className="border-border/50"
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -241,11 +240,11 @@ const MentionDetail = () => {
           </div>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" onClick={handleShare} className="border-border/50">
+          <Button variant="outline" onClick={handleShare}>
             <Share2 className="h-4 w-4 mr-2" />
             Share
           </Button>
-          <Button variant="outline" onClick={handleExport} className="border-border/50">
+          <Button variant="outline" onClick={handleExport}>
             <FileText className="h-4 w-4 mr-2" />
             Export
           </Button>
@@ -256,7 +255,7 @@ const MentionDetail = () => {
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
           {/* Overview Card */}
-          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-6">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-4">
@@ -276,7 +275,7 @@ const MentionDetail = () => {
                     </p>
                   </div>
                 </div>
-                <Button variant="outline" size="sm" onClick={handleCopy} className="border-border/50">
+                <Button variant="outline" size="sm" onClick={handleCopy} className="border border-border">
                   <Copy className="h-3 w-3 mr-1" />
                   Copy
                 </Button>
@@ -287,7 +286,7 @@ const MentionDetail = () => {
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                     User Prompt
                   </h3>
-                  <p className="text-lg font-mono bg-muted/30 p-4 rounded-xl border border-border/50">
+                  <p className="text-lg font-mono bg-muted/30 p-4 rounded-xl border border border-border">
                     {mention.prompt_text}
                   </p>
                 </div>
@@ -296,7 +295,7 @@ const MentionDetail = () => {
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                     Full AI Response
                   </h3>
-                  <div className="bg-gradient-to-br from-muted/30 to-muted/50 p-6 rounded-xl border border-border/50 backdrop-blur-sm">
+                  <div className="bg-gradient-to-br from-muted/30 to-muted/50 p-6 rounded-xl border border border-border backdrop-blur-sm">
                     <div 
                       className="text-sm leading-relaxed prose prose-sm max-w-none [&_h1]:font-semibold [&_h1]:text-lg [&_h1]:mt-4 [&_h1]:mb-2 [&_h1]:text-foreground [&_h2]:font-semibold [&_h2]:text-base [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-foreground [&_h3]:font-semibold [&_h3]:text-sm [&_h3]:mt-4 [&_h3]:mb-2 [&_h3]:text-foreground [&_a]:text-primary [&_a]:underline [&_a]:hover:no-underline [&_strong]:font-semibold [&_strong]:text-foreground [&_b]:font-semibold [&_b]:text-foreground"
                       dangerouslySetInnerHTML={{
@@ -310,7 +309,7 @@ const MentionDetail = () => {
                 </div>
               </div>
 
-              <div className="space-y-4 pt-4 border-t border-border/50">
+              <div className="space-y-4 pt-4 border-t border border-border">
                 <div>
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
                     Citations & Sources ({mention.citations?.length || 0})
@@ -356,7 +355,7 @@ const MentionDetail = () => {
                     <p className="text-sm text-muted-foreground">No detailed citations available</p>
                   )}
                 </div>
-                <Button variant="outline" size="sm" asChild className="border-border/50">
+                <Button variant="outline" size="sm" asChild className="border border-border">
                   <a href={mention.url} target="_blank" rel="noopener noreferrer">
                     <ExternalLink className="h-3 w-3 mr-1" />
                     View Original AI Response
@@ -367,9 +366,9 @@ const MentionDetail = () => {
           </Card>
 
           {/* Tabs Section */}
-          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="bg-muted/50 p-1 border border-border/50 mb-6">
+              <TabsList className="bg-muted/50 p-1 border border border-border mb-6">
                 <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">
                   Overview
                 </TabsTrigger>
@@ -400,7 +399,7 @@ const MentionDetail = () => {
                 <div className="pt-4">
                   <h3 className="text-lg font-semibold mb-4 font-outfit">Position Trend</h3>
                   {trendData.length === 0 ? (
-                    <div className="h-[250px] flex items-center justify-center text-sm text-muted-foreground border border-border/50 rounded-md">
+                    <div className="h-[250px] flex items-center justify-center text-sm text-muted-foreground border border border-border rounded-md">
                       No trend data available
                     </div>
                   ) : (
@@ -432,14 +431,14 @@ const MentionDetail = () => {
 
               <TabsContent value="analysis" className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
+                  <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border border-border">
                     <div className="flex items-center gap-2 mb-2">
                       <MessageSquare className="h-4 w-4 text-primary" />
                       <p className="text-sm text-muted-foreground">Citations</p>
                     </div>
                     <p className="text-3xl font-bold font-outfit">{mention.total_citations}</p>
                   </div>
-                  <div className="p-4 rounded-xl bg-gradient-to-br from-success/5 to-success/10 border border-border/50">
+                  <div className="p-4 rounded-xl bg-gradient-to-br from-success/5 to-success/10 border border border-border">
                     <div className="flex items-center gap-2 mb-2">
                       <TrendingUp className="h-4 w-4 text-success" />
                       <p className="text-sm text-muted-foreground">Position Rank</p>
@@ -448,7 +447,7 @@ const MentionDetail = () => {
                   </div>
                 </div>
 
-                <div className="p-5 rounded-xl border border-border/50 bg-muted/30">
+                <div className="p-5 rounded-xl border border border-border bg-muted/30">
                   <h4 className="font-semibold mb-3 font-outfit">Sentiment Analysis</h4>
                   <p className="text-sm text-muted-foreground leading-relaxed">
                     This mention shows {mention.sentiment} sentiment with a score of {mention.sentiment_score}. 
@@ -480,7 +479,7 @@ const MentionDetail = () => {
                   <div className="space-y-3">
                     {relatedMentions && relatedMentions.length > 0 ? (
                       relatedMentions.map((related, idx) => (
-                        <div key={idx} className="p-4 rounded-xl border border-border/50 hover:shadow-md transition-all bg-card/50">
+                        <div key={idx} className="p-4 rounded-xl border border border-border hover:shadow-md transition-all bg-card/50">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded-xl gradient-primary shadow-md flex items-center justify-center font-bold text-white font-outfit">
@@ -515,14 +514,14 @@ const MentionDetail = () => {
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Engagement Stats */}
-          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <h3 className="text-lg font-semibold mb-4 font-outfit">Engagement Metrics</h3>
             <div className="space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-border/50">
+              <div className="flex items-center justify-between pb-3 border-b border border-border">
                 <span className="text-sm text-muted-foreground">Views</span>
                 <span className="text-lg font-bold font-outfit">{mention.views ? mention.views.toLocaleString() : '0'}</span>
               </div>
-              <div className="flex items-center justify-between pb-3 border-b border-border/50">
+              <div className="flex items-center justify-between pb-3 border-b border border-border">
                 <span className="text-sm text-muted-foreground">Shares</span>
                 <span className="text-lg font-bold font-outfit">{mention.shares || '0'}</span>
               </div>
@@ -534,18 +533,18 @@ const MentionDetail = () => {
           </Card>
 
           {/* Quick Actions */}
-          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <h3 className="text-lg font-semibold mb-4 font-outfit">Quick Actions</h3>
             <div className="space-y-2">
-              <Button variant="outline" className="w-full justify-start border-border/50">
+              <Button variant="outline" className="w-full justify-start border border-border">
                 <Target className="h-4 w-4 mr-2" />
                 Add to Report
               </Button>
-              <Button variant="outline" className="w-full justify-start border-border/50">
+              <Button variant="outline" className="w-full justify-start border border-border">
                 <MessageSquare className="h-4 w-4 mr-2" />
                 View Context
               </Button>
-              <Button variant="outline" className="w-full justify-start border-border/50">
+              <Button variant="outline" className="w-full justify-start border border-border">
                 <TrendingUp className="h-4 w-4 mr-2" />
                 Compare Similar
               </Button>

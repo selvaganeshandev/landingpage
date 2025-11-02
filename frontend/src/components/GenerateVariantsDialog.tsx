@@ -125,7 +125,7 @@ export const GenerateVariantsDialog = ({ open, onOpenChange, promptGroup, onAdd 
           {/* Group Information */}
           <div className="space-y-2">
             <p className="text-sm font-medium">Prompt Group</p>
-            <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
+            <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border border-border">
               <p className="font-mono text-sm">Group ID: {promptGroup?.group_id}</p>
               <p className="text-xs text-muted-foreground mt-1">Domain: {promptGroup?.domain_name}</p>
               <p className="text-xs text-muted-foreground">Current Prompts: {promptGroup?.prompts_count}</p>
@@ -183,7 +183,7 @@ export const GenerateVariantsDialog = ({ open, onOpenChange, promptGroup, onAdd 
                     className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
                       selectedVariants.has(idx)
                         ? "border-primary bg-primary/5 shadow-sm"
-                        : "border-border/50 hover:border-primary/50 bg-card/50"
+                        : "border border-border hover:border-primary/50 bg-card/50"
                     }`}
                   >
                     <div className="flex items-start gap-3">

@@ -167,7 +167,7 @@ export const TopicOptimizeDialog = ({ open, onOpenChange, topic }: TopicOptimize
 
               {/* Keyword Suggestions */}
               <TabsContent value="keywords" className="space-y-3">
-                <Card className="p-6">
+                <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4 flex items-center gap-2">
                     <Plus className="h-4 w-4 text-primary" />
                     Recommended Keywords to Add
@@ -194,7 +194,7 @@ export const TopicOptimizeDialog = ({ open, onOpenChange, topic }: TopicOptimize
 
               {/* Content Gaps */}
               <TabsContent value="gaps" className="space-y-3">
-                <Card className="p-6">
+                <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4 flex items-center gap-2">
                     <AlertCircle className="h-4 w-4 text-warning" />
                     Content Opportunities
@@ -219,7 +219,7 @@ export const TopicOptimizeDialog = ({ open, onOpenChange, topic }: TopicOptimize
 
               {/* Prompt Suggestions */}
               <TabsContent value="prompts" className="space-y-3">
-                <Card className="p-6">
+                <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4 flex items-center gap-2">
                     <Sparkles className="h-4 w-4 text-primary" />
                     Recommended Prompt Variations
@@ -236,7 +236,7 @@ export const TopicOptimizeDialog = ({ open, onOpenChange, topic }: TopicOptimize
 
               {/* Competitive Positioning */}
               <TabsContent value="competitive" className="space-y-3">
-                <Card className="p-6">
+                <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4 flex items-center gap-2">
                     <Target className="h-4 w-4 text-primary" />
                     Competitive Positioning Advice
@@ -263,7 +263,7 @@ export const TopicOptimizeDialog = ({ open, onOpenChange, topic }: TopicOptimize
 
               {/* Action Plan */}
               <TabsContent value="actions" className="space-y-3">
-                <Card className="p-6">
+                <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4 flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-success" />
                     Recommended Action Plan

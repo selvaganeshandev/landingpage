@@ -118,7 +118,7 @@ export default function AcceptInvitation() {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-        <Card className="w-full max-w-md">
+        <Card className="w-full max-w-md border border-border">
           <CardContent className="pt-6">
             <div className="text-center">
               <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
@@ -133,7 +133,7 @@ export default function AcceptInvitation() {
   if (error && !invitation) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-        <Card className="w-full max-w-md">
+        <Card className="w-full max-w-md border border-border">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
               <AlertCircle className="h-6 w-6 text-destructive" />
@@ -163,7 +163,7 @@ export default function AcceptInvitation() {
   if (isAccepted) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-        <Card className="w-full max-w-md">
+        <Card className="w-full max-w-md border border-border">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
               <CheckCircle className="h-6 w-6 text-green-600" />
@@ -196,7 +196,7 @@ export default function AcceptInvitation() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md border border-border">
         <CardHeader className="text-center">
           {/* Avatar */}
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-blue-500">

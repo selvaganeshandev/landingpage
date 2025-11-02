@@ -196,7 +196,7 @@ const Topics = () => {
             <Sparkles className="h-4 w-4 mr-2" />
             Generate Topics
           </Button>
-          <Button onClick={handleAddTopic}>
+          <Button onClick={handleAddTopic} className="gradient-primary shadow-md shadow-primary/20">
             <Plus className="h-4 w-4 mr-2" />
             Add Topic
           </Button>
@@ -204,7 +204,7 @@ const Topics = () => {
       </div>
 
       {/* Search Bar */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input placeholder="Search topics, keywords, or prompts..." className="pl-10" />
@@ -213,7 +213,7 @@ const Topics = () => {
 
       {/* Overview */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <h3 className="text-lg font-semibold mb-6">Topic Distribution</h3>
           <ResponsiveContainer width="100%" height={250}>
             <PieChart>
@@ -344,7 +344,7 @@ const Topics = () => {
       </div>
 
       {/* AI-Generated Prompt Suggestions */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold">AI-Generated Prompt Suggestions</h3>
           <Button variant="outline" size="sm" onClick={handleGenerateMore}>
@@ -380,7 +380,7 @@ const Topics = () => {
       </Card>
 
       {/* Keyword Performance */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Top Keyword Performance</h3>
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={keywordPerformance} layout="vertical">

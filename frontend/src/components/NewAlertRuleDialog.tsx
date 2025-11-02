@@ -112,7 +112,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
               placeholder="e.g., Visibility Drop Alert"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="border-border/50"
+              className="border border-border"
             />
           </div>
 
@@ -124,7 +124,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
               placeholder="Describe when this alert should trigger..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="border-border/50 min-h-[80px]"
+              className="border border-border min-h-[80px]"
             />
           </div>
 
@@ -132,7 +132,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
           <div className="space-y-2">
             <Label htmlFor="trigger">Trigger Condition*</Label>
             <Select value={triggerType} onValueChange={setTriggerType}>
-              <SelectTrigger className="border-border/50">
+              <SelectTrigger className="border border-border">
                 <SelectValue placeholder="Select trigger type" />
               </SelectTrigger>
               <SelectContent>
@@ -159,7 +159,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
                   placeholder="e.g., 10"
                   value={threshold}
                   onChange={(e) => setThreshold(e.target.value)}
-                  className="border-border/50"
+                  className="border border-border"
                 />
                 <span className="text-muted-foreground">%</span>
               </div>
@@ -168,7 +168,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
             <div className="space-y-2">
               <Label htmlFor="timeWindow">Time Window</Label>
               <Select value={timeWindow} onValueChange={setTimeWindow}>
-                <SelectTrigger className="border-border/50">
+                <SelectTrigger className="border border-border">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -187,7 +187,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
           <div className="space-y-3">
             <Label>Notification Channels*</Label>
             <div className="space-y-3">
-              <div className="flex items-center space-x-3 p-3 rounded-lg border border-border/50">
+              <div className="flex items-center space-x-3 p-3 rounded-lg border border border-border">
                 <Checkbox
                   id="email"
                   checked={channels.includes("email")}
@@ -201,7 +201,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
                 </div>
               </div>
 
-              <div className="flex items-center space-x-3 p-3 rounded-lg border border-border/50">
+              <div className="flex items-center space-x-3 p-3 rounded-lg border border border-border">
                 <Checkbox
                   id="slack"
                   checked={channels.includes("slack")}
@@ -215,7 +215,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
                 </div>
               </div>
 
-              <div className="flex items-center space-x-3 p-3 rounded-lg border border-border/50">
+              <div className="flex items-center space-x-3 p-3 rounded-lg border border border-border">
                 <Checkbox
                   id="sms"
                   checked={channels.includes("sms")}

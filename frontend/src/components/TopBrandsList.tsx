@@ -17,7 +17,7 @@ interface TopBrandsListProps {
 
 export const TopBrandsList = ({ brands, totalMentions }: TopBrandsListProps) => {
   return (
-    <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+    <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
       <div className="space-y-6">
         <div className="flex items-center justify-between pb-4 border-b border-border/50">
           <h3 className="text-lg font-semibold font-outfit">Top Brands by Visibility</h3>

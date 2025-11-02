@@ -300,7 +300,7 @@ const MisinformationAlerts = () => {
       {/* Detection Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {detectionMetrics.map((metric) => (
-          <Card key={metric.name}>
+          <Card key={metric.name} className="border border-border">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
                 {metric.name}
@@ -340,7 +340,7 @@ const MisinformationAlerts = () => {
 
         {/* Active Cases Tab */}
         <TabsContent value="active" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
@@ -439,7 +439,7 @@ const MisinformationAlerts = () => {
 
         {/* Resolved Cases Tab */}
         <TabsContent value="resolved" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Resolved Cases</CardTitle>
               <CardDescription>
@@ -489,7 +489,7 @@ const MisinformationAlerts = () => {
 
         {/* Monitoring Rules Tab */}
         <TabsContent value="monitoring" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
@@ -551,7 +551,7 @@ const MisinformationAlerts = () => {
           </Card>
 
           {/* Detection Configuration */}
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Detection Settings</CardTitle>
               <CardDescription>

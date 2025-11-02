@@ -104,7 +104,7 @@ export default function TrafficAttribution() {
 
       <div className="grid gap-4 md:grid-cols-4">
         {roiMetrics.map((item, index) => (
-          <Card key={index}>
+          <Card key={index} className="border border-border">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">{item.metric}</CardTitle>
               {index === 0 && <MousePointerClick className="h-4 w-4 text-muted-foreground" />}
@@ -133,7 +133,7 @@ export default function TrafficAttribution() {
         </TabsList>
 
         <TabsContent value="sources" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>AI Platform Referral Analysis</CardTitle>
               <CardDescription>Traffic, conversions, and revenue by AI platform</CardDescription>
@@ -179,7 +179,7 @@ export default function TrafficAttribution() {
         </TabsContent>
 
         <TabsContent value="search" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Google Search Console Data</CardTitle>
               <CardDescription>Top search queries driving traffic from AI platforms</CardDescription>
@@ -216,7 +216,7 @@ export default function TrafficAttribution() {
 
         <TabsContent value="devices" className="space-y-6">
           <div className="grid gap-6 md:grid-cols-2">
-            <Card>
+            <Card className="border border-border">
               <CardHeader>
                 <CardTitle>Device Breakdown</CardTitle>
                 <CardDescription>Sessions and conversions by device type</CardDescription>
@@ -250,7 +250,7 @@ export default function TrafficAttribution() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border border-border">
               <CardHeader>
                 <CardTitle>Geographic Distribution</CardTitle>
                 <CardDescription>Sessions and revenue by country</CardDescription>
@@ -286,7 +286,7 @@ export default function TrafficAttribution() {
         </TabsContent>
 
         <TabsContent value="pages" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Top Landing Pages</CardTitle>
               <CardDescription>Performance metrics for top landing pages from AI traffic</CardDescription>
@@ -322,7 +322,7 @@ export default function TrafficAttribution() {
         </TabsContent>
 
         <TabsContent value="conversions" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Conversion Attribution Paths</CardTitle>
               <CardDescription>Most common user journeys from AI platforms</CardDescription>
@@ -351,7 +351,7 @@ export default function TrafficAttribution() {
         </TabsContent>
 
         <TabsContent value="attribution" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Attribution Model Comparison</CardTitle>
               <CardDescription>Revenue attribution across different models</CardDescription>

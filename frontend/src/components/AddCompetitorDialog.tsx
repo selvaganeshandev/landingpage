@@ -80,7 +80,7 @@ export const AddCompetitorDialog = ({ open, onOpenChange, onAdd }: AddCompetitor
               placeholder="e.g., Competitor Brand"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="border-border/50"
+              className="border border-border"
             />
           </div>
 
@@ -93,7 +93,7 @@ export const AddCompetitorDialog = ({ open, onOpenChange, onAdd }: AddCompetitor
               placeholder="e.g., competitor.com"
               value={website}
               onChange={(e) => setWebsite(e.target.value)}
-              className="border-border/50"
+              className="border border-border"
             />
             <p className="text-xs text-muted-foreground">
               Enter the main domain (without https://)
@@ -108,11 +108,11 @@ export const AddCompetitorDialog = ({ open, onOpenChange, onAdd }: AddCompetitor
               placeholder="Brief description or notes about this competitor..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="border-border/50 min-h-[80px]"
+              className="border border-border min-h-[80px]"
             />
           </div>
 
-          <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
+          <div className="p-4 rounded-lg bg-muted/30 border border border-border">
             <p className="text-sm font-medium mb-1">What happens next?</p>
             <p className="text-xs text-muted-foreground">
               Our AI will start tracking mentions of this competitor across all monitored platforms. 

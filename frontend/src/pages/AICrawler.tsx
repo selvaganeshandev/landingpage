@@ -105,7 +105,7 @@ export default function AICrawler() {
         </TabsList>
 
         <TabsContent value="new-crawl" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Configure Crawl</CardTitle>
               <CardDescription>Set up a new crawl to track brand mentions across AI models</CardDescription>
@@ -191,7 +191,7 @@ export default function AICrawler() {
         </TabsContent>
 
         <TabsContent value="recent" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Recent Crawls</CardTitle>
               <CardDescription>View status and results of recent crawl operations</CardDescription>
@@ -233,7 +233,7 @@ export default function AICrawler() {
         </TabsContent>
 
         <TabsContent value="discoveries" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Content Discoveries</CardTitle>
               <CardDescription>New mentions and citations found during crawls</CardDescription>

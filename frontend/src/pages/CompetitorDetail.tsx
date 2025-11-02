@@ -120,13 +120,12 @@ const CompetitorDetail = () => {
   return (
     <div className="p-8 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between pb-4 border-b border-border/50">
+      <div className="flex items-center justify-between pb-4">
         <div className="flex items-center gap-4">
           <Button
             variant="outline"
             size="icon"
             onClick={() => navigate(-1)}
-            className="border-border/50"
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -135,17 +134,17 @@ const CompetitorDetail = () => {
               {competitor.logo}
             </div>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight font-outfit">{competitor.name}</h1>
-              <p className="text-muted-foreground mt-1">{competitor.url}</p>
+              <h1 className="text-4xl font-bold tracking-tight">{competitor.name}</h1>
+              <p className="text-muted-foreground mt-2">{competitor.url}</p>
             </div>
           </div>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" onClick={handleShare} className="border-border/50">
+          <Button variant="outline" onClick={handleShare}>
             <Share2 className="h-4 w-4 mr-2" />
             Share
           </Button>
-          <Button variant="outline" onClick={handleExport} className="border-border/50">
+          <Button variant="outline" onClick={handleExport}>
             <FileText className="h-4 w-4 mr-2" />
             Export
           </Button>
@@ -157,7 +156,7 @@ const CompetitorDetail = () => {
 
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+        <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Mentions</p>
             <p className="text-4xl font-bold font-outfit">{competitor.mentions}</p>
@@ -174,7 +173,7 @@ const CompetitorDetail = () => {
           </div>
         </Card>
 
-        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+        <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Visibility Score</p>
             <p className="text-4xl font-bold font-outfit">{competitor.visibility}%</p>
@@ -182,7 +181,7 @@ const CompetitorDetail = () => {
           </div>
         </Card>
 
-        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+        <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Avg Position</p>
             <p className="text-4xl font-bold font-outfit">{competitor.avgPosition}</p>
@@ -190,7 +189,7 @@ const CompetitorDetail = () => {
           </div>
         </Card>
 
-        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+        <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Share of Voice</p>
             <p className="text-4xl font-bold font-outfit">{competitor.shareOfVoice}%</p>
@@ -203,9 +202,9 @@ const CompetitorDetail = () => {
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
           {/* Mention Trends */}
-          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-6">
-              <div className="pb-4 border-b border-border/50">
+              <div className="pb-4 border-b border border-border">
                 <h3 className="text-lg font-semibold font-outfit">Mention Volume & Position Trends</h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   Track mention frequency and average position over time
@@ -249,9 +248,9 @@ const CompetitorDetail = () => {
           </Card>
 
           {/* Platform Breakdown */}
-          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-6">
-              <div className="pb-4 border-b border-border/50">
+              <div className="pb-4 border-b border border-border">
                 <h3 className="text-lg font-semibold font-outfit">Platform Distribution</h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   Mention breakdown across AI platforms
@@ -279,7 +278,7 @@ const CompetitorDetail = () => {
                 </ResponsiveContainer>
                 <div className="space-y-3">
                   {platformBreakdown.map((platform, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-muted/30 border border-border/50">
+                    <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-muted/30 border border border-border">
                       <div className="flex items-center gap-3">
                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: `hsl(var(--chart-${idx + 1}))` }} />
                         <span className="font-medium">{platform.platform}</span>
@@ -296,9 +295,9 @@ const CompetitorDetail = () => {
           </Card>
 
           {/* Tabs Section */}
-          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="bg-muted/50 p-1 border border-border/50 mb-6">
+              <TabsList className="bg-muted/50 p-1 border border border-border mb-6">
                 <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md">
                   Overview
                 </TabsTrigger>
@@ -319,7 +318,7 @@ const CompetitorDetail = () => {
                   <h3 className="text-lg font-semibold mb-4 font-outfit">Sentiment Distribution</h3>
                   <div className="grid grid-cols-3 gap-4">
                     {sentimentData.map((item) => (
-                      <div key={item.name} className="p-4 rounded-xl border border-border/50 bg-muted/30">
+                      <div key={item.name} className="p-4 rounded-xl border border border-border bg-muted/30">
                         <p className="text-sm text-muted-foreground mb-2">{item.name}</p>
                         <p className="text-3xl font-bold font-outfit">{item.value}%</p>
                         <Progress value={item.value} className="h-2 mt-2" />
@@ -331,7 +330,7 @@ const CompetitorDetail = () => {
 
               <TabsContent value="mentions" className="space-y-3">
                 {topMentions.map((mention, idx) => (
-                  <div key={idx} className="p-4 rounded-xl border border-border/50 hover:shadow-md transition-all bg-card/50">
+                  <div key={idx} className="p-4 rounded-xl border border border-border hover:shadow-md transition-all bg-card/50">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl gradient-primary shadow-md flex items-center justify-center font-bold text-white font-outfit">
@@ -392,14 +391,14 @@ const CompetitorDetail = () => {
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Quick Stats */}
-          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <h3 className="text-lg font-semibold mb-4 font-outfit">Quick Stats</h3>
             <div className="space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-border/50">
+              <div className="flex items-center justify-between pb-3 border-b border border-border">
                 <span className="text-sm text-muted-foreground">Positive Sentiment</span>
                 <span className="text-lg font-bold font-outfit text-success">{competitor.sentiment}%</span>
               </div>
-              <div className="flex items-center justify-between pb-3 border-b border-border/50">
+              <div className="flex items-center justify-between pb-3 border-b border border-border">
                 <span className="text-sm text-muted-foreground">Market Rank</span>
                 <span className="text-lg font-bold font-outfit">#2</span>
               </div>
@@ -411,20 +410,20 @@ const CompetitorDetail = () => {
           </Card>
 
           {/* Quick Actions */}
-          <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <h3 className="text-lg font-semibold mb-4 font-outfit">Quick Actions</h3>
             <div className="space-y-2">
-              <Button variant="outline" className="w-full justify-start border-border/50" asChild>
+              <Button variant="outline" className="w-full justify-start border border-border" asChild>
                 <a href={`https://${competitor.url}`} target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="h-4 w-4 mr-2" />
                   Visit Website
                 </a>
               </Button>
-              <Button variant="outline" className="w-full justify-start border-border/50">
+              <Button variant="outline" className="w-full justify-start border border-border">
                 <MessageSquare className="h-4 w-4 mr-2" />
                 View All Mentions
               </Button>
-              <Button variant="outline" className="w-full justify-start border-border/50">
+              <Button variant="outline" className="w-full justify-start border border-border">
                 <Target className="h-4 w-4 mr-2" />
                 Compare Metrics
               </Button>

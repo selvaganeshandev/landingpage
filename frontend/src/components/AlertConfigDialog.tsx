@@ -78,7 +78,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
 
           {/* General Settings */}
           <TabsContent value="general" className="space-y-6 mt-6">
-            <div className="flex items-center justify-between p-4 rounded-lg border border-border/50">
+            <div className="flex items-center justify-between p-4 rounded-lg border border border-border">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
                   <Bell className="h-4 w-4 text-primary" />
@@ -94,7 +94,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
               />
             </div>
 
-            <div className="space-y-4 p-4 rounded-lg border border-border/50">
+            <div className="space-y-4 p-4 rounded-lg border border border-border">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
@@ -120,7 +120,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
                       type="time"
                       value={quietHoursStart}
                       onChange={(e) => setQuietHoursStart(e.target.value)}
-                      className="border-border/50"
+                      className="border border-border"
                     />
                   </div>
                   <div className="space-y-2">
@@ -130,7 +130,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
                       type="time"
                       value={quietHoursEnd}
                       onChange={(e) => setQuietHoursEnd(e.target.value)}
-                      className="border-border/50"
+                      className="border border-border"
                     />
                   </div>
                 </div>
@@ -140,7 +140,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
             <div className="space-y-2">
               <Label htmlFor="digest">Alert Digest Frequency</Label>
               <Select value={digestFrequency} onValueChange={setDigestFrequency}>
-                <SelectTrigger className="border-border/50">
+                <SelectTrigger className="border border-border">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -158,7 +158,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
 
           {/* Email Settings */}
           <TabsContent value="email" className="space-y-6 mt-6">
-            <div className="flex items-center justify-between p-4 rounded-lg border border-border/50">
+            <div className="flex items-center justify-between p-4 rounded-lg border border border-border">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
                   <Mail className="h-4 w-4 text-primary" />
@@ -184,14 +184,14 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
                     placeholder="team@example.com"
                     value={emailAddress}
                     onChange={(e) => setEmailAddress(e.target.value)}
-                    className="border-border/50"
+                    className="border border-border"
                   />
                   <p className="text-xs text-muted-foreground">
                     Primary email address for receiving alerts
                   </p>
                 </div>
 
-                <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
+                <div className="p-4 rounded-lg bg-muted/30 border border border-border">
                   <p className="text-sm font-medium mb-2">Email Format</p>
                   <p className="text-xs text-muted-foreground">
                     Alerts will be sent with detailed information including severity, affected metrics, and recommended actions.
@@ -203,7 +203,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
 
           {/* Slack Settings */}
           <TabsContent value="slack" className="space-y-6 mt-6">
-            <div className="flex items-center justify-between p-4 rounded-lg border border-border/50">
+            <div className="flex items-center justify-between p-4 rounded-lg border border border-border">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
                   <MessageSquare className="h-4 w-4 text-primary" />
@@ -228,7 +228,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
                     placeholder="#ai-monitoring"
                     value={slackChannel}
                     onChange={(e) => setSlackChannel(e.target.value)}
-                    className="border-border/50"
+                    className="border border-border"
                   />
                   <p className="text-xs text-muted-foreground">
                     Channel where alerts will be posted
@@ -243,7 +243,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
                     placeholder="https://hooks.slack.com/services/..."
                     value={slackWebhook}
                     onChange={(e) => setSlackWebhook(e.target.value)}
-                    className="border-border/50"
+                    className="border border-border"
                   />
                   <p className="text-xs text-muted-foreground">
                     Get your webhook URL from Slack's Incoming Webhooks integration
@@ -259,7 +259,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
 
           {/* SMS Settings */}
           <TabsContent value="sms" className="space-y-6 mt-6">
-            <div className="flex items-center justify-between p-4 rounded-lg border border-border/50">
+            <div className="flex items-center justify-between p-4 rounded-lg border border border-border">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
                   <Smartphone className="h-4 w-4 text-primary" />
@@ -285,7 +285,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
                     placeholder="+1 (555) 000-0000"
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value)}
-                    className="border-border/50"
+                    className="border border-border"
                   />
                   <p className="text-xs text-muted-foreground">
                     Include country code (e.g., +1 for US)

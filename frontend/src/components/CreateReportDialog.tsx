@@ -115,7 +115,7 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
               placeholder="e.g., Q4 Performance Report"
               value={reportName}
               onChange={(e) => setReportName(e.target.value)}
-              className="border-border/50"
+              className="border border-border"
             />
           </div>
 
@@ -123,7 +123,7 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
           <div className="space-y-2">
             <Label>Start From Template</Label>
             <Select value={template} onValueChange={setTemplate}>
-              <SelectTrigger className="border-border/50">
+              <SelectTrigger className="border border-border">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -144,7 +144,7 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
               placeholder="Brief description of this report..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="border-border/50 min-h-[60px]"
+              className="border border-border min-h-[60px]"
             />
           </div>
 
@@ -155,7 +155,7 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
               {reportSections.map((section) => (
                 <div
                   key={section.id}
-                  className="flex items-center space-x-3 p-3 rounded-lg border border-border/50 hover:bg-accent/50 cursor-pointer"
+                  className="flex items-center space-x-3 p-3 rounded-lg border border border-border hover:bg-accent/50 cursor-pointer"
                   onClick={() => toggleSection(section.id)}
                 >
                   <Checkbox
@@ -175,7 +175,7 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
             <div className="space-y-2">
               <Label>Format</Label>
               <Select value={format} onValueChange={setFormat}>
-                <SelectTrigger className="border-border/50">
+                <SelectTrigger className="border border-border">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -190,7 +190,7 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
             <div className="space-y-2">
               <Label>Schedule</Label>
               <Select value={schedule} onValueChange={setSchedule}>
-                <SelectTrigger className="border-border/50">
+                <SelectTrigger className="border border-border">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -214,7 +214,7 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
                 placeholder="team@example.com, marketing@example.com"
                 value={recipients}
                 onChange={(e) => setRecipients(e.target.value)}
-                className="border-border/50"
+                className="border border-border"
               />
               <p className="text-xs text-muted-foreground">
                 Separate multiple emails with commas

@@ -24,7 +24,7 @@ const getHeatmapColor = (value: number) => {
 
 export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) => {
   return (
-    <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+    <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
       <div className="space-y-6">
         <div className="pb-4 border-b border-border/50">
           <h3 className="text-lg font-semibold flex items-center gap-2 font-outfit">

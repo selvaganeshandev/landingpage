@@ -55,7 +55,7 @@ export default function PromptInsights() {
 
         <TabsContent value="trends" className="space-y-6">
           <div className="grid gap-4 md:grid-cols-3">
-            <Card>
+            <Card className="border border-border">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Prompt Volume</CardTitle>
                 <Search className="h-4 w-4 text-muted-foreground" />
@@ -69,7 +69,7 @@ export default function PromptInsights() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border border-border">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Avg. Daily Volume</CardTitle>
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
@@ -83,7 +83,7 @@ export default function PromptInsights() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border border-border">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Emerging Queries</CardTitle>
                 <Sparkles className="h-4 w-4 text-muted-foreground" />
@@ -98,7 +98,7 @@ export default function PromptInsights() {
             </Card>
           </div>
 
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Prompt Volume Forecast</CardTitle>
               <CardDescription>30-day trend and prediction model</CardDescription>
@@ -110,7 +110,7 @@ export default function PromptInsights() {
         </TabsContent>
 
         <TabsContent value="emerging" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Emerging Query Identification</CardTitle>
               <CardDescription>Queries with significant volume growth</CardDescription>
@@ -146,7 +146,7 @@ export default function PromptInsights() {
         </TabsContent>
 
         <TabsContent value="intent" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Search Intent Analysis</CardTitle>
               <CardDescription>Classification of user query intentions</CardDescription>
@@ -180,7 +180,7 @@ export default function PromptInsights() {
         </TabsContent>
 
         <TabsContent value="opportunities" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Demand Opportunity Scoring</CardTitle>
               <CardDescription>High-value topics ranked by opportunity score</CardDescription>

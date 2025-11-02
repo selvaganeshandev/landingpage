@@ -137,7 +137,7 @@ const Multilingual = () => {
             <Languages className="h-4 w-4 mr-2" />
             Configure Languages
           </Button>
-          <Button onClick={handleAddLanguage}>
+          <Button onClick={handleAddLanguage} className="gradient-primary shadow-md shadow-primary/20">
             <Plus className="h-4 w-4 mr-2" />
             Add Language
           </Button>
@@ -146,7 +146,7 @@ const Multilingual = () => {
 
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Languages Tracked</p>
             <Globe className="h-5 w-5 text-muted-foreground" />
@@ -155,7 +155,7 @@ const Multilingual = () => {
           <p className="text-xs text-muted-foreground mt-1">Active monitoring</p>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Total Mentions</p>
             <MapPin className="h-5 w-5 text-muted-foreground" />
@@ -164,7 +164,7 @@ const Multilingual = () => {
           <p className="text-xs text-muted-foreground mt-1">Across all languages</p>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Fastest Growing</p>
             <TrendingUp className="h-5 w-5 text-success" />
@@ -173,7 +173,7 @@ const Multilingual = () => {
           <p className="text-xs text-success mt-1">+22% this month</p>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Avg Sentiment</p>
             <Languages className="h-5 w-5 text-muted-foreground" />
@@ -185,7 +185,7 @@ const Multilingual = () => {
 
       {/* Language Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <h3 className="text-lg font-semibold mb-6">Language Distribution</h3>
           <ResponsiveContainer width="100%" height={250}>
             <PieChart>
@@ -232,7 +232,7 @@ const Multilingual = () => {
       </div>
 
       {/* Language Performance */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Language Performance</h3>
         <div className="space-y-6">
           {languages.map((language) => (
@@ -282,7 +282,7 @@ const Multilingual = () => {
       </Card>
 
       {/* Regional Distribution */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Regional Distribution</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {regions.map((region) => (
@@ -315,7 +315,7 @@ const Multilingual = () => {
       </Card>
 
       {/* Cross-Cultural Insights */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Cross-Cultural Insights</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {crossCulturalInsights.map((insight, idx) => (
@@ -335,7 +335,7 @@ const Multilingual = () => {
       </Card>
 
       {/* Top Prompts by Language */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Top Prompts by Language</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {Object.entries(topPromptsByLanguage).map(([language, prompts]) => (

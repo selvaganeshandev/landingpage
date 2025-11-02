@@ -27,8 +27,8 @@ import {
   Zap,
   LogOut,
   Calendar,
-  Menu,
-  X,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
 import { DomainSelector } from "./DomainSelector";
 import { Separator } from "@/components/ui/separator";
@@ -42,7 +42,7 @@ import { Button } from "@/components/ui/button";
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
 
-const NavGroup = ({ group, location, isOpen, onToggle, isSidebarOpen }: { group: any; location: any; isOpen: boolean; onToggle: () => void; isSidebarOpen: boolean }) => {
+const NavGroup = ({ group, location, isOpen, onToggle, isSidebarOpen, onItemClick }: { group: any; location: any; isOpen: boolean; onToggle: () => void; isSidebarOpen: boolean; onItemClick: () => void }) => {
 
   // Check if any item in group is active
   const hasActiveItem = group.items.some((item: any) => location.pathname === item.path);
@@ -56,6 +56,7 @@ const NavGroup = ({ group, location, isOpen, onToggle, isSidebarOpen }: { group:
     return (
       <Link
         to={item.path}
+        onClick={onItemClick}
         className={cn(
           "flex items-center transition-all duration-150",
           isActive
@@ -132,6 +133,7 @@ const NavGroup = ({ group, location, isOpen, onToggle, isSidebarOpen }: { group:
             <Link
               key={item.path}
               to={item.path}
+              onClick={onItemClick}
               className={cn(
                 "flex items-center transition-all duration-150",
                 isActive
@@ -177,8 +179,23 @@ export const Sidebar = () => {
     }
   }, [user, checkPermission, filterByPermissions]);
 
+  // Auto-open menu group if one of its items is active
+  useEffect(() => {
+    const activeGroupIndex = filteredNavGroups.findIndex((group) =>
+      group.items.some((item: any) => location.pathname === item.path)
+    );
+    if (activeGroupIndex !== -1) {
+      setOpenGroupIndex(activeGroupIndex);
+    }
+  }, [location.pathname, filteredNavGroups]);
+
   const handleToggleGroup = (index: number) => {
     setOpenGroupIndex(openGroupIndex === index ? null : index);
+  };
+
+  const handleItemClick = () => {
+    // Don't close menu if clicking on a submenu item within an open group
+    // The useEffect above will handle keeping it open if needed
   };
 
   const handleLogout = async () => {
@@ -219,7 +236,7 @@ export const Sidebar = () => {
                 onClick={toggleSidebar}
                 className="h-8 w-8 -mr-2"
               >
-                <X className="h-4 w-4" />
+                <ChevronsLeft className="h-4 w-4" />
               </Button>
             </>
           ) : (
@@ -230,10 +247,10 @@ export const Sidebar = () => {
                 onClick={toggleSidebar}
                 className="h-8 w-8"
               >
-                <Menu className="h-5 w-5" />
+                <ChevronsRight className="h-5 w-5" />
               </Button>
               {selectedDomain && getFaviconUrl(selectedDomain.url) && (
-                <div className="rounded-md overflow-hidden shadow-sm bg-background" style={{ width: '39px', height: '39px' }}>
+                <div className="rounded-md overflow-hidden shadow-sm bg-background" style={{ width: '36px', height: '36px' }}>
                   <img
                     src={getFaviconUrl(selectedDomain.url) || ''}
                     alt={selectedDomain.name}
@@ -263,6 +280,7 @@ export const Sidebar = () => {
               isOpen={openGroupIndex === index}
               onToggle={() => handleToggleGroup(index)}
               isSidebarOpen={isOpen}
+              onItemClick={handleItemClick}
             />
           ))}
       </nav>

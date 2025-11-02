@@ -119,7 +119,7 @@ const HistoricalTrends = () => {
 
   return (
     <div className="p-8 space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between pb-4">
         <div>
           <h1 className="text-4xl font-bold tracking-tight">Historical Trends</h1>
           <p className="text-muted-foreground mt-2">
@@ -138,7 +138,7 @@ const HistoricalTrends = () => {
               <SelectItem value="24">Last 24 Months</SelectItem>
             </SelectContent>
           </Select>
-          <Button onClick={handleExportReport}>
+          <Button onClick={handleExportReport} className="gradient-primary shadow-md shadow-primary/20">
             <Download className="h-4 w-4 mr-2" />
             Export Report
           </Button>
@@ -147,7 +147,7 @@ const HistoricalTrends = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground font-medium">Visibility Growth</p>
             <h3 className="text-3xl font-bold text-success">+38%</h3>
@@ -158,7 +158,7 @@ const HistoricalTrends = () => {
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground font-medium">Mention Growth</p>
             <h3 className="text-3xl font-bold text-success">+52%</h3>
@@ -169,7 +169,7 @@ const HistoricalTrends = () => {
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground font-medium">Position Improvement</p>
             <h3 className="text-3xl font-bold text-success">-24%</h3>
@@ -180,7 +180,7 @@ const HistoricalTrends = () => {
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground font-medium">Market Share Gain</p>
             <h3 className="text-3xl font-bold text-success">+12%</h3>
@@ -193,7 +193,7 @@ const HistoricalTrends = () => {
       </div>
 
       {/* Visibility Score Over Time */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Visibility Score Progression</h3>
         <ResponsiveContainer width="100%" height={350}>
           <ComposedChart data={visibilityTrend}>
@@ -261,7 +261,7 @@ const HistoricalTrends = () => {
       </Card>
 
       {/* Platform Growth */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Platform Growth Trends</h3>
         <ResponsiveContainer width="100%" height={300}>
           <AreaChart data={platformGrowth}>
@@ -318,7 +318,7 @@ const HistoricalTrends = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Competitor Comparison */}
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <h3 className="text-lg font-semibold mb-6">Competitive Performance</h3>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={competitorComparison}>
@@ -362,7 +362,7 @@ const HistoricalTrends = () => {
         </Card>
 
         {/* Seasonal Patterns */}
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <h3 className="text-lg font-semibold mb-6">Seasonal Patterns</h3>
           <ResponsiveContainer width="100%" height={300}>
             <ComposedChart data={seasonalPattern}>
@@ -398,7 +398,7 @@ const HistoricalTrends = () => {
       </div>
 
       {/* Forecast */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Performance Forecast</h3>
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={forecast}>
@@ -452,7 +452,7 @@ const HistoricalTrends = () => {
       </Card>
 
       {/* Milestones */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Key Milestones</h3>
         <div className="space-y-4">
           {milestones.map((milestone, idx) => (

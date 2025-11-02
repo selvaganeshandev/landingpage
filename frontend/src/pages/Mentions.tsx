@@ -229,21 +229,23 @@ const Mentions = () => {
 
   return (
     <div className="p-8 space-y-8">
-      <div className="flex items-center justify-between pb-4 border-b border-border/50">
+      <div className="flex items-center justify-between pb-4">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight font-outfit">Real-Time Mention Tracking</h1>
+          <h1 className="text-4xl font-bold tracking-tight">Real-Time Mention Tracking</h1>
           <p className="text-muted-foreground mt-2">
             Monitor brand mentions and citations across AI platforms
           </p>
         </div>
-        <Button onClick={handleExport} className="gradient-primary shadow-md shadow-primary/20">Export Mentions</Button>
+        <Button onClick={handleExport} className="gradient-primary shadow-md shadow-primary/20">
+          Export Mentions
+        </Button>
       </div>
 
       {/* Platform Tabs */}
-      <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+      <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
         <Tabs value={selectedPlatform} onValueChange={setSelectedPlatform}>
           <div className="flex items-center justify-between mb-6">
-            <TabsList className="bg-muted/50 p-1 border border-border/50">
+            <TabsList className="bg-muted/50 p-1 border border border-border">
               <TabsTrigger value="all" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">All Platforms</TabsTrigger>
               {availablePlatforms.map(platform => (
                 <TabsTrigger 
@@ -255,7 +257,7 @@ const Mentions = () => {
                 </TabsTrigger>
               ))}
             </TabsList>
-            <Button variant="outline" onClick={handleMoreFilters} className="border-border/50">
+            <Button variant="outline" onClick={handleMoreFilters} className="border border-border">
               <Filter className="h-4 w-4 mr-2" />
               More Filters
             </Button>
@@ -290,7 +292,7 @@ const Mentions = () => {
 
       <div className="grid gap-6">
         {isLoading ? (
-          <Card className="p-12 text-center shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <Card className="p-12 text-center shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="flex flex-col items-center gap-4">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               <div>
@@ -302,7 +304,7 @@ const Mentions = () => {
             </div>
           </Card>
         ) : filteredMentions.length === 0 ? (
-          <Card className="p-12 text-center shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <Card className="p-12 text-center shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="flex flex-col items-center gap-4">
               <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
                 <Search className="h-8 w-8 text-muted-foreground" />
@@ -318,7 +320,7 @@ const Mentions = () => {
         ) : (
           <>
           {filteredMentions.map((mention) => (
-          <Card key={mention.id} className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.01] border-border/50 backdrop-blur-sm bg-card/80">
+          <Card key={mention.id} className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.01] border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-5">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-4">
@@ -340,7 +342,7 @@ const Mentions = () => {
                 <span className="text-xs text-muted-foreground">{mention.time_ago}</span>
               </div>
 
-              <div className="bg-gradient-to-br from-muted/30 to-muted/50 rounded-xl p-5 border border-border/50 backdrop-blur-sm">
+              <div className="bg-gradient-to-br from-muted/30 to-muted/50 rounded-xl p-5 border border border-border backdrop-blur-sm">
                 <div 
                   className="text-sm leading-relaxed prose prose-sm max-w-none [&_h1]:font-semibold [&_h1]:text-lg [&_h1]:mt-4 [&_h1]:mb-2 [&_h1]:text-foreground [&_h2]:font-semibold [&_h2]:text-base [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-foreground [&_h3]:font-semibold [&_h3]:text-sm [&_h3]:mt-4 [&_h3]:mb-2 [&_h3]:text-foreground [&_a]:text-primary [&_a]:underline [&_a]:hover:no-underline [&_strong]:font-semibold [&_strong]:text-foreground [&_b]:font-semibold [&_b]:text-foreground"
                   dangerouslySetInnerHTML={{
@@ -352,7 +354,7 @@ const Mentions = () => {
                 />
               </div>
 
-              <div className="space-y-3 pt-3 border-t border-border/50">
+              <div className="space-y-3 pt-3 border-t border border-border">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground font-medium">Citations ({mention.citations_count}):</span>
                 </div>
@@ -380,11 +382,11 @@ const Mentions = () => {
                   </div>
                 )}
                 <div className="flex gap-2 pt-2">
-                  <Button variant="outline" size="sm" onClick={() => handleCopy(mention.description)} className="border-border/50">
+                  <Button variant="outline" size="sm" onClick={() => handleCopy(mention.description)} className="border border-border">
                     <Copy className="h-3 w-3 mr-1" />
                     Copy
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => handleViewFull(mention.id)} className="border-border/50">
+                  <Button variant="outline" size="sm" onClick={() => handleViewFull(mention.id)} className="border border-border">
                     <ExternalLink className="h-3 w-3 mr-1" />
                     View Full Details
                   </Button>
@@ -395,7 +397,7 @@ const Mentions = () => {
           ))}
           {canLoadMore && (
             <div className="flex justify-center">
-              <Button variant="outline" onClick={handleLoadMore} disabled={isLoading} className="border-border/50">
+              <Button variant="outline" onClick={handleLoadMore} disabled={isLoading} className="border border-border">
                 {isLoading ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin"/> Loading...</>) : 'Load More'}
               </Button>
             </div>

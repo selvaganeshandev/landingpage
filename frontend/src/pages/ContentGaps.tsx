@@ -210,7 +210,7 @@ const ContentGaps = () => {
             Discover untapped opportunities and AI-powered recommendations
           </p>
         </div>
-        <Button onClick={handleGenerateContentPlan}>
+        <Button onClick={handleGenerateContentPlan} className="gradient-primary shadow-md shadow-primary/20">
           <FileText className="h-4 w-4 mr-2" />
           Generate Content Plan
         </Button>
@@ -218,7 +218,7 @@ const ContentGaps = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Total Gaps</p>
             <Target className="h-5 w-5 text-muted-foreground" />
@@ -227,7 +227,7 @@ const ContentGaps = () => {
           <p className="text-xs text-muted-foreground mt-1">Identified opportunities</p>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">High Priority</p>
             <AlertCircle className="h-5 w-5 text-destructive" />
@@ -236,7 +236,7 @@ const ContentGaps = () => {
           <p className="text-xs text-muted-foreground mt-1">Require immediate action</p>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Avg Coverage</p>
             <TrendingUp className="h-5 w-5 text-muted-foreground" />
@@ -245,7 +245,7 @@ const ContentGaps = () => {
           <p className="text-xs text-muted-foreground mt-1">Across all gaps</p>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Est. Impact</p>
             <Sparkles className="h-5 w-5 text-primary" />
@@ -256,7 +256,7 @@ const ContentGaps = () => {
       </div>
 
       {/* Content Gaps List */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold">Identified Content Gaps</h3>
           <div className="relative w-64">
@@ -335,7 +335,7 @@ const ContentGaps = () => {
       </Card>
 
       {/* Page Optimization Suggestions */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Page Optimization Suggestions</h3>
         <div className="space-y-4">
           {optimizationSuggestions.map((suggestion, idx) => (
@@ -367,7 +367,7 @@ const ContentGaps = () => {
       </Card>
 
       {/* Topic Clusters */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Topic Cluster Analysis</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {topicClusters.map((cluster) => (

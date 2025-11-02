@@ -17,7 +17,7 @@ const platforms: Mention[] = [
 
 export const PlatformMentions = () => {
   return (
-    <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80 h-full flex flex-col">
+    <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80 h-full flex flex-col">
       <h3 className="text-lg font-semibold mb-6 font-outfit">Platform Distribution</h3>
       <div className="space-y-5 flex-1">
         {platforms.map((platform) => (

@@ -370,7 +370,7 @@ export default function TeamMemberPermissions() {
         </div>
       </div>
 
-      <Card>
+      <Card className="border border-border">
         <CardHeader>
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-4">
@@ -407,7 +407,7 @@ export default function TeamMemberPermissions() {
         </CardHeader>
       </Card>
 
-      <Card>
+      <Card className="border border-border">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>

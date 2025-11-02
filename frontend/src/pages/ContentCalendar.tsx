@@ -219,7 +219,7 @@ const ContentCalendar = () => {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="p-4">
+        <Card className="p-4 border border-border">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Scheduled</p>
@@ -230,7 +230,7 @@ const ContentCalendar = () => {
             </div>
           </div>
         </Card>
-        <Card className="p-4">
+        <Card className="p-4 border border-border">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">High Priority</p>
@@ -241,7 +241,7 @@ const ContentCalendar = () => {
             </div>
           </div>
         </Card>
-        <Card className="p-4">
+        <Card className="p-4 border border-border">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Generated</p>
@@ -252,7 +252,7 @@ const ContentCalendar = () => {
             </div>
           </div>
         </Card>
-        <Card className="p-4">
+        <Card className="p-4 border border-border">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Avg Impact</p>
@@ -275,7 +275,7 @@ const ContentCalendar = () => {
         {/* Calendar View */}
         <TabsContent value="calendar" className="space-y-6 mt-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card className="p-6">
+            <Card className="p-6 border border-border">
               <Calendar
                 mode="single"
                 selected={selectedDate}
@@ -285,7 +285,7 @@ const ContentCalendar = () => {
             </Card>
 
             <div className="lg:col-span-2 space-y-4">
-              <Card className="p-6">
+              <Card className="p-6 border border-border">
                 <h3 className="text-lg font-semibold mb-4">
                   {selectedDate?.toLocaleDateString('en-US', { 
                     weekday: 'long', 
@@ -298,7 +298,7 @@ const ContentCalendar = () => {
                 {itemsForSelectedDate.length > 0 ? (
                   <div className="space-y-3">
                     {itemsForSelectedDate.map((item) => (
-                      <Card key={item.id} className="p-4 border-border/50">
+                      <Card key={item.id} className="p-4 border border-border">
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
@@ -428,7 +428,7 @@ const ContentCalendar = () => {
         <TabsContent value="pipeline" className="space-y-6 mt-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             {/* Scheduled Column */}
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center gap-2 mb-4">
                 <Clock className="h-5 w-5 text-primary" />
                 <h3 className="font-semibold">Scheduled</h3>
@@ -452,7 +452,7 @@ const ContentCalendar = () => {
             </Card>
 
             {/* Draft Column */}
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center gap-2 mb-4">
                 <FileText className="h-5 w-5 text-warning" />
                 <h3 className="font-semibold">Draft</h3>
@@ -476,7 +476,7 @@ const ContentCalendar = () => {
             </Card>
 
             {/* Generated Column */}
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center gap-2 mb-4">
                 <Sparkles className="h-5 w-5 text-primary" />
                 <h3 className="font-semibold">Generated</h3>
@@ -500,7 +500,7 @@ const ContentCalendar = () => {
             </Card>
 
             {/* Published Column */}
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center gap-2 mb-4">
                 <CheckCircle2 className="h-5 w-5 text-success" />
                 <h3 className="font-semibold">Published</h3>

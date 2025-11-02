@@ -16,7 +16,7 @@ const PlaceholderPage = ({ title, description, features = [] }: PlaceholderPageP
         <p className="text-muted-foreground mt-2">{description}</p>
       </div>
 
-      <Card className="p-12 text-center">
+      <Card className="p-12 border border-border text-center">
         <div className="flex flex-col items-center gap-6 max-w-2xl mx-auto">
           <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
             <Construction className="h-10 w-10 text-primary" />

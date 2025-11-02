@@ -73,7 +73,7 @@ export default function AgentAnalytics() {
         </TabsList>
 
         <TabsContent value="performance" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Model-Specific Performance Tracking</CardTitle>
               <CardDescription>Compare how different AI models reference your brand</CardDescription>
@@ -118,7 +118,7 @@ export default function AgentAnalytics() {
         </TabsContent>
 
         <TabsContent value="sources" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Source Citation Analysis</CardTitle>
               <CardDescription>Which sources AI models prefer when mentioning your brand</CardDescription>
@@ -150,7 +150,7 @@ export default function AgentAnalytics() {
         </TabsContent>
 
         <TabsContent value="behavior" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Agent Behavior Patterns</CardTitle>
               <CardDescription>Identified patterns in how AI models find and cite content</CardDescription>
@@ -182,7 +182,7 @@ export default function AgentAnalytics() {
         </TabsContent>
 
         <TabsContent value="pathways" className="space-y-6">
-          <Card>
+          <Card className="border border-border">
             <CardHeader>
               <CardTitle>Referral Pathway Optimization</CardTitle>
               <CardDescription>Track how users navigate from AI responses to your content</CardDescription>

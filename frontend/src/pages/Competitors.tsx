@@ -308,13 +308,13 @@ const Competitors = () => {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight font-outfit">Competitor Analysis</h1>
-            <p className="text-muted-foreground mt-1">
+            <h1 className="text-4xl font-bold tracking-tight">Competitor Analysis</h1>
+            <p className="text-muted-foreground mt-2">
               Compare your brand's AI visibility against competitors
             </p>
           </div>
           <div className="flex gap-3">
-            <Button variant="outline" onClick={handleExportReport} className="border-border/50">
+            <Button variant="outline" onClick={handleExportReport}>
               <FileText className="h-4 w-4 mr-2" />
               Export Report
             </Button>
@@ -355,7 +355,7 @@ const Competitors = () => {
               {competitors.map((competitor, idx) => (
                 <Card 
                   key={competitor.id} 
-                  className={`p-6 hover:shadow-elegant transition-all duration-300 cursor-pointer border-border/50 backdrop-blur-sm bg-card/80 ${competitor.isYou ? 'ring-2 ring-primary/30' : ''}`}
+                  className={`p-6 hover:shadow-elegant transition-all duration-300 cursor-pointer border border-border backdrop-blur-sm bg-card/80 ${competitor.isYou ? 'ring-2 ring-primary/30' : ''}`}
                   onClick={() => !competitor.isYou && navigate(`/competitors/${competitor.url.replace('.com', '')}`)}
                 >
                   <div className="space-y-4">
@@ -375,27 +375,27 @@ const Competitors = () => {
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                      <div className="p-3 rounded-xl bg-muted/30 border border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Mentions</p>
                         <p className="text-2xl font-bold font-outfit">{competitor.mentions}</p>
                       </div>
-                      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                      <div className="p-3 rounded-xl bg-muted/30 border border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Share</p>
                         <p className="text-2xl font-bold font-outfit">{competitor.shareOfVoice}%</p>
                       </div>
-                      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                      <div className="p-3 rounded-xl bg-muted/30 border border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Visibility</p>
                         <p className="text-lg font-bold font-outfit">{competitor.visibility}%</p>
                         <Progress value={competitor.visibility} className="h-1.5 mt-2" />
                       </div>
-                      <div className="p-3 rounded-xl bg-muted/30 border border-border/50">
+                      <div className="p-3 rounded-xl bg-muted/30 border border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Sentiment</p>
                         <p className="text-lg font-bold font-outfit">{competitor.sentiment}%</p>
                         <Progress value={competitor.sentiment} className="h-1.5 mt-2" />
                       </div>
                     </div>
 
-                    <div className="pt-3 border-t border-border/50 flex items-center justify-between">
+                    <div className="pt-3 border-t border border-border flex items-center justify-between">
                       <div className="flex items-center gap-2 text-sm">
                         <span className="text-muted-foreground">Trend</span>
                         <div className="flex items-center gap-1">
@@ -421,9 +421,9 @@ const Competitors = () => {
             </div>
 
             {/* Brand Visibility Over Time */}
-            <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+            <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
               <div className="space-y-6">
-                <div className="pb-4 border-b border-border/50">
+                <div className="pb-4 border-b border border-border">
                   <h3 className="text-lg font-semibold flex items-center gap-2 font-outfit">
                     <TrendingUp className="h-5 w-5 text-primary" />
                     Brand Visibility Over Time
@@ -527,11 +527,11 @@ const Competitors = () => {
                 </ResponsiveContainer>
               </Card>
 
-              <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+              <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
                 <h3 className="text-lg font-semibold mb-6 font-outfit">Competitive Intelligence</h3>
                 <div className="space-y-3">
                   {competitiveInsights.map((insight, idx) => (
-                    <div key={idx} className="p-5 rounded-xl border border-border/50 hover:shadow-md transition-all duration-300 hover:scale-[1.01] bg-card/50">
+                    <div key={idx} className="p-5 rounded-xl border border border-border hover:shadow-md transition-all duration-300 hover:scale-[1.01] bg-card/50">
                       <div className="flex items-start gap-3">
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md ${
                           insight.type === 'success' ? 'bg-success/10 text-success' :
@@ -557,7 +557,7 @@ const Competitors = () => {
             </div>
 
             {/* Platform Breakdown */}
-            <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+            <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
               <h3 className="text-lg font-semibold mb-6 font-outfit">Platform-Specific Competition</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {Object.entries(platformComparison).map(([platform, data]) => (
@@ -593,7 +593,7 @@ const Competitors = () => {
           <TabsContent value="prompts" className="space-y-6 mt-6">
             <Card className="p-6">
               <div className="space-y-6">
-                <div className="flex items-center justify-between pb-4 border-b border-border/50">
+                <div className="flex items-center justify-between pb-4 border-b border border-border">
                   <div>
                     <h3 className="text-lg font-semibold font-outfit">Prompt Performance Analysis</h3>
                     <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
@@ -606,7 +606,7 @@ const Competitors = () => {
 
                 <div className="space-y-4">
                   {promptData.map((prompt) => (
-                    <Card key={prompt.id} className="p-5 border-border/50 hover:shadow-md transition-all">
+                    <Card key={prompt.id} className="p-5 border border-border hover:shadow-md transition-all">
                       <div className="space-y-4">
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
@@ -686,23 +686,23 @@ const Competitors = () => {
                     </div>
 
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                      <div className="p-4 rounded-xl bg-muted/30 border border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Mentions</p>
                         <p className="text-3xl font-bold font-outfit">{competitor.mentions}</p>
                       </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                      <div className="p-4 rounded-xl bg-muted/30 border border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Visibility</p>
                         <p className="text-3xl font-bold font-outfit">{competitor.visibility}%</p>
                       </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                      <div className="p-4 rounded-xl bg-muted/30 border border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Sentiment</p>
                         <p className="text-3xl font-bold font-outfit">{competitor.sentiment}%</p>
                       </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                      <div className="p-4 rounded-xl bg-muted/30 border border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Position</p>
                         <p className="text-3xl font-bold font-outfit">{competitor.avgPosition}</p>
                       </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                      <div className="p-4 rounded-xl bg-muted/30 border border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Share</p>
                         <p className="text-3xl font-bold font-outfit">{competitor.shareOfVoice}%</p>
                       </div>
@@ -717,7 +717,7 @@ const Competitors = () => {
           <TabsContent value="answer-gap" className="space-y-6 mt-6">
             <Card className="p-6">
               <div className="space-y-6">
-                <div className="flex items-center justify-between pb-4 border-b border-border/50">
+                <div className="flex items-center justify-between pb-4 border-b border border-border">
                   <div>
                     <h3 className="text-lg font-semibold font-outfit">Answer Gap Analysis</h3>
                     <p className="text-sm text-muted-foreground mt-1">
@@ -732,7 +732,7 @@ const Competitors = () => {
 
                 <div className="space-y-4">
                   {answerGapData.map((gap) => (
-                    <Card key={gap.id} className="p-5 border-border/50 hover:shadow-md transition-all">
+                    <Card key={gap.id} className="p-5 border border-border hover:shadow-md transition-all">
                       <div className="space-y-4">
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
@@ -763,7 +763,7 @@ const Competitors = () => {
                           ))}
                         </div>
 
-                        <div className="pt-3 border-t border-border/50">
+                        <div className="pt-3 border-t border border-border">
                           <Button 
                             variant="default" 
                             size="sm" 

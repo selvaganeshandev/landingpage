@@ -159,7 +159,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
         <div className="space-y-6">
           {/* Summary Cards */}
           <div className="grid grid-cols-4 gap-4">
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center justify-between mb-2">
                 <Search className="h-5 w-5 text-muted-foreground" />
                 <Badge className={getPriorityColor(gap.priority)}>
@@ -170,7 +170,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
               <p className="text-xs text-muted-foreground">Mentions/Month</p>
             </Card>
 
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center justify-between mb-2">
                 <AlertCircle className="h-5 w-5 text-warning" />
               </div>
@@ -178,7 +178,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
               <p className="text-xs text-muted-foreground">Current Coverage</p>
             </Card>
 
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center justify-between mb-2">
                 <TrendingUp className="h-5 w-5 text-success" />
               </div>
@@ -186,7 +186,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
               <p className="text-xs text-muted-foreground">Growth (6 mo)</p>
             </Card>
 
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center justify-between mb-2">
                 <Users className="h-5 w-5 text-muted-foreground" />
               </div>
@@ -208,7 +208,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
             {/* Overview */}
             <TabsContent value="overview" className="space-y-4">
               <div className="grid grid-cols-2 gap-6">
-                <Card className="p-6">
+                <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4">Mention Trend</h4>
                   <ResponsiveContainer width="100%" height={250}>
                     <LineChart data={trendData}>
@@ -233,7 +233,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
                   </ResponsiveContainer>
                 </Card>
 
-                <Card className="p-6">
+                <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4">Coverage Trend</h4>
                   <ResponsiveContainer width="100%" height={250}>
                     <LineChart data={trendData}>
@@ -259,7 +259,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
                 </Card>
               </div>
 
-              <Card className="p-6">
+              <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Platform Distribution</h4>
                 <div className="space-y-3">
                   {gap.platforms.map((platform) => (
@@ -284,7 +284,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
 
             {/* Competitors */}
             <TabsContent value="competitors" className="space-y-4">
-              <Card className="p-6">
+              <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Competitor Share of Voice</h4>
                 <div className="space-y-4">
                   {gap.competitorMentions.map((comp) => (
@@ -303,7 +303,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
                 </div>
               </Card>
 
-              <Card className="p-6">
+              <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Opportunity Analysis</h4>
                 <div className="space-y-4">
                   <div className="p-4 rounded-lg bg-warning/10 border border-warning/20">
@@ -326,7 +326,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
 
             {/* Related Questions */}
             <TabsContent value="related" className="space-y-4">
-              <Card className="p-6">
+              <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Related Questions ({relatedQuestions.length})</h4>
                 <div className="space-y-3">
                   {relatedQuestions.map((q, idx) => (
@@ -385,7 +385,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
 
             {/* SEO Suggestions */}
             <TabsContent value="seo" className="space-y-4">
-              <Card className="p-6">
+              <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">SEO Optimization Checklist</h4>
                 <div className="space-y-3">
                   {seoSuggestions.map((sug, idx) => (
@@ -410,7 +410,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
 
             {/* Action Plan */}
             <TabsContent value="action" className="space-y-4">
-              <Card className="p-6">
+              <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">7-Week Implementation Plan</h4>
                 <div className="space-y-3">
                   {actionPlan.map((action, idx) => (

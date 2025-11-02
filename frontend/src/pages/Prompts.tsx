@@ -90,9 +90,9 @@ const Prompts = () => {
 
   return (
     <div className="p-8 space-y-8">
-      <div className="flex items-center justify-between pb-4 border-b border-border/50">
+      <div className="flex items-center justify-between pb-4">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight font-outfit bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+          <h1 className="text-4xl font-bold tracking-tight">
             Prompt Monitoring
           </h1>
           <p className="text-muted-foreground mt-2">
@@ -105,18 +105,18 @@ const Prompts = () => {
         </Button>
       </div>
 
-      <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+      <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
         <div className="flex gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input 
               placeholder="Search prompt groups..." 
-              className="pl-10 border-border/50"
+              className="pl-10 border border-border"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <Button variant="outline" onClick={handleOrganizeGroups} className="border-border/50">
+          <Button variant="outline" onClick={handleOrganizeGroups} className="border border-border">
             <FolderOpen className="h-4 w-4 mr-2" />
             Organize Groups
           </Button>
@@ -131,13 +131,13 @@ const Prompts = () => {
         ) : promptGroups.length > 0 ? (
           <>
           {promptGroups.map((group) => (
-          <Card key={group.id} className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.01] border-border/50 backdrop-blur-sm bg-card/80">
+          <Card key={group.id} className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.01] border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-5">
               <div className="flex items-start justify-between">
                 <div className="space-y-2">
                   <h3 className="text-xl font-semibold font-outfit">{group.group_id}</h3>
                   {group.primary_prompt && (
-                    <p className="text-sm text-muted-foreground font-mono bg-gradient-to-br from-muted/30 to-muted/50 px-3 py-2 rounded-xl inline-block border border-border/50">
+                    <p className="text-sm text-muted-foreground font-mono bg-gradient-to-br from-muted/30 to-muted/50 px-3 py-2 rounded-xl inline-block border border border-border">
                       {group.primary_prompt}
                     </p>
                   )}
@@ -167,12 +167,12 @@ const Prompts = () => {
                 </div>
               </div>
 
-              <div className="flex gap-2 pt-3 border-t border-border/50">
-                <Button variant="outline" size="sm" onClick={() => handleViewDetails(group.id)} className="border-border/50">
+              <div className="flex gap-2 pt-3 border-t border border-border">
+                <Button variant="outline" size="sm" onClick={() => handleViewDetails(group.id)} className="border border-border">
                   <Eye className="h-4 w-4 mr-1" />
                   View Details
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => handleEditGroup(group)} className="border-border/50">
+                <Button variant="outline" size="sm" onClick={() => handleEditGroup(group)} className="border border-border">
                   <Edit className="h-4 w-4 mr-1" />
                   Edit Group
                 </Button>
@@ -183,7 +183,7 @@ const Prompts = () => {
         ))}
         {canLoadMore && (
           <div className="flex justify-center">
-            <Button variant="outline" onClick={handleLoadMore} disabled={isLoading} className="border-border/50">
+            <Button variant="outline" onClick={handleLoadMore} disabled={isLoading} className="border border-border">
               {isLoading ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin"/> Loading...</>) : 'Load More'}
             </Button>
           </div>

@@ -133,7 +133,7 @@ const ShareOfVoice = () => {
             Competitive benchmarking and market position analysis
           </p>
         </div>
-        <Button onClick={handleExportReport}>
+        <Button onClick={handleExportReport} className="gradient-primary shadow-md shadow-primary/20">
           <FileText className="h-4 w-4 mr-2" />
           Export Market Report
         </Button>
@@ -141,7 +141,7 @@ const ShareOfVoice = () => {
 
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Market Share</p>
@@ -158,7 +158,7 @@ const ShareOfVoice = () => {
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Market Position</p>
@@ -173,7 +173,7 @@ const ShareOfVoice = () => {
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Dominance Score</p>
@@ -189,7 +189,7 @@ const ShareOfVoice = () => {
 
       {/* Market Share Overview */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <h3 className="text-lg font-semibold mb-6">Overall Market Share</h3>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={overallShare} layout="vertical">
@@ -218,7 +218,7 @@ const ShareOfVoice = () => {
           </ResponsiveContainer>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <h3 className="text-lg font-semibold mb-6">Share of Voice Trends</h3>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={shareHistory}>
@@ -264,7 +264,7 @@ const ShareOfVoice = () => {
 
       {/* Competitive Positioning */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <h3 className="text-lg font-semibold mb-6">Competitive Strength Radar</h3>
           <ResponsiveContainer width="100%" height={350}>
             <RadarChart data={competitiveStrength}>
@@ -302,7 +302,7 @@ const ShareOfVoice = () => {
           </ResponsiveContainer>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <h3 className="text-lg font-semibold mb-6">Brand Positioning Matrix</h3>
           <ResponsiveContainer width="100%" height={350}>
             <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
@@ -356,7 +356,7 @@ const ShareOfVoice = () => {
       </div>
 
       {/* Platform-Specific Share */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Platform-Specific Share of Voice</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {Object.entries(platformShare).map(([platform, data]) => (
@@ -381,7 +381,7 @@ const ShareOfVoice = () => {
       </Card>
 
       {/* Market Opportunities */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Market Opportunities</h3>
         <div className="space-y-4">
           {opportunities.map((opp) => (

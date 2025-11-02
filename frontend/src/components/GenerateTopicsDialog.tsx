@@ -141,7 +141,7 @@ export const GenerateTopicsDialog = ({ open, onOpenChange, onAdd }: GenerateTopi
         <div className="space-y-6 py-4">
           {/* Generate Button */}
           {generatedTopics.length === 0 && (
-            <Card className="p-8 text-center">
+            <Card className="p-8 border border-border text-center">
               <Brain className="h-16 w-16 mx-auto mb-4 text-primary opacity-50" />
               <h3 className="text-lg font-semibold mb-2">AI-Powered Topic Discovery</h3>
               <p className="text-sm text-muted-foreground mb-6">

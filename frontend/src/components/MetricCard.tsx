@@ -20,7 +20,7 @@ export const MetricCard = ({ title, value, change, icon, trend }: MetricCardProp
     : icon;
 
   return (
-    <Card className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.02] border-border/50 backdrop-blur-sm bg-card/80">
+    <Card className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.02] border border-border backdrop-blur-sm bg-card/80">
       <div className="flex items-start justify-between">
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">{title}</p>

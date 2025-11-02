@@ -18,7 +18,7 @@ const competitors: Competitor[] = [
 
 export const CompetitorComparison = () => {
   return (
-    <Card className="p-6 h-full flex flex-col">
+    <Card className="p-6 h-full flex flex-col border border-border">
       <h3 className="text-lg font-semibold mb-4">Share of Voice</h3>
       <div className="space-y-4 flex-1">
         {competitors.map((competitor, index) => (

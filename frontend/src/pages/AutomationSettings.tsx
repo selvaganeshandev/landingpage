@@ -61,14 +61,14 @@ const AutomationSettings = () => {
             Configure automation behavior for generated articles
           </p>
         </div>
-        <Button onClick={handleSave} className="gradient-primary">
+        <Button onClick={handleSave} className="gradient-primary shadow-md shadow-primary/20">
           <Settings className="h-4 w-4 mr-2" />
           Save Changes
         </Button>
       </div>
 
       {/* Content Automation */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <div className="space-y-6">
           <div className="flex items-start justify-between">
             <div className="flex items-start gap-4">
@@ -128,7 +128,7 @@ const AutomationSettings = () => {
       </Card>
 
       {/* Posting Configuration */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <div className="space-y-6">
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -198,7 +198,7 @@ const AutomationSettings = () => {
       </Card>
 
       {/* Content Configuration */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <div className="space-y-6">
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -343,7 +343,7 @@ const AutomationSettings = () => {
       </Card>
 
       {/* Advanced Content Settings */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <div className="space-y-6">
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -485,7 +485,7 @@ const AutomationSettings = () => {
 
       {/* Save Button */}
       <div className="flex justify-end">
-        <Button onClick={handleSave} size="lg" className="gradient-primary">
+        <Button onClick={handleSave} size="lg" className="gradient-primary shadow-md shadow-primary/20">
           <Settings className="h-4 w-4 mr-2" />
           Save All Settings
         </Button>

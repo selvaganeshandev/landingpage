@@ -111,7 +111,7 @@ export const AddTopicDialog = ({ open, onOpenChange, onAdd }: AddTopicDialogProp
               placeholder="e.g., Recovery & Post-Workout"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="border-border/50"
+              className="border border-border"
             />
           </div>
 
@@ -123,7 +123,7 @@ export const AddTopicDialog = ({ open, onOpenChange, onAdd }: AddTopicDialogProp
               placeholder="Brief description of what this topic covers..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="border-border/50 min-h-[80px]"
+              className="border border-border min-h-[80px]"
             />
           </div>
 
@@ -137,7 +137,7 @@ export const AddTopicDialog = ({ open, onOpenChange, onAdd }: AddTopicDialogProp
                 value={keywordInput}
                 onChange={(e) => setKeywordInput(e.target.value)}
                 onKeyPress={handleKeyPress}
-                className="border-border/50"
+                className="border border-border"
               />
               <Button type="button" onClick={handleAddKeyword} variant="outline">
                 Add
@@ -168,7 +168,7 @@ export const AddTopicDialog = ({ open, onOpenChange, onAdd }: AddTopicDialogProp
             )}
           </div>
 
-          <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
+          <div className="p-4 rounded-lg bg-muted/30 border border border-border">
             <p className="text-sm font-medium mb-1">Pro Tip</p>
             <p className="text-xs text-muted-foreground">
               Choose keywords that are specific to your topic and likely to appear in AI responses. You can always edit and refine these later.

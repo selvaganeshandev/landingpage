@@ -159,32 +159,34 @@ export const DomainSelector = () => {
                     key={domain.id}
                     value={domain.name}
                     onSelect={() => handleDomainSelect(domain.id)}
-                    className="flex items-center gap-2"
+                    className="flex items-center justify-between gap-2"
                   >
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      {faviconUrl ? (
+                        <img
+                          src={faviconUrl}
+                          alt=""
+                          className="h-4 w-4 flex-shrink-0 rounded"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                          }}
+                        />
+                      ) : null}
+                      <Globe className={cn("h-4 w-4 flex-shrink-0", faviconUrl && "hidden")} />
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <span className="truncate">{domain.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {domain.total_mentions} mentions
+                        </span>
+                      </div>
+                    </div>
                     <Check
                       className={cn(
                         "h-4 w-4 flex-shrink-0",
                         selectedDomain?.id === domain.id ? "opacity-100" : "opacity-0"
                       )}
                     />
-                    {faviconUrl ? (
-                      <img
-                        src={faviconUrl}
-                        alt=""
-                        className="h-4 w-4 flex-shrink-0 rounded"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                        }}
-                      />
-                    ) : null}
-                    <Globe className={cn("h-4 w-4 flex-shrink-0", faviconUrl && "hidden")} />
-                    <div className="flex flex-col flex-1 min-w-0">
-                      <span className="truncate">{domain.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {domain.total_mentions} mentions
-                      </span>
-                    </div>
                   </CommandItem>
                 );
               })}

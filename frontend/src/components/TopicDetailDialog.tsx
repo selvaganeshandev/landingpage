@@ -93,7 +93,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
         <div className="space-y-6">
           {/* Summary Cards */}
           <div className="grid grid-cols-4 gap-4">
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center justify-between mb-2">
                 <MessageSquare className="h-5 w-5 text-muted-foreground" />
                 <div className="flex items-center gap-1">
@@ -111,7 +111,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
               <p className="text-xs text-muted-foreground">Total Mentions</p>
             </Card>
 
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-muted-foreground">Visibility</span>
               </div>
@@ -119,7 +119,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
               <Progress value={topic.visibility} className="h-1.5 mt-2" />
             </Card>
 
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center justify-between mb-2">
                 <ThumbsUp className="h-5 w-5 text-success" />
               </div>
@@ -127,7 +127,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
               <p className="text-xs text-muted-foreground">Positive Sentiment</p>
             </Card>
 
-            <Card className="p-4">
+            <Card className="p-4 border border-border">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-muted-foreground">Platforms</span>
               </div>
@@ -147,7 +147,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
 
             {/* Mention Timeline */}
             <TabsContent value="timeline" className="space-y-4">
-              <Card className="p-6">
+              <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Mention Trend (Last 30 Days)</h4>
                 <ResponsiveContainer width="100%" height={300}>
                   <LineChart data={mentionTimeline}>
@@ -176,7 +176,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
             {/* Platform Breakdown */}
             <TabsContent value="platforms" className="space-y-4">
               <div className="grid grid-cols-2 gap-6">
-                <Card className="p-6">
+                <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4">Platform Distribution</h4>
                   <ResponsiveContainer width="100%" height={250}>
                     <PieChart>
@@ -198,7 +198,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
                   </ResponsiveContainer>
                 </Card>
 
-                <Card className="p-6">
+                <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4">Mentions by Platform</h4>
                   <div className="space-y-4 mt-8">
                     {platformBreakdown.map((platform) => (
@@ -220,7 +220,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
 
             {/* Keyword Variations */}
             <TabsContent value="keywords" className="space-y-4">
-              <Card className="p-6">
+              <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Keyword Performance</h4>
                 <div className="space-y-4">
                   {keywordVariations.map((kw) => (
@@ -248,7 +248,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
             {/* Sentiment Breakdown */}
             <TabsContent value="sentiment" className="space-y-4">
               <div className="grid grid-cols-2 gap-6">
-                <Card className="p-6">
+                <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4">Sentiment Distribution</h4>
                   <ResponsiveContainer width="100%" height={250}>
                     <PieChart>
@@ -271,7 +271,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
                   </ResponsiveContainer>
                 </Card>
 
-                <Card className="p-6">
+                <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4">Sentiment Breakdown</h4>
                   <div className="space-y-6 mt-8">
                     <div className="flex items-center gap-4">
@@ -308,7 +308,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
 
             {/* Related Prompts */}
             <TabsContent value="prompts" className="space-y-4">
-              <Card className="p-6">
+              <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Related Prompts ({relatedPrompts.length})</h4>
                 <div className="space-y-3">
                   {relatedPrompts.map((prompt, idx) => (

@@ -99,7 +99,7 @@ const Sentiment = () => {
             Deep dive into brand sentiment across AI platforms
           </p>
         </div>
-        <Button onClick={handleExportReport}>
+        <Button onClick={handleExportReport} className="gradient-primary shadow-md shadow-primary/20">
           <FileText className="h-4 w-4 mr-2" />
           Export Sentiment Report
         </Button>
@@ -107,7 +107,7 @@ const Sentiment = () => {
 
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Positive Sentiment</p>
@@ -124,7 +124,7 @@ const Sentiment = () => {
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Neutral Sentiment</p>
@@ -141,7 +141,7 @@ const Sentiment = () => {
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Negative Sentiment</p>
@@ -161,7 +161,7 @@ const Sentiment = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Sentiment Distribution */}
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <h3 className="text-lg font-semibold mb-4">Sentiment Distribution</h3>
           <ResponsiveContainer width="100%" height={250}>
             <PieChart>
@@ -237,7 +237,7 @@ const Sentiment = () => {
       </div>
 
       {/* Thematic Sentiment Breakdown */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Thematic Sentiment Breakdown</h3>
         <div className="space-y-6">
           {thematicSentiment.map((theme) => (
@@ -280,7 +280,7 @@ const Sentiment = () => {
         </TabsList>
 
         <TabsContent value="platform" className="space-y-4">
-          <Card className="p-6">
+          <Card className="p-6 border border-border">
             <h3 className="text-lg font-semibold mb-6">Platform Sentiment Breakdown</h3>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={platformSentiment}>
@@ -304,7 +304,7 @@ const Sentiment = () => {
         </TabsContent>
 
         <TabsContent value="competitor" className="space-y-4">
-          <Card className="p-6">
+          <Card className="p-6 border border-border">
             <h3 className="text-lg font-semibold mb-6">Competitive Sentiment Analysis</h3>
             <div className="space-y-6">
               {competitorSentiment.map((competitor, index) => (

@@ -240,7 +240,7 @@ const Alerts = () => {
             <Settings className="h-4 w-4 mr-2" />
             Configure
           </Button>
-          <Button onClick={handleNewAlertRule}>
+          <Button onClick={handleNewAlertRule} className="gradient-primary shadow-md shadow-primary/20">
             <Plus className="h-4 w-4 mr-2" />
             New Alert Rule
           </Button>
@@ -249,7 +249,7 @@ const Alerts = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Active Alerts</p>
             <Bell className="h-5 w-5 text-destructive" />
@@ -258,7 +258,7 @@ const Alerts = () => {
           <p className="text-xs text-muted-foreground mt-1">Require attention</p>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">High Priority</p>
             <AlertTriangle className="h-5 w-5 text-destructive" />
@@ -267,7 +267,7 @@ const Alerts = () => {
           <p className="text-xs text-muted-foreground mt-1">Critical issues</p>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Resolved Today</p>
             <CheckCircle2 className="h-5 w-5 text-success" />
@@ -276,7 +276,7 @@ const Alerts = () => {
           <p className="text-xs text-muted-foreground mt-1">Issues fixed</p>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Avg Response</p>
             <Clock className="h-5 w-5 text-muted-foreground" />
@@ -363,7 +363,7 @@ const Alerts = () => {
         </TabsContent>
 
         <TabsContent value="rules" className="space-y-4">
-          <Card className="p-6">
+          <Card className="p-6 border border-border">
             <div className="space-y-6">
               {alertRules.map((rule) => (
                 <div key={rule.id} className="flex items-start justify-between p-4 rounded-lg border border-border">
@@ -397,7 +397,7 @@ const Alerts = () => {
       </Tabs>
 
       {/* Notification Channels */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Notification Channels</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="p-4 rounded-lg border border-border">

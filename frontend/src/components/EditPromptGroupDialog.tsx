@@ -146,7 +146,7 @@ export const EditPromptGroupDialog = ({ open, onOpenChange, promptGroup, onEdit 
               placeholder="e.g., Vegan Protein - Athletes"
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
-              className="border-border/50"
+              className="border border-border"
             />
           </div>
 
@@ -158,7 +158,7 @@ export const EditPromptGroupDialog = ({ open, onOpenChange, promptGroup, onEdit 
               placeholder="e.g., best vegan protein powder for athletes"
               value={primaryPrompt}
               onChange={(e) => setPrimaryPrompt(e.target.value)}
-              className="border-border/50 font-mono"
+              className="border border-border font-mono"
             />
           </div>
 
@@ -170,7 +170,7 @@ export const EditPromptGroupDialog = ({ open, onOpenChange, promptGroup, onEdit 
                 placeholder="Add a variant prompt..."
                 value={secondaryInput}
                 onChange={(e) => setSecondaryInput(e.target.value)}
-                className="border-border/50 font-mono flex-1"
+                className="border border-border font-mono flex-1"
                 onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSecondaryPrompt())}
               />
               <Button type="button" onClick={handleAddSecondaryPrompt} size="sm">

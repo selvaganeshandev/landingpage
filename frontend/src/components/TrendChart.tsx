@@ -17,7 +17,7 @@ interface TrendChartProps {
 
 export const TrendChart = ({ data = defaultData }: TrendChartProps) => {
   return (
-    <Card className="p-6 h-full flex flex-col">
+    <Card className="p-6 h-full flex flex-col border border-border">
       <h3 className="text-lg font-semibold mb-4">Visibility Trends</h3>
       <div className="flex-1 min-h-[300px]">
         <ResponsiveContainer width="100%" height="100%">

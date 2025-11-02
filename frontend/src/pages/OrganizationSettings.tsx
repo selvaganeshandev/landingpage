@@ -443,7 +443,7 @@ export default function OrganizationSettings() {
         </p>
       </div>
 
-      <Card>
+      <Card className="border border-border">
         <CardHeader>
           <CardTitle>Organization Details</CardTitle>
           <CardDescription>
@@ -467,7 +467,7 @@ export default function OrganizationSettings() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border border-border">
         <CardHeader>
           <CardTitle>Domains</CardTitle>
           <CardDescription>
@@ -518,7 +518,7 @@ export default function OrganizationSettings() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border border-border">
         <CardHeader>
           <CardTitle>Integrations</CardTitle>
           <CardDescription>
@@ -620,7 +620,7 @@ export default function OrganizationSettings() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border border-border">
         <CardHeader>
           <CardTitle>Team Members</CardTitle>
           <CardDescription>

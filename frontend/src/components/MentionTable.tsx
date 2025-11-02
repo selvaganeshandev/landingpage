@@ -82,7 +82,7 @@ export const MentionTable = () => {
   };
 
   return (
-    <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+    <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
       <h3 className="text-lg font-semibold mb-6 font-outfit">Recent Mentions</h3>
       <Table>
         <TableHeader>

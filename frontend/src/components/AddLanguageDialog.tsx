@@ -106,7 +106,7 @@ export const AddLanguageDialog = ({ open, onOpenChange, onAdd }: AddLanguageDial
               placeholder="Search languages..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 border-border/50"
+              className="pl-10 border border-border"
             />
           </div>
 

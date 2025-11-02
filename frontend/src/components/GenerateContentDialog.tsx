@@ -134,7 +134,7 @@ export const GenerateContentDialog = ({
       case 1:
         return (
           <div className="space-y-4">
-            <div className="pb-4 border-b border-border/50">
+            <div className="pb-4 border-b border border-border">
               <h3 className="text-lg font-semibold mb-1">Choose an Article Type</h3>
               <p className="text-sm text-muted-foreground">
                 Choose the type of article you want to create
@@ -181,7 +181,7 @@ export const GenerateContentDialog = ({
       case 2:
         return (
           <div className="space-y-6">
-            <div className="pb-4 border-b border-border/50">
+            <div className="pb-4 border-b border border-border">
               <h3 className="text-lg font-semibold mb-1">Article Details</h3>
               <p className="text-sm text-muted-foreground">
                 Provide title and target keywords
@@ -217,7 +217,7 @@ export const GenerateContentDialog = ({
       case 3:
         return (
           <div className="space-y-6">
-            <div className="pb-4 border-b border-border/50">
+            <div className="pb-4 border-b border border-border">
               <h3 className="text-lg font-semibold mb-1">Content Settings</h3>
               <p className="text-sm text-muted-foreground">
                 Configure your article generation preferences
@@ -324,7 +324,7 @@ export const GenerateContentDialog = ({
       case 4:
         return (
           <div className="space-y-6">
-            <div className="pb-4 border-b border-border/50">
+            <div className="pb-4 border-b border border-border">
               <h3 className="text-lg font-semibold mb-1">Review & Generate</h3>
               <p className="text-sm text-muted-foreground">
                 Review your settings and generate content
@@ -346,7 +346,7 @@ export const GenerateContentDialog = ({
               </div>
             ) : (
               <div className="space-y-4">
-                <Card className="p-5 bg-muted/30">
+                <Card className="p-5 border border-border bg-muted/30">
                   <div className="space-y-3">
                     <div className="flex items-center gap-2">
                       <FileText className="h-5 w-5 text-primary" />
@@ -359,7 +359,7 @@ export const GenerateContentDialog = ({
                       <Badge variant="outline">{formData.tone} tone</Badge>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 text-sm pt-3 border-t border-border/50">
+                    <div className="grid grid-cols-2 gap-3 text-sm pt-3 border-t border border-border">
                       <div>
                         <p className="text-muted-foreground mb-1">Style & Goal</p>
                         <p className="font-medium capitalize">{formData.style} / {formData.goal}</p>
@@ -418,7 +418,7 @@ export const GenerateContentDialog = ({
         {renderStepContent()}
 
         {/* Navigation */}
-        <div className="flex items-center justify-between pt-6 border-t border-border/50">
+        <div className="flex items-center justify-between pt-6 border-t border border-border">
           <Button
             variant="outline"
             onClick={() => step > 1 ? setStep(step - 1) : onOpenChange(false)}

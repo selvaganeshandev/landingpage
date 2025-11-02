@@ -196,7 +196,7 @@ export const ConfigureLanguagesDialog = ({ open, onOpenChange }: ConfigureLangua
 
           {/* General Settings Tab */}
           <TabsContent value="general" className="space-y-6 mt-6">
-            <Card className="p-6">
+            <Card className="p-6 border border-border">
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
@@ -247,7 +247,7 @@ export const ConfigureLanguagesDialog = ({ open, onOpenChange }: ConfigureLangua
 
           {/* Alerts Tab */}
           <TabsContent value="alerts" className="space-y-6 mt-6">
-            <Card className="p-6">
+            <Card className="p-6 border border-border">
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">

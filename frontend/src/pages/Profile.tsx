@@ -71,7 +71,7 @@ export default function Profile() {
 
       <div className="space-y-6">
         {/* Profile Information */}
-        <Card>
+        <Card className="border border-border">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <User className="h-5 w-5" />
@@ -134,7 +134,7 @@ export default function Profile() {
         </Card>
 
         {/* Account Information */}
-        <Card>
+        <Card className="border border-border">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Shield className="h-5 w-5" />

@@ -50,7 +50,7 @@ export default function ForgotPassword() {
   if (isEmailSent) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-        <Card className="w-full max-w-md">
+        <Card className="w-full max-w-md border border-border">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
               <Mail className="h-6 w-6 text-primary" />
@@ -95,7 +95,7 @@ export default function ForgotPassword() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md border border-border">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
             <Building2 className="h-6 w-6 text-primary" />

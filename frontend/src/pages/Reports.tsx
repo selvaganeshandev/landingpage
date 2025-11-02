@@ -248,7 +248,7 @@ const Reports = () => {
             <Settings className="h-4 w-4 mr-2" />
             Manage Templates
           </Button>
-          <Button onClick={handleCreateReport}>
+          <Button onClick={handleCreateReport} className="gradient-primary shadow-md shadow-primary/20">
             <Plus className="h-4 w-4 mr-2" />
             Create Report
           </Button>
@@ -276,7 +276,7 @@ const Reports = () => {
       </div>
 
       {/* Scheduled Reports */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Scheduled Reports</h3>
         <div className="space-y-4">
           {scheduledReports.map((report) => (
@@ -329,7 +329,7 @@ const Reports = () => {
       </Card>
 
       {/* Recent Reports */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold">Recent Reports</h3>
           <Button variant="outline" size="sm">View All</Button>
@@ -364,7 +364,7 @@ const Reports = () => {
       </Card>
 
       {/* Templates */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Report Templates</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {templates.map((template) => (
@@ -403,7 +403,7 @@ const Reports = () => {
       </Card>
 
       {/* API Access */}
-      <Card className="p-6">
+      <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-4">API Access</h3>
         <p className="text-sm text-muted-foreground mb-4">
           Integrate visibility data directly into your systems with our REST API

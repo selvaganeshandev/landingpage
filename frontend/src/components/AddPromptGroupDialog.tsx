@@ -153,7 +153,7 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
               placeholder="e.g., Vegan Protein - Athletes"
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
-              className="border-border/50"
+              className="border border-border"
             />
           </div>
 
@@ -161,7 +161,7 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
           <div className="space-y-2">
             <Label htmlFor="domain">Domain*</Label>
             <Select value={domainId?.toString() || ""} onValueChange={(value) => setDomainId(parseInt(value))}>
-              <SelectTrigger className="border-border/50">
+              <SelectTrigger className="border border-border">
                 <SelectValue placeholder="Select a domain" />
               </SelectTrigger>
               <SelectContent>
@@ -182,7 +182,7 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
                 placeholder="e.g., best vegan protein powder for athletes"
                 value={primaryInput}
                 onChange={(e) => setPrimaryInput(e.target.value)}
-                className="border-border/50 font-mono flex-1"
+                className="border border-border font-mono flex-1"
                 onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddPrimaryPrompt())}
               />
               <Button type="button" onClick={handleAddPrimaryPrompt} size="sm">
@@ -214,7 +214,7 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
                 placeholder="Add a variant prompt..."
                 value={secondaryInput}
                 onChange={(e) => setSecondaryInput(e.target.value)}
-                className="border-border/50 font-mono flex-1"
+                className="border border-border font-mono flex-1"
                 onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSecondaryPrompt())}
               />
               <Button type="button" onClick={handleAddSecondaryPrompt} size="sm">
@@ -240,7 +240,7 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="border-border/50">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="border border-border">
             Cancel
           </Button>
           <Button 
