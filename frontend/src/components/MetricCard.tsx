@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { cloneElement, isValidElement } from "react";
 
 interface MetricCardProps {
   title: string;
@@ -11,6 +12,13 @@ interface MetricCardProps {
 }
 
 export const MetricCard = ({ title, value, change, icon, trend }: MetricCardProps) => {
+  // Clone the icon element and add white text color class
+  const whiteIcon = icon && isValidElement(icon)
+    ? cloneElement(icon as React.ReactElement, {
+        className: cn((icon as React.ReactElement).props.className, "text-white")
+      })
+    : icon;
+
   return (
     <Card className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.02] border-border/50 backdrop-blur-sm bg-card/80">
       <div className="flex items-start justify-between">
@@ -39,7 +47,7 @@ export const MetricCard = ({ title, value, change, icon, trend }: MetricCardProp
         </div>
         {icon && (
           <div className="p-4 rounded-2xl gradient-primary shadow-glow">
-            {icon}
+            {whiteIcon}
           </div>
         )}
       </div>

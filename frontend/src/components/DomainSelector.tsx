@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Check, Globe, Loader2 } from "lucide-react";
+import { Check, Globe, Loader2, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -18,6 +18,16 @@ import { cn } from "@/lib/utils";
 import { useDomainStore } from "@/stores/domainStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+
+// Helper function to get favicon URL from domain URL
+const getFaviconUrl = (url: string) => {
+  try {
+    const domain = new URL(url).hostname;
+    return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+  } catch {
+    return null;
+  }
+};
 
 export const DomainSelector = () => {
   const [open, setOpen] = useState(false);
@@ -85,11 +95,11 @@ export const DomainSelector = () => {
     return (
       <Button
         variant="outline"
-        className="w-[200px] justify-between"
+        className="w-full justify-start"
         disabled
       >
         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        Loading domains...
+        <span className="text-left flex-1">Loading domains...</span>
       </Button>
     );
   }
@@ -98,14 +108,16 @@ export const DomainSelector = () => {
     return (
       <Button
         variant="outline"
-        className="w-[200px] justify-between"
+        className="w-full justify-start"
         disabled
       >
-        <Globe className="mr-2 h-4 w-4" />
-        No domain added
+        <Globe className="mr-2 h-4 w-4 flex-shrink-0" />
+        <span className="text-left flex-1">No domain added</span>
       </Button>
     );
   }
+
+  const selectedFaviconUrl = selectedDomain ? getFaviconUrl(selectedDomain.url) : null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -114,38 +126,68 @@ export const DomainSelector = () => {
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-[200px] justify-between"
+          className="w-full justify-start gap-2"
         >
-          <Globe className="mr-2 h-4 w-4" />
-          {selectedDomain ? selectedDomain.name : "Select domain"}
+          {selectedFaviconUrl ? (
+            <img
+              src={selectedFaviconUrl}
+              alt=""
+              className="h-4 w-4 flex-shrink-0 rounded"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.nextElementSibling?.classList.remove('hidden');
+              }}
+            />
+          ) : null}
+          <Globe className={cn("h-4 w-4 flex-shrink-0", selectedFaviconUrl && "hidden")} />
+          <span className="text-left flex-1 truncate">
+            {selectedDomain ? selectedDomain.name : "Select domain"}
+          </span>
+          <ChevronDown className="h-4 w-4 flex-shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[200px] p-0">
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
         <Command>
           <CommandInput placeholder="Search domains..." />
           <CommandList>
             <CommandEmpty>No domains found.</CommandEmpty>
             <CommandGroup heading="Your Domains">
-              {domains.map((domain) => (
-                <CommandItem
-                  key={domain.id}
-                  value={domain.name}
-                  onSelect={() => handleDomainSelect(domain.id)}
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4",
-                      selectedDomain?.id === domain.id ? "opacity-100" : "opacity-0"
-                    )}
-                  />
-                  <div className="flex flex-col">
-                    <span>{domain.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {domain.total_mentions} mentions
-                    </span>
-                  </div>
-                </CommandItem>
-              ))}
+              {domains.map((domain) => {
+                const faviconUrl = getFaviconUrl(domain.url);
+                return (
+                  <CommandItem
+                    key={domain.id}
+                    value={domain.name}
+                    onSelect={() => handleDomainSelect(domain.id)}
+                    className="flex items-center gap-2"
+                  >
+                    <Check
+                      className={cn(
+                        "h-4 w-4 flex-shrink-0",
+                        selectedDomain?.id === domain.id ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                    {faviconUrl ? (
+                      <img
+                        src={faviconUrl}
+                        alt=""
+                        className="h-4 w-4 flex-shrink-0 rounded"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                        }}
+                      />
+                    ) : null}
+                    <Globe className={cn("h-4 w-4 flex-shrink-0", faviconUrl && "hidden")} />
+                    <div className="flex flex-col flex-1 min-w-0">
+                      <span className="truncate">{domain.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {domain.total_mentions} mentions
+                      </span>
+                    </div>
+                  </CommandItem>
+                );
+              })}
             </CommandGroup>
           </CommandList>
         </Command>

@@ -27,52 +27,80 @@ import {
   Zap,
   LogOut,
   Calendar,
+  Menu,
+  X,
 } from "lucide-react";
 import { DomainSelector } from "./DomainSelector";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigationStore } from "@/stores/navigationStore";
+import { useDomainStore } from "@/stores/domainStore";
 import { MODULES } from "@/types/auth";
+import { useSidebar } from "@/contexts/SidebarContext";
+import { Button } from "@/components/ui/button";
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
 
-const NavGroup = ({ group, location }: { group: any; location: any }) => {
-  const [isOpen, setIsOpen] = useState(true);
-  
+const NavGroup = ({ group, location, isOpen, onToggle, isSidebarOpen }: { group: any; location: any; isOpen: boolean; onToggle: () => void; isSidebarOpen: boolean }) => {
+
   // Check if any item in group is active
   const hasActiveItem = group.items.some((item: any) => location.pathname === item.path);
-  
+
   // If group has only one item, render it directly
   if (group.items.length === 1) {
     const item = group.items[0];
     const Icon = (item.icon as any) || LayoutDashboard;
     const isActive = location.pathname === item.path;
-    
+
     return (
       <Link
         to={item.path}
         className={cn(
-          "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+          "flex items-center transition-all duration-150",
           isActive
             ? "bg-primary text-primary-foreground"
-            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          isSidebarOpen
+            ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
+            : "rounded-md justify-center aspect-square w-9 h-9 p-0"
         )}
+        style={!isSidebarOpen ? { marginLeft: '5px' } : undefined}
+        title={!isSidebarOpen ? item.name : undefined}
       >
-        <Icon className={cn("h-4 w-4", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
-        {item.name}
+        <Icon className={cn("h-4 w-4 flex-shrink-0", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
+        {isSidebarOpen && <span className="transition-opacity duration-150">{item.name}</span>}
       </Link>
     );
   }
   
   const GroupIcon = (group.icon as any) || LayoutDashboard;
-  
+
+  // When sidebar is closed, show only icon
+  if (!isSidebarOpen) {
+    return (
+      <button
+        onClick={onToggle}
+        className={cn(
+          "flex items-center justify-center rounded-md transition-all duration-150 aspect-square w-9 h-9 p-0",
+          hasActiveItem
+            ? "bg-primary text-primary-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+        )}
+        style={{ marginLeft: '5px' }}
+        title={group.name}
+      >
+        <GroupIcon className="h-4 w-4 flex-shrink-0" />
+      </button>
+    );
+  }
+
   return (
     <div className="space-y-1">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={onToggle}
         className={cn(
-          "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+          "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150",
           hasActiveItem
             ? "text-primary"
             : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -82,37 +110,42 @@ const NavGroup = ({ group, location }: { group: any; location: any }) => {
           {GroupIcon && <GroupIcon className="h-4 w-4 text-foreground" />}
           <span>{group.name}</span>
         </div>
-        {isOpen ? (
-          <ChevronDown className="h-4 w-4" />
-        ) : (
-          <ChevronRight className="h-4 w-4" />
-        )}
+        <ChevronRight
+          className={cn(
+            "h-4 w-4 transition-transform duration-150 ease-in-out",
+            isOpen ? "rotate-90" : "rotate-0"
+          )}
+        />
       </button>
-      
-      {isOpen && (
-        <div className="ml-4 space-y-1">
-          {group.items.map((item: any) => {
-            const Icon = (item.icon as any) || LayoutDashboard;
-            const isActive = location.pathname === item.path;
-            
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                )}
-              >
-                <Icon className={cn("h-3 w-3", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
-                {item.name}
-              </Link>
-            );
-          })}
-        </div>
-      )}
+
+      <div
+        className={cn(
+          "ml-4 space-y-1 overflow-hidden transition-all duration-200 ease-in-out",
+          isOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+        )}
+      >
+        {group.items.map((item: any) => {
+          const Icon = (item.icon as any) || LayoutDashboard;
+          const isActive = location.pathname === item.path;
+
+          return (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={cn(
+                "flex items-center transition-all duration-150",
+                isActive
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                "gap-3 px-3 py-2 rounded-lg text-sm font-medium"
+              )}
+            >
+              <Icon className={cn("h-3 w-3", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
+              {item.name}
+            </Link>
+          );
+        })}
+      </div>
     </div>
   );
 };
@@ -123,6 +156,19 @@ export const Sidebar = () => {
   const { user, logout, checkPermission } = useAuth();
   const { toast } = useToast();
   const { filteredNavGroups, filterByPermissions } = useNavigationStore();
+  const [openGroupIndex, setOpenGroupIndex] = useState<number | null>(null);
+  const { isOpen, toggleSidebar } = useSidebar();
+  const { selectedDomain } = useDomainStore();
+
+  // Helper function to get favicon URL
+  const getFaviconUrl = (url: string) => {
+    try {
+      const domain = new URL(url).hostname;
+      return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+    } catch {
+      return null;
+    }
+  };
 
   // Filter navigation based on user permissions
   useEffect(() => {
@@ -130,6 +176,10 @@ export const Sidebar = () => {
       filterByPermissions(checkPermission);
     }
   }, [user, checkPermission, filterByPermissions]);
+
+  const handleToggleGroup = (index: number) => {
+    setOpenGroupIndex(openGroupIndex === index ? null : index);
+  };
 
   const handleLogout = async () => {
     try {
@@ -149,64 +199,143 @@ export const Sidebar = () => {
   };
 
   return (
-    <aside className="w-64 bg-card border-r border-border h-screen sticky top-0 overflow-y-auto flex flex-col">
-      <div className="p-6 border-b border-border">
-        <h2 className="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-          PromptMaxx
-        </h2>
-        <p className="text-xs text-muted-foreground mt-1">AI Visibility & Content Strategy</p>
-        <div className="mt-4">
-          <DomainSelector />
+    <aside className={cn(
+      "bg-card border-r border-border h-screen sticky top-0 overflow-y-auto flex flex-col transition-all duration-150",
+      isOpen ? "w-64" : "w-16"
+    )}>
+      <div className={cn("border-b border-border transition-all duration-150", isOpen ? "p-6" : "p-2")}>
+        <div className="flex items-center justify-between">
+          {isOpen ? (
+            <>
+              <div>
+                <h2 className="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                  PromptMaxx
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">AI Visibility & Content Strategy</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleSidebar}
+                className="h-8 w-8 -mr-2"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </>
+          ) : (
+            <div className="flex flex-col items-center gap-2 w-full px-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleSidebar}
+                className="h-8 w-8"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+              {selectedDomain && getFaviconUrl(selectedDomain.url) && (
+                <div className="rounded-md overflow-hidden shadow-sm bg-background" style={{ width: '39px', height: '39px' }}>
+                  <img
+                    src={getFaviconUrl(selectedDomain.url) || ''}
+                    alt={selectedDomain.name}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      </div>
-      
-      <nav className="p-4 space-y-2 flex-1">
-        {filteredNavGroups.map((group, index) => (
-          <NavGroup key={index} group={group} location={location} />
-        ))}
-      </nav>
-      
-      <div className="p-4 border-t border-border mt-auto space-y-2">
-        {/* Organization / Profile shortcuts */}
-        {user && (
-          <div className="space-y-2">
-            {(user.role === 'admin' || user.role === 'super_admin') && (
-              <Link
-                to="/organization-settings"
-                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-              >
-                <Settings className="h-4 w-4" />
-                Organization
-              </Link>
-            )}
-            {user.role === 'admin' && (
-              <Link
-                to="/profile"
-                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-              >
-                <User className="h-4 w-4 text-foreground" />
-                Profile
-              </Link>
-            )}
-            {user.role === 'user' && (
-              <Link
-                to="/profile"
-                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-              >
-                <User className="h-4 w-4 text-foreground" />
-                Profile
-              </Link>
-            )}
+        {isOpen && (
+          <div className="mt-4">
+            <DomainSelector />
           </div>
         )}
-        
-        <button
-          onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-        >
-          <LogOut className="h-4 w-4" />
-          Sign Out
-        </button>
+      </div>
+
+      <nav className={cn("space-y-2 flex-1", isOpen ? "p-4" : "py-4 px-2")}>
+          {filteredNavGroups.map((group, index) => (
+            <NavGroup
+              key={index}
+              group={group}
+              location={location}
+              isOpen={openGroupIndex === index}
+              onToggle={() => handleToggleGroup(index)}
+              isSidebarOpen={isOpen}
+            />
+          ))}
+      </nav>
+
+      <div className={cn("border-t border-border mt-auto space-y-2 transition-all duration-150", isOpen ? "p-4" : "py-4 px-2")}>
+          {/* Organization / Profile shortcuts */}
+          {user && (
+            <div className="space-y-2">
+              {(user.role === 'admin' || user.role === 'super_admin') && (
+                <Link
+                  to="/organization-settings"
+                  className={cn(
+                    "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-150",
+                    isOpen
+                      ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
+                      : "rounded-md justify-center aspect-square w-9 h-9 p-0"
+                  )}
+                  style={!isOpen ? { marginLeft: '5px' } : undefined}
+                  title={!isOpen ? "Organization" : undefined}
+                >
+                  <Settings className="h-4 w-4 flex-shrink-0" />
+                  {isOpen && <span className="transition-opacity duration-150">Organization</span>}
+                </Link>
+              )}
+              {user.role === 'admin' && (
+                <Link
+                  to="/profile"
+                  className={cn(
+                    "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-150",
+                    isOpen
+                      ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
+                      : "rounded-md justify-center aspect-square w-9 h-9 p-0"
+                  )}
+                  style={!isOpen ? { marginLeft: '5px' } : undefined}
+                  title={!isOpen ? "Profile" : undefined}
+                >
+                  <User className="h-4 w-4 flex-shrink-0" />
+                  {isOpen && <span className="transition-opacity duration-150">Profile</span>}
+                </Link>
+              )}
+              {user.role === 'user' && (
+                <Link
+                  to="/profile"
+                  className={cn(
+                    "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-150",
+                    isOpen
+                      ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
+                      : "rounded-md justify-center aspect-square w-9 h-9 p-0"
+                  )}
+                  style={!isOpen ? { marginLeft: '5px' } : undefined}
+                  title={!isOpen ? "Profile" : undefined}
+                >
+                  <User className="h-4 w-4 flex-shrink-0" />
+                  {isOpen && <span className="transition-opacity duration-150">Profile</span>}
+                </Link>
+              )}
+            </div>
+          )}
+
+          <button
+            onClick={handleLogout}
+            className={cn(
+              "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-150",
+              isOpen
+                ? "w-full gap-3 px-3 py-2 text-sm font-medium rounded-lg"
+                : "rounded-md justify-center aspect-square w-9 h-9 p-0"
+            )}
+            style={!isOpen ? { marginLeft: '5px' } : undefined}
+            title={!isOpen ? "Sign Out" : undefined}
+          >
+            <LogOut className="h-4 w-4 flex-shrink-0" />
+            {isOpen && <span className="transition-opacity duration-150">Sign Out</span>}
+          </button>
       </div>
     </aside>
   );
