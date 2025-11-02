@@ -29,6 +29,7 @@ import {
   Calendar,
   ChevronsLeft,
   ChevronsRight,
+  Check,
 } from "lucide-react";
 import { DomainSelector } from "./DomainSelector";
 import { Separator } from "@/components/ui/separator";
@@ -39,10 +40,24 @@ import { useDomainStore } from "@/stores/domainStore";
 import { MODULES } from "@/types/auth";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
 
 const NavGroup = ({ group, location, isOpen, onToggle, isSidebarOpen, onItemClick }: { group: any; location: any; isOpen: boolean; onToggle: () => void; isSidebarOpen: boolean; onItemClick: () => void }) => {
+  const [submenuOpen, setSubmenuOpen] = useState(false);
 
   // Check if any item in group is active
   const hasActiveItem = group.items.some((item: any) => location.pathname === item.path);
@@ -74,25 +89,57 @@ const NavGroup = ({ group, location, isOpen, onToggle, isSidebarOpen, onItemClic
       </Link>
     );
   }
-  
+
   const GroupIcon = (group.icon as any) || LayoutDashboard;
 
-  // When sidebar is closed, show only icon
+  // When sidebar is closed, show only icon with popover submenu
   if (!isSidebarOpen) {
     return (
-      <button
-        onClick={onToggle}
-        className={cn(
-          "flex items-center justify-center rounded-md transition-all duration-150 aspect-square w-9 h-9 p-0",
-          hasActiveItem
-            ? "bg-primary text-primary-foreground"
-            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-        )}
-        style={{ marginLeft: '5px' }}
-        title={group.name}
-      >
-        <GroupIcon className="h-4 w-4 flex-shrink-0" />
-      </button>
+      <Popover open={submenuOpen} onOpenChange={setSubmenuOpen}>
+        <PopoverTrigger asChild>
+          <button
+            className={cn(
+              "flex items-center justify-center rounded-md transition-all duration-150 aspect-square w-9 h-9 p-0",
+              hasActiveItem
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            )}
+            style={{ marginLeft: '5px' }}
+            title={group.name}
+          >
+            <GroupIcon className="h-4 w-4 flex-shrink-0" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[200px] p-2" side="right" align="start">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold text-muted-foreground px-2 py-1">{group.name}</p>
+            {group.items.map((item: any) => {
+              const Icon = (item.icon as any) || LayoutDashboard;
+              const isActive = location.pathname === item.path;
+
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  onClick={() => {
+                    onItemClick();
+                    setSubmenuOpen(false);
+                  }}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150",
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  )}
+                >
+                  <Icon className={cn("h-3 w-3", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
+                  {item.name}
+                </Link>
+              );
+            })}
+          </div>
+        </PopoverContent>
+      </Popover>
     );
   }
 
@@ -160,7 +207,8 @@ export const Sidebar = () => {
   const { filteredNavGroups, filterByPermissions } = useNavigationStore();
   const [openGroupIndex, setOpenGroupIndex] = useState<number | null>(null);
   const { isOpen, toggleSidebar } = useSidebar();
-  const { selectedDomain } = useDomainStore();
+  const { selectedDomain, domains, setSelectedDomain } = useDomainStore();
+  const [domainPopoverOpen, setDomainPopoverOpen] = useState(false);
 
   // Helper function to get favicon URL
   const getFaviconUrl = (url: string) => {
@@ -240,7 +288,7 @@ export const Sidebar = () => {
               </Button>
             </>
           ) : (
-            <div className="flex flex-col items-center gap-2 w-full px-2">
+            <div className="flex flex-col items-center gap-2 w-full px-2 pb-3">
               <Button
                 variant="ghost"
                 size="icon"
@@ -250,16 +298,74 @@ export const Sidebar = () => {
                 <ChevronsRight className="h-5 w-5" />
               </Button>
               {selectedDomain && getFaviconUrl(selectedDomain.url) && (
-                <div className="rounded-md overflow-hidden shadow-sm bg-background" style={{ width: '36px', height: '36px' }}>
-                  <img
-                    src={getFaviconUrl(selectedDomain.url) || ''}
-                    alt={selectedDomain.name}
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
-                </div>
+                <Popover open={domainPopoverOpen} onOpenChange={setDomainPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <button className="rounded-md overflow-hidden shadow-sm bg-background hover:ring-2 hover:ring-primary/50 transition-all" style={{ width: '36px', height: '36px' }}>
+                      <img
+                        src={getFaviconUrl(selectedDomain.url) || ''}
+                        alt={selectedDomain.name}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[240px] p-0" side="right" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search domains..." />
+                      <CommandList>
+                        <CommandEmpty>No domains found.</CommandEmpty>
+                        <CommandGroup heading="Your Domains">
+                          {domains.map((domain) => {
+                            const faviconUrl = getFaviconUrl(domain.url);
+                            return (
+                              <CommandItem
+                                key={domain.id}
+                                value={domain.name}
+                                onSelect={() => {
+                                  setSelectedDomain(domain);
+                                  setDomainPopoverOpen(false);
+                                  if (user) {
+                                    localStorage.setItem(`selected_domain_user_${user.id}`, String(domain.id));
+                                  }
+                                }}
+                                className="flex items-center justify-between gap-2"
+                              >
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  {faviconUrl ? (
+                                    <img
+                                      src={faviconUrl}
+                                      alt=""
+                                      className="h-4 w-4 flex-shrink-0 rounded"
+                                      onError={(e) => {
+                                        e.currentTarget.style.display = 'none';
+                                        e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                                      }}
+                                    />
+                                  ) : null}
+                                  <Globe className={cn("h-4 w-4 flex-shrink-0", faviconUrl && "hidden")} />
+                                  <div className="flex flex-col flex-1 min-w-0">
+                                    <span className="truncate">{domain.name}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {domain.total_mentions} mentions
+                                    </span>
+                                  </div>
+                                </div>
+                                <Check
+                                  className={cn(
+                                    "h-4 w-4 flex-shrink-0",
+                                    selectedDomain?.id === domain.id ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               )}
             </div>
           )}
