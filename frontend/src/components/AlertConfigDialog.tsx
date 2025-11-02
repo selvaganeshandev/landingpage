@@ -78,7 +78,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
 
           {/* General Settings */}
           <TabsContent value="general" className="space-y-6 mt-6">
-            <div className="flex items-center justify-between p-4 rounded-lg border border border-border">
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
                   <Bell className="h-4 w-4 text-primary" />
@@ -94,7 +94,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
               />
             </div>
 
-            <div className="space-y-4 p-4 rounded-lg border border border-border">
+            <div className="space-y-4 p-4 rounded-lg border border-border">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
@@ -158,7 +158,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
 
           {/* Email Settings */}
           <TabsContent value="email" className="space-y-6 mt-6">
-            <div className="flex items-center justify-between p-4 rounded-lg border border border-border">
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
                   <Mail className="h-4 w-4 text-primary" />
@@ -191,7 +191,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
                   </p>
                 </div>
 
-                <div className="p-4 rounded-lg bg-muted/30 border border border-border">
+                <div className="p-4 rounded-lg bg-muted/30 border border-border">
                   <p className="text-sm font-medium mb-2">Email Format</p>
                   <p className="text-xs text-muted-foreground">
                     Alerts will be sent with detailed information including severity, affected metrics, and recommended actions.
@@ -203,7 +203,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
 
           {/* Slack Settings */}
           <TabsContent value="slack" className="space-y-6 mt-6">
-            <div className="flex items-center justify-between p-4 rounded-lg border border border-border">
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
                   <MessageSquare className="h-4 w-4 text-primary" />
@@ -259,7 +259,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
 
           {/* SMS Settings */}
           <TabsContent value="sms" className="space-y-6 mt-6">
-            <div className="flex items-center justify-between p-4 rounded-lg border border border-border">
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
                   <Smartphone className="h-4 w-4 text-primary" />

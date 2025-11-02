@@ -210,7 +210,7 @@ const PromptDetail = () => {
               <div className="space-y-3">
                 {prompts && prompts.length > 0 ? (
                   prompts.map((prompt, idx) => (
-                    <div key={prompt.id} className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border border-border">
+                    <div key={prompt.id} className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border">
                       <div className="flex items-center justify-between">
                         <p className="font-mono text-sm">{prompt.prompt_text || prompt.prompt || 'No prompt text'}</p>
                         <div className="flex items-center gap-2">
@@ -230,7 +230,7 @@ const PromptDetail = () => {
           {/* Mention Trends */}
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-6">
-              <div className="pb-4 border-b border border-border">
+              <div className="pb-4 border-b border-border">
                 <h3 className="text-lg font-semibold font-outfit">Mention Volume Trends</h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   Track how mention frequency changes over time
@@ -276,7 +276,7 @@ const PromptDetail = () => {
           {/* Variant Performance */}
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-6">
-              <div className="pb-4 border-b border border-border">
+              <div className="pb-4 border-b border-border">
                 <h3 className="text-lg font-semibold font-outfit">Variant Performance</h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   Compare performance across prompt variations
@@ -306,7 +306,7 @@ const PromptDetail = () => {
           {/* Prompt Variants */}
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-4">
-              <div className="flex items-center justify-between pb-4 border-b border border-border">
+              <div className="flex items-center justify-between pb-4 border-b border-border">
                 <h3 className="text-lg font-semibold font-outfit">Prompt Variants</h3>
                 <Badge variant="secondary">{promptGroup.prompts?.length || 0}</Badge>
               </div>
@@ -314,7 +314,7 @@ const PromptDetail = () => {
                 {promptGroup.prompts?.map((prompt, idx) => (
                   <div
                     key={prompt.id}
-                    className="group p-3 rounded-xl bg-muted/30 border border border-border hover:shadow-md transition-all"
+                    className="group p-3 rounded-xl bg-muted/30 border border-border hover:shadow-md transition-all"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
@@ -342,7 +342,7 @@ const PromptDetail = () => {
           {/* Platform Distribution */}
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold font-outfit pb-4 border-b border border-border">Platform Distribution</h3>
+              <h3 className="text-lg font-semibold font-outfit pb-4 border-b border-border">Platform Distribution</h3>
               <div className="space-y-3">
                 {platformBreakdown.map((platform, idx) => (
                   <div key={idx} className="space-y-2">
@@ -365,7 +365,7 @@ const PromptDetail = () => {
           {/* Quick Actions */}
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-3">
-              <h3 className="text-lg font-semibold font-outfit pb-4 border-b border border-border">Quick Actions</h3>
+              <h3 className="text-lg font-semibold font-outfit pb-4 border-b border-border">Quick Actions</h3>
               <Button variant="outline" className="w-full justify-start border border-border">
                 <Sparkles className="h-4 w-4 mr-2" />
                 Generate More Variants

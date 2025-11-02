@@ -245,7 +245,7 @@ const Mentions = () => {
       <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
         <Tabs value={selectedPlatform} onValueChange={setSelectedPlatform}>
           <div className="flex items-center justify-between mb-6">
-            <TabsList className="bg-muted/50 p-1 border border border-border">
+            <TabsList className="bg-muted/50 p-1 border border-border">
               <TabsTrigger value="all" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">All Platforms</TabsTrigger>
               {availablePlatforms.map(platform => (
                 <TabsTrigger 
@@ -320,7 +320,7 @@ const Mentions = () => {
         ) : (
           <>
           {filteredMentions.map((mention) => (
-          <Card key={mention.id} className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.01] border border-border backdrop-blur-sm bg-card/80">
+          <Card key={mention.id} className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
             <div className="space-y-5">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-4">
@@ -342,7 +342,7 @@ const Mentions = () => {
                 <span className="text-xs text-muted-foreground">{mention.time_ago}</span>
               </div>
 
-              <div className="bg-gradient-to-br from-muted/30 to-muted/50 rounded-xl p-5 border border border-border backdrop-blur-sm">
+              <div className="bg-gradient-to-br from-muted/30 to-muted/50 rounded-xl p-5 border border-border backdrop-blur-sm">
                 <div 
                   className="text-sm leading-relaxed prose prose-sm max-w-none [&_h1]:font-semibold [&_h1]:text-lg [&_h1]:mt-4 [&_h1]:mb-2 [&_h1]:text-foreground [&_h2]:font-semibold [&_h2]:text-base [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-foreground [&_h3]:font-semibold [&_h3]:text-sm [&_h3]:mt-4 [&_h3]:mb-2 [&_h3]:text-foreground [&_a]:text-primary [&_a]:underline [&_a]:hover:no-underline [&_strong]:font-semibold [&_strong]:text-foreground [&_b]:font-semibold [&_b]:text-foreground"
                   dangerouslySetInnerHTML={{

@@ -249,7 +249,7 @@ const Alerts = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Active Alerts</p>
             <Bell className="h-5 w-5 text-destructive" />
@@ -258,7 +258,7 @@ const Alerts = () => {
           <p className="text-xs text-muted-foreground mt-1">Require attention</p>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">High Priority</p>
             <AlertTriangle className="h-5 w-5 text-destructive" />
@@ -267,7 +267,7 @@ const Alerts = () => {
           <p className="text-xs text-muted-foreground mt-1">Critical issues</p>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Resolved Today</p>
             <CheckCircle2 className="h-5 w-5 text-success" />
@@ -276,7 +276,7 @@ const Alerts = () => {
           <p className="text-xs text-muted-foreground mt-1">Issues fixed</p>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Avg Response</p>
             <Clock className="h-5 w-5 text-muted-foreground" />
@@ -288,15 +288,15 @@ const Alerts = () => {
 
       {/* Alerts List */}
       <Tabs defaultValue="active" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="active">Active Alerts ({activeAlerts.length})</TabsTrigger>
-          <TabsTrigger value="resolved">Resolved ({resolvedAlerts.length})</TabsTrigger>
-          <TabsTrigger value="rules">Alert Rules ({alertRules.length})</TabsTrigger>
+        <TabsList className="bg-muted/50 p-1 border border-border">
+          <TabsTrigger value="active" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Active Alerts ({activeAlerts.length})</TabsTrigger>
+          <TabsTrigger value="resolved" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Resolved ({resolvedAlerts.length})</TabsTrigger>
+          <TabsTrigger value="rules" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Alert Rules ({alertRules.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="active" className="space-y-4">
           {activeAlerts.map((alert) => (
-            <Card key={alert.id} className="p-6 hover:shadow-lg transition-shadow">
+            <Card key={alert.id} className="p-6 transition-all duration-300 border border-border hover:border-primary">
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-start gap-4 flex-1">
                   <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${getSeverityColor(alert.severity)}`}>
@@ -340,7 +340,7 @@ const Alerts = () => {
 
         <TabsContent value="resolved" className="space-y-4">
           {resolvedAlerts.map((alert) => (
-            <Card key={alert.id} className="p-6 opacity-75">
+            <Card key={alert.id} className="p-6 transition-all duration-300 border border-border hover:border-primary opacity-75">
               <div className="flex items-start gap-4">
                 <div className="w-12 h-12 rounded-lg bg-success/10 flex items-center justify-center">
                   <CheckCircle2 className="h-6 w-6 text-success" />
@@ -363,10 +363,10 @@ const Alerts = () => {
         </TabsContent>
 
         <TabsContent value="rules" className="space-y-4">
-          <Card className="p-6 border border-border">
+          <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
             <div className="space-y-6">
               {alertRules.map((rule) => (
-                <div key={rule.id} className="flex items-start justify-between p-4 rounded-lg border border-border">
+                <div key={rule.id} className="flex items-start justify-between p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
                   <div className="flex items-start gap-4 flex-1">
                     <Switch checked={rule.enabled} />
                     <div className="flex-1">
@@ -397,10 +397,10 @@ const Alerts = () => {
       </Tabs>
 
       {/* Notification Channels */}
-      <Card className="p-6 border border-border">
+      <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
         <h3 className="text-lg font-semibold mb-6">Notification Channels</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="p-4 rounded-lg border border-border">
+          <div className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                 <Mail className="h-5 w-5 text-primary" />
@@ -414,7 +414,7 @@ const Alerts = () => {
             <Button variant="outline" size="sm" className="w-full" onClick={handleUpdateEmail}>Update Email</Button>
           </div>
 
-          <div className="p-4 rounded-lg border border-border">
+          <div className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                 <MessageSquare className="h-5 w-5 text-primary" />
@@ -428,7 +428,7 @@ const Alerts = () => {
             <Button variant="outline" size="sm" className="w-full" onClick={handleConfigureSlack}>Configure Slack</Button>
           </div>
 
-          <div className="p-4 rounded-lg border border-border">
+          <div className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
                 <Smartphone className="h-5 w-5 text-muted-foreground" />

@@ -261,7 +261,7 @@ const Topics = () => {
       {/* Topics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {topics.map((topic) => (
-          <Card key={topic.id} className="p-6 hover:shadow-lg transition-shadow">
+          <Card key={topic.id} className="p-6 transition-all duration-300 border border-border hover:border-primary">
             <div className="space-y-4">
               <div className="flex items-start justify-between">
                 <div>

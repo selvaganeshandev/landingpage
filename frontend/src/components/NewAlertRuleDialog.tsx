@@ -187,7 +187,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
           <div className="space-y-3">
             <Label>Notification Channels*</Label>
             <div className="space-y-3">
-              <div className="flex items-center space-x-3 p-3 rounded-lg border border border-border">
+              <div className="flex items-center space-x-3 p-3 rounded-lg border border-border">
                 <Checkbox
                   id="email"
                   checked={channels.includes("email")}
@@ -201,7 +201,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
                 </div>
               </div>
 
-              <div className="flex items-center space-x-3 p-3 rounded-lg border border border-border">
+              <div className="flex items-center space-x-3 p-3 rounded-lg border border-border">
                 <Checkbox
                   id="slack"
                   checked={channels.includes("slack")}
@@ -215,7 +215,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
                 </div>
               </div>
 
-              <div className="flex items-center space-x-3 p-3 rounded-lg border border border-border">
+              <div className="flex items-center space-x-3 p-3 rounded-lg border border-border">
                 <Checkbox
                   id="sms"
                   checked={channels.includes("sms")}

@@ -112,7 +112,7 @@ export const AddCompetitorDialog = ({ open, onOpenChange, onAdd }: AddCompetitor
             />
           </div>
 
-          <div className="p-4 rounded-lg bg-muted/30 border border border-border">
+          <div className="p-4 rounded-lg bg-muted/30 border border-border">
             <p className="text-sm font-medium mb-1">What happens next?</p>
             <p className="text-xs text-muted-foreground">
               Our AI will start tracking mentions of this competitor across all monitored platforms. 

@@ -168,7 +168,7 @@ export const AddTopicDialog = ({ open, onOpenChange, onAdd }: AddTopicDialogProp
             )}
           </div>
 
-          <div className="p-4 rounded-lg bg-muted/30 border border border-border">
+          <div className="p-4 rounded-lg bg-muted/30 border border-border">
             <p className="text-sm font-medium mb-1">Pro Tip</p>
             <p className="text-xs text-muted-foreground">
               Choose keywords that are specific to your topic and likely to appear in AI responses. You can always edit and refine these later.

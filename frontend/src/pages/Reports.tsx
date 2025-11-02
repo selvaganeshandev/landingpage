@@ -280,7 +280,7 @@ const Reports = () => {
         <h3 className="text-lg font-semibold mb-6">Scheduled Reports</h3>
         <div className="space-y-4">
           {scheduledReports.map((report) => (
-            <div key={report.id} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
+            <div key={report.id} className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
@@ -336,7 +336,7 @@ const Reports = () => {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {recentReports.map((report) => (
-            <div key={report.id} className="p-4 rounded-lg border border-border hover:shadow-md transition-shadow">
+            <div key={report.id} className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
               <div className="flex items-start justify-between mb-3">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                   <FileText className="h-5 w-5 text-primary" />
@@ -368,7 +368,7 @@ const Reports = () => {
         <h3 className="text-lg font-semibold mb-6">Report Templates</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {templates.map((template) => (
-            <div key={template.id} className="p-4 rounded-lg border border-border hover:shadow-md transition-shadow">
+            <div key={template.id} className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
               <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-primary/10 to-secondary/10 mb-4 flex items-center justify-center">
                 <FileText className="h-12 w-12 text-muted-foreground" />
               </div>

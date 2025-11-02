@@ -141,7 +141,7 @@ const ShareOfVoice = () => {
 
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Market Share</p>
@@ -158,7 +158,7 @@ const ShareOfVoice = () => {
           </div>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Market Position</p>
@@ -173,7 +173,7 @@ const ShareOfVoice = () => {
           </div>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Dominance Score</p>
@@ -385,7 +385,7 @@ const ShareOfVoice = () => {
         <h3 className="text-lg font-semibold mb-6">Market Opportunities</h3>
         <div className="space-y-4">
           {opportunities.map((opp) => (
-            <div key={opp.prompt} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
+            <div key={opp.prompt} className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
                   <p className="font-mono text-sm mb-2">{opp.prompt}</p>

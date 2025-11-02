@@ -36,10 +36,10 @@ export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) =
           </p>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto px-2">
           <div className="min-w-[800px]">
             {/* Header */}
-            <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: `220px repeat(${platforms.length}, 1fr)` }}>
+            <div className="grid gap-3 mb-3 px-2" style={{ gridTemplateColumns: `220px repeat(${platforms.length}, 1fr)` }}>
               <div className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">Competitor</div>
               {platforms.map((platform) => (
                 <div key={platform} className="font-semibold text-sm text-center text-muted-foreground uppercase tracking-wider">
@@ -54,9 +54,9 @@ export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) =
                 <div
                   key={row.competitor}
                   className={`grid gap-3 transition-all duration-300 ${
-                    row.isYou 
-                      ? "ring-2 ring-primary/30 rounded-xl p-3 bg-gradient-to-br from-primary/5 to-secondary/5" 
-                      : "p-2"
+                    row.isYou
+                      ? "ring-2 ring-primary/30 rounded-xl p-3 bg-gradient-to-br from-primary/5 to-secondary/5"
+                      : "p-3"
                   }`}
                   style={{ gridTemplateColumns: `220px repeat(${platforms.length}, 1fr)` }}
                 >

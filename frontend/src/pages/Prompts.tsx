@@ -131,13 +131,13 @@ const Prompts = () => {
         ) : promptGroups.length > 0 ? (
           <>
           {promptGroups.map((group) => (
-          <Card key={group.id} className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.01] border border-border backdrop-blur-sm bg-card/80">
+          <Card key={group.id} className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
             <div className="space-y-5">
               <div className="flex items-start justify-between">
                 <div className="space-y-2">
                   <h3 className="text-xl font-semibold font-outfit">{group.group_id}</h3>
                   {group.primary_prompt && (
-                    <p className="text-sm text-muted-foreground font-mono bg-gradient-to-br from-muted/30 to-muted/50 px-3 py-2 rounded-xl inline-block border border border-border">
+                    <p className="text-sm text-muted-foreground font-mono bg-gradient-to-br from-muted/30 to-muted/50 px-3 py-2 rounded-xl inline-block border border-border">
                       {group.primary_prompt}
                     </p>
                   )}

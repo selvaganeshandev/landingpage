@@ -155,7 +155,7 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
               {reportSections.map((section) => (
                 <div
                   key={section.id}
-                  className="flex items-center space-x-3 p-3 rounded-lg border border border-border hover:bg-accent/50 cursor-pointer"
+                  className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-accent/50 cursor-pointer"
                   onClick={() => toggleSection(section.id)}
                 >
                   <Checkbox

@@ -300,7 +300,7 @@ const MisinformationAlerts = () => {
       {/* Detection Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {detectionMetrics.map((metric) => (
-          <Card key={metric.name} className="border border-border">
+          <Card key={metric.name} className="transition-all duration-300 border border-border hover:border-primary">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
                 {metric.name}
@@ -323,16 +323,16 @@ const MisinformationAlerts = () => {
 
       {/* Main Content Tabs */}
       <Tabs value={selectedTab} onValueChange={setSelectedTab}>
-        <TabsList>
-          <TabsTrigger value="active">
+        <TabsList className="bg-muted/50 p-1 border border-border">
+          <TabsTrigger value="active" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
             <AlertCircle className="h-4 w-4 mr-2" />
             Active Cases ({activeMisinformation.length})
           </TabsTrigger>
-          <TabsTrigger value="resolved">
+          <TabsTrigger value="resolved" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
             <CheckCircle className="h-4 w-4 mr-2" />
             Resolved ({resolvedCases.length})
           </TabsTrigger>
-          <TabsTrigger value="monitoring">
+          <TabsTrigger value="monitoring" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
             <Shield className="h-4 w-4 mr-2" />
             Monitoring Rules
           </TabsTrigger>
@@ -361,7 +361,7 @@ const MisinformationAlerts = () => {
                 return (
                   <div
                     key={item.id}
-                    className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors"
+                    className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary"
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex-1">
@@ -451,7 +451,7 @@ const MisinformationAlerts = () => {
                 {resolvedCases.map((item) => (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between p-4 rounded-lg border border-border"
+                    className="flex items-center justify-between p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary"
                   >
                     <div className="flex items-center gap-4">
                       <div className="h-10 w-10 rounded-lg bg-success/10 flex items-center justify-center">
@@ -508,7 +508,7 @@ const MisinformationAlerts = () => {
               {rules.map((rule) => (
                 <div
                   key={rule.id}
-                  className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors"
+                  className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">

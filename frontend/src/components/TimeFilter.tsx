@@ -17,7 +17,7 @@ export const TimeFilter = ({
   ]
 }: TimeFilterProps) => {
   return (
-    <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg border border border-border">
+    <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg border border-border">
       {periods.map((period) => (
         <Button
           key={period.value}

@@ -146,7 +146,7 @@ const Multilingual = () => {
 
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Languages Tracked</p>
             <Globe className="h-5 w-5 text-muted-foreground" />
@@ -155,7 +155,7 @@ const Multilingual = () => {
           <p className="text-xs text-muted-foreground mt-1">Active monitoring</p>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Total Mentions</p>
             <MapPin className="h-5 w-5 text-muted-foreground" />
@@ -164,7 +164,7 @@ const Multilingual = () => {
           <p className="text-xs text-muted-foreground mt-1">Across all languages</p>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Fastest Growing</p>
             <TrendingUp className="h-5 w-5 text-success" />
@@ -173,7 +173,7 @@ const Multilingual = () => {
           <p className="text-xs text-success mt-1">+22% this month</p>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Avg Sentiment</p>
             <Languages className="h-5 w-5 text-muted-foreground" />

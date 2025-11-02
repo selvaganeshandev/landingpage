@@ -107,7 +107,7 @@ const Sentiment = () => {
 
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Positive Sentiment</p>
@@ -124,7 +124,7 @@ const Sentiment = () => {
           </div>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Neutral Sentiment</p>
@@ -141,7 +141,7 @@ const Sentiment = () => {
           </div>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Negative Sentiment</p>
@@ -274,9 +274,9 @@ const Sentiment = () => {
 
       {/* Platform & Competitor Analysis */}
       <Tabs defaultValue="platform" className="space-y-6">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="platform">By Platform</TabsTrigger>
-          <TabsTrigger value="competitor">Competitor Comparison</TabsTrigger>
+        <TabsList className="bg-muted/50 p-1 border border-border grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="platform" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">By Platform</TabsTrigger>
+          <TabsTrigger value="competitor" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Competitor Comparison</TabsTrigger>
         </TabsList>
 
         <TabsContent value="platform" className="space-y-4">

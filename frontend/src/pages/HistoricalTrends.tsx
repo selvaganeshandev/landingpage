@@ -147,7 +147,7 @@ const HistoricalTrends = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground font-medium">Visibility Growth</p>
             <h3 className="text-3xl font-bold text-success">+38%</h3>
@@ -158,7 +158,7 @@ const HistoricalTrends = () => {
           </div>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground font-medium">Mention Growth</p>
             <h3 className="text-3xl font-bold text-success">+52%</h3>
@@ -169,7 +169,7 @@ const HistoricalTrends = () => {
           </div>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground font-medium">Position Improvement</p>
             <h3 className="text-3xl font-bold text-success">-24%</h3>
@@ -180,7 +180,7 @@ const HistoricalTrends = () => {
           </div>
         </Card>
 
-        <Card className="p-6 border border-border">
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground font-medium">Market Share Gain</p>
             <h3 className="text-3xl font-bold text-success">+12%</h3>

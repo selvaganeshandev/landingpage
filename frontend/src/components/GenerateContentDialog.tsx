@@ -134,7 +134,7 @@ export const GenerateContentDialog = ({
       case 1:
         return (
           <div className="space-y-4">
-            <div className="pb-4 border-b border border-border">
+            <div className="pb-4 border-b border-border">
               <h3 className="text-lg font-semibold mb-1">Choose an Article Type</h3>
               <p className="text-sm text-muted-foreground">
                 Choose the type of article you want to create
@@ -181,7 +181,7 @@ export const GenerateContentDialog = ({
       case 2:
         return (
           <div className="space-y-6">
-            <div className="pb-4 border-b border border-border">
+            <div className="pb-4 border-b border-border">
               <h3 className="text-lg font-semibold mb-1">Article Details</h3>
               <p className="text-sm text-muted-foreground">
                 Provide title and target keywords
@@ -217,7 +217,7 @@ export const GenerateContentDialog = ({
       case 3:
         return (
           <div className="space-y-6">
-            <div className="pb-4 border-b border border-border">
+            <div className="pb-4 border-b border-border">
               <h3 className="text-lg font-semibold mb-1">Content Settings</h3>
               <p className="text-sm text-muted-foreground">
                 Configure your article generation preferences
@@ -324,7 +324,7 @@ export const GenerateContentDialog = ({
       case 4:
         return (
           <div className="space-y-6">
-            <div className="pb-4 border-b border border-border">
+            <div className="pb-4 border-b border-border">
               <h3 className="text-lg font-semibold mb-1">Review & Generate</h3>
               <p className="text-sm text-muted-foreground">
                 Review your settings and generate content

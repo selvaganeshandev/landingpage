@@ -104,7 +104,7 @@ export default function TrafficAttribution() {
 
       <div className="grid gap-4 md:grid-cols-4">
         {roiMetrics.map((item, index) => (
-          <Card key={index} className="border border-border">
+          <Card key={index} className="transition-all duration-300 border border-border hover:border-primary">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">{item.metric}</CardTitle>
               {index === 0 && <MousePointerClick className="h-4 w-4 text-muted-foreground" />}
@@ -123,13 +123,13 @@ export default function TrafficAttribution() {
       </div>
 
       <Tabs defaultValue="sources" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="sources">Traffic Sources</TabsTrigger>
-          <TabsTrigger value="search">Search Console</TabsTrigger>
-          <TabsTrigger value="devices">Devices & Geo</TabsTrigger>
-          <TabsTrigger value="pages">Landing Pages</TabsTrigger>
-          <TabsTrigger value="conversions">Conversion Paths</TabsTrigger>
-          <TabsTrigger value="attribution">Attribution Models</TabsTrigger>
+        <TabsList className="bg-muted/50 p-1 border border-border">
+          <TabsTrigger value="sources" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Traffic Sources</TabsTrigger>
+          <TabsTrigger value="search" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Search Console</TabsTrigger>
+          <TabsTrigger value="devices" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Devices & Geo</TabsTrigger>
+          <TabsTrigger value="pages" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Landing Pages</TabsTrigger>
+          <TabsTrigger value="conversions" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Conversion Paths</TabsTrigger>
+          <TabsTrigger value="attribution" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Attribution Models</TabsTrigger>
         </TabsList>
 
         <TabsContent value="sources" className="space-y-6">
