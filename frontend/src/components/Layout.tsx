@@ -1,4 +1,5 @@
 import { Sidebar } from "./Sidebar";
+import { FloatingAICopilot } from "./FloatingAICopilot";
 import { Outlet } from "react-router-dom";
 
 export const Layout = () => {
@@ -8,6 +9,7 @@ export const Layout = () => {
       <main className="flex-1 overflow-auto">
         <Outlet />
       </main>
+      <FloatingAICopilot />
     </div>
   );
 };
