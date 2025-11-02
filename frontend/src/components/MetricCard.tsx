@@ -21,12 +21,14 @@ export const MetricCard = ({ title, value, change, icon, trend }: MetricCardProp
 
   return (
     <Card className="p-6 hover:shadow-elegant transition-all duration-300 hover:scale-[1.02] border border-border backdrop-blur-sm bg-card/80">
-      <div className="flex items-start justify-between">
-        <div className="space-y-3">
-          <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">{title}</p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-3 flex-1 min-w-0">
+          <div className="h-10">
+            <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider leading-tight">{title}</p>
+          </div>
           <h3 className="text-4xl font-bold tracking-tight font-outfit">{value}</h3>
           {change !== undefined && (
-            <div className="flex items-center gap-2 text-sm">
+            <div className="flex items-center gap-2 text-sm whitespace-nowrap">
               {trend === "up" ? (
                 <TrendingUp className="h-4 w-4 text-success" />
               ) : (
@@ -46,7 +48,7 @@ export const MetricCard = ({ title, value, change, icon, trend }: MetricCardProp
           )}
         </div>
         {icon && (
-          <div className="p-4 rounded-2xl gradient-primary shadow-glow">
+          <div className="p-3 rounded-2xl gradient-primary shadow-glow flex-shrink-0">
             {whiteIcon}
           </div>
         )}
