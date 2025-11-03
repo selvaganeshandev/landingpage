@@ -121,25 +121,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
             },
           });
         } catch (error) {
-          // Token is invalid, try to refresh
-          try {
-            const refreshResponse = await apiClient.refreshToken();
-            const profile = await apiClient.getProfile();
-            dispatch({
-              type: 'LOGIN_SUCCESS',
-              payload: {
-                user: profile.user,
-                permissions: profile.permissions,
-                accessToken: refreshResponse.access,
-                refreshToken,
-              },
-            });
-          } catch (refreshError) {
-            // Both tokens are invalid, clear them
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('refresh_token');
-            dispatch({ type: 'LOGIN_FAILURE', payload: 'Session expired' });
-          }
+          // Token is invalid, clear it and require re-login
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          dispatch({ type: 'SET_LOADING', payload: false });
         }
       } else {
         dispatch({ type: 'SET_LOADING', payload: false });
@@ -180,18 +165,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  // Refresh auth function
+  // Refresh auth function (simplified - just re-fetch profile)
   const refreshAuth = async (): Promise<void> => {
     try {
-      const refreshResponse = await apiClient.refreshToken();
       const profile = await apiClient.getProfile();
+      const accessToken = localStorage.getItem('access_token') || '';
+      const refreshToken = localStorage.getItem('refresh_token') || '';
       dispatch({
         type: 'LOGIN_SUCCESS',
         payload: {
           user: profile.user,
           permissions: profile.permissions,
-          accessToken: refreshResponse.access,
-          refreshToken: localStorage.getItem('refresh_token') || '',
+          accessToken,
+          refreshToken,
         },
       });
     } catch (error) {
@@ -204,7 +190,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const updateProfile = async (data: Partial<User>): Promise<void> => {
     try {
       const response = await apiClient.updateProfile(data);
-      dispatch({ type: 'UPDATE_USER', payload: response.user });
+      // Backend returns the user object directly or wrapped in { user: ... }
+      const updatedUser = response.user || response;
+      dispatch({ type: 'UPDATE_USER', payload: updatedUser });
     } catch (error) {
       throw error;
     }
