@@ -3,7 +3,7 @@
  * Centralized API client with all backend endpoints
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 interface RequestOptions extends RequestInit {
   skipAuth?: boolean;
@@ -426,6 +426,15 @@ export const apiClient = {
   getShareOfVoice: (params?: any) => {
     const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
     return apiRequest(`/analytics/share-of-voice/${queryParams}`);
+  },
+
+  // ===== Dashboard =====
+  getDashboardSummary: (params: { domain_id: string; days?: number }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.days ? { days: String(params.days) } : {}),
+    }).toString()}`;
+    return apiRequest(`/analytics/dashboard/summary/${queryParams}`);
   },
 
   // ===== Integrations =====

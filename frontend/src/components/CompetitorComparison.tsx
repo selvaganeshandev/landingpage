@@ -1,5 +1,4 @@
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { TrendingUp } from "lucide-react";
 
 interface Competitor {
@@ -10,18 +9,23 @@ interface Competitor {
   trend: number;
 }
 
-const competitors: Competitor[] = [
-  { name: "VegFit Pro", url: "vegfitpro.com", mentions: 221, shareOfVoice: 42, trend: 15 },
-  { name: "MyProtein", url: "myprotein.com", mentions: 187, shareOfVoice: 35, trend: 8 },
-  { name: "Naked Nutrition", url: "nakednutrition.com", mentions: 123, shareOfVoice: 23, trend: -3 },
-];
+export interface CompetitorComparisonProps {
+  competitors?: Array<{ name?: string; url?: string; mentions?: number; shareOfVoice?: number; trend?: number; }>;
+}
 
-export const CompetitorComparison = () => {
+export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonProps) => {
+  const list: Competitor[] = competitors.length ? competitors.map((c, i) => ({
+    name: c.name || `Competitor ${i+1}`,
+    url: c.url || '',
+    mentions: c.mentions ?? 0,
+    shareOfVoice: c.shareOfVoice ?? 0,
+    trend: c.trend ?? 0,
+  })) : [];
   return (
     <Card className="p-6 h-full flex flex-col border border-border">
       <h3 className="text-lg font-semibold mb-4">Share of Voice</h3>
       <div className="space-y-4 flex-1">
-        {competitors.map((competitor, index) => (
+        {list.map((competitor, index) => (
           <div key={competitor.name} className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">

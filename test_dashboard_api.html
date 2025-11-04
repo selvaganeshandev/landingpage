@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard API Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .section {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .section h2 {
+            margin-top: 0;
+            color: #444;
+            font-size: 18px;
+        }
+        input, button {
+            padding: 12px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        input {
+            width: 300px;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success {
+            color: #28a745;
+            font-weight: bold;
+        }
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .metric-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        .metric-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status.ok {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Dashboard API Integration Test</h1>
+        <p class="subtitle">Test the LLM Monitor Dashboard API</p>
+
+        <!-- Login Section -->
+        <div class="section">
+            <h2>1️⃣ Login</h2>
+            <input type="email" id="email" placeholder="Email" value="admin@llmmonitor.com">
+            <input type="password" id="password" placeholder="Password" value="Admin123">
+            <button onclick="login()">Login</button>
+            <div id="loginResult" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Dashboard Test Section -->
+        <div class="section">
+            <h2>2️⃣ Test Dashboard Summary API</h2>
+            <input type="number" id="domainId" placeholder="Domain ID" value="52">
+            <input type="number" id="days" placeholder="Days" value="30">
+            <button onclick="testDashboard()" id="dashboardBtn" disabled>Get Dashboard Data</button>
+            <div id="dashboardResult" class="result" style="display:none;"></div>
+            <div id="dashboardMetrics" class="metric-grid" style="display:none;"></div>
+        </div>
+
+        <!-- Domains List Section -->
+        <div class="section">
+            <h2>3️⃣ List Available Domains</h2>
+            <button onclick="listDomains()" id="domainsBtn" disabled>List Domains</button>
+            <div id="domainsResult" class="result" style="display:none;"></div>
+        </div>
+
+        <!-- Status Section -->
+        <div class="section">
+            <h2>ℹ️ Connection Status</h2>
+            <p><strong>API Base URL:</strong> <code>http://localhost:8000</code></p>
+            <p><strong>Token Status:</strong> <span id="tokenStatus" class="status error">Not Logged In</span></p>
+            <p><strong>Backend Status:</strong> <span id="backendStatus" class="status error">Checking...</span></p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        let accessToken = null;
+
+        // Check backend status on load
+        window.onload = async () => {
+            try {
+                const response = await fetch(`${API_BASE}/admin/`, { method: 'HEAD' });
+                document.getElementById('backendStatus').textContent = 'Online';
+                document.getElementById('backendStatus').className = 'status ok';
+            } catch (error) {
+                document.getElementById('backendStatus').textContent = 'Offline';
+                document.getElementById('backendStatus').className = 'status error';
+            }
+        };
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const resultDiv = document.getElementById('loginResult');
+
+            try {
+                const response = await fetch(`${API_BASE}/auth/login/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                accessToken = data.access;
+
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = `<span class="success">✅ Login Successful!</span>\n\n` +
+                    `User: ${data.user.first_name} ${data.user.last_name}\n` +
+                    `Email: ${data.user.email}\n` +
+                    `Role: ${data.user.role}\n` +
+                    `Organization: ${data.user.organisation_name}\n\n` +
+                    `Access Token: ${accessToken.substring(0, 50)}...`;
+
+                document.getElementById('tokenStatus').textContent = 'Logged In';
+                document.getElementById('tokenStatus').className = 'status ok';
+                document.getElementById('dashboardBtn').disabled = false;
+                document.getElementById('domainsBtn').disabled = false;
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = `<span class="error">❌ Login Failed</span>\n\n${error.message}`;
+            }
+        }
+
+        async function testDashboard() {
+            const domainId = document.getElementById('domainId').value;
+            const days = document.getElementById('days').value;
+            const resultDiv = document.getElementById('dashboardResult');
+            const metricsDiv = document.getElementById('dashboardMetrics');
+
+            if (!accessToken) {
+                alert('Please login first!');
+                return;
+            }
+
+            try {
+                const response = await fetch(
+                    `${API_BASE}/analytics/dashboard/summary/?domain_id=${domainId}&days=${days}`,
+                    {
+                        headers: { 'Authorization': `Bearer ${accessToken}` }
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = `<span class="success">✅ Dashboard API Response:</span>\n\n` +
+                    JSON.stringify(data, null, 2);
+
+                // Display metrics
+                metricsDiv.style.display = 'grid';
+                metricsDiv.innerHTML = `
+                    <div class="metric-card">
+                        <div class="metric-label">Total Mentions</div>
+                        <div class="metric-value">${data.mentions.total}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Avg Position</div>
+                        <div class="metric-value">${data.mentions.avg_position}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Active Alerts</div>
+                        <div class="metric-value">${data.alerts.active}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Sentiment Score</div>
+                        <div class="metric-value">${data.mentions.avg_sentiment.toFixed(3)}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Positive %</div>
+                        <div class="metric-value">${data.sentiment.positive_percentage}%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Share of Voice</div>
+                        <div class="metric-value">${data.share_of_voice_latest?.your_brand?.share_percentage || 0}%</div>
+                    </div>
+                `;
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = `<span class="error">❌ Dashboard API Failed</span>\n\n${error.message}`;
+                metricsDiv.style.display = 'none';
+            }
+        }
+
+        async function listDomains() {
+            const resultDiv = document.getElementById('domainsResult');
+
+            if (!accessToken) {
+                alert('Please login first!');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/domains/`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = `<span class="success">✅ Available Domains:</span>\n\n`;
+                
+                if (data.domains && data.domains.length > 0) {
+                    data.domains.forEach(domain => {
+                        resultDiv.innerHTML += `\n📍 ID: ${domain.id} | Name: ${domain.name} | URL: ${domain.url}`;
+                    });
+                } else {
+                    resultDiv.innerHTML += 'No domains found.';
+                }
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.innerHTML = `<span class="error">❌ Failed to list domains</span>\n\n${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>
+
