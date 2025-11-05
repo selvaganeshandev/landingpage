@@ -12,6 +12,12 @@ class PromptGroup(models.Model):
         related_name='prompt_groups',
         help_text="Domain this group belongs to"
     )
+    theme = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Common theme extracted from prompts in this group using NLP"
+    )
     total_mentions = models.PositiveIntegerField(default=0, help_text="Total number of mentions")
     total_citations = models.PositiveIntegerField(default=0, help_text="Total number of citations")
     average_position = models.DecimalField(

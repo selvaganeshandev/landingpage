@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from shared_models.models import Domain, Keyword, PromptGroup, Prompt, PromptAnalytics
+from shared_models.models import (
+    Domain, Keyword, PromptGroup, Prompt, PromptAnalytics,
+    Competitor, CompetitorPromptAnalytics, CompetitorAnalytics, ShareOfVoiceAnalytics
+)
 
 
 class DomainSerializer(serializers.ModelSerializer):
@@ -16,8 +19,8 @@ class DomainSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'url', 'organisation', 'organisation_name',
             'total_mentions', 'total_citations', 'visibility_score', 'average_position',
-            'active_alerts', 'sentiment', 'sentiment_score',
-            'processing_status', 'track_status', 'track_message',
+            'active_alerts', 'sentiment_category', 'sentiment_score',
+            'processing_status', 'track_message', 'tracked_at',
             'keywords_count', 'prompt_groups_count', 'prompts_count',
             'created_at', 'modified_at'
         ]
@@ -94,9 +97,9 @@ class PromptAnalyticsSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'prompt', 'prompt_text', 'domain_name',
             'platform', 'is_mention', 'total_mentions', 'total_citations', 'position',
-            'sentiment', 'sentiment_score', 'context_summary', 'citations',
-            'views', 'shares', 'engagement_score', 'competitor_mentions',
-            'key_topics', 'position_history', 'created_at', 'modified_at'
+            'sentiment_category', 'sentiment_score', 'context_summary', 'citation_list',
+            'views', 'shares', 'engagement_score', 'competitor_mention_list',
+            'topic_list', 'position_history_list', 'created_at', 'modified_at'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
 
@@ -124,3 +127,90 @@ class DomainProcessingRequestSerializer(serializers.Serializer):
         except Domain.DoesNotExist:
             raise serializers.ValidationError("Domain with this ID does not exist")
         return value
+
+
+class CompetitorSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Competitor model
+    """
+    domain_name = serializers.CharField(source='domain.name', read_only=True)
+    
+    class Meta:
+        model = Competitor
+        fields = [
+            'id', 'domain', 'domain_name', 'name', 'url', 
+            'track_status', 'track_message', 'tracked_at',
+            'total_mentions', 'visibility_score', 'sentiment_score', 'average_position',
+            'share_of_voice_percentage', 'trend_percentage', 
+            'created_by', 'created_at', 'modified_at'
+        ]
+        read_only_fields = [
+            'id', 'track_status', 'track_message', 'tracked_at',
+            'total_mentions', 'visibility_score', 'sentiment_score', 'average_position',
+            'share_of_voice_percentage', 'trend_percentage',
+            'created_at', 'modified_at'
+        ]
+
+
+class CompetitorPromptAnalyticsSerializer(serializers.ModelSerializer):
+    """
+    Serializer for CompetitorPromptAnalytics model
+    """
+    competitor_name = serializers.CharField(source='competitor.name', read_only=True)
+    prompt_text = serializers.CharField(source='prompt.prompt_text', read_only=True)
+    domain_name = serializers.CharField(source='competitor.domain.name', read_only=True)
+    
+    class Meta:
+        model = CompetitorPromptAnalytics
+        fields = [
+            'id', 'competitor', 'competitor_name', 'prompt', 'prompt_text', 'domain_name',
+            'track_status', 'track_message', 'tracked_at',
+            'is_mentioned', 'position', 'mention_count', 
+            'sentiment_category', 'sentiment_score',
+            'platform', 'response_text', 'citation_list',
+            'created_at', 'modified_at'
+        ]
+        read_only_fields = [
+            'id', 'track_status', 'track_message', 'tracked_at',
+            'is_mentioned', 'position', 'mention_count', 
+            'sentiment_category', 'sentiment_score',
+            'platform', 'response_text', 'citation_list',
+            'created_at', 'modified_at'
+        ]
+
+
+class CompetitorAnalyticsSerializer(serializers.ModelSerializer):
+    """
+    Serializer for CompetitorAnalytics model
+    """
+    competitor_name = serializers.CharField(source='competitor.name', read_only=True)
+    
+    class Meta:
+        model = CompetitorAnalytics
+        fields = [
+            'id', 'competitor', 'competitor_name', 'platform', 'total_mentions',
+            'position', 'sentiment_score', 'timestamp', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class ShareOfVoiceAnalyticsSerializer(serializers.ModelSerializer):
+    """
+    Serializer for ShareOfVoiceAnalytics model
+    """
+    domain_name = serializers.CharField(source='domain.name', read_only=True)
+    competitor_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ShareOfVoiceAnalytics
+        fields = [
+            'id', 'domain', 'domain_name', 'competitor', 'competitor_name',
+            'platform', 'share_percentage', 'mention_count', 'market_position',
+            'timestamp', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+    
+    def get_competitor_name(self, obj):
+        if obj.competitor:
+            return obj.competitor.name
+        return f"{obj.domain.name} (Your Brand)"

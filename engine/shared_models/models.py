@@ -1,4 +1,5 @@
 from django.db import models
+from django.contrib.auth.models import AbstractUser
 
 
 class Organisation(models.Model):
@@ -12,6 +13,7 @@ class Organisation(models.Model):
     
     class Meta:
         db_table = 'organisations'
+        managed = False  # Let backend manage this table
         verbose_name = 'Organisation'
         verbose_name_plural = 'Organisations'
         ordering = ['name']
@@ -20,25 +22,25 @@ class Organisation(models.Model):
         return self.name
 
 
-class Account(models.Model):
+class Account(AbstractUser):
     """
-    Account model representing user accounts
+    Read-only Account model for engine (matches backend schema).
+    DO NOT use for authentication in engine - this is READ ONLY!
+    Inherits from AbstractUser to match backend implementation.
     """
     ROLE_CHOICES = [
         ('super_admin', 'Super Administrator'),
-        ('admin', 'Admin'),
+        ('admin', 'Administrator'),
         ('user', 'User'),
     ]
     
-    email = models.EmailField(unique=True, help_text="Email address of the user")
-    first_name = models.CharField(max_length=100, help_text="First name of the user")
-    last_name = models.CharField(max_length=100, help_text="Last name of the user")
-    password = models.CharField(max_length=255, help_text="Hashed password")
+    # Custom fields (same as backend)
+    email = models.EmailField(unique=True, help_text="Email address")
     role = models.CharField(
         max_length=12,
         choices=ROLE_CHOICES,
         default='user',
-        help_text="Role of the user"
+        help_text="Role of the account"
     )
     organisation = models.ForeignKey(
         Organisation, 
@@ -46,18 +48,40 @@ class Account(models.Model):
         related_name='accounts',
         help_text="Organisation this account belongs to"
     )
-    is_active = models.BooleanField(default=True, help_text="Whether the account is active")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the account was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the account was last modified")
     
+    # Override groups and user_permissions to avoid clashes with auth.User
+    groups = models.ManyToManyField(
+        'auth.Group',
+        verbose_name='groups',
+        blank=True,
+        help_text='The groups this user belongs to.',
+        related_name="account_set",  # Custom related_name to avoid clash
+        related_query_name="account",
+    )
+    user_permissions = models.ManyToManyField(
+        'auth.Permission',
+        verbose_name='user permissions',
+        blank=True,
+        help_text='Specific permissions for this user.',
+        related_name="account_set",  # Custom related_name to avoid clash
+        related_query_name="account",
+    )
+    
+    # Authentication settings (same as backend)
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = ['username']
+    
     class Meta:
         db_table = 'accounts'
+        managed = False  # Let backend manage this table
         verbose_name = 'Account'
         verbose_name_plural = 'Accounts'
         ordering = ['email']
     
     def __str__(self):
-        return f"{self.first_name} {self.last_name} ({self.email})"
+        return f"{self.email} ({self.role})"
 
 
 class Domain(models.Model):
@@ -101,11 +125,11 @@ class Domain(models.Model):
         help_text="Average position in search results"
     )
     active_alerts = models.PositiveIntegerField(default=0, help_text="Number of active alerts")
-    sentiment = models.CharField(
+    sentiment_category = models.CharField(
         max_length=10, 
         choices=SENTIMENT_CHOICES, 
         default='neutral',
-        help_text="Overall sentiment of mentions"
+        help_text="Overall sentiment category of mentions (positive/neutral/negative)"
     )
     sentiment_score = models.DecimalField(
         max_digits=3, 
@@ -119,11 +143,6 @@ class Domain(models.Model):
         choices=PROCESSING_STATUS_CHOICES,
         default='INIT',
         help_text="Current processing status of the domain"
-    )
-    track_status = models.CharField(
-        max_length=50,
-        default='INIT',
-        help_text="Detailed tracking status"
     )
     track_message = models.TextField(
         blank=True,
@@ -140,6 +159,7 @@ class Domain(models.Model):
     
     class Meta:
         db_table = 'domains'
+        managed = False  # Let backend manage this table
         verbose_name = 'Domain'
         verbose_name_plural = 'Domains'
         ordering = ['name']
@@ -165,6 +185,7 @@ class Keyword(models.Model):
     
     class Meta:
         db_table = 'keywords'
+        managed = False  # Let backend manage this table
         verbose_name = 'Keyword'
         verbose_name_plural = 'Keywords'
         ordering = ['keyword']
@@ -184,6 +205,12 @@ class PromptGroup(models.Model):
         on_delete=models.CASCADE, 
         related_name='prompt_groups',
         help_text="Domain this group belongs to"
+    )
+    theme = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Common theme extracted from prompts in this group using NLP"
     )
     total_mentions = models.PositiveIntegerField(default=0, help_text="Total number of mentions")
     total_citations = models.PositiveIntegerField(default=0, help_text="Total number of citations")
@@ -227,6 +254,7 @@ class PromptGroup(models.Model):
     
     class Meta:
         db_table = 'prompt_groups'
+        managed = False  # Let backend manage this table
         verbose_name = 'Prompt Group'
         verbose_name_plural = 'Prompt Groups'
         ordering = ['group_id']
@@ -287,6 +315,7 @@ class Prompt(models.Model):
     
     class Meta:
         db_table = 'prompts'
+        managed = False  # Let backend manage this table
         verbose_name = 'Prompt'
         verbose_name_plural = 'Prompts'
         ordering = ['prompt']
@@ -326,11 +355,11 @@ class PromptAnalytics(models.Model):
         default=0.00,
         help_text="Position in search results"
     )
-    sentiment = models.CharField(
+    sentiment_category = models.CharField(
         max_length=10, 
         choices=SENTIMENT_CHOICES, 
         default='neutral',
-        help_text="Sentiment of the analytics"
+        help_text="Sentiment category (positive/neutral/negative)"
     )
     sentiment_score = models.DecimalField(
         max_digits=3, 
@@ -339,7 +368,7 @@ class PromptAnalytics(models.Model):
         help_text="Sentiment score (-1.00 to 1.00)"
     )
     context_summary = models.TextField(blank=True, help_text="Summary of the context")
-    citations = models.JSONField(
+    citation_list = models.JSONField(
         default=list,
         blank=True,
         help_text="List of citations with text and source URLs"
@@ -353,17 +382,17 @@ class PromptAnalytics(models.Model):
         default=0.00,
         help_text="Engagement score"
     )
-    competitor_mentions = models.JSONField(
+    competitor_mention_list = models.JSONField(
         default=list,
         blank=True,
         help_text="List of competitor mentions"
     )
-    key_topics = models.JSONField(
+    topic_list = models.JSONField(
         default=list,
         blank=True,
         help_text="List of key topics extracted"
     )
-    position_history = models.JSONField(
+    position_history_list = models.JSONField(
         default=list,
         blank=True,
         help_text="Historical position data"
@@ -395,6 +424,7 @@ class PromptAnalytics(models.Model):
     
     class Meta:
         db_table = 'prompt_analytics'
+        managed = False  # Let backend manage this table
         verbose_name = 'Prompt Analytics'
         verbose_name_plural = 'Prompt Analytics'
         ordering = ['-created_at']
@@ -402,3 +432,317 @@ class PromptAnalytics(models.Model):
     
     def __str__(self):
         return f"Analytics for {self.prompt.prompt[:30]}... ({self.platform})"
+
+
+class Competitor(models.Model):
+    """
+    Competitor model representing competitor brands being tracked
+    STATUS FLOW: INIT → SCHD → PROC → COMP (or FAIL)
+    """
+    STATUS_CHOICES = [
+        ('INIT', 'Initial'),
+        ('SCHD', 'Scheduled'),
+        ('PROC', 'Processing'),
+        ('COMP', 'Complete'),
+        ('FAIL', 'Failed'),
+    ]
+    
+    domain = models.ForeignKey(
+        Domain, 
+        on_delete=models.CASCADE, 
+        related_name='competitors',
+        help_text="Domain tracking this competitor"
+    )
+    name = models.CharField(max_length=255, help_text="Name of the competitor")
+    url = models.URLField(max_length=500, help_text="URL of the competitor's website")
+    track_status = models.CharField(max_length=4, choices=STATUS_CHOICES, default='INIT', help_text="Processing status")
+    track_message = models.TextField(blank=True, null=True, help_text="Status message or error details")
+    tracked_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when last tracked")
+    total_mentions = models.IntegerField(default=0, help_text="Total number of mentions")
+    visibility_score = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Visibility score"
+    )
+    sentiment_score = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Average sentiment score"
+    )
+    average_position = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Average position in AI responses"
+    )
+    share_of_voice_percentage = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Share of voice percentage"
+    )
+    trend_percentage = models.DecimalField(
+        max_digits=6, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Trend percentage change"
+    )
+    created_by = models.ForeignKey(
+        Account, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='competitors_created',
+        help_text="Account that created this competitor"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when created")
+    modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when last modified")
+    
+    class Meta:
+        db_table = 'competitors'
+        managed = False  # Let backend manage this table
+        unique_together = [['name', 'domain']]
+        ordering = ['-total_mentions']
+    
+    def __str__(self):
+        return f"{self.name} (tracked by {self.domain.name})"
+
+
+class CompetitorAnalytics(models.Model):
+    """
+    CompetitorAnalytics model for tracking competitor performance over time
+    """
+    competitor = models.ForeignKey(
+        Competitor, 
+        on_delete=models.CASCADE, 
+        related_name='competitor_analytics',
+        help_text="Competitor this analytics belongs to"
+    )
+    platform = models.CharField(max_length=100, help_text="AI platform name")
+    total_mentions = models.IntegerField(default=0, help_text="Number of mentions on this date")
+    position = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Average position"
+    )
+    sentiment_score = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Average sentiment score"
+    )
+    timestamp = models.DateField(help_text="Date of this analytics snapshot")
+    created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when created")
+    
+    class Meta:
+        db_table = 'competitor_analytics'
+        managed = False  # Let backend manage this table
+        ordering = ['-timestamp']
+    
+    def __str__(self):
+        return f"{self.competitor.name} - {self.platform} - {self.timestamp}"
+
+
+class SentimentAnalytics(models.Model):
+    """
+    SentimentAnalytics model for aggregated sentiment data by theme
+    """
+    domain = models.ForeignKey(
+        Domain, 
+        on_delete=models.CASCADE, 
+        related_name='sentiment_analytics',
+        help_text="Domain this sentiment analytics belongs to"
+    )
+    theme = models.CharField(
+        max_length=255, 
+        help_text="Theme or topic (e.g., 'Product Quality', 'Customer Service')"
+    )
+    positive_percentage = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Percentage of positive sentiment"
+    )
+    neutral_percentage = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Percentage of neutral sentiment"
+    )
+    negative_percentage = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Percentage of negative sentiment"
+    )
+    mention_count = models.IntegerField(default=0, help_text="Number of mentions for this theme")
+    platform = models.CharField(
+        max_length=100, 
+        null=True, 
+        blank=True,
+        help_text="AI platform (null = aggregated across all platforms)"
+    )
+    timestamp = models.DateField(help_text="Date of this analytics snapshot")
+    created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when created")
+    
+    class Meta:
+        db_table = 'sentiment_analytics'
+        managed = False  # Let backend manage this table
+        ordering = ['-timestamp']
+    
+    def __str__(self):
+        return f"{self.domain.name} - {self.theme} - {self.timestamp}"
+
+
+class ShareOfVoiceAnalytics(models.Model):
+    """
+    ShareOfVoiceAnalytics model for market share tracking
+    """
+    domain = models.ForeignKey(
+        Domain, 
+        on_delete=models.CASCADE, 
+        related_name='sov_analytics',
+        help_text="Domain this share of voice analytics belongs to"
+    )
+    competitor = models.ForeignKey(
+        Competitor, 
+        on_delete=models.CASCADE, 
+        null=True, 
+        blank=True, 
+        related_name='sov_analytics',
+        help_text="Competitor (null = your own brand)"
+    )
+    platform = models.CharField(
+        max_length=100, 
+        null=True, 
+        blank=True,
+        help_text="AI platform (null = aggregated across all platforms)"
+    )
+    share_percentage = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Share of voice percentage"
+    )
+    mention_count = models.IntegerField(default=0, help_text="Number of mentions")
+    market_position = models.IntegerField(
+        null=True, 
+        blank=True,
+        help_text="Market rank (1 = leader, 2 = second, etc.)"
+    )
+    timestamp = models.DateField(help_text="Date of this analytics snapshot")
+    created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when created")
+    
+    class Meta:
+        db_table = 'share_of_voice_analytics'
+        managed = False  # Let backend manage this table
+        unique_together = [['domain', 'competitor', 'platform', 'timestamp']]
+        ordering = ['-timestamp', 'market_position']
+    
+    def __str__(self):
+        competitor_name = self.competitor.name if self.competitor else self.domain.name
+        platform_str = f" - {self.platform}" if self.platform else ""
+        return f"{competitor_name}{platform_str} - {self.share_percentage}% - {self.timestamp}"
+
+
+class CompetitorPromptAnalytics(models.Model):
+    """
+    Links Competitors to Prompts and tracks analytics for each combination.
+    STATUS FLOW: INIT → SCHD → PROC → COMP (or FAIL)
+    """
+    STATUS_CHOICES = [
+        ('INIT', 'Initial'),
+        ('SCHD', 'Scheduled'),
+        ('PROC', 'Processing'),
+        ('COMP', 'Complete'),
+        ('FAIL', 'Failed'),
+    ]
+    
+    competitor = models.ForeignKey(
+        Competitor, 
+        on_delete=models.CASCADE, 
+        related_name='prompt_analytics',
+        help_text="Competitor being tracked"
+    )
+    prompt = models.ForeignKey(
+        Prompt, 
+        on_delete=models.CASCADE, 
+        related_name='competitor_analytics',
+        help_text="Prompt being tested"
+    )
+    
+    # Tracking fields
+    track_status = models.CharField(
+        max_length=4, 
+        choices=STATUS_CHOICES, 
+        default='INIT',
+        help_text="Processing status"
+    )
+    track_message = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Status message or error details"
+    )
+    tracked_at = models.DateTimeField(
+        null=True, 
+        blank=True, 
+        help_text="Timestamp when last tracked"
+    )
+    
+    # Analytics data (populated after ChatGPT testing)
+    is_mentioned = models.BooleanField(
+        default=False, 
+        help_text="Whether competitor was mentioned"
+    )
+    position = models.IntegerField(
+        null=True, 
+        blank=True, 
+        help_text="Position where competitor appears"
+    )
+    mention_count = models.IntegerField(
+        default=0, 
+        help_text="Number of times mentioned in response"
+    )
+    sentiment_category = models.CharField(
+        max_length=50, 
+        blank=True, 
+        null=True, 
+        help_text="Sentiment category (positive/neutral/negative)"
+    )
+    sentiment_score = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.0,
+        help_text="Sentiment score (-1 to 1)"
+    )
+    platform = models.CharField(
+        max_length=100, 
+        blank=True, 
+        null=True, 
+        help_text="AI platform (ChatGPT, Claude, etc.)"
+    )
+    response_text = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Full AI response"
+    )
+    citation_list = models.JSONField(
+        default=list, 
+        blank=True, 
+        help_text="Citations mentioning competitor"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when created")
+    modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when last modified")
+    
+    class Meta:
+        db_table = 'competitor_prompt_analytics'
+        managed = False  # Let backend manage this table
+        unique_together = [['competitor', 'prompt']]
+        ordering = ['competitor', 'position']
+    
+    def __str__(self):
+        return f"{self.competitor.name} - {self.prompt.prompt_text[:50]}... [{self.track_status}]"

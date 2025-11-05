@@ -81,9 +81,9 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'llm_monitor',
-        'USER': 'root',
-        'PASSWORD': 'Monit@2025$',
-        'HOST': '64.227.190.42',
+        'USER': 'arun',
+        'PASSWORD': 'admin',
+        'HOST': 'localhost',
         'PORT': '5432',
     }
 }
@@ -154,7 +154,7 @@ MAX_CONCURRENT_PROMPT_ANALYTICS = 10
 
 # Prompt engine knobs
 # How many keywords to fetch from DataForSEO per domain
-KEYWORD_EXTRACT_LIMIT = 10
+KEYWORD_EXTRACT_LIMIT = 2
 # Minimum number of distinct prompts to produce overall
 PROMPT_MIN_COUNT = 2
 DATAFORSEO_USERNAME = "abulkalam.serpple@gmail.com"

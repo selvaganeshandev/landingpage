@@ -20,4 +20,18 @@ urlpatterns = [
     path('prompts/start/', views.start_prompt_processing, name='start_prompt_processing'),
     path('prompts/status/<int:domain_id>/', views.prompt_analytics_status, name='prompt_analytics_status'),
     path('prompts/summary/<int:domain_id>/', views.prompt_analytics_summary, name='prompt_analytics_summary'),
+    
+    # Competitor management
+    path('competitors/', views.competitor_list, name='competitor_list'),
+    path('competitors/<int:competitor_id>/', views.competitor_detail, name='competitor_detail'),
+    path('competitors/<int:competitor_id>/process/', views.competitor_process, name='competitor_process'),
+    path('competitors/<int:competitor_id>/analytics/', views.competitor_analytics, name='competitor_analytics'),
+    
+    # Competitor-Prompt Analytics
+    path('competitor-prompt-analytics/', views.competitor_prompt_analytics_list, name='competitor_prompt_analytics_list'),
+    path('competitor-prompt-analytics/gaps/', views.competitor_gaps, name='competitor_gaps'),
+    
+    # Share of Voice Analytics
+    path('share-of-voice/', views.share_of_voice, name='share_of_voice'),
+    path('competitor-analytics/trends/', views.competitor_analytics_trends, name='competitor_analytics_trends'),
 ]

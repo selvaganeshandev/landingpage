@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Competitor, CompetitorAnalytics, CompetitorPrompt
+from .models import Competitor, CompetitorAnalytics, CompetitorPrompt, CompetitorPromptAnalytics
 
 
 class CompetitorSerializer(serializers.ModelSerializer):
@@ -9,12 +9,18 @@ class CompetitorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Competitor
         fields = [
-            'id', 'domain', 'domain_name', 'name', 'url', 'total_mentions',
-            'visibility_score', 'sentiment_score', 'average_position',
-            'share_of_voice_percentage', 'trend_percentage', 'created_by',
-            'created_by_email', 'created_at', 'modified_at'
+            'id', 'domain', 'domain_name', 'name', 'url', 
+            'track_status', 'track_message', 'tracked_at',
+            'total_mentions', 'visibility_score', 'sentiment_score', 'average_position',
+            'share_of_voice_percentage', 'trend_percentage', 
+            'created_by', 'created_by_email', 'created_at', 'modified_at'
         ]
-        read_only_fields = ['id', 'created_at', 'modified_at']
+        read_only_fields = [
+            'id', 'track_status', 'track_message', 'tracked_at',
+            'total_mentions', 'visibility_score', 'sentiment_score', 'average_position',
+            'share_of_voice_percentage', 'trend_percentage',
+            'created_at', 'modified_at'
+        ]
 
 
 class CompetitorAnalyticsSerializer(serializers.ModelSerializer):
@@ -30,6 +36,7 @@ class CompetitorAnalyticsSerializer(serializers.ModelSerializer):
 
 
 class CompetitorPromptSerializer(serializers.ModelSerializer):
+    """DEPRECATED: Use CompetitorPromptAnalyticsSerializer instead"""
     competitor_name = serializers.CharField(source='competitor.name', read_only=True)
     
     class Meta:
@@ -40,4 +47,28 @@ class CompetitorPromptSerializer(serializers.ModelSerializer):
             'created_at', 'modified_at'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
+
+
+class CompetitorPromptAnalyticsSerializer(serializers.ModelSerializer):
+    competitor_name = serializers.CharField(source='competitor.name', read_only=True)
+    prompt_text = serializers.CharField(source='prompt.prompt_text', read_only=True)
+    domain_name = serializers.CharField(source='competitor.domain.name', read_only=True)
+    
+    class Meta:
+        model = CompetitorPromptAnalytics
+        fields = [
+            'id', 'competitor', 'competitor_name', 'prompt', 'prompt_text', 'domain_name',
+            'track_status', 'track_message', 'tracked_at',
+            'is_mentioned', 'position', 'mention_count', 
+            'sentiment_category', 'sentiment_score',
+            'platform', 'response_text', 'citation_list',
+            'created_at', 'modified_at'
+        ]
+        read_only_fields = [
+            'id', 'track_status', 'track_message', 'tracked_at',
+            'is_mentioned', 'position', 'mention_count', 
+            'sentiment_category', 'sentiment_score',
+            'platform', 'response_text', 'citation_list',
+            'created_at', 'modified_at'
+        ]
 

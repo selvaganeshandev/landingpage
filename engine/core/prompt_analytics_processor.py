@@ -3,7 +3,8 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.db.models import Sum, Avg, Count
-from shared_models.models import Domain, Prompt, PromptAnalytics, PromptGroup
+from shared_models.models import Domain, Prompt, PromptAnalytics, PromptGroup, SentimentAnalytics
+from datetime import date
 import logging
 
 
@@ -76,9 +77,13 @@ class PromptAnalyticsProcessor:
             if PromptGroup.objects.filter(track_status='SCHD').exists():
                 return {'scheduled': False, 'reason': 'group_in_progress'}
 
-            # Select one INIT group
+            # Select one INIT group - only process if domain is fully complete
+            # This prevents processing incomplete groups while domain is still creating prompts
             group = (
-                PromptGroup.objects.filter(track_status='INIT')
+                PromptGroup.objects.filter(
+                    track_status='INIT',
+                    domain__processing_status='COMP'  # Wait until domain finishes
+                )
                 .select_related('domain')
                 .order_by('modified_at')
                 .first()
@@ -115,24 +120,54 @@ class PromptAnalyticsProcessor:
             )
 
             processed = 0
-            for prompt in init_prompts:
-                # Mark prompt as scheduled then process
-                with transaction.atomic():
-                    p = Prompt.objects.select_for_update().get(id=prompt.id)
-                    if p.track_status != 'INIT':
-                        continue
-                    p.track_status = 'SCHD'
-                    p.tracked_at = timezone.now()
-                    p.save(update_fields=['track_status', 'tracked_at', 'modified_at'])
-                self.process_single_prompt(prompt.id)
-                processed += 1
+            failed = 0
+            
+            try:
+                for prompt in init_prompts:
+                    try:
+                        # Mark prompt as scheduled then process
+                        with transaction.atomic():
+                            p = Prompt.objects.select_for_update().get(id=prompt.id)
+                            if p.track_status != 'INIT':
+                                continue
+                            p.track_status = 'SCHD'
+                            p.tracked_at = timezone.now()
+                            p.save(update_fields=['track_status', 'tracked_at', 'modified_at'])
+                        
+                        self.process_single_prompt(prompt.id)
+                        processed += 1
+                    except Exception as prompt_error:
+                        logger.error(f"Error processing prompt {prompt.id}: {str(prompt_error)}")
+                        failed += 1
+                        # Mark prompt as failed so it doesn't block the group
+                        try:
+                            prompt.track_status = 'FAIL'
+                            prompt.track_message = f'Processing error: {str(prompt_error)[:200]}'
+                            prompt.tracked_at = timezone.now()
+                            prompt.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
+                        except:
+                            pass
+            finally:
+                # ALWAYS check and aggregate, even if there were errors
+                # This ensures the group doesn't stay stuck in SCHD
+                self._check_and_aggregate_group(group)
 
-            # If all prompts are completed, mark group complete and aggregate
-            self._check_and_aggregate_group(group)
-
-            return {'scheduled': True, 'group_id': group.id, 'processed_prompts': processed}
+            return {
+                'scheduled': True,
+                'group_id': group.id,
+                'processed_prompts': processed,
+                'failed_prompts': failed
+            }
         except Exception as e:
             logger.error(f"Error in schedule_tick: {str(e)}")
+            # Critical: If we fail here, reset the group to INIT so it can be retried
+            try:
+                group.track_status = 'INIT'
+                group.track_message = f'Scheduler error, resetting: {str(e)[:200]}'
+                group.tracked_at = timezone.now()
+                group.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
+            except:
+                pass
             return {'error': str(e)}
 
     def process_single_prompt(self, prompt_id: int) -> Dict[str, Any]:
@@ -249,17 +284,15 @@ class PromptAnalyticsProcessor:
                     prompt=prompt,
                     platform=platform_label,
                     defaults={
-                        'domain': prompt.domain,
-                        'organisation': prompt.organisation,
-                        'track_status': 'COMP',
                         'is_mention': bool(result.get('is_mention') or (result.get('mention_count', 0) or 0) > 0),
                         'total_mentions': int(result.get('mention_count', 0) or 0),
                         'total_citations': int(result.get('citation_count', 0) or len(result.get('citations') or [])),
                         'position': float(extracted_position or 0),
-                        'sentiment': str(result.get('sentiment') or 'neutral'),
+                        'sentiment_category': str(result.get('sentiment') or 'neutral'),
                         'sentiment_score': float(result.get('sentiment_score', 0.0) or 0.0),
                         'context_summary': result.get('context_summary') or result.get('response_text') or '',
-                        'citations': result.get('citations') or [],
+                        'citation_list': result.get('citations') or [],
+                        'track_status': 'COMP',  # Mark as completed
                         'tracked_at': timezone.now(),
                         'is_published': True,  # Mark as published when completed
                     }
@@ -275,17 +308,26 @@ class PromptAnalyticsProcessor:
     def _check_and_aggregate_group(self, group: PromptGroup) -> None:
         """If no prompts remain in non-complete states, aggregate group and domain, mark group COMP."""
         try:
-            remaining_prompts = group.prompts.exclude(track_status='COMP').count()
+            # Validation: Check if group has at least one prompt
+            total_prompts = group.prompts.count()
+            if total_prompts == 0:
+                logger.warning(f"Group {group.id} has no prompts, skipping aggregation")
+                return
+            
+            # Count prompts that are still pending (INIT, SCHD, PROC)
+            # COMP and FAIL are considered "done"
+            remaining_prompts = group.prompts.filter(track_status__in=['INIT', 'SCHD', 'PROC']).count()
             if remaining_prompts > 0:
-                logger.info(f"Group {group.id} not ready for aggregation: {remaining_prompts} prompts remaining")
+                logger.info(f"Group {group.id} not ready for aggregation: {remaining_prompts}/{total_prompts} prompts remaining")
                 return
 
             logger.info(f"Aggregating results for group {group.id}")
             
             # Aggregate analytics for this group
+            # Use prompt__track_status because PromptAnalytics.track_status is never updated
             analytics = PromptAnalytics.objects.filter(
                 prompt__group=group,
-                track_status='COMP'
+                prompt__track_status='COMP'
             )
             
             if not analytics.exists():
@@ -310,26 +352,120 @@ class PromptAnalyticsProcessor:
                 'total_citations', 'total_mentions', 'average_position', 
                 'track_status', 'tracked_at', 'is_published', 'modified_at'
             ])
+            
+            # Update SentimentAnalytics for this group's theme
+            if group.theme:
+                try:
+                    self._update_sentiment_analytics_for_theme(group, analytics)
+                except Exception as sentiment_error:
+                    logger.error(f"Error updating sentiment analytics for group {group.id}: {str(sentiment_error)}")
+                    # Don't fail the entire aggregation if sentiment update fails
 
             # Update domain aggregating across all completed analytics
-            domain = group.domain
-            domain_analytics = PromptAnalytics.objects.filter(prompt__domain=domain, track_status='COMP')
-            domain_totals = domain_analytics.aggregate(
-                total_citations=Sum('total_citations'),
-                total_mentions=Sum('total_mentions'),
-                avg_position=Avg('position')
-            )
-            domain.total_citations = domain_totals['total_citations'] or 0
-            domain.total_mentions = domain_totals['total_mentions'] or 0
-            domain.average_position = domain_totals['avg_position'] or 0.0
-            domain.tracked_at = timezone.now()
-            domain.save(update_fields=['total_citations', 'total_mentions', 'average_position', 'tracked_at', 'modified_at'])
+            # Use select_for_update to prevent concurrent updates from overwriting each other
+            with transaction.atomic():
+                domain = Domain.objects.select_for_update().get(id=group.domain_id)
+                
+                # Use prompt__track_status because PromptAnalytics.track_status is never updated
+                domain_analytics = PromptAnalytics.objects.filter(
+                    prompt__domain=domain,
+                    prompt__track_status='COMP'
+                )
+                domain_totals = domain_analytics.aggregate(
+                    total_citations=Sum('total_citations'),
+                    total_mentions=Sum('total_mentions'),
+                    avg_position=Avg('position')
+                )
+                domain.total_citations = domain_totals['total_citations'] or 0
+                domain.total_mentions = domain_totals['total_mentions'] or 0
+                domain.average_position = domain_totals['avg_position'] or 0.0
+                domain.tracked_at = timezone.now()
+                domain.save(update_fields=['total_citations', 'total_mentions', 'average_position', 'tracked_at', 'modified_at'])
 
             logger.info(f"Successfully aggregated group {group.id} and domain {domain.id}")
             
         except Exception as e:
             logger.error(f"Error aggregating group {group.id}: {str(e)}")
 
+    def _update_sentiment_analytics_for_theme(self, group: PromptGroup, analytics) -> None:
+        """
+        Update or create SentimentAnalytics record for this group's theme
+        Aggregates sentiment data from all PromptAnalytics in the group
+        """
+        try:
+            theme = group.theme
+            domain = group.domain
+            today = date.today()
+            
+            # Ensure analytics is a PromptAnalytics QuerySet, not a list or other type
+            if not hasattr(analytics, 'filter'):
+                logger.error(f"Invalid analytics type for group {group.id}: {type(analytics)}")
+                return
+            
+            # Debug: Log the analytics queryset info
+            logger.debug(f"Analytics queryset for group {group.id}: model={analytics.model.__name__}, count={analytics.count()}")
+            
+            # Count sentiment categories - make sure we're working with a clean queryset
+            # Re-query from database to avoid any stale queryset issues
+            from shared_models.models import PromptAnalytics as PA
+            analytics_qs = PA.objects.filter(
+                prompt__group=group,
+                prompt__track_status='COMP'
+            )
+            
+            total = analytics_qs.filter(is_mention=True, is_published=True).count()
+            
+            if total == 0:
+                logger.info(f"No mentions found for theme '{theme}', skipping sentiment update")
+                return
+            
+            positive_count = analytics_qs.filter(
+                sentiment_category='positive',
+                is_mention=True,
+                is_published=True
+            ).count()
+            
+            neutral_count = analytics_qs.filter(
+                sentiment_category='neutral',
+                is_mention=True,
+                is_published=True
+            ).count()
+            
+            negative_count = analytics_qs.filter(
+                sentiment_category='negative',
+                is_mention=True,
+                is_published=True
+            ).count()
+            
+            # Calculate percentages
+            positive_pct = (positive_count / total) * 100 if total > 0 else 0.0
+            neutral_pct = (neutral_count / total) * 100 if total > 0 else 0.0
+            negative_pct = (negative_count / total) * 100 if total > 0 else 0.0
+            
+            # Update or create SentimentAnalytics for this theme (overall, not platform-specific)
+            sentiment_analytics, created = SentimentAnalytics.objects.update_or_create(
+                domain=domain,
+                theme=theme,
+                platform=None,  # Overall aggregation
+                timestamp=today,
+                defaults={
+                    'positive_percentage': round(positive_pct, 2),
+                    'neutral_percentage': round(neutral_pct, 2),
+                    'negative_percentage': round(negative_pct, 2),
+                    'mention_count': total
+                }
+            )
+            
+            action = "Created" if created else "Updated"
+            logger.info(
+                f"{action} SentimentAnalytics for theme '{theme}': "
+                f"Pos={positive_pct:.1f}%, Neu={neutral_pct:.1f}%, Neg={negative_pct:.1f}%, "
+                f"Mentions={total}"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error updating sentiment analytics for theme '{group.theme}': {str(e)}")
+    
     def _get_fallback_analytics(self, prompt_text: str, user_domain: str, platform: str) -> Dict[str, Any]:
         """Generate fallback analytics when AI platforms are unavailable"""
         return {

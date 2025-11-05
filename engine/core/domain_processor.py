@@ -5,12 +5,14 @@ from typing import List, Dict, Any, Tuple
 import re
 from django.conf import settings
 from django.db import transaction
-from shared_models.models import Domain, Keyword, PromptGroup, Prompt, PromptAnalytics, Organisation
+from django.utils import timezone
+from shared_models.models import Domain, Keyword, PromptGroup, Prompt, PromptAnalytics, Organisation, SentimentAnalytics
 from .rest_client import DataForSEOClient
 from .chatgpt_client import ChatGPTClient
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import KMeans
+from datetime import date
 
 
 class DomainProcessor:
@@ -85,8 +87,8 @@ class DomainProcessor:
             
             # Update status to processing
             domain.processing_status = 'PROC'
-            domain.track_status = 'Processing'
             domain.track_message = 'Starting domain processing...'
+            domain.tracked_at = timezone.now()
             domain.save()
             
             # Step 1: Scrape keywords from DataForSEO
@@ -96,8 +98,8 @@ class DomainProcessor:
             
             if not keywords:
                 domain.processing_status = 'FAIL'
-                domain.track_status = 'Failed'
                 domain.track_message = 'No keywords found from DataForSEO API'
+                domain.tracked_at = timezone.now()
                 domain.save()
                 return
             
@@ -130,8 +132,8 @@ class DomainProcessor:
             
             if not prompts:
                 domain.processing_status = 'FAIL'
-                domain.track_status = 'Failed'
                 domain.track_message = 'Failed to generate prompts with ChatGPT'
+                domain.tracked_at = timezone.now()
                 domain.save()
                 return
             
@@ -141,8 +143,8 @@ class DomainProcessor:
             
             if not grouped_prompts:
                 domain.processing_status = 'FAIL'
-                domain.track_status = 'Failed'
                 domain.track_message = 'Failed to group prompts'
+                domain.tracked_at = timezone.now()
                 domain.save()
                 return
             
@@ -152,8 +154,8 @@ class DomainProcessor:
             
             # Step 6: Update domain status to completed
             domain.processing_status = 'COMP'
-            domain.track_status = 'Completed'
             domain.track_message = f'Successfully processed {len(keywords)} keywords and {len(grouped_prompts)} prompt groups'
+            domain.tracked_at = timezone.now()
             domain.save()
             
             print(f"Successfully processed domain: {domain.name}")
@@ -163,8 +165,8 @@ class DomainProcessor:
             try:
                 domain = Domain.objects.get(id=domain_id)
                 domain.processing_status = 'FAIL'
-                domain.track_status = 'Failed'
                 domain.track_message = f'Processing failed: {str(e)}'
+                domain.tracked_at = timezone.now()
                 domain.save()
             except:
                 pass
@@ -183,11 +185,9 @@ class DomainProcessor:
                 keyword, created = Keyword.objects.get_or_create(
                     keyword=keyword_text,
                     domain=domain,
-                    organisation=domain.organisation,
                     defaults={
                         'keyword': keyword_text,
                         'domain': domain,
-                        'organisation': domain.organisation
                     }
                 )
                 if created:
@@ -202,14 +202,32 @@ class DomainProcessor:
                 # Create prompt group with interpretable group_id (title)
                 desired_group_id = group_data.get('title', 'Untitled').strip() or 'Untitled'
                 group_id = self._unique_group_id_for_domain(domain, desired_group_id)
+                
+                # Extract theme from the group
+                theme = self._extract_theme_from_group(group_data)
+                
                 prompt_group = PromptGroup.objects.create(
                     group_id=group_id,
                     domain=domain,
-                    organisation=domain.organisation,
+                    theme=theme,  # Store extracted theme
                     total_mentions=0,
                     total_citations=0,
                     average_position=0.00
                 )
+                
+                # Create initial SentimentAnalytics record for this theme
+                if theme:
+                    SentimentAnalytics.objects.create(
+                        domain=domain,
+                        theme=theme,
+                        positive_percentage=0.0,
+                        neutral_percentage=0.0,
+                        negative_percentage=0.0,
+                        mention_count=0,
+                        platform=None,  # Overall aggregation
+                        timestamp=date.today()
+                    )
+                    print(f"Created SentimentAnalytics for theme: {theme}")
                 
                 # Create primary prompts (limit to 1) and convert the rest to secondary
                 primary_prompts = group_data.get('primary_prompts', [])
@@ -224,8 +242,6 @@ class DomainProcessor:
                         prompt = Prompt.objects.create(
                             prompt=prompt_text.strip(),
                             group=prompt_group,
-                            domain=domain,
-                            organisation=domain.organisation,
                             type='primary',
                             track_status='INIT'
                         )
@@ -239,8 +255,6 @@ class DomainProcessor:
                         prompt = Prompt.objects.create(
                             prompt=prompt_text.strip(),
                             group=prompt_group,
-                            domain=domain,
-                            organisation=domain.organisation,
                             type='secondary',
                             track_status='INIT'
                         )
@@ -269,24 +283,20 @@ class DomainProcessor:
                 prompt=prompt,
                 platform=platform,
                 defaults={
-                    'prompt': prompt,
-                    'domain': domain,
-                    'organisation': domain.organisation,
-                    'platform': platform,
                     'is_mention': False,
                     'total_mentions': 0,
                     'total_citations': 0,
                     'position': 0.00,
-                    'sentiment': 'neutral',
+                    'sentiment_category': 'neutral',
                     'sentiment_score': 0.00,
                     'context_summary': '',
-                    'citations': [],
+                    'citation_list': [],
                     'views': 0,
                     'shares': 0,
                     'engagement_score': 0.00,
-                    'competitor_mentions': [],
-                    'key_topics': [],
-                    'position_history': []
+                    'competitor_mention_list': [],
+                    'topic_list': [],
+                    'position_history_list': []
                 }
             )
 
@@ -427,6 +437,34 @@ class DomainProcessor:
             })
         return result
 
+    def _extract_theme_from_group(self, group_data: Dict[str, Any]) -> str:
+        """
+        Extract a concise theme from the prompt group using NLP
+        Uses the title and primary prompts to identify the common theme
+        """
+        title = group_data.get('title', '').strip()
+        primary_prompts = group_data.get('primary_prompts', [])
+        
+        # Use the title as base (it's already derived from representative prompt)
+        if title and title != 'Untitled':
+            # Extract key noun phrases (simple approach: first 2-4 meaningful words)
+            words = title.split()
+            # Filter out common stop words
+            stop_words = {'what', 'how', 'why', 'when', 'where', 'who', 'the', 'is', 'are', 'a', 'an', 'for', 'to', 'of', 'in', 'on', 'at'}
+            meaningful_words = [w for w in words if w.lower() not in stop_words]
+            
+            # Take first 2-4 meaningful words as theme
+            theme_words = meaningful_words[:min(4, len(meaningful_words))]
+            if theme_words:
+                theme = ' '.join(theme_words).title()
+                # Limit to 50 chars for clean themes
+                if len(theme) > 50:
+                    theme = theme[:50].rsplit(' ', 1)[0]
+                return theme
+        
+        # Fallback: if no meaningful theme, use "General" with number
+        return "General Topics"
+    
     def _build_expert_prompt_template(self, keyword: str, domain_name: str) -> str:
         return (
             f"For the domain {domain_name}, draft an expert-level, actionable brief on '{keyword}'. "
@@ -460,8 +498,8 @@ class DomainProcessor:
             
             # Update status to scheduled
             domain.processing_status = 'SCHD'
-            domain.track_status = 'Scheduled'
             domain.track_message = 'Scheduled for processing by API request'
+            domain.tracked_at = timezone.now()
             domain.save()
             
             # Start processing in a separate thread

@@ -4,11 +4,18 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from shared_models.models import Domain, Prompt, PromptAnalytics, PromptGroup
+from shared_models.models import (
+    Domain, Prompt, PromptAnalytics, PromptGroup,
+    Competitor, CompetitorPromptAnalytics, CompetitorAnalytics, ShareOfVoiceAnalytics
+)
 from .domain_processor import DomainProcessor
-from .processing_tasks import process_domain_task, process_prompt_analytics_task
-from .serializers import DomainSerializer, ProcessingStatusSerializer
-from django.db.models import Avg, Count, Q
+from .processing_tasks import process_domain_task, process_prompt_analytics_task, process_single_competitor_task
+from .serializers import (
+    DomainSerializer, ProcessingStatusSerializer,
+    CompetitorSerializer, CompetitorPromptAnalyticsSerializer,
+    CompetitorAnalyticsSerializer, ShareOfVoiceAnalyticsSerializer
+)
+from django.db.models import Avg, Count, Q, Sum
 from .prompt_analytics_processor import PromptAnalyticsProcessor
 
 
@@ -27,11 +34,11 @@ def processing_status(request):
         
         # Get domain counts by status
         domain_counts = {
-            'INIT': Domain.objects.filter(track_status='INIT').count(),
-            'SCHD': Domain.objects.filter(track_status='SCHD').count(),
-            'PROC': Domain.objects.filter(track_status='PROC').count(),
-            'COMP': Domain.objects.filter(track_status='COMP').count(),
-            'FAIL': Domain.objects.filter(track_status='FAIL').count(),
+            'INIT': Domain.objects.filter(processing_status='INIT').count(),
+            'SCHD': Domain.objects.filter(processing_status='SCHD').count(),
+            'PROC': Domain.objects.filter(processing_status='PROC').count(),
+            'COMP': Domain.objects.filter(processing_status='COMP').count(),
+            'FAIL': Domain.objects.filter(processing_status='FAIL').count(),
         }
         
         status_data['domain_counts'] = domain_counts
@@ -67,25 +74,26 @@ def start_processing(request):
         
         # If sync requested, process inline without Celery
         if sync:
-            if domain.track_status == 'PROC':
+            if domain.processing_status == 'PROC':
                 return Response({
                     'success': False,
                     'error': 'Domain is already being processed'
                 }, status=status.HTTP_409_CONFLICT)
 
             # Mark as processing and run inline
-            domain.track_status = 'PROC'
+            domain.processing_status = 'PROC'
             domain.track_message = 'Processing inline via /api/start (sync)'
-            domain.save(update_fields=['track_status', 'track_message', 'modified_at'])
+            domain.tracked_at = timezone.now()
+            domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
 
             try:
                 # Execute synchronously
                 domain_processor._process_single_domain(domain.id)
                 # Success
-                domain.track_status = 'COMP'
+                domain.processing_status = 'COMP'
                 domain.track_message = 'Completed inline processing'
                 domain.tracked_at = timezone.now()
-                domain.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
+                domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
                 return Response({
                     'success': True,
                     'message': f'Completed inline processing for domain: {domain.name}',
@@ -93,10 +101,10 @@ def start_processing(request):
                     'mode': 'sync'
                 })
             except Exception as inline_err:
-                domain.track_status = 'FAIL'
+                domain.processing_status = 'FAIL'
                 domain.track_message = f'Inline processing failed: {inline_err}'
                 domain.tracked_at = timezone.now()
-                domain.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
+                domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
                 return Response({
                     'success': False,
                     'error': f'Inline processing failed: {inline_err}',
@@ -105,16 +113,17 @@ def start_processing(request):
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Default: enqueue Celery task (idempotent scheduling)
-        if domain.track_status in ['PROC']:
+        if domain.processing_status in ['PROC']:
             return Response({
                 'success': False,
                 'error': 'Domain is already being processed'
             }, status=status.HTTP_409_CONFLICT)
 
-        if domain.track_status == 'INIT':
-            domain.track_status = 'SCHD'
+        if domain.processing_status == 'INIT':
+            domain.processing_status = 'SCHD'
             domain.track_message = 'Scheduled via API request'
-            domain.save(update_fields=['track_status', 'track_message', 'modified_at'])
+            domain.tracked_at = timezone.now()
+            domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
 
         process_domain_task.delay(domain_id)
 
@@ -142,7 +151,7 @@ def domain_list(request):
         status_filter = request.GET.get('status')
         
         if status_filter:
-            domains = Domain.objects.filter(track_status=status_filter)
+            domains = Domain.objects.filter(processing_status=status_filter)
         else:
             domains = Domain.objects.all()
         
@@ -209,14 +218,15 @@ def schedule_domain(request):
         domain = get_object_or_404(Domain, id=domain_id)
         
         # Only schedule if domain is in INIT status
-        if domain.track_status != 'INIT':
+        if domain.processing_status != 'INIT':
             return Response({
                 'success': False,
-                'error': f'Domain is in {domain.track_status} status. Only INIT domains can be scheduled.'
+                'error': f'Domain is in {domain.processing_status} status. Only INIT domains can be scheduled.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        domain.track_status = 'SCHD'
+        domain.processing_status = 'SCHD'
         domain.track_message = 'Scheduled for processing'
+        domain.tracked_at = timezone.now()
         domain.save()
         
         return Response({
@@ -249,8 +259,9 @@ def reset_domain(request):
         domain = get_object_or_404(Domain, id=domain_id)
         
         # Reset domain status
-        domain.track_status = 'INIT'
+        domain.processing_status = 'INIT'
         domain.track_message = 'Reset for processing'
+        domain.tracked_at = timezone.now()
         domain.save()
         
         return Response({
@@ -333,7 +344,7 @@ def prompt_analytics_status(request, domain_id):
         analytics = PromptAnalytics.objects.filter(prompt__domain=domain)
         total_analytics = analytics.count()
         
-        # Derive platform status using platform field and track_status
+        # Derive platform status using platform field and prompt track_status
         platform_status = {}
         platform_map = {
             'chatgpt': 'ChatGPT',
@@ -341,11 +352,12 @@ def prompt_analytics_status(request, domain_id):
             'perplexity': 'Perplexity',
         }
         for key, label in platform_map.items():
+            # Use prompt__track_status because PromptAnalytics.track_status is never updated
             platform_status[key] = {
-                'pending': analytics.filter(platform=label, track_status='INIT').count(),
-                'processing': analytics.filter(platform=label, track_status='PROC').count(),
-                'completed': analytics.filter(platform=label, track_status='COMP').count(),
-                'failed': analytics.filter(platform=label, track_status='FAIL').count(),
+                'pending': analytics.filter(platform=label, prompt__track_status='INIT').count(),
+                'processing': analytics.filter(platform=label, prompt__track_status='PROC').count(),
+                'completed': analytics.filter(platform=label, prompt__track_status='COMP').count(),
+                'failed': analytics.filter(platform=label, prompt__track_status='FAIL').count(),
             }
         
         # Calculate overall progress
@@ -369,7 +381,7 @@ def prompt_analytics_status(request, domain_id):
                 'domain': {
                     'id': domain.id,
                     'name': domain.name,
-                    'track_status': domain.track_status
+                    'processing_status': domain.processing_status
                 },
                 'prompts': {
                     'total': total_prompts,
@@ -526,3 +538,251 @@ def start_prompt_processing(request):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# COMPETITOR ENDPOINTS
+# ============================================================================
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def competitor_list(request):
+    """
+    GET: List all competitors
+    POST: Create a new competitor (sets track_status='INIT' automatically)
+    """
+    if request.method == 'GET':
+        domain_id = request.query_params.get('domain_id')
+        
+        queryset = Competitor.objects.all()
+        if domain_id:
+            queryset = queryset.filter(domain_id=domain_id)
+        
+        queryset = queryset.select_related('domain').order_by('-modified_at')
+        serializer = CompetitorSerializer(queryset, many=True)
+        return Response(serializer.data)
+    
+    elif request.method == 'POST':
+        serializer = CompetitorSerializer(data=request.data)
+        if serializer.is_valid():
+            # Auto-set track_status to INIT when creating
+            competitor = serializer.save(track_status='INIT')
+            return Response(
+                CompetitorSerializer(competitor).data,
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([AllowAny])
+def competitor_detail(request, competitor_id):
+    """
+    GET: Get competitor details
+    PUT: Update competitor
+    DELETE: Delete competitor
+    """
+    competitor = get_object_or_404(Competitor, id=competitor_id)
+    
+    if request.method == 'GET':
+        serializer = CompetitorSerializer(competitor)
+        return Response(serializer.data)
+    
+    elif request.method == 'PUT':
+        serializer = CompetitorSerializer(competitor, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif request.method == 'DELETE':
+        competitor.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def competitor_process(request, competitor_id):
+    """
+    Trigger processing for a specific competitor
+    """
+    competitor = get_object_or_404(Competitor, id=competitor_id)
+    
+    try:
+        # Trigger the Celery task
+        task = process_single_competitor_task.delay(competitor.id)
+        
+        return Response({
+            'success': True,
+            'message': f'Processing started for competitor {competitor.name}',
+            'competitor_id': competitor.id,
+            'track_status': competitor.track_status,
+            'task_id': task.id
+        })
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def competitor_analytics(request, competitor_id):
+    """
+    Get detailed analytics for a competitor
+    """
+    competitor = get_object_or_404(Competitor, id=competitor_id)
+    
+    # Get competitor-prompt analytics
+    prompt_analytics = CompetitorPromptAnalytics.objects.filter(
+        competitor=competitor
+    ).select_related('prompt')
+    
+    # Calculate statistics
+    stats = prompt_analytics.aggregate(
+        total_tested=Count('id'),
+        total_mentioned=Count('id', filter=Q(is_mentioned=True)),
+        avg_position=Avg('position'),
+        avg_sentiment=Avg('sentiment_score'),
+        total_mentions=Sum('mention_count')
+    )
+    
+    mention_rate = 0
+    if stats['total_tested'] and stats['total_tested'] > 0:
+        mention_rate = (stats['total_mentioned'] / stats['total_tested']) * 100
+    
+    return Response({
+        'competitor': CompetitorSerializer(competitor).data,
+        'statistics': {
+            'total_prompts_tested': stats['total_tested'] or 0,
+            'times_mentioned': stats['total_mentioned'] or 0,
+            'mention_rate': round(mention_rate, 2),
+            'average_position': round(float(stats['avg_position'] or 0), 2),
+            'average_sentiment': round(float(stats['avg_sentiment'] or 0), 2),
+            'total_mention_count': stats['total_mentions'] or 0,
+        },
+        'recent_prompts': CompetitorPromptAnalyticsSerializer(
+            prompt_analytics.order_by('-tracked_at')[:10], many=True
+        ).data
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def competitor_prompt_analytics_list(request):
+    """
+    List competitor-prompt analytics
+    """
+    competitor_id = request.query_params.get('competitor_id')
+    domain_id = request.query_params.get('domain_id')
+    
+    queryset = CompetitorPromptAnalytics.objects.all()
+    
+    if competitor_id:
+        queryset = queryset.filter(competitor_id=competitor_id)
+    
+    if domain_id:
+        queryset = queryset.filter(competitor__domain_id=domain_id)
+    
+    queryset = queryset.select_related('competitor', 'prompt').order_by('-tracked_at')
+    serializer = CompetitorPromptAnalyticsSerializer(queryset[:100], many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def competitor_gaps(request):
+    """
+    Find opportunity gaps - prompts where competitor appears in top positions
+    """
+    domain_id = request.query_params.get('domain_id')
+    competitor_id = request.query_params.get('competitor_id')
+    
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    queryset = CompetitorPromptAnalytics.objects.filter(
+        competitor__domain_id=domain_id,
+        is_mentioned=True,  # Competitor is mentioned
+        position__lte=5  # In top 5
+    ).select_related('competitor', 'prompt')
+    
+    if competitor_id:
+        queryset = queryset.filter(competitor_id=competitor_id)
+    
+    queryset = queryset.order_by('position')
+    serializer = CompetitorPromptAnalyticsSerializer(queryset[:50], many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def share_of_voice(request):
+    """
+    Get Share of Voice analytics for a domain
+    """
+    domain_id = request.query_params.get('domain_id')
+    
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Get latest timestamp
+    latest = ShareOfVoiceAnalytics.objects.filter(
+        domain_id=domain_id
+    ).order_by('-timestamp').first()
+    
+    if not latest:
+        return Response({
+            'domain_id': int(domain_id),
+            'message': 'No share of voice data available yet',
+            'players': []
+        })
+    
+    # Get all records for latest timestamp
+    sov_data = ShareOfVoiceAnalytics.objects.filter(
+        domain_id=domain_id,
+        timestamp=latest.timestamp
+    ).select_related('competitor', 'domain').order_by('market_position')
+    
+    serializer = ShareOfVoiceAnalyticsSerializer(sov_data, many=True)
+    
+    return Response({
+        'domain_id': int(domain_id),
+        'timestamp': latest.timestamp,
+        'platform': latest.platform or 'Overall',
+        'players': serializer.data
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def competitor_analytics_trends(request):
+    """
+    Get time-series trends for competitor analytics
+    """
+    competitor_id = request.query_params.get('competitor_id')
+    days = int(request.query_params.get('days', 30))
+    
+    if not competitor_id:
+        return Response(
+            {'error': 'competitor_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    from datetime import timedelta
+    start_date = timezone.now().date() - timedelta(days=days)
+    
+    analytics = CompetitorAnalytics.objects.filter(
+        competitor_id=competitor_id,
+        timestamp__gte=start_date
+    ).order_by('timestamp')
+    
+    serializer = CompetitorAnalyticsSerializer(analytics, many=True)
+    return Response(serializer.data)
