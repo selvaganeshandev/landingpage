@@ -26,9 +26,12 @@ interface NewAlertRuleDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAdd?: (rule: any) => void;
+  domainId?: number | string;
 }
 
-export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDialogProps) => {
+import { apiClient } from "@/services/api";
+
+export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewAlertRuleDialogProps) => {
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -45,7 +48,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
     );
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!name.trim() || !triggerType || !threshold) {
       toast({
         title: "Missing Information",
@@ -64,33 +67,34 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd }: NewAlertRuleDi
       return;
     }
 
-    const newRule = {
+    const payload = {
       name: name.trim(),
       description: description.trim(),
-      triggerType,
-      threshold,
-      timeWindow,
-      channels,
+      conditions: {
+        trigger_type: triggerType,
+        threshold_percent: Number(threshold),
+        time_window_hours: Number(timeWindow),
+      },
+      notification_channel_list: channels,
       enabled: true,
-    };
+      ...(domainId ? { domain: domainId } : {}),
+    } as any;
 
-    if (onAdd) {
-      onAdd(newRule);
+    try {
+      const created = await apiClient.createAlertRule(payload);
+      if (onAdd) onAdd(created);
+      toast({ title: "Alert Rule Created", description: `"${name}" has been created successfully.` });
+      // Reset form
+      setName("");
+      setDescription("");
+      setTriggerType("");
+      setThreshold("");
+      setTimeWindow("24");
+      setChannels([]);
+      onOpenChange(false);
+    } catch (e:any) {
+      toast({ title: 'Failed to create rule', description: String(e.message||e), variant: 'destructive' });
     }
-
-    toast({
-      title: "Alert Rule Created",
-      description: `"${name}" has been created successfully.`,
-    });
-
-    // Reset form
-    setName("");
-    setDescription("");
-    setTriggerType("");
-    setThreshold("");
-    setTimeWindow("24");
-    setChannels([]);
-    onOpenChange(false);
   };
 
   return (

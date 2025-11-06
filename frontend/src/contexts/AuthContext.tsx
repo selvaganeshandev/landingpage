@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { AuthState, User, Permission, LoginRequest } from '@/types/auth';
 import { apiClient } from '@/services/api';
+import { loadActiveDomain, saveActiveDomain } from '@/utils/activeDomain';
 
 // Auth Actions
 type AuthAction =
@@ -120,6 +121,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
               refreshToken,
             },
           });
+
+          // Ensure active domain exists for this user (namespaced by user id)
+          const existing = loadActiveDomain(profile.user.id);
+          if (!existing) {
+            try {
+              const domains = await apiClient.getDomains();
+              const first = Array.isArray(domains) && domains.length ? (domains[0].id || domains[0].domain_id || domains[0]) : null;
+              if (first) {
+                saveActiveDomain(profile.user.id, String(first));
+              }
+            } catch {
+              // ignore
+            }
+          }
         } catch (error) {
           // Token is invalid, clear it and require re-login
           localStorage.removeItem('access_token');
@@ -148,6 +163,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
           refreshToken: response.refresh,
         },
       });
+
+      // Set or sync active domain for this user
+      const local = loadActiveDomain(response.user.id);
+      if (!local) {
+        try {
+          const domains = await apiClient.getDomains();
+          const first = Array.isArray(domains) && domains.length ? (domains[0].id || domains[0].domain_id || domains[0]) : null;
+          if (first) {
+            saveActiveDomain(response.user.id, String(first));
+          }
+        } catch {
+          // ignore
+        }
+      }
     } catch (error) {
       dispatch({ type: 'LOGIN_FAILURE', payload: error instanceof Error ? error.message : 'Login failed' });
       throw error;

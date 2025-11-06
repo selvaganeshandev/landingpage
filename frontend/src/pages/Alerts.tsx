@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,129 +21,8 @@ import {
 } from "lucide-react";
 import { NewAlertRuleDialog } from "@/components/NewAlertRuleDialog";
 import { AlertConfigDialog } from "@/components/AlertConfigDialog";
-
-const activeAlerts = [
-  {
-    id: 1,
-    type: "visibility_drop",
-    severity: "high",
-    title: "Visibility Drop Detected",
-    message: "ChatGPT visibility decreased by 12% in the last 24 hours",
-    platform: "ChatGPT",
-    timestamp: "2 hours ago",
-    metric: -12,
-    status: "active"
-  },
-  {
-    id: 2,
-    type: "sentiment_negative",
-    severity: "medium",
-    title: "Negative Sentiment Spike",
-    message: "Negative sentiment increased to 8% for 'taste' related mentions",
-    platform: "Multiple",
-    timestamp: "5 hours ago",
-    metric: 8,
-    status: "active"
-  },
-  {
-    id: 3,
-    type: "competitor_surge",
-    severity: "medium",
-    title: "Competitor Mention Surge",
-    message: "MyProtein mentions increased by 25% in Perplexity",
-    platform: "Perplexity",
-    timestamp: "8 hours ago",
-    metric: 25,
-    status: "investigating"
-  },
-  {
-    id: 4,
-    type: "anomaly",
-    severity: "high",
-    title: "Unusual Activity Pattern",
-    message: "Mention volume 3x above normal in weight loss category",
-    platform: "Claude",
-    timestamp: "12 hours ago",
-    metric: 300,
-    status: "active"
-  },
-];
-
-const resolvedAlerts = [
-  {
-    id: 5,
-    type: "visibility_recovery",
-    severity: "low",
-    title: "Visibility Recovered",
-    message: "Gemini visibility returned to normal levels",
-    platform: "Gemini",
-    timestamp: "1 day ago",
-    resolvedAt: "8 hours ago",
-    status: "resolved"
-  },
-  {
-    id: 6,
-    type: "sentiment_improved",
-    severity: "low",
-    title: "Sentiment Improvement",
-    message: "Positive sentiment recovered to 75%",
-    platform: "Multiple",
-    timestamp: "2 days ago",
-    resolvedAt: "1 day ago",
-    status: "resolved"
-  },
-];
-
-const alertRules = [
-  {
-    id: 1,
-    name: "Visibility Drop Alert",
-    description: "Trigger when visibility score drops by more than 10% in 24 hours",
-    enabled: true,
-    channels: ["email", "slack"],
-    conditions: "Visibility < -10% in 24h"
-  },
-  {
-    id: 2,
-    name: "Negative Sentiment Spike",
-    description: "Alert when negative sentiment exceeds 10%",
-    enabled: true,
-    channels: ["email"],
-    conditions: "Negative sentiment > 10%"
-  },
-  {
-    id: 3,
-    name: "Competitor Movement",
-    description: "Monitor significant competitor mention changes",
-    enabled: true,
-    channels: ["slack"],
-    conditions: "Competitor mentions +/- 20%"
-  },
-  {
-    id: 4,
-    name: "Position Loss",
-    description: "Alert when average position drops below 2.0",
-    enabled: false,
-    channels: ["email"],
-    conditions: "Avg position > 2.0"
-  },
-  {
-    id: 5,
-    name: "New Platform Detection",
-    description: "Notify when brand appears on new AI platform",
-    enabled: true,
-    channels: ["email", "slack", "sms"],
-    conditions: "New platform mention detected"
-  },
-  {
-    id: 6,
-    name: "Anomaly Detection",
-    description: "AI-powered unusual pattern detection",
-    enabled: true,
-    channels: ["email", "slack"],
-    conditions: "Statistical anomaly detected"
-  },
-];
+import { apiClient } from "@/services/api";
+import { useDomainStore } from "@/stores/domainStore";
 
 const getSeverityColor = (severity: string) => {
   switch (severity) {
@@ -173,8 +52,44 @@ const getStatusColor = (status: string) => {
 
 const Alerts = () => {
   const { toast } = useToast();
+  const { selectedDomain } = useDomainStore();
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [newRuleDialogOpen, setNewRuleDialogOpen] = useState(false);
+
+  const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
+  const [resolvedAlerts, setResolvedAlerts] = useState<any[]>([]);
+  const [alertRules, setAlertRules] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any>({ total: 0, active: 0, high_priority: 0, resolved_today: 0, investigating: 0 });
+
+  const loadData = async () => {
+    try {
+      const domain_id = selectedDomain?.id;
+      const [activeResp, listResp, rulesResp, summaryResp] = await Promise.all([
+        apiClient.getActiveAlerts(domain_id ? { domain_id } : undefined),
+        apiClient.getAlerts(domain_id ? { domain_id } : undefined),
+        apiClient.getAlertRules(domain_id ? { domain_id } : undefined),
+        apiClient.getAlertSummary(domain_id ? { domain_id } : undefined)
+      ] as any);
+
+      const normalize = (data: any) => (Array.isArray(data) ? data : (data?.results || []));
+      const active = normalize(activeResp);
+      const all = normalize(listResp);
+      const rules = normalize(rulesResp);
+      const resolved = all.filter((a: any) => a.status === 'resolved');
+
+      setActiveAlerts(active);
+      setResolvedAlerts(resolved);
+      setAlertRules(rules);
+      setSummary(summaryResp || {});
+    } catch (e:any) {
+      toast({ title: 'Failed to load alerts', description: String(e.message||e), variant: 'destructive' });
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDomain?.id]);
 
   const handleConfigure = () => {
     setConfigDialogOpen(true);
@@ -192,38 +107,35 @@ const Alerts = () => {
   };
 
   const handleMarkResolved = () => {
-    toast({
-      title: "Alert Resolved",
-      description: "Alert has been marked as resolved.",
-    });
+    toast({ title: 'Mark Resolved', description: 'Use the resolve action from alert row (to be implemented).' });
   };
 
   const handleEdit = () => {
-    toast({
-      title: "Edit Rule",
-      description: "Opening alert rule editor...",
-    });
+    toast({ title: 'Edit Rule', description: 'Opening alert rule editor...' });
+  };
+
+  const handleRuleEnabledToggle = async (rule: any, enabled: boolean) => {
+    try {
+      // Use toggle endpoint for simplicity; if mismatch, fallback to PUT
+      if (Boolean(rule.enabled) !== Boolean(enabled)) {
+        await apiClient.toggleAlertRule(rule.id);
+      }
+      setAlertRules(prev => prev.map(r => (r.id === rule.id ? { ...r, enabled } : r)));
+    } catch (e:any) {
+      toast({ title: 'Failed to update rule', description: String(e.message||e), variant: 'destructive' });
+    }
   };
 
   const handleUpdateEmail = () => {
-    toast({
-      title: "Updating Email",
-      description: "Email address updated successfully.",
-    });
+    toast({ title: 'Updating Email', description: 'Email address updated successfully.' });
   };
 
   const handleConfigureSlack = () => {
-    toast({
-      title: "Configure Slack",
-      description: "Opening Slack integration settings...",
-    });
+    toast({ title: 'Configure Slack', description: 'Opening Slack integration settings...' });
   };
 
   const handleConnectSMS = () => {
-    toast({
-      title: "Connect SMS",
-      description: "Setting up SMS notifications...",
-    });
+    toast({ title: 'Connect SMS', description: 'Setting up SMS notifications...' });
   };
 
   return (
@@ -254,7 +166,7 @@ const Alerts = () => {
             <p className="text-sm text-muted-foreground font-medium">Active Alerts</p>
             <Bell className="h-5 w-5 text-destructive" />
           </div>
-          <h3 className="text-3xl font-bold text-destructive">4</h3>
+          <h3 className="text-3xl font-bold text-destructive">{summary.active}</h3>
           <p className="text-xs text-muted-foreground mt-1">Require attention</p>
         </Card>
 
@@ -263,7 +175,7 @@ const Alerts = () => {
             <p className="text-sm text-muted-foreground font-medium">High Priority</p>
             <AlertTriangle className="h-5 w-5 text-destructive" />
           </div>
-          <h3 className="text-3xl font-bold text-destructive">2</h3>
+          <h3 className="text-3xl font-bold text-destructive">{summary.high_priority}</h3>
           <p className="text-xs text-muted-foreground mt-1">Critical issues</p>
         </Card>
 
@@ -272,7 +184,7 @@ const Alerts = () => {
             <p className="text-sm text-muted-foreground font-medium">Resolved Today</p>
             <CheckCircle2 className="h-5 w-5 text-success" />
           </div>
-          <h3 className="text-3xl font-bold text-success">6</h3>
+          <h3 className="text-3xl font-bold text-success">{summary.resolved_today}</h3>
           <p className="text-xs text-muted-foreground mt-1">Issues fixed</p>
         </Card>
 
@@ -308,11 +220,11 @@ const Alerts = () => {
                       <Badge className={getSeverityColor(alert.severity)}>
                         {alert.severity}
                       </Badge>
-                      <Badge variant="outline">{alert.platform}</Badge>
+                      <Badge variant="outline">{alert.platform || 'All'}</Badge>
                     </div>
                     <p className="text-muted-foreground mb-3">{alert.message}</p>
                     <div className="flex items-center gap-4 text-sm">
-                      <span className="text-muted-foreground">{alert.timestamp}</span>
+                      <span className="text-muted-foreground">{alert.created_at}</span>
                       <span className={`font-medium ${getStatusColor(alert.status)}`}>
                         Status: {alert.status}
                       </span>
@@ -353,8 +265,8 @@ const Alerts = () => {
                   </div>
                   <p className="text-sm text-muted-foreground mb-2">{alert.message}</p>
                   <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span>Triggered: {alert.timestamp}</span>
-                    <span>Resolved: {alert.resolvedAt}</span>
+                    <span>Triggered: {alert.created_at}</span>
+                    <span>Resolved: {alert.resolved_at}</span>
                   </div>
                 </div>
               </div>
@@ -368,7 +280,7 @@ const Alerts = () => {
               {alertRules.map((rule) => (
                 <div key={rule.id} className="flex items-start justify-between p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
                   <div className="flex items-start gap-4 flex-1">
-                    <Switch checked={rule.enabled} />
+                    <Switch checked={rule.enabled} onCheckedChange={(val) => handleRuleEnabledToggle(rule, Boolean(val))} />
                     <div className="flex-1">
                       <h4 className="font-semibold mb-1">{rule.name}</h4>
                       <p className="text-sm text-muted-foreground mb-3">{rule.description}</p>
@@ -376,14 +288,14 @@ const Alerts = () => {
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">Conditions:</span>
                           <Badge variant="secondary" className="text-xs font-mono">
-                            {rule.conditions}
+                            {typeof rule.conditions === 'string' ? rule.conditions : JSON.stringify(rule.conditions)}
                           </Badge>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">Channels:</span>
-                          {rule.channels.includes("email") && <Mail className="h-4 w-4 text-muted-foreground" />}
-                          {rule.channels.includes("slack") && <MessageSquare className="h-4 w-4 text-muted-foreground" />}
-                          {rule.channels.includes("sms") && <Smartphone className="h-4 w-4 text-muted-foreground" />}
+                          {rule.notification_channel_list?.includes("email") && <Mail className="h-4 w-4 text-muted-foreground" />}
+                          {rule.notification_channel_list?.includes("slack") && <MessageSquare className="h-4 w-4 text-muted-foreground" />}
+                          {rule.notification_channel_list?.includes("sms") && <Smartphone className="h-4 w-4 text-muted-foreground" />}
                         </div>
                       </div>
                     </div>
@@ -448,6 +360,8 @@ const Alerts = () => {
       <NewAlertRuleDialog 
         open={newRuleDialogOpen} 
         onOpenChange={setNewRuleDialogOpen}
+        domainId={selectedDomain?.id}
+        onAdd={() => { void loadData(); }}
       />
       <AlertConfigDialog 
         open={configDialogOpen} 

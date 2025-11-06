@@ -35,84 +35,25 @@ import {
   ZAxis,
   Cell
 } from "recharts";
+import { useEffect, useMemo, useState } from "react";
+import { apiClient } from "@/services/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { loadActiveDomain } from "@/utils/activeDomain";
 
-const overallShare = [
-  { brand: "VegFit Pro", share: 42, mentions: 221, change: 15 },
-  { brand: "MyProtein", share: 35, mentions: 187, change: 8 },
-  { brand: "Naked Nutrition", share: 23, mentions: 123, change: -3 },
-];
+type SovRow = { domain: number; competitor: number | null; platform?: string | null; share_percentage: number; mention_count: number; market_position?: number | null; timestamp: string };
+type LatestSov = { domain_id: number; timestamp: string; platform: string; players: Array<{ competitor: any | null; share_percentage: number; mention_count: number; market_position: number | null }>; };
 
-const platformShare = {
-  "ChatGPT": [
-    { brand: "VegFit Pro", share: 44 },
-    { brand: "MyProtein", share: 34 },
-    { brand: "Naked Nutrition", share: 22 },
-  ],
-  "Claude": [
-    { brand: "VegFit Pro", share: 41 },
-    { brand: "MyProtein", share: 36 },
-    { brand: "Naked Nutrition", share: 23 },
-  ],
-  "Perplexity": [
-    { brand: "VegFit Pro", share: 40 },
-    { brand: "MyProtein", share: 38 },
-    { brand: "Naked Nutrition", share: 22 },
-  ],
-  "Gemini": [
-    { brand: "VegFit Pro", share: 43 },
-    { brand: "MyProtein", share: 32 },
-    { brand: "Naked Nutrition", share: 25 },
-  ],
-};
-
-const shareHistory = [
-  { month: "Jul", vegfit: 38, myprotein: 37, naked: 25 },
-  { month: "Aug", vegfit: 39, myprotein: 36, naked: 25 },
-  { month: "Sep", vegfit: 40, myprotein: 36, naked: 24 },
-  { month: "Oct", vegfit: 42, myprotein: 35, naked: 23 },
-  { month: "Nov", vegfit: 42, myprotein: 35, naked: 23 },
-];
-
-const positioningMatrix = [
-  { brand: "VegFit Pro", visibility: 94, sentiment: 74, mentions: 221, color: "hsl(var(--primary))" },
-  { brand: "MyProtein", visibility: 85, sentiment: 68, mentions: 187, color: "hsl(var(--chart-2))" },
-  { brand: "Naked Nutrition", visibility: 78, sentiment: 71, mentions: 123, color: "hsl(var(--chart-3))" },
-];
-
-const competitiveStrength = [
-  { category: "Visibility", vegfit: 94, myprotein: 85, naked: 78 },
-  { category: "Sentiment", vegfit: 74, myprotein: 68, naked: 71 },
-  { category: "Avg Position", vegfit: 88, myprotein: 75, naked: 70 },
-  { category: "Mention Growth", vegfit: 85, myprotein: 72, naked: 65 },
-  { category: "Topic Coverage", vegfit: 82, myprotein: 78, naked: 68 },
-];
-
-const opportunities = [
-  { 
-    prompt: "best protein powder for weight loss",
-    avgMentions: 45,
-    currentShare: 28,
-    opportunity: "high",
-    competitors: ["MyProtein (38%)", "Naked Nutrition (34%)"]
-  },
-  { 
-    prompt: "affordable vegan protein",
-    avgMentions: 38,
-    currentShare: 35,
-    opportunity: "medium",
-    competitors: ["Naked Nutrition (42%)", "MyProtein (23%)"]
-  },
-  { 
-    prompt: "organic plant protein powder",
-    avgMentions: 32,
-    currentShare: 15,
-    opportunity: "high",
-    competitors: ["Naked Nutrition (52%)", "MyProtein (33%)"]
-  },
-];
+// Fallback minimal radar/matrix will be computed from latest share (visibility proxy)
 
 const ShareOfVoice = () => {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const [domainId, setDomainId] = useState<string | null>(null);
+  const [days, setDays] = useState<number>(30);
+
+  const [latest, setLatest] = useState<LatestSov | null>(null);
+  const [rows, setRows] = useState<SovRow[]>([]);
+  const [opportunities, setOpportunities] = useState<any[]>([]);
 
   const handleExportReport = () => {
     toast({
@@ -121,8 +62,89 @@ const ShareOfVoice = () => {
     });
   };
 
-  const dominanceScore = 94;
-  const marketPosition = 1;
+  useEffect(() => {
+    if (!user) return;
+    const id = loadActiveDomain(user.id);
+    if (id) setDomainId(String(id));
+  }, [user]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!domainId) return;
+      try {
+        const [latestResp, byDomain, gaps] = await Promise.all([
+          apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }),
+          apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days }),
+          apiClient.getCompetitorGapsEngine({ domain_id: domainId })
+        ]);
+        setLatest(latestResp as any);
+        setRows(byDomain as any);
+        setOpportunities(Array.isArray(gaps) ? gaps : gaps?.results || []);
+      } catch (e:any) {
+        toast({ title: 'Failed to load share of voice', description: String(e.message||e), variant: 'destructive' });
+      }
+    };
+    void load();
+  }, [domainId, days]);
+
+  const ownBrandName = useMemo(() => (latest?.players?.find(p => !p.competitor)?.competitor?.name) || 'Your Brand', [latest]);
+
+  const overallShare = useMemo(() => {
+    if (!latest) return [] as any[];
+    const items = latest.players.map((p:any) => ({
+      brand: p.competitor?.name || ownBrandName,
+      share: Number(p.share_percentage),
+      mentions: Number(p.mention_count) || 0,
+      change: 0,
+    }));
+    return items;
+  }, [latest, ownBrandName]);
+
+  const shareHistory = useMemo(() => {
+    if (!rows || rows.length === 0) return [] as any[];
+    const byDate: Record<string, Record<string, number>> = {};
+    rows.forEach((r) => {
+      const brand = (r as any).competitor_name || (r.competitor ? String(r.competitor) : ownBrandName);
+      const date = r.timestamp;
+      if (!byDate[date]) byDate[date] = {};
+      byDate[date][brand] = Number(r.share_percentage);
+    });
+    const brands = new Set<string>();
+    Object.values(byDate).forEach(map => Object.keys(map).forEach(b => brands.add(b)));
+    const [b1, b2, b3] = Array.from(brands).slice(0, 3);
+    return Object.entries(byDate).sort((a,b)=>a[0].localeCompare(b[0])).map(([date, v]) => ({
+      month: date,
+      [b1 || 'BrandA']: v[b1 || ''] || 0,
+      [b2 || 'BrandB']: v[b2 || ''] || 0,
+      [b3 || 'BrandC']: v[b3 || ''] || 0,
+    }));
+  }, [rows, ownBrandName]);
+
+  const platformShare = useMemo(() => {
+    if (!rows || rows.length === 0) return {} as Record<string, Array<{ brand: string; share: number }>>;
+    const latestDate = rows.map(r=>r.timestamp).sort().pop();
+    const filtered = rows.filter(r => r.timestamp === latestDate);
+    const byPlatform: Record<string, Record<string, number>> = {};
+    filtered.forEach((r) => {
+      const plat = r.platform || 'Overall';
+      const brand = (r as any).competitor_name || (r.competitor ? String(r.competitor) : ownBrandName);
+      if (!byPlatform[plat]) byPlatform[plat] = {};
+      byPlatform[plat][brand] = Number(r.share_percentage);
+    });
+    const result: Record<string, Array<{ brand: string; share: number }>> = {};
+    Object.entries(byPlatform).forEach(([plat, mp]) => {
+      result[plat] = Object.entries(mp).map(([brand, share]) => ({ brand, share })).sort((a,b)=>b.share-a.share);
+    });
+    return result;
+  }, [rows, ownBrandName]);
+
+  const marketShareValue = useMemo(() => overallShare.find(b => b.brand === ownBrandName)?.share || 0, [overallShare, ownBrandName]);
+  const marketPosition = useMemo(() => {
+    if (!overallShare.length) return 0;
+    const sorted = [...overallShare].sort((a,b)=>b.share-a.share);
+    return Math.max(1, sorted.findIndex(x => x.brand === ownBrandName) + 1);
+  }, [overallShare, ownBrandName]);
+  const dominanceScore = useMemo(() => Math.round(marketShareValue), [marketShareValue]);
 
   return (
     <div className="p-8 space-y-8">
@@ -145,7 +167,7 @@ const ShareOfVoice = () => {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-sm text-muted-foreground font-medium">Market Share</p>
-              <h3 className="text-4xl font-bold text-primary mt-2">42%</h3>
+              <h3 className="text-4xl font-bold text-primary mt-2">{marketShareValue}%</h3>
             </div>
             <div className="p-3 rounded-xl bg-gradient-to-br from-primary to-secondary text-primary-foreground">
               <Target className="h-6 w-6" />
@@ -233,26 +255,27 @@ const ShareOfVoice = () => {
                 }}
               />
               <Legend />
+              {/* First three dynamic brands */}
               <Line 
                 type="monotone" 
-                dataKey="vegfit" 
-                name="VegFit Pro"
+                dataKey={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[0] : 'BrandA'} 
+                name={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[0] : 'Brand A'}
                 stroke="hsl(var(--primary))" 
                 strokeWidth={3}
                 dot={{ fill: "hsl(var(--primary))", r: 4 }}
               />
               <Line 
                 type="monotone" 
-                dataKey="myprotein" 
-                name="MyProtein"
+                dataKey={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[1] : 'BrandB'} 
+                name={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[1] : 'Brand B'}
                 stroke="hsl(var(--chart-2))" 
                 strokeWidth={2}
                 dot={{ fill: "hsl(var(--chart-2))", r: 3 }}
               />
               <Line 
                 type="monotone" 
-                dataKey="naked" 
-                name="Naked Nutrition"
+                dataKey={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[2] : 'BrandC'} 
+                name={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[2] : 'Brand C'}
                 stroke="hsl(var(--chart-3))" 
                 strokeWidth={2}
                 dot={{ fill: "hsl(var(--chart-3))", r: 3 }}
@@ -267,7 +290,7 @@ const ShareOfVoice = () => {
         <Card className="p-6 border border-border">
           <h3 className="text-lg font-semibold mb-6">Competitive Strength Radar</h3>
           <ResponsiveContainer width="100%" height={350}>
-            <RadarChart data={competitiveStrength}>
+            <RadarChart data={[{ category: 'Visibility', a: marketShareValue, b: 100-marketShareValue, c: 50 }]}>
               <PolarGrid stroke="hsl(var(--border))" />
               <PolarAngleAxis 
                 dataKey="category" 
@@ -276,23 +299,23 @@ const ShareOfVoice = () => {
               />
               <PolarRadiusAxis angle={90} domain={[0, 100]} stroke="hsl(var(--muted-foreground))" />
               <Radar 
-                name="VegFit Pro" 
-                dataKey="vegfit" 
+                name={ownBrandName} 
+                dataKey="a" 
                 stroke="hsl(var(--primary))" 
                 fill="hsl(var(--primary))" 
                 fillOpacity={0.3}
                 strokeWidth={2}
               />
               <Radar 
-                name="MyProtein" 
-                dataKey="myprotein" 
+                name="Brand B" 
+                dataKey="b" 
                 stroke="hsl(var(--chart-2))" 
                 fill="hsl(var(--chart-2))" 
                 fillOpacity={0.2}
               />
               <Radar 
-                name="Naked Nutrition" 
-                dataKey="naked" 
+                name="Brand C" 
+                dataKey="c" 
                 stroke="hsl(var(--chart-3))" 
                 fill="hsl(var(--chart-3))" 
                 fillOpacity={0.2}
@@ -334,18 +357,18 @@ const ShareOfVoice = () => {
                   borderRadius: "var(--radius)",
                 }}
               />
-              <Scatter name="Brands" data={positioningMatrix}>
-                {positioningMatrix.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
+            <Scatter name="Brands" data={overallShare.map((b,idx)=>({ brand:b.brand, visibility:b.share, sentiment: b.share, mentions:b.mentions, color: idx===0?"hsl(var(--primary))":"hsl(var(--muted-foreground))" }))}>
+                {overallShare.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={(entry as any).color} />
                 ))}
               </Scatter>
             </ScatterChart>
           </ResponsiveContainer>
           <div className="mt-4 space-y-2">
-            {positioningMatrix.map((brand) => (
+            {overallShare.map((brand:any) => (
               <div key={brand.brand} className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: brand.color }} />
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: brand.brand===ownBrandName? 'hsl(var(--primary))': 'hsl(var(--muted-foreground))' }} />
                   <span className="font-medium">{brand.brand}</span>
                 </div>
                 <span className="text-muted-foreground">{brand.mentions} mentions</span>
@@ -384,33 +407,32 @@ const ShareOfVoice = () => {
       <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Market Opportunities</h3>
         <div className="space-y-4">
-          {opportunities.map((opp) => (
-            <div key={opp.prompt} className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
+          {opportunities && opportunities.length > 0 ? opportunities.map((opp:any, idx:number) => (
+            <div key={`${opp.prompt_id||idx}`} className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
-                  <p className="font-mono text-sm mb-2">{opp.prompt}</p>
+                  <p className="font-mono text-sm mb-2">{opp.prompt?.prompt || opp.prompt_text || opp.prompt_id || 'Prompt'}</p>
                   <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                    <span>{opp.avgMentions} avg mentions</span>
-                    <span>Current share: {opp.currentShare}%</span>
+                    <span>{opp.mention_count || 0} avg mentions</span>
+                    {typeof opp.current_share === 'number' && <span>Current share: {opp.current_share}%</span>}
                   </div>
                 </div>
                 <Badge 
-                  variant={opp.opportunity === "high" ? "default" : "secondary"}
-                  className={opp.opportunity === "high" ? "bg-warning text-warning-foreground" : ""}
+                  variant="secondary"
                 >
-                  {opp.opportunity} opportunity
+                  competitor: {opp.competitor?.name || opp.competitor_name || 'Unknown'}
                 </Badge>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Leading competitors:</span>
-                {opp.competitors.map((comp, idx) => (
-                  <Badge key={idx} variant="outline" className="text-xs">
-                    {comp}
-                  </Badge>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-muted-foreground">Platforms:</span>
+                {(opp.platform ? [opp.platform] : (opp.citation_list || [])).slice(0,4).map((p:any,i:number)=>(
+                  <Badge key={i} variant="outline" className="text-xs">{String(p||'AI')}</Badge>
                 ))}
               </div>
             </div>
-          ))}
+          )) : (
+            <p className="text-sm text-muted-foreground">No opportunities detected yet.</p>
+          )}
         </div>
       </Card>
     </div>

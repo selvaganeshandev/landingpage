@@ -13,6 +13,7 @@ urlpatterns = [
     path('mentions/trends/', views.get_mention_trends, name='get_mention_trends'),
     path('mentions/analytics/', views.get_mention_analytics, name='get_mention_analytics'),
     path('mentions/export/', views.export_mentions, name='export_mentions'),
+    path('historical-trends/', views.get_historical_trends, name='get_historical_trends'),
     
     # Prompt Groups endpoints
     path('groups/', views.prompt_groups_list, name='prompt_groups_list'),

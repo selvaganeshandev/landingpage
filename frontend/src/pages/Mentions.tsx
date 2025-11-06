@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
+import { loadActiveDomain } from "@/utils/activeDomain";
 import DOMPurify from 'dompurify';
 
 interface Mention {
@@ -66,7 +67,7 @@ const Mentions = () => {
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [offset, setOffset] = useState(0);
-  const limit = 1; // testing limit
+  const limit = 20;
   const [isLoading, setIsLoading] = useState(true);
   const [availablePlatforms, setAvailablePlatforms] = useState<string[]>(["ChatGPT", "Google Gemini", "Perplexity"]);
   const [availableSentiments, setAvailableSentiments] = useState<string[]>(["Positive", "Negative", "Neutral"]);
@@ -121,24 +122,26 @@ const Mentions = () => {
     setMentions([]);
     setOffset(0);
     setTotalCount(0);
-    loadMentions(0, true);
-    loadFilters();
+    void loadMentions(0, true);
+    void loadFilters();
   }, [selectedPlatform, selectedSentiment, searchQuery, selectedDomain?.id]);
 
   const loadMentions = async (startOffset: number = offset, replace: boolean = false) => {
     try {
       setIsLoading(true);
+      const activeDomainId = selectedDomain?.id ?? loadActiveDomain((JSON.parse(atob((localStorage.getItem('access_token')||'').split('.')[1]||'""'))?.user_id) || 0);
       const response = await apiClient.getMentions({
         search: searchQuery || undefined,
         platform: selectedPlatform !== "all" ? selectedPlatform : undefined,
         sentiment: selectedSentiment !== "all" ? selectedSentiment : undefined,
-        domain_id: selectedDomain?.id,
+        domain_id: activeDomainId || undefined,
         limit,
         offset: startOffset,
       });
       setTotalCount(response.total_count || 0);
       setMentions(replace ? (response.mentions || []) : [...mentions, ...(response.mentions || [])]);
     } catch (error: any) {
+      console.error('Mentions: API error', error);
       toast({
         title: "Error loading mentions",
         description: error.message || "Failed to load mentions",

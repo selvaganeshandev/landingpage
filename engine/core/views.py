@@ -3,7 +3,9 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from django.shortcuts import get_object_or_404
+from django.http import Http404
 from django.utils import timezone
+from django.db import transaction
 from shared_models.models import (
     Domain, Prompt, PromptAnalytics, PromptGroup,
     Competitor, CompetitorPromptAnalytics, CompetitorAnalytics, ShareOfVoiceAnalytics
@@ -602,9 +604,149 @@ def competitor_detail(request, competitor_id):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+def start_single_competitor_processing(request):
+    """
+    Start processing for a single competitor (similar to start_single_prompt_processing).
+    Takes competitor_id from request body.
+    Can run synchronously (default) or asynchronously via Celery (if sync=false).
+    """
+    try:
+        competitor_id = request.data.get('competitor_id')
+        sync = request.data.get('sync', True)  # Default to sync (no Celery)
+        
+        if not competitor_id:
+            return Response({
+                'success': False,
+                'error': 'competitor_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if competitor exists
+        try:
+            competitor = Competitor.objects.get(id=competitor_id)
+        except Competitor.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': f'Competitor with id {competitor_id} not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        if sync:
+            # Run synchronously (no Celery)
+            from .competitor_processor import CompetitorProcessor
+            from django.conf import settings
+            
+            processor = CompetitorProcessor(
+                max_concurrent_prompts=getattr(settings, 'MAX_CONCURRENT_COMPETITOR_PROMPTS', 10)
+            )
+            
+            try:
+                # Process directly (similar to process_single_competitor_task)
+                with transaction.atomic():
+                    comp = Competitor.objects.select_for_update().get(id=competitor_id)
+                    
+                    # Allow reprocessing if COMP or failed before, or if INIT
+                    if comp.track_status == 'COMP':
+                        comp.track_status = 'INIT'
+                        comp.track_message = 'Resetting for reprocessing'
+                        comp.save(update_fields=['track_status', 'track_message', 'modified_at'])
+                    elif comp.track_status not in ['INIT', 'FAIL']:
+                        return Response({
+                            'success': False,
+                            'error': f'Competitor already in status {comp.track_status}'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                    
+                    # Mark as SCHD
+                    comp.track_status = 'SCHD'
+                    comp.track_message = f"Scheduled for processing at {timezone.now()}"
+                    comp.save(update_fields=['track_status', 'track_message', 'modified_at'])
+                
+                # Refresh competitor from DB to ensure we have latest state
+                competitor.refresh_from_db()
+                
+                # Link prompts to competitor
+                linked_count = processor._link_prompts_to_competitor(competitor)
+                
+                # Mark as processing
+                with transaction.atomic():
+                    comp = Competitor.objects.select_for_update().get(id=competitor_id)
+                    comp.track_status = 'PROC'
+                    comp.track_message = "Processing competitor analytics"
+                    comp.save(update_fields=['track_status', 'track_message', 'modified_at'])
+                
+                # Refresh again before processing
+                competitor.refresh_from_db()
+                
+                # Process prompts
+                processor._process_competitor_prompts(competitor)
+                
+                # Aggregate analytics
+                processor._aggregate_competitor_analytics(competitor)
+                
+                # Mark as complete
+                with transaction.atomic():
+                    comp = Competitor.objects.select_for_update().get(id=competitor_id)
+                    comp.track_status = 'COMP'
+                    comp.track_message = f"Completed at {timezone.now()}"
+                    comp.tracked_at = timezone.now()
+                    comp.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
+                
+                # Refresh competitor object
+                competitor.refresh_from_db()
+                
+                return Response({
+                    'success': True,
+                    'message': f'Single competitor processing completed for {competitor.name}',
+                    'mode': 'sync',
+                    'competitor_id': competitor_id,
+                    'competitor_name': competitor.name,
+                    'track_status': competitor.track_status,
+                    'prompts_linked': linked_count,
+                    'total_mentions': competitor.total_mentions,
+                    'visibility_score': str(competitor.visibility_score),
+                    'share_of_voice_percentage': str(competitor.share_of_voice_percentage)
+                }, status=status.HTTP_200_OK)
+                
+            except Exception as processing_error:
+                # Mark as failed
+                try:
+                    with transaction.atomic():
+                        comp = Competitor.objects.select_for_update().get(id=competitor_id)
+                        comp.track_status = 'FAIL'
+                        comp.track_message = f"Processing failed: {str(processing_error)}"
+                        comp.save(update_fields=['track_status', 'track_message', 'modified_at'])
+                except:
+                    pass
+                
+                return Response({
+                    'success': False,
+                    'error': str(processing_error),
+                    'mode': 'sync'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
+            # Run asynchronously via Celery
+            task = process_single_competitor_task.delay(competitor_id)
+            
+            return Response({
+                'success': True,
+                'message': f'Single competitor processing started for {competitor.name}',
+                'mode': 'async',
+                'task_id': task.id,
+                'competitor_id': competitor_id,
+                'competitor_name': competitor.name,
+                'track_status': competitor.track_status
+            }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
 def competitor_process(request, competitor_id):
     """
-    Trigger processing for a specific competitor
+    Trigger processing for a specific competitor (URL parameter version)
     """
     competitor = get_object_or_404(Competitor, id=competitor_id)
     

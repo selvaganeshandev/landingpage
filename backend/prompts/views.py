@@ -69,7 +69,8 @@ def get_mentions(request):
     # Apply sentiment filter if provided
     sentiment = request.GET.get('sentiment', '')
     if sentiment and sentiment.lower() != 'all' and sentiment.lower() != 'all sentiments':
-        mentions = mentions.filter(sentiment__iexact=sentiment)
+        # Model field is sentiment_category in shared schema
+        mentions = mentions.filter(sentiment_category__iexact=sentiment)
     
     # Order by most recent first
     mentions = mentions.order_by('-created_at')
@@ -99,7 +100,7 @@ def get_mentions(request):
             'mention_text_long': mention.prompt.prompt,
             'description': (mention.context_summary[:500] + '...') if mention.context_summary and len(mention.context_summary) > 500 else (mention.context_summary or ''),
             'platform': mention.platform,
-            'sentiment': mention.sentiment,
+            'sentiment': getattr(mention, 'sentiment_category', None) or getattr(mention, 'sentiment', ''),
             'sentiment_score': float(mention.sentiment_score),
             'total_mentions': mention.total_mentions,
             'total_citations': mention.total_citations,
@@ -116,8 +117,8 @@ def get_mentions(request):
             'views': mention.views,
             'shares': mention.shares,
             'engagement_score': float(mention.engagement_score),
-            'competitor_mentions': mention.competitor_mentions,
-            'key_topics': mention.key_topics
+            'competitor_mentions': (getattr(mention, 'competitor_mention_list', None) or getattr(mention, 'competitor_mentions', []) or []),
+            'key_topics': (getattr(mention, 'topic_list', None) or getattr(mention, 'key_topics', []) or [])
         }
         mentions_data.append(mention_data)
     
@@ -168,7 +169,7 @@ def _get_available_platforms():
 
 def _get_available_sentiments():
     """Get list of available sentiments for filtering"""
-    sentiments = PromptAnalytics.objects.filter(is_mention=True, is_published=True).values_list('sentiment', flat=True).distinct()
+    sentiments = PromptAnalytics.objects.filter(is_mention=True, is_published=True).values_list('sentiment_category', flat=True).distinct()
     return list(sentiments)
 
 
@@ -188,7 +189,7 @@ def get_mention_filters(request):
     platforms = list(base_query.values_list('platform', flat=True).distinct())
     
     # Get available sentiments
-    sentiments = list(base_query.values_list('sentiment', flat=True).distinct())
+    sentiments = list(base_query.values_list('sentiment_category', flat=True).distinct())
     
     # Get total counts by platform
     platform_counts = {}
@@ -199,7 +200,7 @@ def get_mention_filters(request):
     # Get total counts by sentiment
     sentiment_counts = {}
     for sentiment in sentiments:
-        count = base_query.filter(sentiment=sentiment).count()
+        count = base_query.filter(sentiment_category=sentiment).count()
         sentiment_counts[sentiment] = count
     
     return Response({
@@ -238,44 +239,33 @@ def get_mention_detail(request, analytics_id):
         prompt = analytics_record.prompt
         group = prompt.group if prompt.group else None
         
-        # Structure citations for detailed display
+        # Structure citations for detailed display (supports new/legacy fields)
         citations_data = []
-        if analytics_record.citations:
-            # Handle both string and list citations
-            if isinstance(analytics_record.citations, str):
-                # If citations is a string, treat it as a single citation
-                citations_data.append({
-                    'id': 1,
-                    'text': analytics_record.citations,
-                    'source_name': 'Source',
-                    'source_url': '',
-                    'description': '',
-                    'reliability': 'Unknown',
-                    'referenced_at': analytics_record.created_at.isoformat()
-                })
-            elif isinstance(analytics_record.citations, list):
-                for i, citation in enumerate(analytics_record.citations):
-                    if isinstance(citation, dict):
-                        citations_data.append({
-                            'id': i + 1,
-                            'text': citation.get('text', ''),
-                            'source_name': citation.get('source_name', citation.get('source', '')),
-                            'source_url': citation.get('source_url', citation.get('url', '')),
-                            'description': citation.get('description', ''),
-                            'reliability': citation.get('reliability', 'Unknown'),
-                            'referenced_at': citation.get('referenced_at', analytics_record.created_at.isoformat())
-                        })
-                    else:
-                        # Handle string citations in list
-                        citations_data.append({
-                            'id': i + 1,
-                            'text': str(citation),
-                            'source_name': 'Source',
-                            'source_url': '',
-                            'description': '',
-                            'reliability': 'Unknown',
-                            'referenced_at': analytics_record.created_at.isoformat()
-                        })
+        citations_src = getattr(analytics_record, 'citation_list', None) or getattr(analytics_record, 'citations', []) or []
+        if isinstance(citations_src, str):
+            citations_src = [citations_src]
+        if isinstance(citations_src, list):
+            for i, citation in enumerate(citations_src):
+                if isinstance(citation, dict):
+                    citations_data.append({
+                        'id': i + 1,
+                        'text': citation.get('text', ''),
+                        'source_name': citation.get('source_name', citation.get('source', '')),
+                        'source_url': citation.get('source_url', citation.get('url', '')),
+                        'description': citation.get('description', ''),
+                        'reliability': citation.get('reliability', 'Unknown'),
+                        'referenced_at': citation.get('referenced_at', analytics_record.created_at.isoformat())
+                    })
+                else:
+                    citations_data.append({
+                        'id': i + 1,
+                        'text': str(citation),
+                        'source_name': 'Source',
+                        'source_url': '',
+                        'description': '',
+                        'reliability': 'Unknown',
+                        'referenced_at': analytics_record.created_at.isoformat()
+                    })
         
         # Prepare comprehensive response data
         response_data = {
@@ -283,7 +273,7 @@ def get_mention_detail(request, analytics_id):
             'id': analytics_record.id,
             'rank': 1,  # This would need to be calculated based on position/score
             'platform': analytics_record.platform,
-            'sentiment': analytics_record.sentiment,
+            'sentiment': getattr(analytics_record, 'sentiment_category', None) or getattr(analytics_record, 'sentiment', ''),
             'sentiment_score': float(analytics_record.sentiment_score),
             'created_at': analytics_record.created_at.isoformat(),
             'time_ago': _get_time_ago(analytics_record.created_at),
@@ -314,13 +304,14 @@ def get_mention_detail(request, analytics_id):
             'citations': citations_data,
             'citations_count': len(citations_data),
             
-            # Engagement metrics (currently missing from model)
-            'views': None,  # MISSING FIELD - needs to be added to PromptAnalytics
-            'shares': None,  # MISSING FIELD - needs to be added to PromptAnalytics
+            # Engagement metrics
+            'views': getattr(analytics_record, 'views', None),
+            'shares': getattr(analytics_record, 'shares', None),
             
-            # Historical data (would need separate endpoint)
-            'position_trend': [],  # MISSING - needs historical position data
-            'key_topics': [],  # MISSING - needs topic extraction or keyword association
+            # Historical data (placeholder)
+            'position_trend': [],
+            'key_topics': (getattr(analytics_record, 'topic_list', None) or getattr(analytics_record, 'key_topics', []) or []),
+            'competitor_mentions': (getattr(analytics_record, 'competitor_mention_list', None) or getattr(analytics_record, 'competitor_mentions', []) or []),
         }
         
         return Response(response_data)
@@ -414,7 +405,7 @@ def get_mention_analytics(request):
         ).order_by('-count')
         
         # Sentiment breakdown
-        sentiment_stats = mentions.values('sentiment').annotate(
+        sentiment_stats = mentions.values('sentiment_category').annotate(
             count=Count('id'),
             avg_position=Avg('position'),
             avg_sentiment_score=Avg('sentiment_score')
@@ -429,7 +420,7 @@ def get_mention_analytics(request):
                 'prompt_text': mention.prompt.prompt[:100] + '...' if len(mention.prompt.prompt) > 100 else mention.prompt.prompt,
                 'platform': mention.platform,
                 'position': float(mention.position),
-                'sentiment': mention.sentiment,
+                'sentiment': getattr(mention, 'sentiment_category', None) or getattr(mention, 'sentiment', ''),
                 'engagement_score': float(mention.engagement_score),
                 'views': mention.views,
                 'shares': mention.shares,
@@ -439,15 +430,16 @@ def get_mention_analytics(request):
         # Competitor analysis
         competitor_data = {}
         for mention in mentions:
-            if mention.competitor_mentions:
-                for competitor in mention.competitor_mentions:
+            comp_list = getattr(mention, 'competitor_mention_list', None) or getattr(mention, 'competitor_mentions', []) or []
+            if comp_list:
+                for competitor in comp_list:
                     if competitor not in competitor_data:
                         competitor_data[competitor] = {'count': 0, 'mentions': []}
                     competitor_data[competitor]['count'] += 1
                     competitor_data[competitor]['mentions'].append({
                         'id': mention.id,
                         'platform': mention.platform,
-                        'sentiment': mention.sentiment,
+                        'sentiment': getattr(mention, 'sentiment_category', None) or getattr(mention, 'sentiment', ''),
                         'position': float(mention.position)
                     })
         
@@ -509,7 +501,7 @@ def get_related_mentions(request, analytics_id):
                 'prompt_text': mention.prompt.prompt[:100] + '...' if len(mention.prompt.prompt) > 100 else mention.prompt.prompt,
                 'platform': mention.platform,
                 'position': float(mention.position),
-                'sentiment': mention.sentiment,
+                'sentiment': getattr(mention, 'sentiment_category', None) or getattr(mention, 'sentiment', ''),
                 'created_at': mention.created_at.isoformat(),
                 'time_ago': _get_time_ago(mention.created_at),
                 'relation_type': 'same_group'
@@ -521,7 +513,7 @@ def get_related_mentions(request, analytics_id):
                 'prompt_text': mention.prompt.prompt[:100] + '...' if len(mention.prompt.prompt) > 100 else mention.prompt.prompt,
                 'platform': mention.platform,
                 'position': float(mention.position),
-                'sentiment': mention.sentiment,
+                'sentiment': getattr(mention, 'sentiment_category', None) or getattr(mention, 'sentiment', ''),
                 'created_at': mention.created_at.isoformat(),
                 'time_ago': _get_time_ago(mention.created_at),
                 'relation_type': 'same_platform'
@@ -568,7 +560,7 @@ def export_mentions(request):
             mentions = mentions.filter(platform__icontains=platform)
         
         if sentiment and sentiment != 'all':
-            mentions = mentions.filter(sentiment=sentiment)
+            mentions = mentions.filter(sentiment_category=sentiment)
         
         if date_from:
             mentions = mentions.filter(created_at__gte=date_from)
@@ -583,7 +575,7 @@ def export_mentions(request):
                 'id': mention.id,
                 'prompt': mention.prompt.prompt,
                 'platform': mention.platform,
-                'sentiment': mention.sentiment,
+                'sentiment': getattr(mention, 'sentiment_category', None) or getattr(mention, 'sentiment', ''),
                 'position': float(mention.position),
                 'total_mentions': mention.total_mentions,
                 'total_citations': mention.total_citations,
@@ -778,7 +770,7 @@ def prompt_groups_list(request):
                             platform=platform,
                             is_mention=False,  # Initially not a mention
                             position=0.0,
-                            sentiment='neutral',
+                            sentiment_category='neutral',
                             sentiment_score=0.0,
                             total_mentions=0,
                             total_citations=0
@@ -803,7 +795,7 @@ def prompt_groups_list(request):
                             platform=platform,
                             is_mention=False,  # Initially not a mention
                             position=0.0,
-                            sentiment='neutral',
+                            sentiment_category='neutral',
                             sentiment_score=0.0,
                             total_mentions=0,
                             total_citations=0
@@ -857,6 +849,7 @@ def prompt_group_detail(request, group_id):
             prompts_data = []
             for prompt in prompts:
                 prompt_analytics = analytics.filter(prompt=prompt)
+                prompt_mentions = prompt_analytics.filter(is_mention=True, is_published=True).count()
                 prompts_data.append({
                     'id': prompt.id,
                     'prompt_text': prompt.prompt,
@@ -866,9 +859,50 @@ def prompt_group_detail(request, group_id):
                     'track_message': prompt.track_message,
                     'created_at': prompt.created_at.isoformat(),
                     'analytics_count': prompt_analytics.count(),
-                    'mentions_count': prompt_analytics.filter(is_mention=True, is_published=True).count(),
+                    'mentions_count': prompt_mentions,
                     'avg_position': float(prompt_analytics.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0)
                 })
+
+            # Platform distribution for the group
+            platform_dist = []
+            for platform in analytics.values_list('platform', flat=True).distinct():
+                qs = analytics.filter(platform=platform, is_mention=True, is_published=True)
+                platform_dist.append({
+                    'platform': platform,
+                    'count': qs.count(),
+                    'avg_position': float(qs.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0)
+                })
+
+            # Variants performance based on mentions per prompt
+            variants_perf = []
+            for p in prompts:
+                p_mentions = analytics.filter(prompt=p, is_mention=True, is_published=True).count()
+                variants_perf.append({
+                    'prompt_id': p.id,
+                    'prompt_text': p.prompt,
+                    'mentions': p_mentions
+                })
+
+            # Simple mention trends (by month in last 6 months)
+            from django.utils import timezone as _tz
+            from datetime import timedelta as _td
+            end = _tz.now()
+            start = end - _td(days=180)
+            trends = []
+            cur = start
+            while cur <= end:
+                month_qs = analytics.filter(created_at__year=cur.year, created_at__month=cur.month,
+                                            is_mention=True, is_published=True)
+                trends.append({
+                    'date': cur.strftime('%Y-%m'),
+                    'mentions': month_qs.count(),
+                    'avg_position': float(month_qs.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0)
+                })
+                # move to next month
+                if cur.month == 12:
+                    cur = cur.replace(year=cur.year+1, month=1)
+                else:
+                    cur = cur.replace(month=cur.month+1)
             
             return Response({
                 'group': {
@@ -884,12 +918,16 @@ def prompt_group_detail(request, group_id):
                     'created_at': group.created_at.isoformat(),
                     'modified_at': group.modified_at.isoformat(),
                     'prompts': prompts_data,
+                    'active_variants': prompts.count(),
                     'analytics_summary': {
                         'total_analytics': analytics.count(),
                         'mentions_count': analytics.filter(is_mention=True, is_published=True).count(),
                         'platforms': list(analytics.values_list('platform', flat=True).distinct()),
-                        'sentiments': list(analytics.values_list('sentiment', flat=True).distinct())
-                    }
+                        'sentiments': list(analytics.values_list('sentiment_category', flat=True).distinct())
+                    },
+                    'platform_distribution': platform_dist,
+                    'variants_performance': variants_perf,
+                    'mention_trends': trends
                 }
             })
         
@@ -1323,8 +1361,9 @@ def prompt_analytics(request, prompt_id):
         analytics_data = []
         for analytic in analytics:
             citations_data = []
-            if analytic.citations:
-                for i, citation in enumerate(analytic.citations):
+            citations_src = getattr(analytic, 'citation_list', None) or getattr(analytic, 'citations', []) or []
+            if citations_src:
+                for i, citation in enumerate(citations_src):
                     citations_data.append({
                         'id': i + 1,
                         'text': citation.get('text', ''),
@@ -1340,14 +1379,14 @@ def prompt_analytics(request, prompt_id):
                 'total_mentions': analytic.total_mentions,
                 'total_citations': analytic.total_citations,
                 'position': float(analytic.position),
-                'sentiment': analytic.sentiment,
+                'sentiment': getattr(analytic, 'sentiment_category', None) or getattr(analytic, 'sentiment', ''),
                 'sentiment_score': float(analytic.sentiment_score),
                 'context_summary': analytic.context_summary,
                 'views': analytic.views,
                 'shares': analytic.shares,
                 'engagement_score': float(analytic.engagement_score),
-                'competitor_mentions': analytic.competitor_mentions,
-                'key_topics': analytic.key_topics,
+                'competitor_mentions': (getattr(analytic, 'competitor_mention_list', None) or getattr(analytic, 'competitor_mentions', []) or []),
+                'key_topics': (getattr(analytic, 'topic_list', None) or getattr(analytic, 'key_topics', []) or []),
                 'created_at': analytic.created_at.isoformat(),
                 'citations': citations_data,
                 'citations_count': len(citations_data)
@@ -1378,6 +1417,174 @@ def prompt_analytics(request, prompt_id):
     except Exception as e:
         return Response(
             {'error': f'Failed to retrieve prompt analytics: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_historical_trends(request):
+    """
+    Get comprehensive historical trends data for the Historical Trends page
+    Returns: visibility progression, platform growth, competitor comparison, seasonal patterns, summary metrics
+    """
+    try:
+        domain_id = request.GET.get('domain_id')
+        months = int(request.GET.get('months', 12))
+        start_date_qs = request.GET.get('start_date')  # YYYY-MM-DD (optional)
+        end_date_qs = request.GET.get('end_date')      # YYYY-MM-DD (optional)
+        
+        if not domain_id:
+            return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Calculate date range (prefer explicit start/end; fallback to months)
+        tz_now = timezone.now()
+        end_date = tz_now
+        if end_date_qs:
+            try:
+                end_date = timezone.make_aware(datetime.strptime(end_date_qs, '%Y-%m-%d'))
+            except Exception:
+                pass
+        if start_date_qs:
+            try:
+                start_date = timezone.make_aware(datetime.strptime(start_date_qs, '%Y-%m-%d'))
+            except Exception:
+                start_date = end_date - timedelta(days=months * 30)
+        else:
+            start_date = end_date - timedelta(days=months * 30)
+        
+        # Get all analytics for this domain
+        analytics = PromptAnalytics.objects.filter(
+            prompt__group__domain_id=domain_id,
+            is_mention=True,
+            is_published=True,
+            created_at__gte=start_date
+        )
+        
+        # Group by month
+        monthly_data = {}
+        current = start_date.replace(day=1)
+        # Helper to add 1 month without external deps
+        def add_one_month(d):
+            year = d.year + (d.month // 12)
+            month = 1 if d.month == 12 else d.month + 1
+            if d.month == 12:
+                year = d.year + 1
+            return d.replace(year=year, month=month, day=1)
+
+        while current <= end_date:
+            month_key = current.strftime('%Y-%m')
+            month_start = current
+            month_end = add_one_month(current) - timedelta(seconds=1)
+            
+            month_analytics = analytics.filter(created_at__gte=month_start, created_at__lte=month_end)
+            
+            total_mentions = month_analytics.count()
+            avg_position = float(month_analytics.aggregate(avg=Avg('position'))['avg'] or 0)
+            avg_sentiment = float(month_analytics.aggregate(avg=Avg('sentiment_score'))['avg'] or 0)
+            # Derive a proxy visibility score since PromptAnalytics has no visibility_score field
+            # Higher visibility corresponds to lower average position; cap to [0,100]
+            visibility_score = max(0.0, min(100.0, 100.0 - (avg_position * 20.0) if avg_position else 0.0))
+            
+            # Platform breakdown
+            platforms = {}
+            for platform in ['ChatGPT', 'Claude', 'Perplexity', 'Gemini']:
+                plat_analytics = month_analytics.filter(platform=platform)
+                platforms[platform.lower()] = plat_analytics.count()
+            
+            monthly_data[month_key] = {
+                'month': current.strftime('%b'),
+                'mentions': total_mentions,
+                'avg_position': round(avg_position, 2),
+                'sentiment': round(avg_sentiment, 2),
+                'visibility_score': round(visibility_score, 2),
+                'platforms': platforms
+            }
+            
+            current = add_one_month(current)
+        
+        # Build visibility trend (sorted by month)
+        sorted_months = sorted(monthly_data.keys())
+        visibility_trend = [monthly_data[k] for k in sorted_months]
+        
+        # Platform growth (aggregate by month)
+        platform_growth = []
+        for k in sorted_months:
+            data = monthly_data[k]
+            platform_growth.append({
+                'month': data['month'],
+                'chatgpt': data['platforms'].get('chatgpt', 0),
+                'claude': data['platforms'].get('claude', 0),
+                'perplexity': data['platforms'].get('perplexity', 0),
+                'gemini': data['platforms'].get('gemini', 0),
+            })
+        
+        # Calculate summary metrics
+        if len(visibility_trend) >= 2:
+            first = visibility_trend[0]
+            last = visibility_trend[-1]
+            
+            visibility_growth = round(((last['visibility_score'] - first['visibility_score']) / first['visibility_score'] * 100) if first['visibility_score'] > 0 else 0, 1)
+            mention_growth = round(((last['mentions'] - first['mentions']) / first['mentions'] * 100) if first['mentions'] > 0 else 0, 1)
+            position_improvement = round(((first['avg_position'] - last['avg_position']) / first['avg_position'] * 100) if first['avg_position'] > 0 else 0, 1)
+        else:
+            visibility_growth = 0
+            mention_growth = 0
+            position_improvement = 0
+        
+        # Competitor comparison (from ShareOfVoiceAnalytics if available)
+        from analytics.models import ShareOfVoiceAnalytics
+        competitor_data = {}
+        sov_records = ShareOfVoiceAnalytics.objects.filter(
+            domain_id=domain_id,
+            timestamp__gte=start_date.date()
+        ).order_by('timestamp')
+        
+        for record in sov_records:
+            month_key = record.timestamp.strftime('%Y-%m')
+            if month_key not in competitor_data:
+                competitor_data[month_key] = {}
+            competitor_name = record.competitor.name if record.competitor else 'Your Brand'
+            competitor_data[month_key][competitor_name.lower().replace(' ', '')] = record.mention_count
+        
+        competitor_comparison = []
+        for k in sorted_months:
+            comp_data = {'month': monthly_data[k]['month']}
+            if k in competitor_data:
+                comp_data.update(competitor_data[k])
+            else:
+                comp_data['yourbrand'] = monthly_data[k]['mentions']
+            competitor_comparison.append(comp_data)
+        
+        # Seasonal patterns (current year vs average)
+        seasonal_pattern = []
+        for k in sorted_months:
+            data = monthly_data[k]
+            seasonal_pattern.append({
+                'month': data['month'],
+                'mentions': data['mentions'],
+                'avgYear': data['mentions']  # For now, use same value; can compute historical average later
+            })
+        
+        return Response({
+            'visibility_trend': visibility_trend,
+            'platform_growth': platform_growth,
+            'competitor_comparison': competitor_comparison,
+            'seasonal_pattern': seasonal_pattern,
+            'summary': {
+                'visibility_growth': visibility_growth,
+                'mention_growth': mention_growth,
+                'position_improvement': position_improvement,
+                'market_share_gain': 0  # Can be computed from ShareOfVoiceAnalytics
+            },
+            'period_months': months,
+            'start_date': start_date.date().isoformat(),
+            'end_date': end_date.date().isoformat()
+        })
+        
+    except Exception as e:
+        return Response(
+            {'error': f'Failed to retrieve historical trends: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 

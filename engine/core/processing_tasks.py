@@ -73,28 +73,78 @@ def process_competitor_scheduler(self):
 def process_single_competitor_task(self, competitor_id: int):
     """
     Process a single competitor (for manual/on-demand processing).
+    Directly processes the competitor instead of going through scheduler.
     
     Args:
         competitor_id: ID of competitor to process
     """
     from shared_models.models import Competitor
     try:
-        competitor = Competitor.objects.get(id=competitor_id)
         processor = CompetitorProcessor(max_concurrent_prompts=getattr(settings, 'MAX_CONCURRENT_COMPETITOR_PROMPTS', 10))
         
-        # Mark as INIT so it gets picked up
+        # Get the competitor
         with transaction.atomic():
-            comp = Competitor.objects.select_for_update().get(id=competitor_id)
-            comp.track_status = 'INIT'
-            comp.save(update_fields=['track_status', 'modified_at'])
+            competitor = Competitor.objects.select_for_update().get(id=competitor_id)
+            
+            # Allow reprocessing if COMP or failed before, or if INIT
+            # Reset to INIT if it's already COMP (for reprocessing)
+            if competitor.track_status == 'COMP':
+                logger.info(f"Competitor {competitor_id} is already COMP, resetting to INIT for reprocessing")
+                competitor.track_status = 'INIT'
+                competitor.track_message = 'Resetting for reprocessing'
+                competitor.save(update_fields=['track_status', 'track_message', 'modified_at'])
+            elif competitor.track_status not in ['INIT', 'FAIL']:
+                logger.warning(f"Competitor {competitor_id} is in status {competitor.track_status}, skipping")
+                return {'error': f'Competitor already in status {competitor.track_status}'}
+            
+            # Mark as SCHD
+            competitor.track_status = 'SCHD'
+            competitor.track_message = f"Scheduled for processing at {timezone.now()}"
+            competitor.save(update_fields=['track_status', 'track_message', 'modified_at'])
         
-        # Trigger scheduler
-        return processor.schedule_tick()
+        logger.info(f"Processing competitor {competitor_id} ({competitor.name})")
+        
+        # Link prompts to competitor
+        processor._link_prompts_to_competitor(competitor)
+        
+        # Mark as processing
+        with transaction.atomic():
+            competitor = Competitor.objects.select_for_update().get(id=competitor_id)
+            competitor.track_status = 'PROC'
+            competitor.track_message = "Processing competitor analytics"
+            competitor.save(update_fields=['track_status', 'track_message', 'modified_at'])
+        
+        # Process prompts
+        processor._process_competitor_prompts(competitor)
+        
+        # Aggregate analytics
+        processor._aggregate_competitor_analytics(competitor)
+        
+        # Mark as complete
+        with transaction.atomic():
+            competitor = Competitor.objects.select_for_update().get(id=competitor_id)
+            competitor.track_status = 'COMP'
+            competitor.track_message = f"Completed at {timezone.now()}"
+            competitor.tracked_at = timezone.now()
+            competitor.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
+        
+        logger.info(f"Successfully completed competitor {competitor_id}")
+        return {'success': True, 'competitor_id': competitor_id}
+        
     except Competitor.DoesNotExist:
         logger.error(f"Competitor {competitor_id} not found")
         return {'error': 'competitor_not_found'}
     except Exception as e:
         logger.error(f"Error processing competitor {competitor_id}: {str(e)}")
+        # Mark as failed
+        try:
+            with transaction.atomic():
+                competitor = Competitor.objects.select_for_update().get(id=competitor_id)
+                competitor.track_status = 'FAIL'
+                competitor.track_message = f"Processing failed: {str(e)}"
+                competitor.save(update_fields=['track_status', 'track_message', 'modified_at'])
+        except:
+            pass
         return {'error': str(e)}
 
 

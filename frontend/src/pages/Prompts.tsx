@@ -11,6 +11,7 @@ import { useDomainStore } from "@/stores/domainStore";
 import { AddPromptGroupDialog } from "@/components/AddPromptGroupDialog";
 import { EditPromptGroupDialog } from "@/components/EditPromptGroupDialog";
 import { GenerateVariantsDialog } from "@/components/GenerateVariantsDialog";
+import { loadActiveDomain } from "@/utils/activeDomain";
 
 const Prompts = () => {
   const navigate = useNavigate();
@@ -22,26 +23,35 @@ const Prompts = () => {
   const [promptGroups, setPromptGroups] = useState<any[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [offset, setOffset] = useState(0);
-  const limit = 1; // testing limit
+  const limit = 20;
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
   const { selectedDomain } = useDomainStore();
 
   useEffect(() => {
-    // reset pagination on filters/domain change
     setPromptGroups([]);
     setOffset(0);
     setTotalCount(0);
-    loadPromptGroups(0, true);
+    void loadPromptGroups(0, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery, selectedDomain?.id]);
 
   const loadPromptGroups = async (startOffset: number = offset, replace: boolean = false) => {
     try {
       setIsLoading(true);
+      const token = localStorage.getItem('access_token') || '';
+      let userId: number | null = null;
+      try { userId = JSON.parse(atob(token.split('.')[1] || '""'))?.user_id || null; } catch {}
+      const activeDomainId = selectedDomain?.id ?? (userId ? loadActiveDomain(userId) : null);
+      if (!activeDomainId) {
+        setIsLoading(false);
+        toast({ title: 'No domain selected', description: 'Please select a domain to view prompt groups.', variant: 'destructive' });
+        return;
+      }
       const response = await apiClient.getPromptGroups({
         search: searchQuery || undefined,
-        domain_id: selectedDomain?.id,
+        domain_id: activeDomainId,
         limit,
         offset: startOffset,
       });
@@ -70,22 +80,17 @@ const Prompts = () => {
   };
 
   const handleEditGroup = (group: typeof promptGroups[0]) => {
-    console.log("Edit Group clicked for:", group);
     setSelectedGroup(group);
     setEditDialogOpen(true);
   };
 
   const handleGenerateVariants = (group: typeof promptGroups[0]) => {
-    console.log("Generate Variants clicked for:", group);
     setSelectedGroup(group);
     setGenerateDialogOpen(true);
   };
 
   const handleOrganizeGroups = () => {
-    toast({
-      title: "Organize Groups",
-      description: "Opening group organization panel...",
-    });
+    toast({ title: "Organize Groups", description: "Opening group organization panel..." });
   };
 
   return (
@@ -176,7 +181,6 @@ const Prompts = () => {
                   <Edit className="h-4 w-4 mr-1" />
                   Edit Group
                 </Button>
-                {/* Generate Variants temporarily hidden */}
               </div>
             </div>
           </Card>
@@ -211,7 +215,6 @@ const Prompts = () => {
         open={addDialogOpen} 
         onOpenChange={setAddDialogOpen}
         onAdd={(group) => {
-          // Prepend new group and reset pagination counts optimistically
           setPromptGroups([group, ...promptGroups]);
           setTotalCount(totalCount + 1);
         }}

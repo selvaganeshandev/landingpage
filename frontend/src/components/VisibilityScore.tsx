@@ -5,6 +5,7 @@ interface VisibilityScoreProps {
   brand: string;
   score: number;
   mentions: number;
+  avgPosition?: number;
   sentiment: {
     positive: number;
     neutral: number;
@@ -12,7 +13,7 @@ interface VisibilityScoreProps {
   };
 }
 
-export const VisibilityScore = ({ brand, score, mentions, sentiment }: VisibilityScoreProps) => {
+export const VisibilityScore = ({ brand, score, mentions, avgPosition = 0, sentiment }: VisibilityScoreProps) => {
   return (
     <Card className="p-6 h-full border border-border">
       <div className="space-y-4 h-full flex flex-col">
@@ -30,7 +31,7 @@ export const VisibilityScore = ({ brand, score, mentions, sentiment }: Visibilit
           </div>
           <div>
             <p className="text-sm text-muted-foreground">Avg Position</p>
-            <p className="text-2xl font-bold">1.6</p>
+            <p className="text-2xl font-bold">{avgPosition > 0 ? avgPosition.toFixed(1) : '0'}</p>
           </div>
         </div>
         

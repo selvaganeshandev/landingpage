@@ -5,9 +5,11 @@ Handles end-to-end competitor tracking and analytics
 Flow:
 1. Competitor created with track_status='INIT'
 2. Schedule_tick picks up INIT competitors
-3. Links all domain prompts to competitor (creates CompetitorPromptAnalytics records)
-4. Processes each prompt-competitor pair through ChatGPT
+3. Links all prompts with completed PromptAnalytics to competitor (creates CompetitorPromptAnalytics records)
+4. Extracts competitor mentions from existing PromptAnalytics.context_summary (no new API calls)
 5. Aggregates results into Competitor and ShareOfVoiceAnalytics
+
+Note: Uses existing PromptAnalytics data instead of making new API calls to save costs and ensure consistency.
 """
 
 import logging
@@ -29,7 +31,6 @@ from shared_models.models import (
     Prompt,
     PromptAnalytics
 )
-from .chatgpt_client import ChatGPTClient
 
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,6 @@ class CompetitorProcessor:
             max_concurrent_prompts: Max number of prompts to process per competitor at once
         """
         self.max_concurrent_prompts = max_concurrent_prompts
-        self.chatgpt_client = ChatGPTClient()
         logger.info(f"CompetitorProcessor initialized with max_concurrent_prompts={max_concurrent_prompts}")
     
     def schedule_tick(self) -> Dict[str, Any]:
@@ -136,7 +136,8 @@ class CompetitorProcessor:
     
     def _link_prompts_to_competitor(self, competitor: Competitor) -> int:
         """
-        Link all completed prompts from competitor's domain to this competitor.
+        Link all prompts with completed analytics from competitor's domain to this competitor.
+        Only links prompts that have completed PromptAnalytics (track_status='COMP').
         Creates CompetitorPromptAnalytics records with status='INIT'.
         
         Args:
@@ -146,15 +147,29 @@ class CompetitorProcessor:
             int: Number of prompts linked
         """
         try:
-            # Get all completed prompts for this domain
-            prompts = Prompt.objects.filter(
-                domain=competitor.domain,
-                track_status='COMP'
-            ).only('id')
+            # Ensure competitor.domain is loaded (not lazy)
+            domain = competitor.domain
+            if domain is None:
+                raise ValueError(f"Competitor {competitor.id} has no domain assigned")
+            
+            # Get domain ID to ensure we're using the correct reference
+            domain_id = domain.id if hasattr(domain, 'id') else domain
+            
+            # Get all prompts for this domain that have completed analytics
+            # Note: Prompt doesn't have domain field directly, it's through group.domain
+            prompts_with_analytics = Prompt.objects.filter(
+                group__domain_id=domain_id,  # Use domain_id instead of domain object
+                analytics__track_status='COMP'  # Only prompts with completed analytics
+            ).distinct().select_related('group')
             
             created_count = 0
             with transaction.atomic():
-                for prompt in prompts:
+                for prompt in prompts_with_analytics:
+                    # Ensure prompt is a Prompt instance
+                    if not isinstance(prompt, Prompt):
+                        logger.error(f"Invalid prompt object: {type(prompt)}, skipping")
+                        continue
+                    
                     # Create CompetitorPromptAnalytics if not exists
                     _, created = CompetitorPromptAnalytics.objects.get_or_create(
                         competitor=competitor,
@@ -168,7 +183,7 @@ class CompetitorProcessor:
                     if created:
                         created_count += 1
             
-            logger.info(f"Linked {created_count} new prompts to competitor {competitor.id}")
+            logger.info(f"Linked {created_count} new prompts (with completed analytics) to competitor {competitor.id}")
             return created_count
         
         except Exception as e:
@@ -178,7 +193,7 @@ class CompetitorProcessor:
     def _process_competitor_prompts(self, competitor: Competitor) -> None:
         """
         Process all INIT prompts for this competitor.
-        Sends prompts to ChatGPT and analyzes competitor mentions.
+        Uses existing PromptAnalytics data instead of making new API calls.
         
         Args:
             competitor: Competitor instance
@@ -227,7 +242,7 @@ class CompetitorProcessor:
     def _process_single_competitor_prompt(self, comp_prompt: CompetitorPromptAnalytics) -> None:
         """
         Process a single competitor-prompt pair.
-        Sends prompt to ChatGPT and analyzes if/how competitor is mentioned.
+        Uses existing PromptAnalytics data instead of making new API calls.
         
         Args:
             comp_prompt: CompetitorPromptAnalytics instance
@@ -237,22 +252,26 @@ class CompetitorProcessor:
             with transaction.atomic():
                 cp = CompetitorPromptAnalytics.objects.select_for_update().get(id=comp_prompt.id)
                 cp.track_status = 'PROC'
-                cp.track_message = "Querying ChatGPT"
+                cp.track_message = "Extracting from existing analytics"
                 cp.save(update_fields=['track_status', 'track_message', 'modified_at'])
             
-            # Get the AI response for this prompt
-            prompt_text = comp_prompt.prompt.prompt_text
+            # Get existing PromptAnalytics for this prompt
+            prompt_analytics = PromptAnalytics.objects.filter(
+                prompt=comp_prompt.prompt,
+                track_status='COMP'  # Only use completed analytics
+            ).order_by('-tracked_at').first()
+            
+            if not prompt_analytics:
+                raise ValueError(f"No completed PromptAnalytics found for prompt {comp_prompt.prompt.id}")
+            
+            # Use existing context_summary from PromptAnalytics
+            response_text = prompt_analytics.context_summary
+            if not response_text:
+                raise ValueError(f"PromptAnalytics {prompt_analytics.id} has no context_summary")
+            
             competitor_name = comp_prompt.competitor.name
             
-            # Use ChatGPT to get response
-            response = self.chatgpt_client.query_chatgpt(prompt_text)
-            
-            if not response or not response.get('content'):
-                raise ValueError("Empty response from ChatGPT")
-            
-            response_text = response['content']
-            
-            # Analyze competitor presence in response
+            # Analyze competitor presence in existing response
             analytics = self._analyze_competitor_mention(
                 response_text=response_text,
                 competitor_name=competitor_name,
@@ -263,18 +282,19 @@ class CompetitorProcessor:
             with transaction.atomic():
                 cp = CompetitorPromptAnalytics.objects.select_for_update().get(id=comp_prompt.id)
                 cp.track_status = 'COMP'
-                cp.track_message = "Completed successfully"
+                cp.track_message = "Completed successfully (using existing analytics)"
                 cp.tracked_at = timezone.now()
                 cp.is_mentioned = analytics['is_mentioned']
                 cp.position = analytics['position']
                 cp.mention_count = analytics['mention_count']
                 cp.sentiment_category = analytics['sentiment_category']
                 cp.sentiment_score = analytics['sentiment_score']
-                cp.response_text = response_text
-                cp.citation_list = analytics['citations']
+                cp.response_text = response_text  # Store the context_summary we used
+                cp.citation_list = prompt_analytics.citation_list  # Reuse citations from PromptAnalytics
+                cp.platform = prompt_analytics.platform  # Use same platform as PromptAnalytics
                 cp.save()
             
-            logger.info(f"Completed competitor-prompt {comp_prompt.id}: mentioned={analytics['is_mentioned']}, position={analytics['position']}")
+            logger.info(f"Completed competitor-prompt {comp_prompt.id}: mentioned={analytics['is_mentioned']}, position={analytics['position']} (from existing analytics)")
         
         except Exception as e:
             logger.error(f"Error processing competitor-prompt {comp_prompt.id}: {str(e)}")
@@ -468,33 +488,41 @@ class CompetitorProcessor:
         """
         try:
             domain = competitor.domain
+            domain_id = domain.id if hasattr(domain, 'id') else domain
             today = date.today()
             
             # Get own brand's mention count from PromptAnalytics
+            # Note: Prompt doesn't have domain field directly, it's through group.domain
             own_mentions = PromptAnalytics.objects.filter(
-                prompt__domain=domain,
-                prompt__track_status='COMP'
+                prompt__group__domain_id=domain_id,  # Access domain through group
+                prompt__track_status='COMP',  # Only completed prompts
+                track_status='COMP'  # Only completed analytics
             ).aggregate(total=Sum('total_mentions'))['total'] or 0
             
             # Get all competitors' mention counts for this domain
             competitors_mentions = Competitor.objects.filter(
-                domain=domain,
+                domain_id=domain_id,
                 track_status='COMP'
             ).aggregate(total=Sum('total_mentions'))['total'] or 0
             
             # Total mentions in market
             total_market_mentions = own_mentions + competitors_mentions
             
-            if total_market_mentions == 0:
-                logger.warning(f"No mentions found for share of voice calculation (domain={domain.id})")
-                return
+            logger.info(f"Share of Voice calculation for domain {domain_id}: "
+                       f"own_mentions={own_mentions}, competitors_mentions={competitors_mentions}, "
+                       f"competitor.total_mentions={competitor.total_mentions}, "
+                       f"total_market_mentions={total_market_mentions}")
             
             # Calculate competitor's share percentage
-            competitor_share = (competitor.total_mentions / total_market_mentions) * 100
+            if total_market_mentions > 0:
+                competitor_share = (competitor.total_mentions / total_market_mentions) * 100
+            else:
+                competitor_share = 0.0
+                logger.warning(f"No mentions found for share of voice calculation (domain={domain_id}), setting share to 0%")
             
-            # Update ShareOfVoiceAnalytics
-            ShareOfVoiceAnalytics.objects.update_or_create(
-                domain=domain,
+            # Update ShareOfVoiceAnalytics for competitor
+            sov_record, created = ShareOfVoiceAnalytics.objects.update_or_create(
+                domain_id=domain_id,  # Use domain_id instead of domain object
                 competitor=competitor,
                 platform='ChatGPT',
                 timestamp=today,
@@ -504,11 +532,12 @@ class CompetitorProcessor:
                     'market_position': None  # Will be calculated separately
                 }
             )
+            logger.info(f"{'Created' if created else 'Updated'} ShareOfVoice record for competitor {competitor.id}: {competitor_share:.2f}%")
             
             # Update own brand's ShareOfVoiceAnalytics
-            own_share = (own_mentions / total_market_mentions) * 100 if total_market_mentions > 0 else 0
-            ShareOfVoiceAnalytics.objects.update_or_create(
-                domain=domain,
+            own_share = (own_mentions / total_market_mentions) * 100 if total_market_mentions > 0 else 0.0
+            own_sov_record, own_created = ShareOfVoiceAnalytics.objects.update_or_create(
+                domain_id=domain_id,  # Use domain_id instead of domain object
                 competitor=None,  # NULL = own brand
                 platform='ChatGPT',
                 timestamp=today,
@@ -518,6 +547,7 @@ class CompetitorProcessor:
                     'market_position': None
                 }
             )
+            logger.info(f"{'Created' if own_created else 'Updated'} ShareOfVoice record for own brand: {own_share:.2f}%")
             
             # Calculate market positions (ranks)
             self._calculate_market_positions(domain, today)

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { 
+import {
   Plus,
   TrendingUp,
   TrendingDown,
@@ -48,8 +48,11 @@ import {
   Legend,
   Cell
 } from "recharts";
+import { apiClient } from "@/services/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { loadActiveDomain } from "@/utils/activeDomain";
 
-const competitors = [
+const competitorsStatic = [
   {
     id: 1,
     name: "VegFit Pro",
@@ -256,6 +259,15 @@ const Competitors = () => {
   const { toast } = useToast();
   const { navigateToContentGeneration } = useContentGeneration();
   const [addCompetitorDialogOpen, setAddCompetitorDialogOpen] = useState(false);
+  const { user } = useAuth();
+  const [domainId, setDomainId] = useState<string | null>(null);
+  const [competitors, setCompetitors] = useState<any[]>(competitorsStatic);
+  const [sovLatest, setSovLatest] = useState<any>(null);
+  const [sovSeries, setSovSeries] = useState<any[]>([]);
+  const [platformMap, setPlatformMap] = useState<Record<string, Array<{ brand: string; mentions: number }>>>({});
+  const [heatmap, setHeatmap] = useState<any[]>([]);
+  const [topBrands, setTopBrands] = useState<any[]>([]);
+  const [promptCards, setPromptCards] = useState<any[]>(promptData);
 
   const handleExportReport = () => {
     toast({
@@ -263,6 +275,145 @@ const Competitors = () => {
       description: "Your competitor analysis report is being generated...",
     });
   };
+  useEffect(() => {
+    if (!user) return;
+    const id = loadActiveDomain(user.id);
+    if (id) setDomainId(String(id));
+  }, [user]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!domainId) return;
+      try {
+        const [list, latest, byDomain, compPromptAnalytics] = await Promise.all([
+          apiClient.getEngineCompetitors({ domain_id: domainId }),
+          apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }),
+          apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }),
+          apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId }),
+        ] as any);
+
+        // Normalize competitor list
+        const mapped = (Array.isArray(list) ? list : list?.results || []).map((c: any, idx: number) => ({
+          id: c.id,
+          name: c.name,
+          url: c.url || (c.domain_name || '').toLowerCase(),
+          mentions: c.total_mentions || 0,
+          visibility: Math.round(Number(c.visibility_score || 0)),
+          sentiment: Math.round(Number(c.sentiment_score || 0)),
+          avgPosition: Number(c.average_position || 0).toFixed ? Number(c.average_position).toFixed(1) : (c.average_position || 0),
+          shareOfVoice: Math.round(Number(c.share_of_voice_percentage || 0)),
+          trend: 0,
+          color: idx === 0 ? 'hsl(var(--primary))' : idx === 1 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-3))',
+          isYou: c.is_you || false,
+        }));
+        setCompetitors(mapped.length ? mapped : competitorsStatic);
+
+        setSovLatest(latest);
+
+        // Build mention history series from SoV by_domain (use mention_count)
+        const rows = Array.isArray(byDomain) ? byDomain : byDomain?.results || [];
+        const grouped: Record<string, Record<string, number>> = {};
+        rows.forEach((r: any) => {
+          const month = r.timestamp || r.date || '';
+          if (!grouped[month]) grouped[month] = {};
+          const brand = r.competitor?.name || 'Your Brand';
+          grouped[month][brand] = (grouped[month][brand] || 0) + (Number(r.mention_count || 0));
+        });
+        const months = Object.keys(grouped).sort();
+        const brands = new Set<string>();
+        Object.values(grouped).forEach(m => Object.keys(m).forEach(b => brands.add(b)));
+        const [b1, b2, b3] = Array.from(brands);
+        const series = months.map(m => ({
+          month: m,
+          [b1 || 'BrandA']: grouped[m][b1 || ''] || 0,
+          [b2 || 'BrandB']: grouped[m][b2 || ''] || 0,
+          [b3 || 'BrandC']: grouped[m][b3 || ''] || 0,
+        }));
+        setSovSeries(series);
+
+        // Platform-specific share for latest month using byDomain rows
+        const lastDate = months[months.length - 1];
+        const latestRows = rows.filter((r: any) => (r.timestamp || r.date) === lastDate);
+        const platMap: Record<string, Record<string, number>> = {};
+        latestRows.forEach((r: any) => {
+          const plat = r.platform || 'Overall';
+          const brand = r.competitor?.name || 'Your Brand';
+          if (!platMap[plat]) platMap[plat] = {};
+          platMap[plat][brand] = (platMap[plat][brand] || 0) + (Number(r.mention_count || 0));
+        });
+        const platOut: Record<string, Array<{ brand: string; mentions: number }>> = {};
+        Object.entries(platMap).forEach(([plat, counts]) => {
+          platOut[plat] = Object.entries(counts)
+            .map(([brand, m]) => ({ brand, mentions: Number(m) }))
+            .sort((a, b) => b.mentions - a.mentions)
+            .slice(0, 3);
+        });
+        setPlatformMap(platOut);
+
+        // Heatmap: competitor (row) vs platform percentage
+        const platforms = Object.keys(platOut);
+        const brandsSet = new Set<string>();
+        Object.values(platOut).forEach(arr => arr.forEach(e => brandsSet.add(e.brand)));
+        const brandsArr = Array.from(brandsSet);
+        const heatArr = brandsArr.map(brand => ({
+          competitor: brand,
+          platforms: platforms.reduce((acc: any, p) => {
+            const total = (platOut[p] || []).reduce((s, e) => s + e.mentions, 0) || 1;
+            const item = (platOut[p] || []).find(e => e.brand === brand);
+            acc[p] = item ? Number(((item.mentions / total) * 100).toFixed(1)) : 0;
+            return acc;
+          }, {}),
+          isYou: brand.toLowerCase().includes('your')
+        }));
+        setHeatmap(heatArr);
+
+        // Top brands list from latest snapshot
+        const tb = (latest?.players || []).map((p: any) => ({
+          name: p?.competitor?.name || 'Your Brand',
+          url: '',
+          mentions: p?.mention_count || 0,
+          percentage: Number(p?.share_percentage || 0),
+          isYou: !p?.competitor,
+        })).sort((a: any, b: any) => b.mentions - a.mentions).slice(0, 5);
+        if (tb.length) setTopBrands(tb);
+
+        // Build dynamic prompt performance cards
+        const displayBrands = (mapped.length ? mapped : competitorsStatic)
+          .sort((a: any, b: any) => (b.isYou ? 1 : 0) - (a.isYou ? 1 : 0))
+          .slice(0, 3)
+          .map((c: any) => c.name);
+
+        const compPromptRows = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
+        const pmap: Record<string, { counts: Record<string, number>; total: number }> = {};
+        compPromptRows.forEach((row: any) => {
+          const promptText = row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`;
+          const brand = row?.competitor?.name || 'Your Brand';
+          const count = Number(row?.mention_count || (row?.is_mentioned ? 1 : 0));
+          if (!pmap[promptText]) pmap[promptText] = { counts: {}, total: 0 };
+          pmap[promptText].counts[brand] = (pmap[promptText].counts[brand] || 0) + count;
+          pmap[promptText].total += count;
+        });
+        const cards = Object.entries(pmap)
+          .sort((a, b) => b[1].total - a[1].total)
+          .map(([promptText, v], idx) => {
+          const countsForDisplay = displayBrands.map((b) => v.counts[b] || 0);
+          const winnerIdx = countsForDisplay.reduce((mi, val, i, arr) => (val > arr[mi] ? i : mi), 0);
+          return {
+            id: idx + 1,
+            prompt: promptText,
+            brands: displayBrands,
+            counts: countsForDisplay,
+            total: v.total,
+            winner: displayBrands[winnerIdx],
+          };
+        });
+        if (cards.length) setPromptCards(cards);
+      } catch (e: any) {
+        toast({ title: 'Failed to load competitors', description: String(e.message || e), variant: 'destructive' });
+      }
+    };
+    void load();
+  }, [domainId, timePeriod]);
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
@@ -278,28 +429,16 @@ const Competitors = () => {
     });
   };
 
-  const heatmapData = [
+  const heatmapData = heatmap.length ? heatmap : [
     {
-      competitor: "VegFit Pro",
-      platforms: { Grok: 22.5, Claude: 20.0, ChatGPT: 28.5, Perplexity: 19.0, "Google Gemini": 10.0 },
+      competitor: "Your Brand",
+      platforms: { ChatGPT: 50.0, Claude: 25.0, Perplexity: 15.0, Gemini: 10.0 },
       isYou: true
-    },
-    {
-      competitor: "MyProtein",
-      platforms: { Grok: 18.0, Claude: 22.0, ChatGPT: 24.0, Perplexity: 21.0, "Google Gemini": 15.0 },
-    },
-    {
-      competitor: "Naked Nutrition",
-      platforms: { Grok: 15.0, Claude: 18.0, ChatGPT: 20.0, Perplexity: 22.0, "Google Gemini": 25.0 },
-    },
+    }
   ];
 
-  const topBrands = [
-    { name: "VegFit Pro", url: "vegfitpro.com", mentions: 221, percentage: 10.9, isYou: true },
-    { name: "MyProtein", url: "myprotein.com", mentions: 187, percentage: 30.1 },
-    { name: "Naked Nutrition", url: "nakednutrition.com", mentions: 123, percentage: 17.5 },
-    { name: "Marketmuse", url: "marketmuse.com", mentions: 110, percentage: 11.1 },
-    { name: "Clearscope", url: "clearscope.io", mentions: 109, percentage: 11.0 },
+  const topBrandsDefault = [
+    { name: "Your Brand", url: "", mentions: 0, percentage: 0, isYou: true },
   ];
 
   return (
@@ -437,7 +576,7 @@ const Competitors = () => {
                   </p>
                 </div>
                 <ResponsiveContainer width="100%" height={350}>
-                  <LineChart data={mentionHistory}>
+                  <LineChart data={sovSeries.length ? sovSeries : mentionHistory}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                     <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
@@ -483,11 +622,11 @@ const Competitors = () => {
               <div className="lg:col-span-2">
                 <CompetitorHeatmap 
                   data={heatmapData} 
-                  platforms={["Grok", "Claude", "ChatGPT", "Perplexity", "Google Gemini"]} 
+                  platforms={Object.keys(platformMap).length ? Object.keys(platformMap) : ["ChatGPT","Claude","Perplexity","Gemini"]} 
                 />
               </div>
               <div>
-                <TopBrandsList brands={topBrands} totalMentions={989} />
+                <TopBrandsList brands={(topBrands.length ? topBrands : topBrandsDefault)} totalMentions={(topBrands.length ? topBrands.reduce((s,b)=>s+b.mentions,0) : 0)} />
               </div>
             </div>
 
@@ -564,7 +703,7 @@ const Competitors = () => {
             <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
               <h3 className="text-lg font-semibold mb-6 font-outfit">Platform-Specific Competition</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {Object.entries(platformComparison).map(([platform, data]) => (
+                {Object.entries(Object.keys(platformMap).length ? platformMap : platformComparison).map(([platform, data]) => (
                   <div key={platform} className="space-y-4">
                     <h4 className="font-medium text-center">{platform}</h4>
                     <ResponsiveContainer width="100%" height={200}>
@@ -604,12 +743,12 @@ const Competitors = () => {
                   </div>
                   <Badge variant="secondary">
                     <MessageSquare className="h-3 w-3 mr-1" />
-                    {promptData.length} Prompts Tracked
+                    {(promptCards.length ? promptCards.length : promptData.length)} Prompts Tracked
                   </Badge>
                 </div>
 
                 <div className="space-y-4">
-                  {promptData.map((prompt) => (
+                  {(promptCards.length ? promptCards : promptData).map((prompt: any) => (
                     <Card key={prompt.id} className="p-5 transition-all duration-300 border border-border hover:border-primary">
                       <div className="space-y-4">
                         <div className="flex items-start justify-between">
@@ -617,39 +756,31 @@ const Competitors = () => {
                             <h4 className="font-medium mb-2">{prompt.prompt}</h4>
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
                               <Eye className="h-4 w-4" />
-                              <span>{prompt.total} total mentions</span>
+                              <span>{(typeof prompt.total === 'number' ? prompt.total : Array.isArray(prompt.counts) ? prompt.counts.reduce((s:number,v:number)=>s+v,0) : (Number(prompt.vegfit||0)+Number(prompt.myprotein||0)+Number(prompt.naked||0)))} total mentions</span>
                               <span className="text-xs">•</span>
-                              <Badge variant="outline" className="text-xs">
-                                Winner: {prompt.winner}
-                              </Badge>
+                              {prompt.winner && (
+                                <Badge variant="outline" className="text-xs">
+                                  Winner: {prompt.winner}
+                                </Badge>
+                              )}
                             </div>
                           </div>
                         </div>
 
                         <div className="space-y-3">
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="font-medium">VegFit Pro</span>
-                              <span className="text-muted-foreground">{prompt.vegfit} mentions</span>
+                          {(prompt.brands ? prompt.brands : ["VegFit Pro","MyProtein","Naked Nutrition"]).map((brand: string, idx: number) => (
+                            <div key={brand} className="space-y-2">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="font-medium">{brand}</span>
+                                <span className="text-muted-foreground">{(prompt.counts ? prompt.counts[idx] : (idx===0?Number(prompt.vegfit||0):idx===1?Number(prompt.myprotein||0):Number(prompt.naked||0)))} mentions</span>
+                              </div>
+                              <Progress value={(() => {
+                                const val = (prompt.counts ? prompt.counts[idx] : (idx===0?Number(prompt.vegfit||0):idx===1?Number(prompt.myprotein||0):Number(prompt.naked||0)));
+                                const denom = (typeof prompt.total === 'number' ? prompt.total : Array.isArray(prompt.counts) ? prompt.counts.reduce((s:number,v:number)=>s+v,0) : (Number(prompt.vegfit||0)+Number(prompt.myprotein||0)+Number(prompt.naked||0)));
+                                return denom > 0 ? (val / denom) * 100 : 0;
+                              })()} className="h-2" />
                             </div>
-                            <Progress value={(prompt.vegfit / prompt.total) * 100} className="h-2" />
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="font-medium">MyProtein</span>
-                              <span className="text-muted-foreground">{prompt.myprotein} mentions</span>
-                            </div>
-                            <Progress value={(prompt.myprotein / prompt.total) * 100} className="h-2" />
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="font-medium">Naked Nutrition</span>
-                              <span className="text-muted-foreground">{prompt.naked} mentions</span>
-                            </div>
-                            <Progress value={(prompt.naked / prompt.total) * 100} className="h-2" />
-                          </div>
+                          ))}
                         </div>
                       </div>
                     </Card>

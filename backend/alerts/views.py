@@ -13,9 +13,12 @@ class AlertViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'super_admin':
-            return Alert.objects.all()
-        return Alert.objects.filter(domain__organisation=user.organisation)
+        base_qs = Alert.objects.all() if getattr(user, 'role', None) == 'super_admin' else Alert.objects.filter(domain__organisation=user.organisation)
+        # Optional domain scoping via query param
+        domain_id = self.request.query_params.get('domain_id') if hasattr(self, 'request') else None
+        if domain_id:
+            base_qs = base_qs.filter(domain_id=domain_id)
+        return base_qs
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -72,9 +75,12 @@ class AlertRuleViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'super_admin':
-            return AlertRule.objects.all()
-        return AlertRule.objects.filter(domain__organisation=user.organisation)
+        base_qs = AlertRule.objects.all() if getattr(user, 'role', None) == 'super_admin' else AlertRule.objects.filter(domain__organisation=user.organisation)
+        # Optional domain scoping via query param
+        domain_id = self.request.query_params.get('domain_id') if hasattr(self, 'request') else None
+        if domain_id:
+            base_qs = base_qs.filter(domain_id=domain_id)
+        return base_qs
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)

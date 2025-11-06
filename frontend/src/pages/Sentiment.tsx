@@ -29,44 +29,12 @@ import {
   ResponsiveContainer,
   Legend 
 } from "recharts";
+import { useEffect, useMemo, useState } from "react";
+import { apiClient } from "@/services/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { loadActiveDomain } from "@/utils/activeDomain";
 
-const sentimentOverview = {
-  positive: 74,
-  neutral: 21,
-  negative: 5,
-};
-
-const sentimentTrend = [
-  { date: "Oct 1", positive: 68, neutral: 25, negative: 7 },
-  { date: "Oct 8", positive: 71, neutral: 23, negative: 6 },
-  { date: "Oct 15", positive: 72, neutral: 22, negative: 6 },
-  { date: "Oct 22", positive: 73, neutral: 22, negative: 5 },
-  { date: "Oct 29", positive: 74, neutral: 21, negative: 5 },
-  { date: "Nov 5", positive: 75, neutral: 20, negative: 5 },
-  { date: "Nov 12", positive: 74, neutral: 21, negative: 5 },
-];
-
-const thematicSentiment = [
-  { theme: "Product Quality", positive: 85, neutral: 12, negative: 3, mentions: 89 },
-  { theme: "Taste & Flavor", positive: 78, neutral: 18, negative: 4, mentions: 72 },
-  { theme: "Price & Value", positive: 65, neutral: 28, negative: 7, mentions: 58 },
-  { theme: "Ingredient Quality", positive: 88, neutral: 10, negative: 2, mentions: 94 },
-  { theme: "Mixability", positive: 71, neutral: 22, negative: 7, mentions: 45 },
-  { theme: "Customer Service", positive: 82, neutral: 15, negative: 3, mentions: 31 },
-];
-
-const platformSentiment = [
-  { platform: "ChatGPT", positive: 76, neutral: 20, negative: 4 },
-  { platform: "Claude", positive: 73, neutral: 22, negative: 5 },
-  { platform: "Perplexity", positive: 71, neutral: 23, negative: 6 },
-  { platform: "Gemini", positive: 78, neutral: 18, negative: 4 },
-];
-
-const competitorSentiment = [
-  { name: "VegFit Pro", positive: 74, neutral: 21, negative: 5 },
-  { name: "MyProtein", positive: 68, neutral: 25, negative: 7 },
-  { name: "Naked Nutrition", positive: 71, neutral: 23, negative: 6 },
-];
+type SentimentRow = { theme: string; positive_percentage: number; neutral_percentage: number; negative_percentage: number; mention_count: number; platform?: string | null; timestamp: string };
 
 const COLORS = {
   positive: "hsl(var(--success))",
@@ -76,6 +44,51 @@ const COLORS = {
 
 const Sentiment = () => {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const [days, setDays] = useState<number>(30);
+  const [domainId, setDomainId] = useState<string | null>(null);
+
+  // API data
+  const [summary, setSummary] = useState<{ positive_percentage: number; neutral_percentage: number; negative_percentage: number; total_mentions: number } | null>(null);
+  const [rows, setRows] = useState<SentimentRow[]>([]);
+  const [competitorRows, setCompetitorRows] = useState<any[]>([]);
+  const [opportunities, setOpportunities] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    const id = loadActiveDomain(user.id);
+    if (id) setDomainId(String(id));
+  }, [user]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!domainId) return;
+      try {
+        const [sum, list] = await Promise.all([
+          apiClient.getSentimentSummary({ domain_id: domainId, days }),
+          apiClient.getSentimentByDomain({ domain_id: domainId, days })
+        ]);
+        setSummary(sum as any);
+        setRows(list as any);
+        // Optional: competitor sentiment (engine)
+        try {
+          const cp = await apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId });
+          setCompetitorRows(Array.isArray(cp) ? cp : cp || []);
+        } catch {
+          setCompetitorRows([]);
+        }
+        try {
+          const gaps = await apiClient.getCompetitorGapsEngine({ domain_id: domainId });
+          setOpportunities(Array.isArray(gaps) ? gaps : gaps || []);
+        } catch {
+          setOpportunities([]);
+        }
+      } catch (e:any) {
+        toast({ title: 'Failed to load sentiment', description: String(e.message||e), variant: 'destructive' });
+      }
+    };
+    void load();
+  }, [domainId, days]);
 
   const handleExportReport = () => {
     toast({
@@ -84,11 +97,94 @@ const Sentiment = () => {
     });
   };
 
+  const sentimentOverview = useMemo(() => ({
+    positive: summary?.positive_percentage || 0,
+    neutral: summary?.neutral_percentage || 0,
+    negative: summary?.negative_percentage || 0,
+  }), [summary]);
+
   const pieData = [
     { name: "Positive", value: sentimentOverview.positive, color: COLORS.positive },
     { name: "Neutral", value: sentimentOverview.neutral, color: COLORS.neutral },
     { name: "Negative", value: sentimentOverview.negative, color: COLORS.negative },
   ];
+
+  // Build trend by date (weighted by mentions per day)
+  const sentimentTrend = useMemo(() => {
+    const byDate: Record<string, { posSum: number; neuSum: number; negSum: number; mentions: number }> = {};
+    rows.forEach((r) => {
+      const d = r.timestamp;
+      if (!byDate[d]) byDate[d] = { posSum: 0, neuSum: 0, negSum: 0, mentions: 0 };
+      byDate[d].posSum += Number(r.positive_percentage) * Number(r.mention_count);
+      byDate[d].neuSum += Number(r.neutral_percentage) * Number(r.mention_count);
+      byDate[d].negSum += Number(r.negative_percentage) * Number(r.mention_count);
+      byDate[d].mentions += Number(r.mention_count);
+    });
+    return Object.entries(byDate).sort((a,b)=>a[0].localeCompare(b[0])).map(([date, v]) => ({
+      date,
+      positive: v.mentions ? +(v.posSum / v.mentions).toFixed(2) : 0,
+      neutral: v.mentions ? +(v.neuSum / v.mentions).toFixed(2) : 0,
+      negative: v.mentions ? +(v.negSum / v.mentions).toFixed(2) : 0,
+    }));
+  }, [rows]);
+
+  // Thematic breakdown aggregated across period (weighted by mentions)
+  const thematicSentiment = useMemo(() => {
+    const map: Record<string, { positive: number; neutral: number; negative: number; mentions: number }> = {};
+    rows.forEach((r) => {
+      const key = r.theme || 'Unknown';
+      if (!map[key]) map[key] = { positive: 0, neutral: 0, negative: 0, mentions: 0 };
+      map[key].positive += Number(r.positive_percentage) * Number(r.mention_count);
+      map[key].neutral += Number(r.neutral_percentage) * Number(r.mention_count);
+      map[key].negative += Number(r.negative_percentage) * Number(r.mention_count);
+      map[key].mentions += Number(r.mention_count);
+    });
+    return Object.entries(map).map(([theme, v]) => ({
+      theme,
+      positive: v.mentions ? +(v.positive / v.mentions).toFixed(2) : 0,
+      neutral: v.mentions ? +(v.neutral / v.mentions).toFixed(2) : 0,
+      negative: v.mentions ? +(v.negative / v.mentions).toFixed(2) : 0,
+      mentions: v.mentions,
+    })).sort((a,b)=>b.mentions - a.mentions);
+  }, [rows]);
+
+  // Platform breakdown
+  const platformSentiment = useMemo(() => {
+    const map: Record<string, { pos: number; neu: number; neg: number; mentions: number }> = {};
+    rows.forEach((r) => {
+      const key = r.platform || 'Overall';
+      if (!map[key]) map[key] = { pos: 0, neu: 0, neg: 0, mentions: 0 };
+      map[key].pos += Number(r.positive_percentage) * Number(r.mention_count);
+      map[key].neu += Number(r.neutral_percentage) * Number(r.mention_count);
+      map[key].neg += Number(r.negative_percentage) * Number(r.mention_count);
+      map[key].mentions += Number(r.mention_count);
+    });
+    return Object.entries(map).map(([platform, v]) => ({
+      platform,
+      positive: v.mentions ? +(v.pos / v.mentions).toFixed(2) : 0,
+      neutral: v.mentions ? +(v.neu / v.mentions).toFixed(2) : 0,
+      negative: v.mentions ? +(v.neg / v.mentions).toFixed(2) : 0,
+    }));
+  }, [rows]);
+
+  // Competitor sentiment from engine competitor prompt analytics (average sentiment_score -> categories pct approx)
+  const competitorSentiment = useMemo(() => {
+    if (!competitorRows || competitorRows.length === 0) return [] as any[];
+    const map: Record<string, { name: string; pos: number; neu: number; neg: number; count: number }> = {};
+    competitorRows.forEach((r:any) => {
+      const key = r.competitor?.name || `Competitor ${r.competitor_id || ''}`;
+      if (!map[key]) map[key] = { name: key, pos: 0, neu: 0, neg: 0, count: 0 };
+      const cat = (r.sentiment_category || '').toLowerCase();
+      if (cat === 'positive') map[key].pos += 1; else if (cat === 'negative') map[key].neg += 1; else map[key].neu += 1;
+      map[key].count += 1;
+    });
+    return Object.values(map).map(v => ({
+      name: v.name,
+      positive: v.count ? +(v.pos * 100 / v.count).toFixed(2) : 0,
+      neutral: v.count ? +(v.neu * 100 / v.count).toFixed(2) : 0,
+      negative: v.count ? +(v.neg * 100 / v.count).toFixed(2) : 0,
+    }));
+  }, [competitorRows]);
 
   return (
     <div className="p-8 space-y-8">
@@ -346,6 +442,39 @@ const Sentiment = () => {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Market Opportunities */}
+      <Card className="p-6 border border-border">
+        <h3 className="text-lg font-semibold mb-6">Market Opportunities</h3>
+        <div className="space-y-4">
+          {opportunities && opportunities.length > 0 ? opportunities.map((opp:any, idx:number) => (
+            <div key={`${opp.prompt_id||idx}`} className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1">
+                  <p className="font-mono text-sm mb-2">{opp.prompt?.prompt || opp.prompt_text || opp.prompt_id || 'Prompt'}</p>
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    <span>{opp.mention_count || 0} mentions</span>
+                    {typeof opp.position === 'number' && <span>Top position: {opp.position}</span>}
+                  </div>
+                </div>
+                <Badge 
+                  variant="secondary"
+                >
+                  competitor: {opp.competitor?.name || opp.competitor_name || 'Unknown'}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-muted-foreground">Platforms:</span>
+                {(opp.platform ? [opp.platform] : (opp.citation_list || [])).slice(0,4).map((p:any,i:number)=>(
+                  <Badge key={i} variant="outline" className="text-xs">{String(p||'AI')}</Badge>
+                ))}
+              </div>
+            </div>
+          )) : (
+            <p className="text-sm text-muted-foreground">No opportunities detected yet.</p>
+          )}
+        </div>
+      </Card>
     </div>
   );
 };

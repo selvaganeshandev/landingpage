@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from . import dashboard_api
 
 app_name = 'core'
 
@@ -24,6 +25,7 @@ urlpatterns = [
     # Competitor management
     path('competitors/', views.competitor_list, name='competitor_list'),
     path('competitors/<int:competitor_id>/', views.competitor_detail, name='competitor_detail'),
+    path('competitors/process-single/', views.start_single_competitor_processing, name='start_single_competitor_processing'),
     path('competitors/<int:competitor_id>/process/', views.competitor_process, name='competitor_process'),
     path('competitors/<int:competitor_id>/analytics/', views.competitor_analytics, name='competitor_analytics'),
     
@@ -34,4 +36,7 @@ urlpatterns = [
     # Share of Voice Analytics
     path('share-of-voice/', views.share_of_voice, name='share_of_voice'),
     path('competitor-analytics/trends/', views.competitor_analytics_trends, name='competitor_analytics_trends'),
+    
+    # Dashboard API
+    path('dashboard/summary/', dashboard_api.dashboard_summary, name='dashboard_summary'),
 ]

@@ -250,7 +250,13 @@ export const apiClient = {
 
   // ===== Mentions =====
   getMentions: (params?: any) => {
-    const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
+    const cleaned: Record<string, string> = {};
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') cleaned[k] = String(v);
+      });
+    }
+    const queryParams = Object.keys(cleaned).length ? `?${new URLSearchParams(cleaned).toString()}` : '';
     return apiRequest(`/prompts/mentions/${queryParams}`);
   },
 
@@ -262,6 +268,14 @@ export const apiClient = {
 
   getMentionTrends: () => apiRequest('/prompts/mentions/trends/'),
 
+  getHistoricalTrends: (params: { domain_id: string; months?: number }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.months ? { months: String(params.months) } : {}),
+    }).toString()}`;
+    return apiRequest(`/prompts/historical-trends/${queryParams}`);
+  },
+
   exportMentions: (data: any) => apiRequest('/prompts/mentions/export/', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -269,7 +283,13 @@ export const apiClient = {
 
   // ===== Prompt Groups =====
   getPromptGroups: (params?: any) => {
-    const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
+    const cleaned: Record<string, string> = {};
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') cleaned[k] = String(v);
+      });
+    }
+    const queryParams = Object.keys(cleaned).length ? `?${new URLSearchParams(cleaned).toString()}` : '';
     return apiRequest(`/prompts/groups/${queryParams}`);
   },
 
@@ -324,6 +344,16 @@ export const apiClient = {
     return apiRequest(`/alerts/alerts/${queryParams}`);
   },
 
+  getActiveAlerts: (params?: any) => {
+    const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return apiRequest(`/alerts/alerts/active/${queryParams}`);
+  },
+
+  getAlertSummary: (params?: any) => {
+    const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return apiRequest(`/alerts/alerts/summary/${queryParams}`);
+  },
+
   createAlert: (data: any) => apiRequest('/alerts/alerts/', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -339,7 +369,10 @@ export const apiClient = {
   }),
 
   // ===== Alert Rules =====
-  getAlertRules: () => apiRequest('/alerts/alert-rules/'),
+  getAlertRules: (params?: any) => {
+    const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return apiRequest(`/alerts/alert-rules/${queryParams}`);
+  },
 
   createAlertRule: (data: any) => apiRequest('/alerts/alert-rules/', {
     method: 'POST',
@@ -350,6 +383,8 @@ export const apiClient = {
     method: 'PUT',
     body: JSON.stringify(data),
   }),
+
+  toggleAlertRule: (id: number) => apiRequest(`/alerts/alert-rules/${id}/toggle/`, { method: 'POST' }),
 
   deleteAlertRule: (id: number) => apiRequest(`/alerts/alert-rules/${id}/`, {
     method: 'DELETE',
@@ -423,10 +458,94 @@ export const apiClient = {
     return apiRequest(`/analytics/sentiment-analytics/${queryParams}`);
   },
 
+  getSentimentSummary: (params: { domain_id: string; days?: number }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.days ? { days: String(params.days) } : {}),
+    }).toString()}`;
+    return apiRequest(`/analytics/sentiment-analytics/summary/${queryParams}`);
+  },
+
+  getSentimentByDomain: (params: { domain_id: string; days?: number }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.days ? { days: String(params.days) } : {}),
+    }).toString()}`;
+    return apiRequest(`/analytics/sentiment-analytics/by_domain/${queryParams}`);
+  },
+
   getShareOfVoice: (params?: any) => {
     const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
     return apiRequest(`/analytics/share-of-voice/${queryParams}`);
   },
+
+  // Share of Voice helpers for ShareOfVoice page
+  
+
+  getShareOfVoiceByDomain: (params: { domain_id: string; days?: number; platform?: string }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.days ? { days: String(params.days) } : {}),
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/analytics/share-of-voice/by_domain/${queryParams}`);
+  },
+
+  getShareOfVoiceComparison: (params: { domain_id: string; date?: string; platform?: string }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.date ? { date: params.date } : {}),
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/analytics/share-of-voice/comparison/${queryParams}`);
+  },
+
+  getShareOfVoiceLatestEngine: (params: { domain_id: string }) => {
+    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
+    return apiClient.getEngine(`/api/share-of-voice/${queryParams}`);
+  },
+
+  // ===== Engine (port 8001) helpers for competitor sentiment (optional for Sentiment page)
+  getEngine: <T>(endpoint: string) => {
+    const engineBaseUrl = import.meta.env.VITE_ENGINE_API_URL || 'http://localhost:8001';
+    const apiUrl = `${engineBaseUrl}${endpoint}`;
+    return fetch(apiUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(localStorage.getItem('access_token') ? {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        } : {}),
+      },
+    }).then(async (response) => {
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
+        throw new Error(error.detail || error.error || `HTTP ${response.status}`);
+      }
+      return response.json();
+    });
+  },
+
+  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string }) => {
+    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
+    return apiClient.getEngine(`/api/competitor-prompt-analytics/${queryParams}`);
+  },
+
+  getCompetitorGapsEngine: (params: { domain_id: string; competitor_id?: string }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
+    }).toString()}`;
+    return apiClient.getEngine(`/api/competitor-prompt-analytics/gaps/${queryParams}`);
+  },
+
+  getEngineCompetitors: (params: { domain_id: string }) => {
+    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
+    return apiClient.getEngine(`/api/competitors/${queryParams}`);
+  },
+
+  getEngineCompetitorDetail: (id: number) => apiClient.getEngine(`/api/competitors/${id}/`),
+  getEngineCompetitorAnalytics: (id: number) => apiClient.getEngine(`/api/competitors/${id}/analytics/`),
 
   // ===== Dashboard =====
   getDashboardSummary: (params: { domain_id: string; days?: number }) => {
@@ -434,7 +553,27 @@ export const apiClient = {
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
     }).toString()}`;
-    return apiRequest(`/analytics/dashboard/summary/${queryParams}`);
+    // Use engine API (port 8001) instead of backend
+    const engineBaseUrl = import.meta.env.VITE_ENGINE_API_URL || 'http://localhost:8001';
+    const apiUrl = `${engineBaseUrl}/api/dashboard/summary/${queryParams}`;
+    console.log('Dashboard API: Calling', apiUrl);
+    return fetch(apiUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(localStorage.getItem('access_token') ? {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        } : {}),
+      },
+    }).then(async (response) => {
+      console.log('Dashboard API: Response status', response.status);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
+        console.error('Dashboard API: Error response', error);
+        throw new Error(error.detail || error.error || `HTTP ${response.status}`);
+      }
+      return response.json();
+    });
   },
 
   // ===== Integrations =====
