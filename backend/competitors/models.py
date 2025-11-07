@@ -155,5 +155,5 @@ class CompetitorPromptAnalytics(models.Model):
         ordering = ['competitor', 'position']
     
     def __str__(self):
-        return f"{self.competitor.name} - {self.prompt.prompt_text[:50]}... [{self.track_status}]"
+        return f"{self.competitor.name} - {self.prompt.prompt[:50]}... [{self.track_status}]"
 

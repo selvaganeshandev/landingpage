@@ -5,8 +5,8 @@ from .models import SentimentAnalytics, ShareOfVoiceAnalytics
 @admin.register(SentimentAnalytics)
 class SentimentAnalyticsAdmin(admin.ModelAdmin):
     list_display = ['domain', 'theme', 'positive_percentage', 'neutral_percentage', 
-                    'negative_percentage', 'mention_count', 'platform', 'timestamp']
-    list_filter = ['domain', 'theme', 'platform', 'timestamp']
+                    'negative_percentage', 'mention_count', 'platform', 'snapshot_date', 'period_type']
+    list_filter = ['domain', 'theme', 'platform', 'snapshot_date', 'period_type']
     search_fields = ['domain__name', 'theme']
     readonly_fields = ['created_at']
 

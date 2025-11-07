@@ -5,7 +5,7 @@ class PromptGroup(models.Model):
     """
     PromptGroup model representing groups of prompts for domains
     """
-    group_id = models.CharField(max_length=100, unique=True, help_text="Unique identifier for the group")
+    group_id = models.CharField(max_length=100, help_text="Unique identifier for the group")
     domain = models.ForeignKey(
         'domains.Domain', 
         on_delete=models.CASCADE, 
@@ -25,6 +25,18 @@ class PromptGroup(models.Model):
         decimal_places=2, 
         default=0.00,
         help_text="Average position in search results"
+    )
+    visibility_score = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0.00,
+        help_text="Visibility score calculated from average position"
+    )
+    sentiment_score = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        default=0.00,
+        help_text="Average sentiment score (-1.00 to 1.00)"
     )
     # Tracking fields aligned with engine
     track_status = models.CharField(max_length=10, default='INIT', help_text="Processing status: INIT/SCHD/PROC/COMP/FAIL")
@@ -208,3 +220,228 @@ class PromptAnalytics(models.Model):
     
     def __str__(self):
         return f"Analytics for {self.prompt.prompt[:30]}... ({self.platform})"
+
+
+class PromptMetricSnapshot(models.Model):
+    """
+    Time-series snapshot of metrics for individual prompts.
+    Can be daily, weekly, monthly, or quarterly based on user preference.
+    """
+    PERIOD_TYPE_CHOICES = [
+        ('daily', 'Daily'),
+        ('weekly', 'Weekly'),
+        ('monthly', 'Monthly'),
+        ('quarterly', 'Quarterly'),
+    ]
+    
+    prompt = models.ForeignKey(
+        Prompt, 
+        on_delete=models.CASCADE, 
+        related_name='metric_snapshots',
+        help_text="Prompt this snapshot belongs to"
+    )
+    platform = models.CharField(
+        max_length=100, 
+        null=True, 
+        blank=True, 
+        help_text="AI platform (null = aggregated across all platforms)"
+    )
+    snapshot_date = models.DateField(
+        help_text="Date of the snapshot (can be daily, weekly, monthly, quarterly)"
+    )
+    period_type = models.CharField(
+        max_length=20,
+        choices=PERIOD_TYPE_CHOICES,
+        default='daily',
+        help_text="Type of period this snapshot represents"
+    )
+    
+    # 5 Core Metrics
+    mentions = models.PositiveIntegerField(default=0, help_text="Total mentions")
+    citations = models.PositiveIntegerField(default=0, help_text="Total citations")
+    visibility_score = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Visibility score calculated from average position"
+    )
+    sentiment_score = models.DecimalField(
+        max_digits=3, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Average sentiment score (-1.00 to 1.00)"
+    )
+    average_position = models.DecimalField(
+        max_digits=8, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Average position in search results"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'prompt_metric_snapshots'
+        unique_together = ['prompt', 'platform', 'snapshot_date', 'period_type']
+        indexes = [
+            models.Index(fields=['prompt', 'snapshot_date']),
+            models.Index(fields=['platform', 'snapshot_date']),
+            models.Index(fields=['snapshot_date', '-visibility_score']),
+            models.Index(fields=['prompt', 'period_type', 'snapshot_date']),
+        ]
+        ordering = ['-snapshot_date']
+    
+    def __str__(self):
+        platform_str = f" - {self.platform}" if self.platform else " (All Platforms)"
+        return f"Prompt {self.prompt.id}{platform_str} - {self.snapshot_date} ({self.period_type})"
+
+
+class PromptGroupMetricSnapshot(models.Model):
+    """
+    Time-series snapshot of aggregated metrics for prompt groups.
+    Can be daily, weekly, monthly, or quarterly based on user preference.
+    """
+    PERIOD_TYPE_CHOICES = [
+        ('daily', 'Daily'),
+        ('weekly', 'Weekly'),
+        ('monthly', 'Monthly'),
+        ('quarterly', 'Quarterly'),
+    ]
+    
+    prompt_group = models.ForeignKey(
+        PromptGroup, 
+        on_delete=models.CASCADE, 
+        related_name='metric_snapshots',
+        help_text="Prompt group this snapshot belongs to"
+    )
+    platform = models.CharField(
+        max_length=100, 
+        null=True, 
+        blank=True, 
+        help_text="AI platform (null = aggregated across all platforms)"
+    )
+    snapshot_date = models.DateField(
+        help_text="Date of the snapshot (can be daily, weekly, monthly, quarterly)"
+    )
+    period_type = models.CharField(
+        max_length=20,
+        choices=PERIOD_TYPE_CHOICES,
+        default='daily',
+        help_text="Type of period this snapshot represents"
+    )
+    
+    # 5 Core Metrics
+    mentions = models.PositiveIntegerField(default=0, help_text="Total mentions")
+    citations = models.PositiveIntegerField(default=0, help_text="Total citations")
+    visibility_score = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Visibility score calculated from average position"
+    )
+    sentiment_score = models.DecimalField(
+        max_digits=3, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Average sentiment score (-1.00 to 1.00)"
+    )
+    average_position = models.DecimalField(
+        max_digits=8, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Average position in search results"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'prompt_group_metric_snapshots'
+        unique_together = ['prompt_group', 'platform', 'snapshot_date', 'period_type']
+        indexes = [
+            models.Index(fields=['prompt_group', 'snapshot_date']),
+            models.Index(fields=['platform', 'snapshot_date']),
+            models.Index(fields=['snapshot_date', '-visibility_score']),
+            models.Index(fields=['prompt_group', 'period_type', 'snapshot_date']),
+        ]
+        ordering = ['-snapshot_date']
+    
+    def __str__(self):
+        platform_str = f" - {self.platform}" if self.platform else " (All Platforms)"
+        return f"Group {self.prompt_group.group_id}{platform_str} - {self.snapshot_date} ({self.period_type})"
+
+
+class DomainMetricSnapshot(models.Model):
+    """
+    Time-series snapshot of aggregated metrics for domains.
+    Can be daily, weekly, monthly, or quarterly based on user preference.
+    """
+    PERIOD_TYPE_CHOICES = [
+        ('daily', 'Daily'),
+        ('weekly', 'Weekly'),
+        ('monthly', 'Monthly'),
+        ('quarterly', 'Quarterly'),
+    ]
+    
+    domain = models.ForeignKey(
+        'domains.Domain', 
+        on_delete=models.CASCADE, 
+        related_name='metric_snapshots',
+        help_text="Domain this snapshot belongs to"
+    )
+    platform = models.CharField(
+        max_length=100, 
+        null=True, 
+        blank=True, 
+        help_text="AI platform (null = aggregated across all platforms)"
+    )
+    snapshot_date = models.DateField(
+        help_text="Date of the snapshot (can be daily, weekly, monthly, quarterly)"
+    )
+    period_type = models.CharField(
+        max_length=20,
+        choices=PERIOD_TYPE_CHOICES,
+        default='daily',
+        help_text="Type of period this snapshot represents"
+    )
+    
+    # 5 Core Metrics
+    mentions = models.PositiveIntegerField(default=0, help_text="Total mentions")
+    citations = models.PositiveIntegerField(default=0, help_text="Total citations")
+    visibility_score = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Visibility score calculated from average position"
+    )
+    sentiment_score = models.DecimalField(
+        max_digits=3, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Average sentiment score (-1.00 to 1.00)"
+    )
+    average_position = models.DecimalField(
+        max_digits=8, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Average position in search results"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'domain_metric_snapshots'
+        unique_together = ['domain', 'platform', 'snapshot_date', 'period_type']
+        indexes = [
+            models.Index(fields=['domain', 'snapshot_date']),
+            models.Index(fields=['platform', 'snapshot_date']),
+            models.Index(fields=['snapshot_date', '-visibility_score']),
+            models.Index(fields=['domain', 'period_type', 'snapshot_date']),
+        ]
+        ordering = ['-snapshot_date']
+    
+    def __str__(self):
+        platform_str = f" - {self.platform}" if self.platform else " (All Platforms)"
+        return f"{self.domain.name}{platform_str} - {self.snapshot_date} ({self.period_type})"

@@ -76,8 +76,13 @@ class DataForSEOClient:
         client_post_data = {
             0: {
                 "target": domain_name,
+                # "location_code": 2840,  # US location
+                "language_code": "en",  # English language
+                "historical_serp_mode": "live",
+                "ignore_synonyms": False,
+                "include_clickstream_data": False,
                 "load_rank_absolute": False,
-                "order_by": ["ranked_serp_element.serp_item.rank_group,asc"],
+                "order_by": ["ranked_serp_element.serp_item.rank_absolute,desc"],
                 "limit": limit,
                 "offset": 0
             }

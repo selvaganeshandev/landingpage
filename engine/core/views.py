@@ -928,3 +928,121 @@ def competitor_analytics_trends(request):
     
     serializer = CompetitorAnalyticsSerializer(analytics, many=True)
     return Response(serializer.data)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def reset_track_status(request):
+    """
+    Reset track_status for domains, prompt groups, or prompts to INIT.
+    Useful for testing and reprocessing.
+    
+    Request body:
+    {
+        "entity_type": "domain" | "prompt_group" | "prompt",
+        "entity_id": <id>,
+        "reset_to": "INIT" (default) | "SCHD" | "PROC"
+    }
+    """
+    try:
+        import json
+        
+        data = json.loads(request.body)
+        entity_type = data.get('entity_type')
+        entity_id = data.get('entity_id')
+        reset_to = data.get('reset_to', 'INIT')
+        
+        if not entity_type or not entity_id:
+            return Response({
+                "status": "error",
+                "message": "entity_type and entity_id are required"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if reset_to not in ['INIT', 'SCHD', 'PROC']:
+            return Response({
+                "status": "error",
+                "message": "reset_to must be INIT, SCHD, or PROC"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if entity_type == 'domain':
+            try:
+                entity = Domain.objects.get(id=entity_id)
+                entity.processing_status = reset_to
+                entity.track_message = f"Reset to {reset_to} via API"
+                entity.tracked_at = timezone.now()
+                entity.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
+                
+                return Response({
+                    "status": "success",
+                    "message": f"Domain {entity_id} reset to {reset_to}",
+                    "entity_type": "domain",
+                    "entity_id": entity_id,
+                    "new_status": reset_to
+                })
+            except Domain.DoesNotExist:
+                return Response({
+                    "status": "error",
+                    "message": f"Domain with id {entity_id} not found"
+                }, status=status.HTTP_404_NOT_FOUND)
+        
+        elif entity_type == 'prompt_group':
+            try:
+                entity = PromptGroup.objects.get(id=entity_id)
+                entity.track_status = reset_to
+                entity.track_message = f"Reset to {reset_to} via API"
+                entity.tracked_at = timezone.now()
+                entity.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
+                
+                return Response({
+                    "status": "success",
+                    "message": f"PromptGroup {entity_id} reset to {reset_to}",
+                    "entity_type": "prompt_group",
+                    "entity_id": entity_id,
+                    "new_status": reset_to
+                })
+            except PromptGroup.DoesNotExist:
+                return Response({
+                    "status": "error",
+                    "message": f"PromptGroup with id {entity_id} not found"
+                }, status=status.HTTP_404_NOT_FOUND)
+        
+        elif entity_type == 'prompt':
+            try:
+                entity = Prompt.objects.get(id=entity_id)
+                entity.track_status = reset_to
+                entity.track_message = f"Reset to {reset_to} via API"
+                entity.tracked_at = timezone.now()
+                entity.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
+                
+                return Response({
+                    "status": "success",
+                    "message": f"Prompt {entity_id} reset to {reset_to}",
+                    "entity_type": "prompt",
+                    "entity_id": entity_id,
+                    "new_status": reset_to
+                })
+            except Prompt.DoesNotExist:
+                return Response({
+                    "status": "error",
+                    "message": f"Prompt with id {entity_id} not found"
+                }, status=status.HTTP_404_NOT_FOUND)
+        
+        else:
+            return Response({
+                "status": "error",
+                "message": f"Invalid entity_type: {entity_type}. Must be 'domain', 'prompt_group', or 'prompt'"
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    except json.JSONDecodeError:
+        return Response({
+            "status": "error",
+            "message": "Invalid JSON in request body"
+        }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error resetting track_status: {str(e)}")
+        return Response({
+            "status": "error",
+            "message": f"Error resetting track_status: {str(e)}"
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

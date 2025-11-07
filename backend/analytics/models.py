@@ -4,30 +4,58 @@ from competitors.models import Competitor
 
 
 class SentimentAnalytics(models.Model):
+    """
+    SentimentAnalytics model for aggregated sentiment data by theme (snapshot pattern)
+    Can be daily, weekly, monthly, or quarterly based on user preference.
+    """
+    PERIOD_TYPE_CHOICES = [
+        ('daily', 'Daily'),
+        ('weekly', 'Weekly'),
+        ('monthly', 'Monthly'),
+        ('quarterly', 'Quarterly'),
+    ]
+    
     domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='sentiment_analytics')
     theme = models.CharField(max_length=255)  # e.g., "Product Quality", "Taste"
+    platform = models.CharField(max_length=100, null=True, blank=True)
+    snapshot_date = models.DateField(help_text="Date of the snapshot (can be daily, weekly, monthly, quarterly)")
+    period_type = models.CharField(
+        max_length=20,
+        choices=PERIOD_TYPE_CHOICES,
+        default='daily',
+        help_text="Type of period this snapshot represents"
+    )
+    
+    # Sentiment breakdown
     positive_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     neutral_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     negative_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     mention_count = models.IntegerField(default=0)
-    platform = models.CharField(max_length=100, null=True, blank=True)
-    timestamp = models.DateField()
+    
+    # 5 Core Metrics (for consistency with other snapshots)
+    mentions = models.PositiveIntegerField(default=0, help_text="Total mentions")
+    citations = models.PositiveIntegerField(default=0, help_text="Total citations")
+    visibility_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
+    sentiment_score = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
+    average_position = models.DecimalField(max_digits=8, decimal_places=2, default=0.00)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
         db_table = 'sentiment_analytics'
+        unique_together = ['domain', 'theme', 'platform', 'snapshot_date', 'period_type']
         indexes = [
-            models.Index(fields=['domain', 'timestamp']),
-            models.Index(fields=['theme', 'timestamp']),
-            # Additional indexes
-            models.Index(fields=['domain', 'platform', 'timestamp']),
-            models.Index(fields=['domain', 'theme', '-negative_percentage']),
-            models.Index(fields=['timestamp', '-mention_count']),
+            models.Index(fields=['domain', 'snapshot_date']),
+            models.Index(fields=['theme', 'snapshot_date']),
+            models.Index(fields=['domain', 'platform', 'snapshot_date']),
+            models.Index(fields=['domain', 'theme', '-sentiment_score']),
+            models.Index(fields=['snapshot_date', '-mention_count']),
+            models.Index(fields=['domain', 'period_type', 'snapshot_date']),
         ]
-        ordering = ['-timestamp']
+        ordering = ['-snapshot_date']
     
     def __str__(self):
-        return f"{self.domain.name} - {self.theme} - {self.timestamp}"
+        return f"{self.domain.name} - {self.theme} - {self.snapshot_date} ({self.period_type})"
 
 
 class ShareOfVoiceAnalytics(models.Model):

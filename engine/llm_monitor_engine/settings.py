@@ -154,7 +154,7 @@ MAX_CONCURRENT_PROMPT_ANALYTICS = 10
 
 # Prompt engine knobs
 # How many keywords to fetch from DataForSEO per domain
-KEYWORD_EXTRACT_LIMIT = 2
+KEYWORD_EXTRACT_LIMIT = 5
 # Minimum number of distinct prompts to produce overall
 PROMPT_MIN_COUNT = 2
 DATAFORSEO_USERNAME = "abulkalam.serpple@gmail.com"

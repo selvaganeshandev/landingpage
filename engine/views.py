@@ -1960,3 +1960,120 @@ def get_group_keywords(request):
         })
 
 
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def reset_track_status(request):
+    """
+    Reset track_status for domains, prompt groups, or prompts to INIT.
+    Useful for testing and reprocessing.
+    
+    Request body:
+    {
+        "entity_type": "domain" | "prompt_group" | "prompt",
+        "entity_id": <id>,
+        "reset_to": "INIT" (default) | "SCHD" | "PROC"
+    }
+    """
+    try:
+        from shared_models.models import Domain, PromptGroup, Prompt
+        from django.utils import timezone
+        
+        data = json.loads(request.body)
+        entity_type = data.get('entity_type')
+        entity_id = data.get('entity_id')
+        reset_to = data.get('reset_to', 'INIT')
+        
+        if not entity_type or not entity_id:
+            return JsonResponse({
+                "status": "error",
+                "message": "entity_type and entity_id are required"
+            }, status=400)
+        
+        if reset_to not in ['INIT', 'SCHD', 'PROC']:
+            return JsonResponse({
+                "status": "error",
+                "message": "reset_to must be INIT, SCHD, or PROC"
+            }, status=400)
+        
+        if entity_type == 'domain':
+            try:
+                entity = Domain.objects.get(id=entity_id)
+                entity.processing_status = reset_to
+                entity.track_message = f"Reset to {reset_to} via API"
+                entity.tracked_at = timezone.now()
+                entity.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
+                
+                return JsonResponse({
+                    "status": "success",
+                    "message": f"Domain {entity_id} reset to {reset_to}",
+                    "entity_type": "domain",
+                    "entity_id": entity_id,
+                    "new_status": reset_to
+                })
+            except Domain.DoesNotExist:
+                return JsonResponse({
+                    "status": "error",
+                    "message": f"Domain with id {entity_id} not found"
+                }, status=404)
+        
+        elif entity_type == 'prompt_group':
+            try:
+                entity = PromptGroup.objects.get(id=entity_id)
+                entity.track_status = reset_to
+                entity.track_message = f"Reset to {reset_to} via API"
+                entity.tracked_at = timezone.now()
+                entity.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
+                
+                return JsonResponse({
+                    "status": "success",
+                    "message": f"PromptGroup {entity_id} reset to {reset_to}",
+                    "entity_type": "prompt_group",
+                    "entity_id": entity_id,
+                    "new_status": reset_to
+                })
+            except PromptGroup.DoesNotExist:
+                return JsonResponse({
+                    "status": "error",
+                    "message": f"PromptGroup with id {entity_id} not found"
+                }, status=404)
+        
+        elif entity_type == 'prompt':
+            try:
+                entity = Prompt.objects.get(id=entity_id)
+                entity.track_status = reset_to
+                entity.track_message = f"Reset to {reset_to} via API"
+                entity.tracked_at = timezone.now()
+                entity.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
+                
+                return JsonResponse({
+                    "status": "success",
+                    "message": f"Prompt {entity_id} reset to {reset_to}",
+                    "entity_type": "prompt",
+                    "entity_id": entity_id,
+                    "new_status": reset_to
+                })
+            except Prompt.DoesNotExist:
+                return JsonResponse({
+                    "status": "error",
+                    "message": f"Prompt with id {entity_id} not found"
+                }, status=404)
+        
+        else:
+            return JsonResponse({
+                "status": "error",
+                "message": f"Invalid entity_type: {entity_type}. Must be 'domain', 'prompt_group', or 'prompt'"
+            }, status=400)
+    
+    except json.JSONDecodeError:
+        return JsonResponse({
+            "status": "error",
+            "message": "Invalid JSON in request body"
+        }, status=400)
+    except Exception as e:
+        logger.error(f"Error resetting track_status: {str(e)}")
+        return JsonResponse({
+            "status": "error",
+            "message": f"Error resetting track_status: {str(e)}"
+        }, status=500)
+
+

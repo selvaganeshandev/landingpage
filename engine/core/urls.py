@@ -39,4 +39,7 @@ urlpatterns = [
     
     # Dashboard API
     path('dashboard/summary/', dashboard_api.dashboard_summary, name='dashboard_summary'),
+    
+    # Reset track status (for testing)
+    path('reset-track-status/', views.reset_track_status, name='reset_track_status'),
 ]

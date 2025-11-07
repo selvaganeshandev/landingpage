@@ -43,7 +43,7 @@ def dashboard_summary(request):
     active_alerts = alerts_qs.filter(status='active').count()
 
     # Sentiment (weighted)
-    senti_qs = SentimentAnalytics.objects.filter(domain_id=domain_id, timestamp__gte=start_dt.date())
+    senti_qs = SentimentAnalytics.objects.filter(domain_id=domain_id, snapshot_date__gte=start_dt.date())
     total_mentions = senti_qs.aggregate(Sum('mention_count'))['mention_count__sum'] or 0
     if total_mentions > 0:
         weighted = lambda fld: sum(getattr(x, fld) * x.mention_count for x in senti_qs) / total_mentions

@@ -91,21 +91,35 @@ class DomainProcessor:
             domain.tracked_at = timezone.now()
             domain.save()
             
-            # Step 1: Scrape keywords from DataForSEO
-            print(f"Scraping keywords for {domain.name}")
-            kw_limit = getattr(settings, 'KEYWORD_EXTRACT_LIMIT', 50)
-            keywords = self.dataforseo_client.scrape_target_domain(domain.name, limit=kw_limit)
+            # Step 1: Check if domain has keywords with auto_generate_prompts=True
+            keywords_qs = Keyword.objects.filter(
+                domain=domain,
+                auto_generate_prompts=True
+            ).order_by('-priority', 'last_used_for_generation')
             
-            if not keywords:
-                domain.processing_status = 'FAIL'
-                domain.track_message = 'No keywords found from DataForSEO API'
-                domain.tracked_at = timezone.now()
-                domain.save()
-                return
+            keyword_ids_to_update = None  # Store keyword IDs to update after successful generation
             
-            # Step 2: Store keywords in database
-            print(f"Storing {len(keywords)} keywords for {domain.name}")
-            self._store_keywords(domain, keywords)
+            if keywords_qs.exists():
+                # Use existing keywords for prompt generation
+                keywords = list(keywords_qs.values_list('keyword', flat=True))
+                keyword_ids_to_update = list(keywords_qs.values_list('id', flat=True))
+                print(f"Using {len(keywords)} existing keywords for prompt generation for {domain.name}")
+            else:
+                # Fallback to DataForSEO scraping (existing logic)
+                print(f"Scraping keywords for {domain.name}")
+                kw_limit = getattr(settings, 'KEYWORD_EXTRACT_LIMIT', 50)
+                keywords = self.dataforseo_client.scrape_target_domain(domain.name, limit=kw_limit)
+                
+                if not keywords:
+                    domain.processing_status = 'FAIL'
+                    domain.track_message = 'No keywords found from DataForSEO API'
+                    domain.tracked_at = timezone.now()
+                    domain.save()
+                    return
+                
+                # Step 2: Store keywords in database
+                print(f"Storing {len(keywords)} keywords for {domain.name}")
+                self._store_keywords(domain, keywords)
             
             # Step 3: Generate prompts using ChatGPT
             print(f"Generating prompts for {domain.name}")
@@ -152,7 +166,17 @@ class DomainProcessor:
             print(f"Storing {len(grouped_prompts)} prompt groups for {domain.name}")
             self._store_prompt_groups(domain, grouped_prompts)
             
-            # Step 6: Update domain status to completed
+            # Step 6: Update last_used_for_generation for keywords that were used
+            if keyword_ids_to_update:
+                try:
+                    updated_count = Keyword.objects.filter(id__in=keyword_ids_to_update).update(
+                        last_used_for_generation=timezone.now()
+                    )
+                    print(f"Updated last_used_for_generation for {updated_count} keywords")
+                except Exception as update_error:
+                    print(f"Error updating last_used_for_generation: {str(update_error)}")
+            
+            # Step 7: Update domain status to completed
             domain.processing_status = 'COMP'
             domain.track_message = f'Successfully processed {len(keywords)} keywords and {len(grouped_prompts)} prompt groups'
             domain.tracked_at = timezone.now()
@@ -217,17 +241,27 @@ class DomainProcessor:
                 
                 # Create initial SentimentAnalytics record for this theme
                 if theme:
-                    SentimentAnalytics.objects.create(
+                    # Use update_or_create to avoid duplicates and ensure we use snapshot_date
+                    today = date.today()
+                    SentimentAnalytics.objects.update_or_create(
                         domain=domain,
                         theme=theme,
-                        positive_percentage=0.0,
-                        neutral_percentage=0.0,
-                        negative_percentage=0.0,
-                        mention_count=0,
                         platform=None,  # Overall aggregation
-                        timestamp=date.today()
+                        snapshot_date=today,
+                        period_type='daily',
+                        defaults={
+                            'positive_percentage': 0.0,
+                            'neutral_percentage': 0.0,
+                            'negative_percentage': 0.0,
+                            'mention_count': 0,
+                            'mentions': 0,
+                            'citations': 0,
+                            'visibility_score': 0.00,
+                            'sentiment_score': 0.00,
+                            'average_position': 0.00
+                        }
                     )
-                    print(f"Created SentimentAnalytics for theme: {theme}")
+                    print(f"Created/updated SentimentAnalytics for theme: {theme}")
                 
                 # Create primary prompts (limit to 1) and convert the rest to secondary
                 primary_prompts = group_data.get('primary_prompts', [])
