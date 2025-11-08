@@ -23,6 +23,7 @@ class AccountSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'email', 'first_name', 'last_name', 'role', 
             'organisation', 'organisation_name', 'is_active', 
+            'active_domain_id',
             'created_at', 'modified_at'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']

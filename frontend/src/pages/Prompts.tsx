@@ -8,10 +8,11 @@ import { Plus, Search, FolderOpen, TrendingUp, Eye, Edit, Sparkles, Loader2 } fr
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
+import { useAuth } from "@/contexts/AuthContext";
 import { AddPromptGroupDialog } from "@/components/AddPromptGroupDialog";
 import { EditPromptGroupDialog } from "@/components/EditPromptGroupDialog";
 import { GenerateVariantsDialog } from "@/components/GenerateVariantsDialog";
-import { loadActiveDomain } from "@/utils/activeDomain";
+import { getActiveDomainIdNumber } from "@/utils/activeDomain";
 
 const Prompts = () => {
   const navigate = useNavigate();
@@ -28,6 +29,7 @@ const Prompts = () => {
   const [searchQuery, setSearchQuery] = useState("");
 
   const { selectedDomain } = useDomainStore();
+  const { user } = useAuth();
 
   useEffect(() => {
     setPromptGroups([]);
@@ -40,10 +42,8 @@ const Prompts = () => {
   const loadPromptGroups = async (startOffset: number = offset, replace: boolean = false) => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('access_token') || '';
-      let userId: number | null = null;
-      try { userId = JSON.parse(atob(token.split('.')[1] || '""'))?.user_id || null; } catch {}
-      const activeDomainId = selectedDomain?.id ?? (userId ? loadActiveDomain(userId) : null);
+      // Use unified helper to get active domain ID (from localStorage, synced with server)
+      const activeDomainId = selectedDomain?.id ?? getActiveDomainIdNumber(user);
       if (!activeDomainId) {
         setIsLoading(false);
         toast({ title: 'No domain selected', description: 'Please select a domain to view prompt groups.', variant: 'destructive' });
@@ -56,7 +56,12 @@ const Prompts = () => {
         offset: startOffset,
       });
       setTotalCount(response.total_count || 0);
-      setPromptGroups(replace ? (response.groups || []) : [...promptGroups, ...(response.groups || [])]);
+      if (replace) {
+        setPromptGroups(response.groups || []);
+      } else {
+        // Use functional update to ensure we're using the latest state
+        setPromptGroups(prevGroups => [...prevGroups, ...(response.groups || [])]);
+      }
     } catch (error: any) {
       toast({
         title: "Error loading prompt groups",
@@ -70,9 +75,11 @@ const Prompts = () => {
 
   const canLoadMore = promptGroups.length < totalCount;
   const handleLoadMore = async () => {
+    // Calculate next offset using current offset value
     const nextOffset = offset + limit;
     setOffset(nextOffset);
-    await loadPromptGroups(nextOffset);
+    // Load more with the new offset
+    await loadPromptGroups(nextOffset, false);
   };
 
   const handleViewDetails = (groupId: number) => {

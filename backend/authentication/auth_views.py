@@ -65,6 +65,75 @@ def profile_update(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def update_active_domain(request):
+    """
+    Update the active domain for the current user.
+    Validates that the domain exists and belongs to the user's organisation.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    user = request.user
+    domain_id = request.data.get('domain_id')
+    
+    logger.info(f"[update_active_domain] User {user.id} ({user.email}) - Received domain_id: {domain_id} (type: {type(domain_id)})")
+    logger.info(f"[update_active_domain] Request data: {request.data}")
+    
+    if domain_id is None:
+        # Allow clearing the active domain
+        logger.info(f"[update_active_domain] Clearing active domain for user {user.id}")
+        user.active_domain_id = None
+        user.save(update_fields=['active_domain_id', 'modified_at'])
+        return Response({
+            'message': 'Active domain cleared successfully',
+            'user': AccountSerializer(user).data
+        })
+    
+    try:
+        domain_id = int(domain_id)
+        logger.info(f"[update_active_domain] Converted domain_id to int: {domain_id}")
+    except (ValueError, TypeError) as e:
+        logger.error(f"[update_active_domain] Failed to convert domain_id to int: {e}")
+        return Response(
+            {'error': 'domain_id must be a valid integer'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Validate domain exists and belongs to user's organisation
+    from domains.models import Domain
+    try:
+        domain = Domain.objects.get(id=domain_id)
+        logger.info(f"[update_active_domain] Found domain: {domain.id} ({domain.name}) - Organisation: {domain.organisation_id}")
+        if domain.organisation_id != user.organisation_id:
+            logger.warning(f"[update_active_domain] Domain {domain_id} does not belong to user's organisation {user.organisation_id}")
+            return Response(
+                {'error': 'Domain does not belong to your organisation'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+    except Domain.DoesNotExist:
+        logger.error(f"[update_active_domain] Domain {domain_id} not found")
+        return Response(
+            {'error': 'Domain not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    # Update active domain
+    logger.info(f"[update_active_domain] Updating user {user.id} active_domain_id from {user.active_domain_id} to {domain_id}")
+    user.active_domain_id = domain_id
+    user.save(update_fields=['active_domain_id', 'modified_at'])
+    
+    # Verify it was saved
+    user.refresh_from_db()
+    logger.info(f"[update_active_domain] Verified saved active_domain_id: {user.active_domain_id}")
+    
+    return Response({
+        'message': 'Active domain updated successfully',
+        'user': AccountSerializer(user).data
+    })
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def logout(request):

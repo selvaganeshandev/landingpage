@@ -1,0 +1,37 @@
+BEGIN;
+
+-- Truncate child tables first (snapshots and analytics)
+TRUNCATE TABLE domain_metric_snapshots RESTART IDENTITY CASCADE;
+TRUNCATE TABLE prompt_group_metric_snapshots RESTART IDENTITY CASCADE;
+TRUNCATE TABLE prompt_metric_snapshots RESTART IDENTITY CASCADE;
+TRUNCATE TABLE competitor_prompt_analytics RESTART IDENTITY CASCADE;
+TRUNCATE TABLE competitor_analytics RESTART IDENTITY CASCADE;
+TRUNCATE TABLE share_of_voice_analytics RESTART IDENTITY CASCADE;
+TRUNCATE TABLE sentiment_analytics RESTART IDENTITY CASCADE;
+TRUNCATE TABLE prompt_analytics RESTART IDENTITY CASCADE;
+
+-- Truncate intermediate tables
+TRUNCATE TABLE prompts RESTART IDENTITY CASCADE;
+TRUNCATE TABLE prompt_groups RESTART IDENTITY CASCADE;
+TRUNCATE TABLE keywords RESTART IDENTITY CASCADE;
+TRUNCATE TABLE competitors RESTART IDENTITY CASCADE;
+
+-- Truncate main domain table
+TRUNCATE TABLE domains RESTART IDENTITY CASCADE;
+
+COMMIT;
+
+-- Update prompt_metric_snapshots
+UPDATE prompt_metric_snapshots 
+SET snapshot_date = CURRENT_DATE - INTERVAL '30 days'
+WHERE snapshot_date IS NOT NULL;
+
+-- Update prompt_group_metric_snapshots
+UPDATE prompt_group_metric_snapshots 
+SET snapshot_date = CURRENT_DATE - INTERVAL '30 days'
+WHERE snapshot_date IS NOT NULL;
+
+-- Update domain_metric_snapshots
+UPDATE domain_metric_snapshots 
+SET snapshot_date = CURRENT_DATE - INTERVAL '30 days'
+WHERE snapshot_date IS NOT NULL;

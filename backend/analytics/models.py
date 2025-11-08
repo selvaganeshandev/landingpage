@@ -54,6 +54,22 @@ class SentimentAnalytics(models.Model):
         ]
         ordering = ['-snapshot_date']
     
+    def save(self, *args, **kwargs):
+        """
+        Override save to prevent empty string or NULL platforms from being saved.
+        Platform must be a valid platform name (e.g., 'ChatGPT', 'Google Gemini', 'Perplexity').
+        Empty strings and NULL are not allowed and will raise a ValueError.
+        """
+        # CRITICAL: Never save empty string or NULL for platform - only save valid platform names
+        # If platform is empty string or None, raise an error to prevent invalid data
+        if self.platform == '' or self.platform is None:
+            raise ValueError(
+                f"Cannot save SentimentAnalytics with empty or NULL platform. "
+                f"Platform must be a valid platform name (e.g., 'ChatGPT', 'Google Gemini', 'Perplexity'). "
+                f"Domain: {self.domain}, Theme: {self.theme}"
+            )
+        super().save(*args, **kwargs)
+    
     def __str__(self):
         return f"{self.domain.name} - {self.theme} - {self.snapshot_date} ({self.period_type})"
 

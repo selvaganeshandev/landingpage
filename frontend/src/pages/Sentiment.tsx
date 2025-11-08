@@ -32,7 +32,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { loadActiveDomain } from "@/utils/activeDomain";
+import { getActiveDomainId } from "@/utils/activeDomain";
 
 type SentimentRow = { theme: string; positive_percentage: number; neutral_percentage: number; negative_percentage: number; mention_count: number; platform?: string | null; timestamp: string };
 
@@ -56,8 +56,9 @@ const Sentiment = () => {
 
   useEffect(() => {
     if (!user) return;
-    const id = loadActiveDomain(user.id);
-    if (id) setDomainId(String(id));
+    // Use unified helper to get active domain ID (from localStorage, synced with server)
+    const id = getActiveDomainId(user);
+    if (id) setDomainId(id);
   }, [user]);
 
   useEffect(() => {

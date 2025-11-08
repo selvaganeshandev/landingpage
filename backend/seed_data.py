@@ -431,6 +431,8 @@ for i, domain in enumerate(domains):
         negative = Decimal(random.uniform(5, 20))
         neutral = Decimal(100 - positive - negative)
         
+        # CRITICAL: Only create SentimentAnalytics with valid platform names, never NULL
+        # Platform must be a valid platform name (e.g., 'ChatGPT', 'Google Gemini', 'Perplexity')
         SentimentAnalytics.objects.create(
             domain=domain,
             theme=themes[day % len(themes)],
@@ -438,8 +440,9 @@ for i, domain in enumerate(domains):
             neutral_percentage=neutral,
             negative_percentage=negative,
             mention_count=random.randint(50, 300),
-            platform=random.choice(platforms + [None]),
-            timestamp=timezone.now().date() - timedelta(days=day)
+            platform=random.choice(platforms),  # Only use valid platforms, never None
+            snapshot_date=timezone.now().date() - timedelta(days=day),
+            period_type='daily'
         )
     print(f"  ✓ Created sentiment analytics for {domain.name}")
 

@@ -202,7 +202,19 @@ const NavGroup = ({ group, location, isOpen, onToggle, isSidebarOpen, onItemClic
 export const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, checkPermission } = useAuth();
+  
+  // Safely get auth context - handle case when not available
+  let user, logout, checkPermission;
+  try {
+    const auth = useAuth();
+    user = auth.user;
+    logout = auth.logout;
+    checkPermission = auth.checkPermission;
+  } catch (error) {
+    // Auth context not available yet - return null or loading state
+    console.warn('Sidebar: Auth context not available:', error);
+    return null;
+  }
   const { toast } = useToast();
   const { filteredNavGroups, filterByPermissions } = useNavigationStore();
   const [openGroupIndex, setOpenGroupIndex] = useState<number | null>(null);
@@ -323,11 +335,13 @@ export const Sidebar = () => {
                               <CommandItem
                                 key={domain.id}
                                 value={domain.name}
-                                onSelect={() => {
+                                onSelect={async () => {
                                   setSelectedDomain(domain);
                                   setDomainPopoverOpen(false);
                                   if (user) {
-                                    localStorage.setItem(`selected_domain_user_${user.id}`, String(domain.id));
+                                    // Use updateActiveDomain to sync both systems properly
+                                    const { updateActiveDomain } = await import('@/utils/activeDomain');
+                                    await updateActiveDomain(user.id, domain.id, domain);
                                   }
                                 }}
                                 className="flex items-center justify-between gap-2"

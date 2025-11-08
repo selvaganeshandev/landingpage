@@ -48,6 +48,11 @@ class Account(AbstractUser):
         related_name='accounts',
         help_text="Organisation this account belongs to"
     )
+    active_domain_id = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="ID of the currently active domain for this user"
+    )
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the account was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the account was last modified")
     
@@ -635,6 +640,22 @@ class SentimentAnalytics(models.Model):
         managed = False  # Let backend manage this table
         unique_together = ['domain', 'theme', 'platform', 'snapshot_date', 'period_type']
         ordering = ['-snapshot_date']
+    
+    def save(self, *args, **kwargs):
+        """
+        Override save to prevent empty string or NULL platforms from being saved.
+        Platform must be a valid platform name (e.g., 'ChatGPT', 'Google Gemini', 'Perplexity').
+        Empty strings and NULL are not allowed and will raise a ValueError.
+        """
+        # CRITICAL: Never save empty string or NULL for platform - only save valid platform names
+        # If platform is empty string or None, raise an error to prevent invalid data
+        if self.platform == '' or self.platform is None:
+            raise ValueError(
+                f"Cannot save SentimentAnalytics with empty or NULL platform. "
+                f"Platform must be a valid platform name (e.g., 'ChatGPT', 'Google Gemini', 'Perplexity'). "
+                f"Domain: {self.domain}, Theme: {self.theme}"
+            )
+        super().save(*args, **kwargs)
     
     def __str__(self):
         return f"{self.domain.name} - {self.theme} - {self.snapshot_date} ({self.period_type})"

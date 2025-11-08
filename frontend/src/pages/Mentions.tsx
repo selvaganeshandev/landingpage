@@ -16,7 +16,8 @@ import {
 } from "@/components/ui/select";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
-import { loadActiveDomain } from "@/utils/activeDomain";
+import { useAuth } from "@/contexts/AuthContext";
+import { getActiveDomainIdNumber } from "@/utils/activeDomain";
 import DOMPurify from 'dompurify';
 
 interface Mention {
@@ -115,6 +116,7 @@ const Mentions = () => {
   };
 
   const { selectedDomain } = useDomainStore();
+  const { user } = useAuth();
 
   // Load mentions data
   useEffect(() => {
@@ -129,7 +131,8 @@ const Mentions = () => {
   const loadMentions = async (startOffset: number = offset, replace: boolean = false) => {
     try {
       setIsLoading(true);
-      const activeDomainId = selectedDomain?.id ?? loadActiveDomain((JSON.parse(atob((localStorage.getItem('access_token')||'').split('.')[1]||'""'))?.user_id) || 0);
+      // Use unified helper to get active domain ID (from localStorage, synced with server)
+      const activeDomainId = selectedDomain?.id ?? getActiveDomainIdNumber(user);
       const response = await apiClient.getMentions({
         search: searchQuery || undefined,
         platform: selectedPlatform !== "all" ? selectedPlatform : undefined,
@@ -139,7 +142,12 @@ const Mentions = () => {
         offset: startOffset,
       });
       setTotalCount(response.total_count || 0);
-      setMentions(replace ? (response.mentions || []) : [...mentions, ...(response.mentions || [])]);
+      if (replace) {
+        setMentions(response.mentions || []);
+      } else {
+        // Use functional update to ensure we're using the latest state
+        setMentions(prevMentions => [...prevMentions, ...(response.mentions || [])]);
+      }
     } catch (error: any) {
       console.error('Mentions: API error', error);
       toast({
@@ -154,9 +162,11 @@ const Mentions = () => {
 
   const canLoadMore = mentions.length < totalCount;
   const handleLoadMore = async () => {
+    // Calculate next offset using current offset value
     const nextOffset = offset + limit;
     setOffset(nextOffset);
-    await loadMentions(nextOffset);
+    // Load more with the new offset
+    await loadMentions(nextOffset, false);
   };
 
   const loadFilters = async () => {

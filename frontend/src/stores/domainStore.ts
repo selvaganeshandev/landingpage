@@ -44,7 +44,35 @@ export const useDomainStore = create<DomainState>()(
 
       setDomains: (domains) => set({ domains }),
       
-      setSelectedDomain: (domain) => set({ selectedDomain: domain }),
+      setSelectedDomain: (domain) => {
+        set({ selectedDomain: domain });
+        // Sync with active_domain_id localStorage when domain is set
+        // NOTE: This only updates active_domain_id key, not the legacy key
+        if (domain) {
+          // Use async IIFE to handle dynamic import
+          (async () => {
+            try {
+              // Try to get userId from localStorage token
+              const token = localStorage.getItem('access_token') || '';
+              if (token) {
+                try {
+                  const payload = JSON.parse(atob(token.split('.')[1] || '""'));
+                  const userId = payload?.user_id || payload?.id;
+                  if (userId) {
+                    const { saveActiveDomain } = await import('@/utils/activeDomain');
+                    saveActiveDomain(userId, domain.id);
+                    console.log(`[domainStore] Synced active_domain_id:${userId} with domain ${domain.id}`);
+                  }
+                } catch (e) {
+                  // Ignore token parsing errors
+                }
+              }
+            } catch (error) {
+              console.warn('[domainStore] Failed to sync with active_domain_id:', error);
+            }
+          })();
+        }
+      },
       
       setLoading: (loading) => set({ isLoading: loading }),
       

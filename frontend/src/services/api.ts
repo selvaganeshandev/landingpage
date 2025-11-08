@@ -134,6 +134,11 @@ export const apiClient = {
     body: JSON.stringify(data),
   }),
 
+  updateActiveDomain: (domainId: number | null) => apiRequest('/auth/active-domain/', {
+    method: 'PUT',
+    body: JSON.stringify({ domain_id: domainId }),
+  }),
+
   // ===== Organization =====
   getOrganization: () => apiRequest('/auth/organization/'),
 

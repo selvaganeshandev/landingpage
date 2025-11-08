@@ -38,7 +38,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { loadActiveDomain } from "@/utils/activeDomain";
+import { getActiveDomainId } from "@/utils/activeDomain";
 
 type SovRow = { domain: number; competitor: number | null; platform?: string | null; share_percentage: number; mention_count: number; market_position?: number | null; timestamp: string };
 type LatestSov = { domain_id: number; timestamp: string; platform: string; players: Array<{ competitor: any | null; share_percentage: number; mention_count: number; market_position: number | null }>; };
@@ -64,8 +64,9 @@ const ShareOfVoice = () => {
 
   useEffect(() => {
     if (!user) return;
-    const id = loadActiveDomain(user.id);
-    if (id) setDomainId(String(id));
+    // Use unified helper to get active domain ID (from localStorage, synced with server)
+    const id = getActiveDomainId(user);
+    if (id) setDomainId(id);
   }, [user]);
 
   useEffect(() => {

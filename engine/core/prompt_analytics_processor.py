@@ -2,7 +2,7 @@ from typing import Dict, Any, List
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
-from django.db.models import Sum, Avg, Count
+from django.db.models import Sum, Avg, Count, Max, Q
 from shared_models.models import (
     Domain, Prompt, PromptAnalytics, PromptGroup, SentimentAnalytics,
     PromptMetricSnapshot, PromptGroupMetricSnapshot, DomainMetricSnapshot
@@ -354,8 +354,17 @@ class PromptAnalyticsProcessor:
 
             # Calculate visibility score and sentiment score
             avg_pos = float(group_totals['avg_position'] or 0)
-            group_visibility_score = self._calculate_visibility_score(avg_pos)
-            group_sentiment_score = float(group_totals['avg_sentiment'] or 0)
+            total_mentions = group_totals['total_mentions'] or 0
+            total_citations = group_totals['total_citations'] or 0
+            avg_sentiment = float(group_totals['avg_sentiment'] or 0)
+            group_visibility_score = self._calculate_visibility_score(
+                mentions=total_mentions,
+                citations=total_citations,
+                sentiment_score=avg_sentiment,
+                average_position=avg_pos,
+                scope='group'
+            )
+            group_sentiment_score = avg_sentiment
 
             # Update group record
             group.total_citations = group_totals['total_citations'] or 0
@@ -390,9 +399,12 @@ class PromptAnalyticsProcessor:
                 domain = Domain.objects.select_for_update().get(id=group.domain_id)
                 
                 # Use prompt__track_status because PromptAnalytics.track_status is never updated
+                # Filter for mentions and published analytics only
                 domain_analytics = PromptAnalytics.objects.filter(
                     prompt__group__domain=domain,
-                    prompt__track_status='COMP'
+                    prompt__track_status='COMP',
+                    is_mention=True,
+                    is_published=True
                 )
                 domain_totals = domain_analytics.aggregate(
                     total_citations=Sum('total_citations'),
@@ -403,8 +415,17 @@ class PromptAnalyticsProcessor:
                 
                 # Calculate visibility score and sentiment score for domain
                 domain_avg_pos = float(domain_totals['avg_position'] or 0)
-                domain_visibility_score = self._calculate_visibility_score(domain_avg_pos)
-                domain_sentiment_score = float(domain_totals['avg_sentiment'] or 0)
+                domain_total_mentions = domain_totals['total_mentions'] or 0
+                domain_total_citations = domain_totals['total_citations'] or 0
+                domain_avg_sentiment = float(domain_totals['avg_sentiment'] or 0)
+                domain_visibility_score = self._calculate_visibility_score(
+                    mentions=domain_total_mentions,
+                    citations=domain_total_citations,
+                    sentiment_score=domain_avg_sentiment,
+                    average_position=domain_avg_pos,
+                    scope='domain'
+                )
+                domain_sentiment_score = domain_avg_sentiment
                 
                 domain.total_citations = domain_totals['total_citations'] or 0
                 domain.total_mentions = domain_totals['total_mentions'] or 0
@@ -420,9 +441,13 @@ class PromptAnalyticsProcessor:
                 
                 # Create metric snapshots for domain (daily by default)
                 try:
+                    logger.info(f"About to create domain metric snapshots for domain {domain.id}, date {today}")
+                    logger.info(f"Domain analytics count: {domain_analytics.count()}")
                     self._create_domain_metric_snapshots(domain, domain_analytics, today, period_type='daily')
+                    logger.info(f"Successfully completed domain metric snapshots for domain {domain.id}")
                 except Exception as domain_snapshot_error:
-                    logger.error(f"Error creating domain metric snapshots: {str(domain_snapshot_error)}", exc_info=True)
+                    logger.error(f"Error creating domain metric snapshots for domain {domain.id}: {str(domain_snapshot_error)}", exc_info=True)
+                    # Don't re-raise here - let the process continue even if snapshots fail
                 
                 # Create metric snapshots for individual prompts (daily by default)
                 # Use domain_analytics to get all prompts in the domain, not just the current group
@@ -498,33 +523,77 @@ class PromptAnalyticsProcessor:
             )
             
             avg_pos = float(totals['avg_position'] or 0)
-            visibility_score = self._calculate_visibility_score(avg_pos)
-            
-            # Update or create SentimentAnalytics for this theme (overall, not platform-specific)
-            sentiment_analytics, created = SentimentAnalytics.objects.update_or_create(
-                domain=domain,
-                theme=theme,
-                platform=None,  # Overall aggregation
-                snapshot_date=today,
-                period_type='daily',
-                defaults={
-                    'positive_percentage': round(positive_pct, 2),
-                    'neutral_percentage': round(neutral_pct, 2),
-                    'negative_percentage': round(negative_pct, 2),
-                    'mention_count': total,
-                    'mentions': totals['total_mentions'] or 0,
-                    'citations': totals['total_citations'] or 0,
-                    'visibility_score': visibility_score,
-                    'sentiment_score': float(totals['avg_sentiment'] or 0),
-                    'average_position': avg_pos,
-                }
+            total_mentions = totals['total_mentions'] or 0
+            total_citations = totals['total_citations'] or 0
+            avg_sentiment = float(totals['avg_sentiment'] or 0)
+            visibility_score = self._calculate_visibility_score(
+                mentions=total_mentions,
+                citations=total_citations,
+                sentiment_score=avg_sentiment,
+                average_position=avg_pos,
+                scope='domain'
             )
             
+            # NOTE: We no longer create overall aggregation records with platform=None
+            # Only platform-specific records with valid platform names are created
+            
             # Create platform-wise sentiment analytics
-            platforms = analytics_qs.values_list('platform', flat=True).distinct()
-            for platform in platforms:
+            # Get all distinct platforms from analytics (including those with whitespace)
+            platforms_raw = analytics_qs.exclude(
+                platform__isnull=True
+            ).exclude(
+                platform=''
+            ).values_list('platform', flat=True).distinct()
+            
+            # Normalize platforms: strip whitespace and filter out empty/whitespace-only
+            # Create a mapping of normalized -> original for filtering
+            platform_map = {}  # normalized -> list of original values
+            for platform_raw in platforms_raw:
+                # Skip None, empty strings, and non-string values
+                if not platform_raw or not isinstance(platform_raw, str):
+                    logger.warning(f"Skipping invalid platform_raw for theme '{theme}': {repr(platform_raw)}")
+                    continue
+                
+                # Normalize: strip whitespace
+                platform_normalized = platform_raw.strip()
+                
+                # Only add non-empty normalized platforms
+                if platform_normalized and len(platform_normalized) > 0:
+                    if platform_normalized not in platform_map:
+                        platform_map[platform_normalized] = []
+                    # Only add original if it's also non-empty
+                    if platform_raw and platform_raw.strip() and platform_raw not in platform_map[platform_normalized]:
+                        platform_map[platform_normalized].append(platform_raw)
+            
+            # CRITICAL: If no valid platforms found, do not create any records
+            if not platform_map:
+                logger.warning(f"No valid platforms found for theme '{theme}'. Skipping SentimentAnalytics creation.")
+                return
+            
+            # Process each normalized platform
+            for platform_normalized, original_platforms in platform_map.items():
+                # Skip if platform is empty after normalization
+                if not platform_normalized or not platform_normalized.strip():
+                    continue
+                
+                # Filter analytics using original platform values (to match database records)
+                # Use Q objects to match any of the original platform values
+                # Only include non-empty original platforms in the filter
+                platform_filter = Q()
+                valid_original_platforms = []
+                for orig_platform in original_platforms:
+                    # Validate original platform is non-empty
+                    if orig_platform and isinstance(orig_platform, str) and orig_platform.strip():
+                        platform_filter |= Q(platform=orig_platform)
+                        valid_original_platforms.append(orig_platform)
+                
+                # Skip if no valid original platforms found
+                if not valid_original_platforms:
+                    logger.warning(f"Skipping SentimentAnalytics creation for theme '{theme}': no valid original platforms for normalized '{platform_normalized}'")
+                    continue
+                
                 platform_analytics = analytics_qs.filter(
-                    platform=platform,
+                    platform_filter,
                     is_mention=True,
                     is_published=True
                 )
@@ -549,30 +618,82 @@ class PromptAnalyticsProcessor:
                 )
                 
                 platform_avg_pos = float(platform_totals['avg_position'] or 0)
-                platform_visibility_score = self._calculate_visibility_score(platform_avg_pos)
-                
-                SentimentAnalytics.objects.update_or_create(
-                    domain=domain,
-                    theme=theme,
-                    platform=platform,
-                    snapshot_date=today,
-                    period_type='daily',
-                    defaults={
-                        'positive_percentage': round(platform_positive_pct, 2),
-                        'neutral_percentage': round(platform_neutral_pct, 2),
-                        'negative_percentage': round(platform_negative_pct, 2),
-                        'mention_count': platform_total,
-                        'mentions': platform_totals['total_mentions'] or 0,
-                        'citations': platform_totals['total_citations'] or 0,
-                        'visibility_score': platform_visibility_score,
-                        'sentiment_score': float(platform_totals['avg_sentiment'] or 0),
-                        'average_position': platform_avg_pos,
-                    }
+                platform_total_mentions = platform_totals['total_mentions'] or 0
+                platform_total_citations = platform_totals['total_citations'] or 0
+                platform_avg_sentiment = float(platform_totals['avg_sentiment'] or 0)
+                platform_visibility_score = self._calculate_visibility_score(
+                    mentions=platform_total_mentions,
+                    citations=platform_total_citations,
+                    sentiment_score=platform_avg_sentiment,
+                    average_position=platform_avg_pos,
+                    scope='domain'
                 )
+                
+                # Validate platform: must be a non-empty string (not None, not empty, not whitespace-only)
+                # This is a final safety check to ensure we never store empty platforms
+                if not platform_normalized or not isinstance(platform_normalized, str):
+                    logger.warning(f"Skipping SentimentAnalytics creation for theme '{theme}': platform is None or not a string")
+                    continue
+                
+                platform_value = platform_normalized.strip()
+                
+                # Final validation: platform must be a non-empty string after stripping
+                # CRITICAL: Do not create records with empty platforms - only create if platform is valid
+                if not platform_value or len(platform_value) == 0 or not platform_value.strip():
+                    logger.warning(f"Skipping SentimentAnalytics creation for theme '{theme}': platform is empty after normalization")
+                    continue
+                
+                # ABSOLUTE FINAL CHECK: Ensure platform_value is a valid, non-empty string before saving
+                # This prevents any edge case where an empty string might slip through
+                if platform_value is None or (isinstance(platform_value, str) and (not platform_value or not platform_value.strip())):
+                    logger.error(f"CRITICAL: Attempted to create SentimentAnalytics with invalid platform for theme '{theme}'. Skipping.")
+                    continue
+                
+                # FINAL SAFETY CHECK: Double-check platform_value is not None or empty before database operation
+                # This is the last line of defense before creating the record
+                if not platform_value or platform_value is None or (isinstance(platform_value, str) and len(platform_value.strip()) == 0):
+                    logger.error(f"CRITICAL: platform_value is None or empty for theme '{theme}'. Aborting record creation.")
+                    continue
+                
+                # ABSOLUTE FINAL CHECK: Ensure platform_value is a valid string before database operation
+                # Convert to string and strip to ensure it's not None or empty
+                platform_final = str(platform_value).strip() if platform_value else None
+                if not platform_final or len(platform_final) == 0:
+                    logger.error(f"CRITICAL: platform_final is None or empty after conversion for theme '{theme}'. Aborting record creation.")
+                    continue
+                
+                # Only create records with valid, non-empty platform values
+                # Platform must be a real platform name (e.g., 'ChatGPT', 'Google Gemini', 'Perplexity')
+                # Never create records with None, empty string, or whitespace-only platforms
+                # CRITICAL: platform_final is guaranteed to be a non-empty string at this point
+                try:
+                    SentimentAnalytics.objects.update_or_create(
+                        domain=domain,
+                        theme=theme,
+                        platform=platform_final,  # Use final validated platform value (guaranteed non-empty string, never None)
+                        snapshot_date=today,
+                        period_type='daily',
+                        defaults={
+                            'positive_percentage': round(platform_positive_pct, 2),
+                            'neutral_percentage': round(platform_neutral_pct, 2),
+                            'negative_percentage': round(platform_negative_pct, 2),
+                            'mention_count': platform_total,
+                            'mentions': platform_total_mentions,
+                            'citations': platform_total_citations,
+                            'visibility_score': platform_visibility_score,
+                            'sentiment_score': platform_avg_sentiment,
+                            'average_position': platform_avg_pos,
+                        }
+                    )
+                except ValueError as e:
+                    # Catch ValueError from model's save() method if platform is None or empty
+                    logger.error(f"CRITICAL: ValueError caught when creating SentimentAnalytics for theme '{theme}': {str(e)}")
+                    logger.error(f"  platform_final value: {repr(platform_final)}")
+                    continue
             
-            action = "Created" if created else "Updated"
+            # Log platform-specific records created
             logger.info(
-                f"{action} SentimentAnalytics for theme '{theme}': "
+                f"Created platform-specific SentimentAnalytics for theme '{theme}': "
                 f"Pos={positive_pct:.1f}%, Neu={neutral_pct:.1f}%, Neg={negative_pct:.1f}%, "
                 f"Mentions={total}"
             )
@@ -580,15 +701,88 @@ class PromptAnalyticsProcessor:
         except Exception as e:
             logger.error(f"Error updating sentiment analytics for theme '{group.theme}': {str(e)}")
     
-    def _calculate_visibility_score(self, average_position: float) -> Decimal:
+    def _calculate_visibility_score(
+        self, 
+        mentions: int = 0,
+        citations: int = 0,
+        sentiment_score: float = 0.0,
+        average_position: float = 0.0,
+        scope: str = 'domain'
+    ) -> Decimal:
         """
-        Calculate visibility score from average position.
-        Formula: max(0, min(100, 100 - (average_position * 20)))
+        Calculate visibility score using weighted formula.
+        
+        Formula: weighted_score = (
+            0.4 * norm_mentions +
+            0.3 * norm_citations +
+            0.2 * norm_sentiment +
+            0.1 * norm_position
+        ) * 100
+        
+        Weights:
+        - Mentions: 40% (biggest driver - frequency)
+        - Citations: 30% (authority/trust)
+        - Sentiment: 20% (perception quality)
+        - Position: 10% (ranking adjustment)
+        
+        Args:
+            mentions: Total mentions count
+            citations: Total citations count
+            sentiment_score: Average sentiment score (-1.0 to 1.0)
+            average_position: Average position in results
+            scope: Normalization scope ('domain', 'group', 'snapshot')
+        
+        Returns:
+            Decimal: Visibility score (0-100)
         """
-        if average_position <= 0:
-            return Decimal('100.0')
-        score = max(0, min(100, 100 - (average_position * 20)))
-        return Decimal(str(round(score, 2)))
+        # Fetch normalization limits based on scope
+        # Convert to float to avoid Decimal/float division issues
+        if scope == 'domain':
+            # Normalize across all domains
+            max_mentions = float(Domain.objects.aggregate(Max('total_mentions'))['total_mentions__max'] or 1)
+            max_citations = float(Domain.objects.aggregate(Max('total_citations'))['total_citations__max'] or 1)
+            max_position = float(Domain.objects.aggregate(Max('average_position'))['average_position__max'] or 1)
+        elif scope == 'group':
+            # Normalize across all groups in the same domain (will need domain_id passed)
+            # For now, use domain normalization
+            max_mentions = float(Domain.objects.aggregate(Max('total_mentions'))['total_mentions__max'] or 1)
+            max_citations = float(Domain.objects.aggregate(Max('total_citations'))['total_citations__max'] or 1)
+            max_position = float(Domain.objects.aggregate(Max('average_position'))['average_position__max'] or 1)
+        else:  # snapshot
+            # For snapshots, use domain normalization
+            max_mentions = float(Domain.objects.aggregate(Max('total_mentions'))['total_mentions__max'] or 1)
+            max_citations = float(Domain.objects.aggregate(Max('total_citations'))['total_citations__max'] or 1)
+            max_position = float(Domain.objects.aggregate(Max('average_position'))['average_position__max'] or 1)
+        
+        # Ensure all values are float for division operations
+        mentions_float = float(mentions) if mentions else 0.0
+        citations_float = float(citations) if citations else 0.0
+        sentiment_float = float(sentiment_score) if sentiment_score else 0.0
+        position_float = float(average_position) if average_position else 0.0
+        
+        # Normalize components (0-1 range)
+        norm_mentions = mentions_float / max_mentions if max_mentions > 0 else 0.0
+        norm_citations = citations_float / max_citations if max_citations > 0 else 0.0
+        norm_sentiment = (sentiment_float + 1.0) / 2.0  # Convert -1 to 1 range to 0-1 range
+        norm_position = 1.0 - (position_float / max_position) if max_position > 0 and position_float > 0 else 1.0
+        
+        # Clamp normalized values to 0-1
+        norm_mentions = max(0, min(1, norm_mentions))
+        norm_citations = max(0, min(1, norm_citations))
+        norm_sentiment = max(0, min(1, norm_sentiment))
+        norm_position = max(0, min(1, norm_position))
+        
+        # Weighted score
+        weighted_score = (
+            0.4 * norm_mentions +
+            0.3 * norm_citations +
+            0.2 * norm_sentiment +
+            0.1 * norm_position
+        )
+        
+        # Scale to 0-100
+        visibility_score = round(weighted_score * 100, 2)
+        return Decimal(str(visibility_score))
     
     def _create_prompt_metric_snapshots(self, analytics, snapshot_date: date, period_type: str = 'daily') -> None:
         """Create metric snapshots for individual prompts (per platform only)"""
@@ -674,13 +868,22 @@ class PromptAnalyticsProcessor:
                     )
                     
                     platform_avg_pos = float(platform_totals['avg_position'] or 0)
-                    platform_visibility_score = self._calculate_visibility_score(platform_avg_pos)
+                    platform_total_mentions = platform_totals['total_mentions'] or 0
+                    platform_total_citations = platform_totals['total_citations'] or 0
+                    platform_avg_sentiment = float(platform_totals['avg_sentiment'] or 0)
+                    platform_visibility_score = self._calculate_visibility_score(
+                        mentions=platform_total_mentions,
+                        citations=platform_total_citations,
+                        sentiment_score=platform_avg_sentiment,
+                        average_position=platform_avg_pos,
+                        scope='snapshot'
+                    )
                     
                     metrics = {
-                        'mentions': platform_totals['total_mentions'] or 0,
-                        'citations': platform_totals['total_citations'] or 0,
+                        'mentions': platform_total_mentions,
+                        'citations': platform_total_citations,
                         'visibility_score': platform_visibility_score,
-                        'sentiment_score': float(platform_totals['avg_sentiment'] or 0),
+                        'sentiment_score': platform_avg_sentiment,
                         'average_position': platform_avg_pos,
                     }
                     
@@ -768,7 +971,16 @@ class PromptAnalyticsProcessor:
                 )
                 
                 platform_avg_pos = float(platform_totals['avg_position'] or 0)
-                platform_visibility_score = self._calculate_visibility_score(platform_avg_pos)
+                platform_total_mentions = platform_totals['total_mentions'] or 0
+                platform_total_citations = platform_totals['total_citations'] or 0
+                platform_avg_sentiment = float(platform_totals['avg_sentiment'] or 0)
+                platform_visibility_score = self._calculate_visibility_score(
+                    mentions=platform_total_mentions,
+                    citations=platform_total_citations,
+                    sentiment_score=platform_avg_sentiment,
+                    average_position=platform_avg_pos,
+                    scope='snapshot'
+                )
                 
                 snapshot, created = PromptGroupMetricSnapshot.objects.update_or_create(
                     prompt_group=group,
@@ -776,10 +988,10 @@ class PromptAnalyticsProcessor:
                     snapshot_date=snapshot_date,
                     period_type=period_type,
                     defaults={
-                        'mentions': platform_totals['total_mentions'] or 0,
-                        'citations': platform_totals['total_citations'] or 0,
+                        'mentions': platform_total_mentions,
+                        'citations': platform_total_citations,
                         'visibility_score': platform_visibility_score,
-                        'sentiment_score': float(platform_totals['avg_sentiment'] or 0),
+                        'sentiment_score': platform_avg_sentiment,
                         'average_position': platform_avg_pos,
                     }
                 )
@@ -803,26 +1015,45 @@ class PromptAnalyticsProcessor:
     ) -> None:
         """Create metric snapshots for domain (per platform only)"""
         try:
+            # Log initial state
+            total_analytics = analytics.count()
+            logger.info(f"Creating domain metric snapshots for domain {domain.id}, date {snapshot_date}, period_type {period_type}")
+            logger.info(f"Total analytics passed: {total_analytics}")
+            
             # Filter out analytics with no platform
             analytics_with_platform = analytics.exclude(platform__isnull=True).exclude(platform='')
+            analytics_with_platform_count = analytics_with_platform.count()
+            
+            logger.info(f"Analytics with platform: {analytics_with_platform_count} (out of {total_analytics})")
             
             if not analytics_with_platform.exists():
                 logger.warning(f"No analytics with platform found for domain {domain.id} metric snapshots")
+                # Log sample platforms to help debug
+                sample_platforms = list(analytics.values_list('platform', flat=True).distinct()[:10])
+                logger.warning(f"Sample platforms in analytics (may include None/empty): {sample_platforms}")
                 return
             
             # Create snapshots per platform only (no aggregated snapshot)
             platforms = list(analytics_with_platform.values_list('platform', flat=True).distinct())
             
-            logger.info(f"Creating domain metric snapshots for domain {domain.id}, {len(platforms)} platforms")
+            logger.info(f"Creating domain metric snapshots for domain {domain.id}, {len(platforms)} platforms: {platforms}")
+            
+            created_count = 0
+            updated_count = 0
             
             for platform in platforms:
                 if not platform:  # Skip None or empty platforms
+                    logger.warning(f"Skipping empty platform for domain {domain.id}")
                     continue
                     
                 platform_analytics = analytics_with_platform.filter(platform=platform)
+                platform_analytics_count = platform_analytics.count()
                 
                 if not platform_analytics.exists():
+                    logger.warning(f"No analytics found for platform {platform} in domain {domain.id}")
                     continue
+                
+                logger.debug(f"Processing platform {platform} with {platform_analytics_count} analytics")
                 
                 platform_totals = platform_analytics.aggregate(
                     total_mentions=Sum('total_mentions'),
@@ -832,31 +1063,69 @@ class PromptAnalyticsProcessor:
                 )
                 
                 platform_avg_pos = float(platform_totals['avg_position'] or 0)
-                platform_visibility_score = self._calculate_visibility_score(platform_avg_pos)
+                platform_total_mentions = platform_totals['total_mentions'] or 0
+                platform_total_citations = platform_totals['total_citations'] or 0
+                platform_avg_sentiment = float(platform_totals['avg_sentiment'] or 0)
                 
-                snapshot, created = DomainMetricSnapshot.objects.update_or_create(
-                    domain=domain,
-                    platform=platform,
-                    snapshot_date=snapshot_date,
-                    period_type=period_type,
-                    defaults={
-                        'mentions': platform_totals['total_mentions'] or 0,
-                        'citations': platform_totals['total_citations'] or 0,
-                        'visibility_score': platform_visibility_score,
-                        'sentiment_score': float(platform_totals['avg_sentiment'] or 0),
-                        'average_position': platform_avg_pos,
-                    }
-                )
-                
-                action = "Created" if created else "Updated"
                 logger.debug(
-                    f"{action} DomainMetricSnapshot for domain {domain.id}, "
-                    f"platform {platform}, date {snapshot_date}: "
-                    f"mentions={platform_totals['total_mentions'] or 0}, "
-                    f"citations={platform_totals['total_citations'] or 0}"
+                    f"Platform {platform} totals: mentions={platform_total_mentions}, "
+                    f"citations={platform_total_citations}, avg_position={platform_avg_pos}, "
+                    f"avg_sentiment={platform_avg_sentiment}"
                 )
+                
+                platform_visibility_score = self._calculate_visibility_score(
+                    mentions=platform_total_mentions,
+                    citations=platform_total_citations,
+                    sentiment_score=platform_avg_sentiment,
+                    average_position=platform_avg_pos,
+                    scope='snapshot'
+                )
+                
+                try:
+                    snapshot, created = DomainMetricSnapshot.objects.update_or_create(
+                        domain=domain,
+                        platform=platform,
+                        snapshot_date=snapshot_date,
+                        period_type=period_type,
+                        defaults={
+                            'mentions': platform_total_mentions,
+                            'citations': platform_total_citations,
+                            'visibility_score': platform_visibility_score,
+                            'sentiment_score': platform_avg_sentiment,
+                            'average_position': platform_avg_pos,
+                        }
+                    )
+                    
+                    if created:
+                        created_count += 1
+                        action = "Created"
+                    else:
+                        updated_count += 1
+                        action = "Updated"
+                    
+                    logger.info(
+                        f"{action} DomainMetricSnapshot for domain {domain.id}, "
+                        f"platform {platform}, date {snapshot_date}, period_type {period_type}: "
+                        f"mentions={platform_total_mentions}, "
+                        f"citations={platform_total_citations}, "
+                        f"visibility_score={platform_visibility_score}"
+                    )
+                except Exception as db_error:
+                    logger.error(
+                        f"Database error creating DomainMetricSnapshot for domain {domain.id}, "
+                        f"platform {platform}, date {snapshot_date}: {str(db_error)}",
+                        exc_info=True
+                    )
+                    raise
+            
+            logger.info(
+                f"Completed domain metric snapshots for domain {domain.id}, date {snapshot_date}: "
+                f"{created_count} created, {updated_count} updated"
+            )
+            
         except Exception as e:
-            logger.error(f"Error creating domain metric snapshots: {str(e)}", exc_info=True)
+            logger.error(f"Error creating domain metric snapshots for domain {domain.id}: {str(e)}", exc_info=True)
+            raise  # Re-raise to ensure the error is visible
     
     def _get_fallback_analytics(self, prompt_text: str, user_domain: str, platform: str) -> Dict[str, Any]:
         """Generate fallback analytics when AI platforms are unavailable"""

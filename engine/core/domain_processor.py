@@ -91,37 +91,87 @@ class DomainProcessor:
             domain.tracked_at = timezone.now()
             domain.save()
             
-            # Step 1: Check if domain has keywords with auto_generate_prompts=True
-            keywords_qs = Keyword.objects.filter(
-                domain=domain,
-                auto_generate_prompts=True
-            ).order_by('-priority', 'last_used_for_generation')
+            # Step 1: Check if domain has any keywords at all
+            all_keywords_exist = Keyword.objects.filter(domain=domain).exists()
             
-            keyword_ids_to_update = None  # Store keyword IDs to update after successful generation
-            
-            if keywords_qs.exists():
-                # Use existing keywords for prompt generation
-                keywords = list(keywords_qs.values_list('keyword', flat=True))
-                keyword_ids_to_update = list(keywords_qs.values_list('id', flat=True))
-                print(f"Using {len(keywords)} existing keywords for prompt generation for {domain.name}")
-            else:
-                # Fallback to DataForSEO scraping (existing logic)
-                print(f"Scraping keywords for {domain.name}")
+            if not all_keywords_exist:
+                # First time: Fetch keywords from DataForSEO (only once per domain)
+                print(f"Initial keyword fetch for {domain.name} from DataForSEO")
                 kw_limit = getattr(settings, 'KEYWORD_EXTRACT_LIMIT', 50)
-                keywords = self.dataforseo_client.scrape_target_domain(domain.name, limit=kw_limit)
+                keywords_from_api = self.dataforseo_client.scrape_target_domain(domain.name, limit=kw_limit)
                 
-                if not keywords:
+                if not keywords_from_api:
                     domain.processing_status = 'FAIL'
                     domain.track_message = 'No keywords found from DataForSEO API'
                     domain.tracked_at = timezone.now()
                     domain.save()
                     return
                 
-                # Step 2: Store keywords in database
-                print(f"Storing {len(keywords)} keywords for {domain.name}")
-                self._store_keywords(domain, keywords)
+                # Store unique keywords in database (get_or_create ensures uniqueness per domain)
+                print(f"Storing {len(keywords_from_api)} unique keywords for {domain.name}")
+                self._store_keywords(domain, keywords_from_api)
             
-            # Step 3: Generate prompts using ChatGPT
+            # Step 2: Get only unused keywords (where last_used_for_generation is NULL)
+            # These are unique keywords that haven't been used for prompt generation yet
+            unused_keywords_qs = Keyword.objects.filter(
+                domain=domain,
+                auto_generate_prompts=True,
+                last_used_for_generation__isnull=True  # Only unused keywords
+            ).order_by('-priority', 'created_at')
+            
+            # Step 3: If all keywords are used, fetch new keywords from DataForSEO
+            if not unused_keywords_qs.exists():
+                # Check if there are any keywords at all (used or unused)
+                total_keywords = Keyword.objects.filter(domain=domain).count()
+                
+                if total_keywords > 0:
+                    # All existing keywords have been used, fetch new keywords from DataForSEO
+                    print(f"All {total_keywords} keywords have been used for {domain.name}. Fetching new keywords from DataForSEO.")
+                    kw_limit = getattr(settings, 'KEYWORD_EXTRACT_LIMIT', 50)
+                    keywords_from_api = self.dataforseo_client.scrape_target_domain(domain.name, limit=kw_limit)
+                    
+                    if not keywords_from_api:
+                        domain.processing_status = 'COMP'
+                        domain.track_message = 'All keywords have been used. No new keywords found from DataForSEO API.'
+                        domain.tracked_at = timezone.now()
+                        domain.save()
+                        print(f"No new keywords found from DataForSEO API for {domain.name}.")
+                        return
+                    
+                    # Store new unique keywords in database
+                    print(f"Storing {len(keywords_from_api)} new unique keywords for {domain.name}")
+                    self._store_keywords(domain, keywords_from_api)
+                    
+                    # Re-query for unused keywords after fetching new ones
+                    unused_keywords_qs = Keyword.objects.filter(
+                        domain=domain,
+                        auto_generate_prompts=True,
+                        last_used_for_generation__isnull=True  # Only unused keywords
+                    ).order_by('-priority', 'created_at')
+                    
+                    # If still no unused keywords after fetching (shouldn't happen, but safety check)
+                    if not unused_keywords_qs.exists():
+                        domain.processing_status = 'COMP'
+                        domain.track_message = 'All keywords have been used. No unused keywords available after fetching new ones.'
+                        domain.tracked_at = timezone.now()
+                        domain.save()
+                        print(f"No unused keywords available for {domain.name} after fetching new keywords.")
+                        return
+                else:
+                    # No keywords at all (shouldn't happen after Step 1, but safety check)
+                    domain.processing_status = 'COMP'
+                    domain.track_message = 'No keywords available for prompt generation.'
+                    domain.tracked_at = timezone.now()
+                    domain.save()
+                    print(f"No keywords available for {domain.name}.")
+                    return
+            
+            # Step 4: Use only unused, unique keywords for prompt generation
+            keywords = list(unused_keywords_qs.values_list('keyword', flat=True))
+            keyword_ids_to_update = list(unused_keywords_qs.values_list('id', flat=True))
+            print(f"Using {len(keywords)} unused keywords for prompt generation for {domain.name}")
+            
+            # Step 5: Generate prompts using ChatGPT
             print(f"Generating prompts for {domain.name}")
             prompts = self.chatgpt_client.generate_prompts_from_keywords(keywords, domain.name)
 
@@ -151,7 +201,7 @@ class DomainProcessor:
                 domain.save()
                 return
             
-            # Step 4: Group prompts using SentenceTransformer-based NLP
+            # Step 6: Group prompts using SentenceTransformer-based NLP
             print(f"Grouping prompts for {domain.name}")
             grouped_prompts = self._group_prompts_with_sentence_transformers(prompts)
             
@@ -162,21 +212,24 @@ class DomainProcessor:
                 domain.save()
                 return
             
-            # Step 5: Store prompts and groups in database
+            # Step 7: Store prompts and groups in database
             print(f"Storing {len(grouped_prompts)} prompt groups for {domain.name}")
             self._store_prompt_groups(domain, grouped_prompts)
             
-            # Step 6: Update last_used_for_generation for keywords that were used
+            # Step 8: Mark keywords as used after successful prompt generation
+            # This prevents reuse of keywords in the next cycle
+            # Set auto_generate_prompts=False and update last_used_for_generation
             if keyword_ids_to_update:
                 try:
                     updated_count = Keyword.objects.filter(id__in=keyword_ids_to_update).update(
-                        last_used_for_generation=timezone.now()
+                        last_used_for_generation=timezone.now(),
+                        auto_generate_prompts=False  # Disable auto-generation after usage
                     )
-                    print(f"Updated last_used_for_generation for {updated_count} keywords")
+                    print(f"Marked {updated_count} keywords as used (set auto_generate_prompts=False and updated last_used_for_generation)")
                 except Exception as update_error:
-                    print(f"Error updating last_used_for_generation: {str(update_error)}")
+                    print(f"Error updating keyword usage status: {str(update_error)}")
             
-            # Step 7: Update domain status to completed
+            # Step 9: Update domain status to completed
             domain.processing_status = 'COMP'
             domain.track_message = f'Successfully processed {len(keywords)} keywords and {len(grouped_prompts)} prompt groups'
             domain.tracked_at = timezone.now()
@@ -202,9 +255,11 @@ class DomainProcessor:
     
     def _store_keywords(self, domain: Domain, keywords: List[str]):
         """
-        Store keywords in the database
+        Store unique keywords in the database (per domain).
+        Uses get_or_create to ensure uniqueness - same keyword won't be stored twice for the same domain.
         """
         with transaction.atomic():
+            created_count = 0
             for keyword_text in keywords:
                 keyword, created = Keyword.objects.get_or_create(
                     keyword=keyword_text,
@@ -212,10 +267,14 @@ class DomainProcessor:
                     defaults={
                         'keyword': keyword_text,
                         'domain': domain,
+                        'auto_generate_prompts': True,  # Enable auto-generation by default
+                        'priority': 0,  # Default priority
                     }
                 )
                 if created:
-                    print(f"Created keyword: {keyword_text}")
+                    created_count += 1
+                    print(f"Created unique keyword: {keyword_text}")
+            print(f"Stored {created_count} new unique keywords (out of {len(keywords)} total) for domain {domain.name}")
     
     def _store_prompt_groups(self, domain: Domain, grouped_prompts: List[Dict[str, Any]]):
         """
@@ -239,29 +298,9 @@ class DomainProcessor:
                     average_position=0.00
                 )
                 
-                # Create initial SentimentAnalytics record for this theme
-                if theme:
-                    # Use update_or_create to avoid duplicates and ensure we use snapshot_date
-                    today = date.today()
-                    SentimentAnalytics.objects.update_or_create(
-                        domain=domain,
-                        theme=theme,
-                        platform=None,  # Overall aggregation
-                        snapshot_date=today,
-                        period_type='daily',
-                        defaults={
-                            'positive_percentage': 0.0,
-                            'neutral_percentage': 0.0,
-                            'negative_percentage': 0.0,
-                            'mention_count': 0,
-                            'mentions': 0,
-                            'citations': 0,
-                            'visibility_score': 0.00,
-                            'sentiment_score': 0.00,
-                            'average_position': 0.00
-                        }
-                    )
-                    print(f"Created/updated SentimentAnalytics for theme: {theme}")
+                # NOTE: We no longer create initial SentimentAnalytics records with platform=None
+                # SentimentAnalytics records are only created with valid platform names
+                # when prompt analytics are processed
                 
                 # Create primary prompts (limit to 1) and convert the rest to secondary
                 primary_prompts = group_data.get('primary_prompts', [])

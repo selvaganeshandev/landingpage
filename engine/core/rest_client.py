@@ -112,4 +112,5 @@ class DataForSEOClient:
             print(f"DataForSEO API Error. Code: {response.get('status_code', 'Unknown')} "
                   f"Message: {response.get('status_message', 'Unknown error')}")
         
+        print(target_domain_keywords)
         return target_domain_keywords

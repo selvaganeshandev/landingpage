@@ -51,23 +51,60 @@ export const DomainSelector = () => {
     loadDomains();
   }, [loadDomains, clearDomainStore]);
 
-  // After domains load, restore last selected domain for this user
+  // After domains load, restore last selected domain from server
   useEffect(() => {
     if (!user) return;
     if (domains.length === 0) return;
-    const key = `selected_domain_user_${user.id}`;
-    const savedId = parseInt(localStorage.getItem(key) || '', 10);
-    const exists = domains.find(d => d.id === savedId);
-    if (exists) {
-      setSelectedDomain(exists);
-    } else {
-      // if current selected not in list, pick first
-      if (!selectedDomain || !domains.find(d => d.id === selectedDomain.id)) {
-        setSelectedDomain(domains[0]);
-        localStorage.setItem(key, String(domains[0].id));
+    
+    const restoreDomain = async () => {
+      // Load from server (primary source of truth)
+      const { loadActiveDomainFromServer, updateActiveDomain } = await import('@/utils/activeDomain');
+      const serverActiveDomainId = await loadActiveDomainFromServer(user.id);
+      
+      if (serverActiveDomainId) {
+        const domainId = parseInt(serverActiveDomainId, 10);
+        const exists = domains.find(d => d.id === domainId);
+        if (exists) {
+          // Sync both systems: set Zustand store and verify active_domain_id matches
+          setSelectedDomain(exists);
+          // Verify active_domain_id is in sync
+          const currentActiveId = localStorage.getItem(`active_domain_id:${user.id}`);
+          if (currentActiveId !== String(domainId)) {
+            console.log(`[DomainSelector] Syncing active_domain_id with server value ${domainId}`);
+            await updateActiveDomain(user.id, domainId, exists);
+          }
+          return;
+        }
       }
-    }
-  }, [domains, user, setSelectedDomain]);
+      
+      // If server has no active domain or domain doesn't exist, use first domain
+      if (!serverActiveDomainId || serverActiveDomainId === null || serverActiveDomainId === '') {
+        console.log(`[DomainSelector] No active domain found for user ${user.id}, setting first domain`);
+        const firstDomain = domains[0];
+        if (firstDomain) {
+          // Update both systems: Zustand store and server
+          setSelectedDomain(firstDomain);
+          const success = await updateActiveDomain(user.id, firstDomain.id, firstDomain);
+          if (success) {
+            console.log(`[DomainSelector] Successfully set first domain ${firstDomain.id} as active for user ${user.id}`);
+          } else {
+            console.warn(`[DomainSelector] Failed to set first domain ${firstDomain.id} as active for user ${user.id}`);
+          }
+        }
+      } else if (!selectedDomain || !domains.find(d => d.id === selectedDomain.id)) {
+        // Server has active domain but it doesn't exist in current domain list
+        const firstDomain = domains[0];
+        if (firstDomain) {
+          console.log(`[DomainSelector] Active domain ${serverActiveDomainId} not found in domain list, using first domain`);
+          setSelectedDomain(firstDomain);
+          // Update server with first domain
+          await updateActiveDomain(user.id, firstDomain.id, firstDomain);
+        }
+      }
+    };
+    
+    void restoreDomain();
+  }, [domains, user, setSelectedDomain, selectedDomain]);
 
   // Show error if domain loading failed
   useEffect(() => {
@@ -80,13 +117,34 @@ export const DomainSelector = () => {
     }
   }, [error, toast]);
 
-  const handleDomainSelect = (domainId: number) => {
+  const handleDomainSelect = async (domainId: number) => {
     const domain = domains.find(d => d.id === domainId);
     if (domain) {
-      setSelectedDomain(domain);
       setOpen(false);
       if (user) {
-        localStorage.setItem(`selected_domain_user_${user.id}`, String(domain.id));
+        // Update both Zustand store and server/localStorage in one call
+        // This ensures both systems stay in sync
+        const { updateActiveDomain } = await import('@/utils/activeDomain');
+        const success = await updateActiveDomain(user.id, domainId, domain);
+        if (success) {
+          // Only update Zustand store if server sync succeeded
+          // (updateActiveDomain already updates it, but this ensures it's set)
+          setSelectedDomain(domain);
+        } else {
+          // If server sync failed, revert to server value
+          const { loadActiveDomainFromServer } = await import('@/utils/activeDomain');
+          const serverActiveDomainId = await loadActiveDomainFromServer(user.id);
+          if (serverActiveDomainId) {
+            const serverDomainId = parseInt(serverActiveDomainId, 10);
+            const serverDomain = domains.find(d => d.id === serverDomainId);
+            if (serverDomain) {
+              setSelectedDomain(serverDomain);
+            }
+          }
+        }
+      } else {
+        // If no user, just update Zustand store (shouldn't happen in normal flow)
+        setSelectedDomain(domain);
       }
     }
   };

@@ -4,7 +4,7 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 from .auth_views import (
-    login, profile, profile_update, logout,
+    login, profile, profile_update, update_active_domain, logout,
     send_invitation, get_invitation_details, accept_invitation, 
     assign_permissions, check_permissions,
     list_permissions, list_user_permissions, update_permission, 
@@ -19,6 +19,7 @@ urlpatterns = [
     path('login/', login, name='login'),
     path('profile/', profile, name='profile'),
     path('profile/update/', profile_update, name='profile_update'),
+    path('active-domain/', update_active_domain, name='update_active_domain'),
     path('logout/', logout, name='logout'),
     
     # Password Reset APIs

@@ -14,7 +14,7 @@ export interface CompetitorComparisonProps {
 }
 
 export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonProps) => {
-  const list: Competitor[] = competitors.length ? competitors.map((c, i) => ({
+  const list: Competitor[] = competitors && competitors.length > 0 ? competitors.map((c, i) => ({
     name: c.name || `Competitor ${i+1}`,
     url: c.url || '',
     mentions: c.mentions ?? 0,
@@ -25,7 +25,12 @@ export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonP
     <Card className="p-6 h-full flex flex-col border border-border">
       <h3 className="text-lg font-semibold mb-4">Share of Voice</h3>
       <div className="space-y-4 flex-1">
-        {list.map((competitor, index) => (
+        {list.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-muted-foreground text-center">No competitors found</p>
+          </div>
+        ) : (
+          list.map((competitor, index) => (
           <div key={competitor.name} className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -55,7 +60,8 @@ export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonP
               <p className="text-xs text-muted-foreground text-right">{competitor.shareOfVoice}% share of voice</p>
             </div>
           </div>
-        ))}
+        ))
+        )}
       </div>
     </Card>
   );

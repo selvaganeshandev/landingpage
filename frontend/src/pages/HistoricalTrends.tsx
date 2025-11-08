@@ -36,7 +36,7 @@ import {
 import { useEffect, useState, useMemo } from "react";
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { loadActiveDomain } from "@/utils/activeDomain";
+import { getActiveDomainId } from "@/utils/activeDomain";
 
 const HistoricalTrends = () => {
   const { toast } = useToast();
@@ -48,8 +48,9 @@ const HistoricalTrends = () => {
 
   useEffect(() => {
     if (!user) return;
-    const id = loadActiveDomain(user.id);
-    if (id) setDomainId(String(id));
+    // Use unified helper to get active domain ID (from localStorage, synced with server)
+    const id = getActiveDomainId(user);
+    if (id) setDomainId(id);
   }, [user]);
 
   useEffect(() => {

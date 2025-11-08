@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 import uuid
 
 
@@ -46,6 +47,11 @@ class Account(AbstractUser):
         related_name='accounts',
         help_text="Organisation this account belongs to"
     )
+    active_domain_id = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="ID of the currently active domain for this user"
+    )
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the account was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the account was last modified")
     
@@ -61,7 +67,19 @@ class Account(AbstractUser):
         indexes = [
             models.Index(fields=['organisation', 'role', 'is_active']),
             models.Index(fields=['organisation', 'created_at']),
+            models.Index(fields=['active_domain_id']),
         ]
+    
+    def clean(self):
+        """Validate that active_domain_id belongs to user's organisation if set"""
+        if self.active_domain_id:
+            from domains.models import Domain
+            try:
+                domain = Domain.objects.get(id=self.active_domain_id)
+                if domain.organisation_id != self.organisation_id:
+                    raise ValidationError("Active domain must belong to the user's organisation")
+            except Domain.DoesNotExist:
+                raise ValidationError("Active domain does not exist")
     
     def __str__(self):
         return f"{self.email} ({self.role})"

@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { loadActiveDomain } from "@/utils/activeDomain";
+import { loadActiveDomain, loadActiveDomainFromServer } from "@/utils/activeDomain";
 import { useDomainStore } from "@/stores/domainStore";
 
 const Dashboard = () => {
@@ -29,13 +29,21 @@ const Dashboard = () => {
     ? domainNameRaw.charAt(0).toUpperCase() + domainNameRaw.slice(1)
     : "Domain name";
 
-  // Check for domain_id on mount and when user changes
+  // Sync domain_id from server on mount and when user changes
   useEffect(() => {
     if (!user) return;
-    const stored = loadActiveDomain(user.id) || '';
-    if (stored !== domainId) {
-      setDomainId(stored);
-    }
+    
+    const syncDomain = async () => {
+      // Load from server (primary source of truth)
+      const serverActiveDomain = await loadActiveDomainFromServer(user.id);
+      const serverDomainId = serverActiveDomain || '';
+      
+      if (serverDomainId !== domainId) {
+        setDomainId(serverDomainId);
+      }
+    };
+    
+    void syncDomain();
   }, [user, domainId]);
 
   const handleExportReport = () => {
@@ -51,7 +59,10 @@ const Dashboard = () => {
 
   async function fetchSummary() {
     if (!user) return;
-    const currentDomainId = loadActiveDomain(user.id) || domainId;
+    
+    // Try to get from server first (primary source of truth)
+    const serverActiveDomain = await loadActiveDomainFromServer(user.id);
+    const currentDomainId = serverActiveDomain || domainId || loadActiveDomain(user.id) || '';
     
     if (!currentDomainId) {
       console.warn('Dashboard: No active domain for user', user.id);
@@ -113,29 +124,29 @@ const Dashboard = () => {
         <MetricCard
           title="Total Mentions"
           value={summary?.metrics?.total_mentions ?? "-"}
-          change={15.2}
-          trend="up"
+          change={summary?.metrics?.mentions_change ?? undefined}
+          trend={summary?.metrics?.mentions_change && summary.metrics.mentions_change > 0 ? "up" : "down"}
           icon={<Eye className="h-6 w-6" />}
         />
         <MetricCard
           title="Total Citations"
           value={summary?.metrics?.total_citations ?? "-"}
-          change={23.4}
-          trend="up"
+          change={summary?.metrics?.citations_change ?? undefined}
+          trend={summary?.metrics?.citations_change && summary.metrics.citations_change > 0 ? "up" : "down"}
           icon={<Link2 className="h-6 w-6" />}
         />
         <MetricCard
           title="Visibility Score"
           value={summary?.metrics?.visibility_score ?? "-"}
-          change={8.5}
-          trend="up"
+          change={summary?.metrics?.visibility_change ?? undefined}
+          trend={summary?.metrics?.visibility_change && summary.metrics.visibility_change > 0 ? "up" : "down"}
           icon={<Target className="h-6 w-6" />}
         />
         <MetricCard
           title="Avg Position"
           value={summary?.metrics?.avg_position ?? "-"}
-          change={-12.3}
-          trend="up"
+          change={summary?.metrics?.position_change ?? undefined}
+          trend={summary?.metrics?.position_change && summary.metrics.position_change < 0 ? "up" : "down"}
           icon={<TrendingUp className="h-6 w-6" />}
         />
         <MetricCard
