@@ -56,7 +56,7 @@ import {
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
 
-const NavGroup = ({ group, location, isSidebarOpen, onItemClick }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void }) => {
+const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void; navigate: any }) => {
   const [submenuOpen, setSubmenuOpen] = useState(false);
 
   // Check if any item in group is active
@@ -68,21 +68,26 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick }: { group: any;
       <div className="flex flex-col">
         <p className="text-xs font-semibold text-muted-foreground px-3 py-2 mt-2">{group.name}</p>
         <div className="max-h-[300px] overflow-y-auto space-y-0.5">
-          {group.items.map((item: any) => {
+          {group.items.map((item: any, idx: number) => {
             const isActive = location.pathname === item.path;
 
             return (
-              <Link
-                key={item.name}
-                to={item.path}
-                onClick={onItemClick}
+              <button
+                key={idx}
+                type="button"
+                onClick={() => {
+                  navigate(item.path);
+                  onItemClick();
+                }}
                 className={cn(
-                  "flex items-center px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground",
-                  isActive && "text-primary"
+                  "w-full flex items-center px-3 py-1.5 text-sm rounded-lg text-left",
+                  isActive
+                    ? "text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                 )}
               >
                 <span className="truncate">{item.name}</span>
-              </Link>
+              </button>
             );
           })}
         </div>
@@ -372,6 +377,7 @@ export const Sidebar = () => {
                 location={location}
                 isSidebarOpen={isOpen}
                 onItemClick={handleItemClick}
+                navigate={navigate}
               />
             </div>
           ))}
