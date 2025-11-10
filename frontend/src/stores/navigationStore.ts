@@ -18,6 +18,8 @@ import {
   AlertTriangle,
   Activity,
   Lightbulb,
+  MessageSquarePlus,
+  Clock,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -32,6 +34,8 @@ export interface NavGroup {
   name: string;
   icon?: any;
   items: NavItem[];
+  separator?: boolean;
+  scrollable?: boolean;
 }
 
 interface NavigationState {
@@ -45,9 +49,15 @@ interface NavigationState {
 
 const allNavGroups: NavGroup[] = [
   {
+    name: "Chat",
+    items: [
+      { name: "New Chat", path: "/chat", icon: MessageSquarePlus, module: MODULES.DASHBOARD },
+    ],
+  },
+  {
     name: "Overview",
     items: [
-      { name: "Dashboard", path: "/", icon: LayoutDashboard, module: MODULES.DASHBOARD },
+      { name: "Insights", path: "/", icon: LayoutDashboard, module: MODULES.DASHBOARD },
     ],
   },
   {
@@ -82,7 +92,6 @@ const allNavGroups: NavGroup[] = [
     icon: Sparkles,
     items: [
       { name: "Multilingual", path: "/multilingual", icon: Globe, module: MODULES.MULTILINGUAL },
-      { name: "AI Copilot", path: "/copilot", icon: Sparkles, module: MODULES.AI_COPILOT },
       { name: "Traffic Attribution", path: "/traffic", icon: Link2, module: MODULES.TRAFFIC_ATTRIBUTION },
       { name: "Misinformation", path: "/misinformation", icon: AlertTriangle, module: MODULES.MISINFORMATION_ALERTS },
     ],
@@ -91,6 +100,28 @@ const allNavGroups: NavGroup[] = [
     name: "Reporting",
     items: [
       { name: "Reports", path: "/reports", icon: FileText, module: MODULES.REPORTS },
+    ],
+  },
+  {
+    name: "Recents",
+    icon: Clock,
+    separator: true,
+    scrollable: true,
+    items: [
+      { name: "CSS to React Native conversion", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "Figma copy as code plugin", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "Expo vs React Native CLI comparison", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "Menu categorization strategy", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "Software architecture and tech stack", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "React Native splash screen integration", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "React Native home page shaking issue", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "Document-based Q&A with local storage", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "API image upload error", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "Professional document formatting", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "Crypto-themed mobile game development", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "Local food delivery app strategy", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "Crypto coin creation website", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
+      { name: "React native bottom space layout", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
     ],
   },
 ];

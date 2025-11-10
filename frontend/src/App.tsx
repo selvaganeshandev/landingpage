@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, ProtectedRoute } from "@/contexts/AuthContext";
 import { SidebarProvider } from "@/contexts/SidebarContext";
 import { Layout } from "./components/Layout";
+import { Chat } from "./pages/Chat";
 import Dashboard from "./pages/Dashboard";
 import Prompts from "./pages/Prompts";
 import PromptDetail from "./pages/PromptDetail";
@@ -56,6 +57,13 @@ const App = () => (
             <Route path="/reset-password/:tokenId" element={<ResetPassword />} />
             <Route path="/accept-invitation/:invitationId" element={<AcceptInvitation />} />
             <Route element={<Layout />}>
+              {/* Chat */}
+              <Route path="/chat" element={
+                <ProtectedRoute requiredPermission={MODULES.DASHBOARD}>
+                  <Chat />
+                </ProtectedRoute>
+              } />
+
               {/* Overview */}
               <Route path="/" element={
                 <ProtectedRoute requiredPermission={MODULES.DASHBOARD}>

@@ -146,6 +146,57 @@ All colors MUST be HSL.
   h1, h2, h3, h4, h5, h6 {
     @apply font-outfit;
   }
+
+  /* Ultra-Thin Modern Scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary) / 0.2) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 1px;
+    height: 1px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.12);
+    border-radius: 100vh;
+    transition: all 0.2s ease;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.3);
+    width: 3px;
+  }
+
+  *::-webkit-scrollbar-thumb:active {
+    background: hsl(var(--primary) / 0.4);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Dark mode scrollbar */
+  .dark * {
+    scrollbar-color: hsl(var(--primary) / 0.3) transparent;
+  }
+
+  .dark *::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.2);
+  }
+
+  .dark *::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.4);
+  }
+
+  .dark *::-webkit-scrollbar-thumb:active {
+    background: hsl(var(--primary) / 0.5);
+  }
 }
 
 @layer utilities {

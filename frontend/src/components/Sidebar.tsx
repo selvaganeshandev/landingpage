@@ -56,11 +56,44 @@ import {
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
 
-const NavGroup = ({ group, location, isOpen, onToggle, isSidebarOpen, onItemClick }: { group: any; location: any; isOpen: boolean; onToggle: () => void; isSidebarOpen: boolean; onItemClick: () => void }) => {
+const NavGroup = ({ group, location, isSidebarOpen, onItemClick }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void }) => {
   const [submenuOpen, setSubmenuOpen] = useState(false);
 
   // Check if any item in group is active
   const hasActiveItem = group.items.some((item: any) => location.pathname === item.path);
+
+  // Special handling for scrollable recent chats
+  if (group.scrollable && isSidebarOpen) {
+    return (
+      <div className="flex flex-col">
+        <p className="text-xs font-semibold text-muted-foreground px-3 py-2 mt-2">{group.name}</p>
+        <div className="max-h-[300px] overflow-y-auto space-y-0.5">
+          {group.items.map((item: any) => {
+            const isActive = location.pathname === item.path;
+
+            return (
+              <Link
+                key={item.name}
+                to={item.path}
+                onClick={onItemClick}
+                className={cn(
+                  "flex items-center px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground",
+                  isActive && "text-primary"
+                )}
+              >
+                <span className="truncate">{item.name}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // Don't show scrollable groups in closed state
+  if (group.scrollable && !isSidebarOpen) {
+    return null;
+  }
 
   // If group has only one item, render it directly
   if (group.items.length === 1) {
@@ -73,129 +106,85 @@ const NavGroup = ({ group, location, isOpen, onToggle, isSidebarOpen, onItemClic
         to={item.path}
         onClick={onItemClick}
         className={cn(
-          "flex items-center transition-all duration-150",
+          "flex items-center",
           isActive
             ? "bg-primary text-primary-foreground"
             : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
           isSidebarOpen
-            ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-            : "rounded-md justify-center aspect-square w-9 h-9 p-0"
+            ? "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+            : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
         )}
-        style={!isSidebarOpen ? { marginLeft: '5px' } : undefined}
         title={!isSidebarOpen ? item.name : undefined}
       >
-        <Icon className={cn("h-4 w-4 flex-shrink-0", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
-        {isSidebarOpen && <span className="transition-opacity duration-150">{item.name}</span>}
+        <Icon className={cn("h-5 w-5 flex-shrink-0", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
+        {isSidebarOpen && <span>{item.name}</span>}
       </Link>
     );
   }
 
   const GroupIcon = (group.icon as any) || LayoutDashboard;
 
-  // When sidebar is closed, show only icon with popover submenu
-  if (!isSidebarOpen) {
-    return (
-      <Popover open={submenuOpen} onOpenChange={setSubmenuOpen}>
-        <PopoverTrigger asChild>
+  // Always use popover for submenus (both open and closed states)
+  return (
+    <Popover open={submenuOpen} onOpenChange={setSubmenuOpen}>
+      <PopoverTrigger asChild>
+        {isSidebarOpen ? (
           <button
             className={cn(
-              "flex items-center justify-center rounded-md transition-all duration-150 aspect-square w-9 h-9 p-0",
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium",
               hasActiveItem
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             )}
-            style={{ marginLeft: '5px' }}
+          >
+            <GroupIcon className={cn("h-5 w-5 flex-shrink-0", hasActiveItem ? "text-primary-foreground" : "text-foreground")} />
+            <span className="flex-1 text-left">{group.name}</span>
+            <ChevronRight className="h-4 w-4 flex-shrink-0" />
+          </button>
+        ) : (
+          <button
+            className={cn(
+              "flex items-center justify-center rounded-md aspect-square w-10 h-10 p-0 mx-auto",
+              hasActiveItem
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            )}
             title={group.name}
           >
-            <GroupIcon className="h-4 w-4 flex-shrink-0" />
+            <GroupIcon className="h-5 w-5 flex-shrink-0" />
           </button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[200px] p-2" side="right" align="start">
-          <div className="space-y-1">
-            <p className="text-xs font-semibold text-muted-foreground px-2 py-1">{group.name}</p>
-            {group.items.map((item: any) => {
-              const Icon = (item.icon as any) || LayoutDashboard;
-              const isActive = location.pathname === item.path;
-
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  onClick={() => {
-                    onItemClick();
-                    setSubmenuOpen(false);
-                  }}
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150",
-                    isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                  )}
-                >
-                  <Icon className={cn("h-3 w-3", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
-                  {item.name}
-                </Link>
-              );
-            })}
-          </div>
-        </PopoverContent>
-      </Popover>
-    );
-  }
-
-  return (
-    <div className="space-y-1">
-      <button
-        onClick={onToggle}
-        className={cn(
-          "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150",
-          hasActiveItem
-            ? "text-primary"
-            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
         )}
-      >
-        <div className="flex items-center gap-3">
-          {GroupIcon && <GroupIcon className="h-4 w-4 text-foreground" />}
-          <span>{group.name}</span>
+      </PopoverTrigger>
+      <PopoverContent className="w-[200px] p-2" side="right" align="start">
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-muted-foreground px-2 py-1">{group.name}</p>
+          {group.items.map((item: any) => {
+            const Icon = (item.icon as any) || LayoutDashboard;
+            const isActive = location.pathname === item.path;
+
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                onClick={() => {
+                  onItemClick();
+                  setSubmenuOpen(false);
+                }}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium",
+                  isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                )}
+              >
+                <Icon className={cn("h-5 w-5", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
+                {item.name}
+              </Link>
+            );
+          })}
         </div>
-        <ChevronRight
-          className={cn(
-            "h-4 w-4 transition-transform duration-150 ease-in-out",
-            isOpen ? "rotate-90" : "rotate-0"
-          )}
-        />
-      </button>
-
-      <div
-        className={cn(
-          "ml-4 space-y-1 overflow-hidden transition-all duration-200 ease-in-out",
-          isOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
-        )}
-      >
-        {group.items.map((item: any) => {
-          const Icon = (item.icon as any) || LayoutDashboard;
-          const isActive = location.pathname === item.path;
-
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              onClick={onItemClick}
-              className={cn(
-                "flex items-center transition-all duration-150",
-                isActive
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                "gap-3 px-3 py-2 rounded-lg text-sm font-medium"
-              )}
-            >
-              <Icon className={cn("h-3 w-3", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
-              {item.name}
-            </Link>
-          );
-        })}
-      </div>
-    </div>
+      </PopoverContent>
+    </Popover>
   );
 };
 
@@ -217,7 +206,6 @@ export const Sidebar = () => {
   }
   const { toast } = useToast();
   const { filteredNavGroups, filterByPermissions } = useNavigationStore();
-  const [openGroupIndex, setOpenGroupIndex] = useState<number | null>(null);
   const { isOpen, toggleSidebar } = useSidebar();
   const { selectedDomain, domains, setSelectedDomain } = useDomainStore();
   const [domainPopoverOpen, setDomainPopoverOpen] = useState(false);
@@ -239,23 +227,8 @@ export const Sidebar = () => {
     }
   }, [user, checkPermission, filterByPermissions]);
 
-  // Auto-open menu group if one of its items is active
-  useEffect(() => {
-    const activeGroupIndex = filteredNavGroups.findIndex((group) =>
-      group.items.some((item: any) => location.pathname === item.path)
-    );
-    if (activeGroupIndex !== -1) {
-      setOpenGroupIndex(activeGroupIndex);
-    }
-  }, [location.pathname, filteredNavGroups]);
-
-  const handleToggleGroup = (index: number) => {
-    setOpenGroupIndex(openGroupIndex === index ? null : index);
-  };
-
   const handleItemClick = () => {
-    // Don't close menu if clicking on a submenu item within an open group
-    // The useEffect above will handle keeping it open if needed
+    // Close any open popovers when clicking on items
   };
 
   const handleLogout = async () => {
@@ -280,7 +253,7 @@ export const Sidebar = () => {
       "bg-card border-r border-border h-screen sticky top-0 overflow-y-auto flex flex-col transition-all duration-150",
       isOpen ? "w-64" : "w-16"
     )}>
-      <div className={cn("border-b border-border transition-all duration-150", isOpen ? "p-6" : "p-2")}>
+      <div className={cn("border-b border-border transition-all duration-150", isOpen ? "px-4 pt-4 pb-3" : "px-3 py-4")}>
         <div className="flex items-center justify-between">
           {isOpen ? (
             <>
@@ -288,19 +261,18 @@ export const Sidebar = () => {
                 <h2 className="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
                   PromptMaxx
                 </h2>
-                <p className="text-xs text-muted-foreground mt-1">AI Visibility & Content Strategy</p>
               </div>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={toggleSidebar}
-                className="h-8 w-8 -mr-2"
+                className="h-8 w-8"
               >
                 <ChevronsLeft className="h-4 w-4" />
               </Button>
             </>
           ) : (
-            <div className="flex flex-col items-center gap-2 w-full px-2 pb-3">
+            <div className="flex flex-col items-center gap-4 w-full">
               <Button
                 variant="ghost"
                 size="icon"
@@ -391,79 +363,76 @@ export const Sidebar = () => {
         )}
       </div>
 
-      <nav className={cn("space-y-2 flex-1", isOpen ? "p-4" : "py-4 px-2")}>
+      <nav className={cn("space-y-1 flex-1", isOpen ? "p-4" : "px-3 py-4")}>
           {filteredNavGroups.map((group, index) => (
-            <NavGroup
-              key={index}
-              group={group}
-              location={location}
-              isOpen={openGroupIndex === index}
-              onToggle={() => handleToggleGroup(index)}
-              isSidebarOpen={isOpen}
-              onItemClick={handleItemClick}
-            />
+            <div key={index}>
+              {group.separator && <Separator className="mt-4 mb-0" />}
+              <NavGroup
+                group={group}
+                location={location}
+                isSidebarOpen={isOpen}
+                onItemClick={handleItemClick}
+              />
+            </div>
           ))}
       </nav>
 
-      <div className={cn("border-t border-border mt-auto space-y-2 transition-all duration-150", isOpen ? "p-4" : "py-4 px-2")}>
+      <div className={cn("border-t border-border mt-auto space-y-1 pt-0", isOpen ? "px-4 pb-4" : "px-3 pb-4")}>
           {/* Organization / Profile shortcuts */}
           {user && (
-            <div className="space-y-2">
+            <div className="space-y-1 mt-4">
               {(user.role === 'admin' || user.role === 'super_admin') && (
                 <Link
                   to="/organization-settings"
                   className={cn(
-                    "flex items-center transition-all duration-150",
+                    "flex items-center",
                     location.pathname === "/organization-settings"
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                     isOpen
-                      ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-                      : "rounded-md justify-center aspect-square w-9 h-9 p-0"
+                      ? "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+                      : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
                   )}
-                  style={!isOpen ? { marginLeft: '5px' } : undefined}
                   title={!isOpen ? "Organization" : undefined}
                 >
-                  <Settings className={cn("h-4 w-4 flex-shrink-0", location.pathname === "/organization-settings" ? "text-primary-foreground" : "text-muted-foreground")} />
-                  {isOpen && <span className="transition-opacity duration-150">Organization</span>}
+                  <Settings className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/organization-settings" ? "text-primary-foreground" : "text-muted-foreground")} />
+                  {isOpen && <span>Organization</span>}
                 </Link>
               )}
               {user.role === 'admin' && (
                 <Link
                   to="/profile"
                   className={cn(
-                    "flex items-center transition-all duration-150",
+                    "flex items-center",
                     location.pathname === "/profile"
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                     isOpen
-                      ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-                      : "rounded-md justify-center aspect-square w-9 h-9 p-0"
+                      ? "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+                      : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
                   )}
-                  style={!isOpen ? { marginLeft: '5px' } : undefined}
                   title={!isOpen ? "Profile" : undefined}
                 >
-                  <User className={cn("h-4 w-4 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
-                  {isOpen && <span className="transition-opacity duration-150">Profile</span>}
+                  <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
+                  {isOpen && <span>Profile</span>}
                 </Link>
               )}
               {user.role === 'user' && (
                 <Link
                   to="/profile"
                   className={cn(
-                    "flex items-center transition-all duration-150",
+                    "flex items-center",
                     location.pathname === "/profile"
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                     isOpen
-                      ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-                      : "rounded-md justify-center aspect-square w-9 h-9 p-0"
+                      ? "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+                      : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
                   )}
-                  style={!isOpen ? { marginLeft: '5px' } : undefined}
                   title={!isOpen ? "Profile" : undefined}
                 >
-                  <User className={cn("h-4 w-4 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
-                  {isOpen && <span className="transition-opacity duration-150">Profile</span>}
+                  <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
+                  {isOpen && <span>Profile</span>}
                 </Link>
               )}
             </div>
@@ -472,16 +441,15 @@ export const Sidebar = () => {
           <button
             onClick={handleLogout}
             className={cn(
-              "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-150",
+              "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
               isOpen
-                ? "w-full gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-                : "rounded-md justify-center aspect-square w-9 h-9 p-0"
+                ? "w-full gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+                : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
             )}
-            style={!isOpen ? { marginLeft: '5px' } : undefined}
             title={!isOpen ? "Sign Out" : undefined}
           >
-            <LogOut className="h-4 w-4 flex-shrink-0" />
-            {isOpen && <span className="transition-opacity duration-150">Sign Out</span>}
+            <LogOut className="h-5 w-5 flex-shrink-0" />
+            {isOpen && <span>Sign Out</span>}
           </button>
       </div>
     </aside>

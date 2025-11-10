@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { Sidebar } from "./Sidebar";
-import { FloatingAICopilot } from "./FloatingAICopilot";
 import { PageLoader } from "./PageLoader";
 import { Outlet, useLocation } from "react-router-dom";
 import { useSidebar } from "@/contexts/SidebarContext";
@@ -29,7 +28,6 @@ export const Layout = () => {
       <main className="flex-1 overflow-auto">
         <Outlet />
       </main>
-      <FloatingAICopilot />
     </div>
   );
 };
