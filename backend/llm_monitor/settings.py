@@ -199,6 +199,9 @@ EMAIL_HOST_USER = "appkodes@gmail.com"
 EMAIL_HOST_PASSWORD = "chykvzrenfscmseb"
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
+# OpenAI API Configuration
+OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
+
 # JWT Configuration
 from datetime import timedelta
 

@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,12 +21,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-j-ftjg4gs$tc&hneu1h4pr^qsn1g@$+ttp3s$*^)h*o^2j9sv^'
+SECRET_KEY = config('SECRET_KEY', default='django-insecure-j-ftjg4gs$tc&hneu1h4pr^qsn1g@$+ttp3s$*^)h*o^2j9sv^')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,testserver', cast=lambda v: [s.strip() for s in v.split(',')])
 
 
 # Application definition
@@ -80,11 +81,11 @@ WSGI_APPLICATION = 'llm_monitor_engine.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'llm_monitor',
-        'USER': 'arun',
-        'PASSWORD': 'admin',
-        'HOST': 'localhost',
-        'PORT': '5432',
+        'NAME': config('DB_NAME', default='llm_monitor'),
+        'USER': config('DB_USER', default='arun'),
+        'PASSWORD': config('DB_PASSWORD', default='admin'),
+        'HOST': config('DB_HOST', default='localhost'),
+        'PORT': config('DB_PORT', default='5432'),
     }
 }
 
@@ -111,9 +112,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = config('LANGUAGE_CODE', default='en-us')
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = config('TIME_ZONE', default='UTC')
 
 USE_I18N = True
 
@@ -141,7 +142,7 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
     ],
-    'PAGE_SIZE': 20,
+    'PAGE_SIZE': config('REST_FRAMEWORK_PAGE_SIZE', default=20, cast=int),
 }
 
 # CORS settings
@@ -149,41 +150,44 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 # Domain processing settings
-MAX_CONCURRENT_DOMAINS = 10
-MAX_CONCURRENT_PROMPT_ANALYTICS = 10
+MAX_CONCURRENT_DOMAINS = config('MAX_CONCURRENT_DOMAINS', default=10, cast=int)
+MAX_CONCURRENT_PROMPT_ANALYTICS = config('MAX_CONCURRENT_PROMPT_ANALYTICS', default=10, cast=int)
 
 # Prompt engine knobs
 # How many keywords to fetch from DataForSEO per domain
-KEYWORD_EXTRACT_LIMIT = 5
+KEYWORD_EXTRACT_LIMIT = config('KEYWORD_EXTRACT_LIMIT', default=5, cast=int)
 # Minimum number of distinct prompts to produce overall
-PROMPT_MIN_COUNT = 2
-DATAFORSEO_USERNAME = "abulkalam.serpple@gmail.com"
-DATAFORSEO_PASSWORD = "e816abfef0ba5fa5"
-OPENAI_API_KEY = "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"
-GEMINI_API_KEY = "AIzaSyD0tOPBuYGk4NEIdCEMKFjszkQWLBiyvAY"
-PERPLEXITY_API_KEY = "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"
+PROMPT_MIN_COUNT = config('PROMPT_MIN_COUNT', default=2, cast=int)
+DATAFORSEO_USERNAME = config('DATAFORSEO_USERNAME', default='')
+DATAFORSEO_PASSWORD = config('DATAFORSEO_PASSWORD', default='')
+OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
+GEMINI_API_KEY = config('GEMINI_API_KEY', default=None)
+PERPLEXITY_API_KEY = config('PERPLEXITY_API_KEY', default=None)
+
+# Platform tracking settings (lowercase keys, converted to proper case in code)
+ENABLED_PLATFORMS = config('ENABLED_PLATFORMS', default='chatgpt', cast=lambda v: [p.strip() for p in v.split(',')])
 
 # Celery settings (for background processing)
 # Use a dedicated Redis DB index for engine tasks (e.g., DB 5)
-CELERY_BROKER_URL = 'redis://localhost:6379/5'
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/5'
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/5')
+CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/5')
+CELERY_ACCEPT_CONTENT = [config('CELERY_ACCEPT_CONTENT', default='json')]
+CELERY_TASK_SERIALIZER = config('CELERY_TASK_SERIALIZER', default='json')
+CELERY_RESULT_SERIALIZER = config('CELERY_RESULT_SERIALIZER', default='json')
 CELERY_TIMEZONE = TIME_ZONE
 
 # Auto-expire task results after 1 day (reduce Redis usage); set to None if not needed
 from datetime import timedelta
-CELERY_RESULT_EXPIRES = timedelta(days=1)
+CELERY_RESULT_EXPIRES = timedelta(days=config('CELERY_RESULT_EXPIRES_DAYS', default=1, cast=int))
 
 # Celery Beat schedule: tick every 15 seconds to dispatch domain processing
 CELERY_BEAT_SCHEDULE = {
     'domain-scheduler-tick-every-15s': {
         'task': 'core.processing_tasks.scheduler_tick',
-        'schedule': 15.0,
+        'schedule': config('CELERY_BEAT_SCHEDULE_DOMAIN', default=15.0, cast=float),
     },
     'prompt-analytics-scheduler-every-15s': {
         'task': 'core.processing_tasks.process_prompt_analytics_scheduler',
-        'schedule': 15.0,
+        'schedule': config('CELERY_BEAT_SCHEDULE_PROMPT_ANALYTICS', default=15.0, cast=float),
     },
 }

@@ -18,6 +18,7 @@ urlpatterns = [
     # Prompt Groups endpoints
     path('groups/', views.prompt_groups_list, name='prompt_groups_list'),
     path('groups/<int:group_id>/', views.prompt_group_detail, name='prompt_group_detail'),
+    path('groups/generate-variants/', views.generate_prompt_variants, name='generate_prompt_variants'),
     
     # Prompts endpoints
     path('prompts/', views.prompts_list, name='prompts_list'),

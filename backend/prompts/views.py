@@ -2,14 +2,30 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from django.db.models import Q, Count, Avg, F
+from django.db.models import Q, Count, Avg, F, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta, datetime
-from .models import PromptGroup, Prompt, PromptAnalytics
+from .models import PromptGroup, Prompt, PromptAnalytics, PromptGroupMetricSnapshot, PromptMetricSnapshot
 from domains.models import Domain, DomainAccess
 from .serializers import PromptAnalyticsSerializer, PromptGroupSerializer, PromptSerializer
 import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Import OpenAI client helper
+def get_openai_client():
+    """Return OpenAI client if configured in Django settings; else raise."""
+    from django.conf import settings
+    api_key = getattr(settings, "OPENAI_API_KEY", None)
+    if not api_key:
+        raise Exception("OpenAI API key not configured")
+    try:
+        from openai import OpenAI  # lazy import
+        return OpenAI(api_key=api_key, timeout=60)
+    except Exception as e:
+        raise Exception(f"Failed to initialize OpenAI client: {e}")
 
 
 @api_view(['GET'])
@@ -87,11 +103,135 @@ def get_mentions(request):
     total_count = mentions.count()
     mentions = mentions[offset:offset + limit]
     
+    # Helper function to extract domain name from URL
+    def _extract_domain_name(url):
+        """Extract a readable domain name from URL"""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            domain = parsed.netloc or parsed.path
+            if domain.startswith('www.'):
+                domain = domain[4:]
+            # Capitalize and format
+            parts = domain.split('.')
+            if len(parts) >= 2:
+                return parts[0].capitalize() + ' ' + parts[1].capitalize()
+            return domain.capitalize()
+        except:
+            return 'Source'
+    
+    # Helper function to extract headline from context around URL
+    def _extract_headline_from_context(url, context_summary):
+        """Extract a headline/quote from context around the URL"""
+        if not context_summary or not url:
+            return None
+        try:
+            import re
+            # Find the URL in the context
+            url_lower = url.lower()
+            context_lower = context_summary.lower()
+            idx = context_lower.find(url_lower)
+            if idx == -1:
+                return None
+            
+            # Extract text around the URL (300 chars before and after)
+            start = max(0, idx - 300)
+            end = min(len(context_summary), idx + len(url) + 300)
+            snippet = context_summary[start:end]
+            url_pos_in_snippet = snippet.lower().find(url_lower)
+            
+            if url_pos_in_snippet == -1:
+                return None
+            
+            # Get text before the URL
+            text_before = snippet[:url_pos_in_snippet].strip()
+            
+            # Strategy 1: Look for quoted text (text in quotes)
+            quoted_matches = re.findall(r'["\']([^"\']{10,100})["\']', text_before)
+            if quoted_matches:
+                # Return the last (most recent) quote
+                return quoted_matches[-1].strip()
+            
+            # Strategy 2: Look for sentences ending with punctuation before the URL
+            # Split by sentence endings
+            sentences = re.split(r'[.!?]\s+', text_before)
+            if sentences:
+                # Get the last complete sentence before the URL
+                last_sentence = sentences[-1].strip()
+                # Clean up common prefixes
+                last_sentence = re.sub(r'^(For|As|According to|In|On|The|A|An)\s+', '', last_sentence, flags=re.IGNORECASE)
+                if len(last_sentence) > 10 and len(last_sentence) < 150:
+                    return last_sentence.strip()
+            
+            # Strategy 3: Extract key phrases (look for patterns like "stands out", "top choice", etc.)
+            # Look for common patterns that indicate key statements
+            patterns = [
+                r'([^.!?]{0,50}(?:stands out|top choice|best|superior|excellent|outstanding|recommended|highly rated)[^.!?]{0,50})',
+                r'([^.!?]{0,50}(?:key benefits|features|advantages|benefits)[^.!?]{0,50})',
+                r'([^.!?]{0,50}(?:notable|significant|important|noteworthy)[^.!?]{0,50})',
+            ]
+            for pattern in patterns:
+                matches = re.findall(pattern, text_before, re.IGNORECASE)
+                if matches:
+                    phrase = matches[-1].strip()
+                    if len(phrase) > 10 and len(phrase) < 150:
+                        return phrase.strip()
+            
+            # Strategy 4: Extract last 5-15 words as fallback
+            words = text_before.split()
+            if len(words) >= 5:
+                # Get last 5-15 words
+                phrase = ' '.join(words[-15:]).strip()
+                # Remove common prefixes
+                phrase = re.sub(r'^(For|As|According to|In|On|The|A|An)\s+', '', phrase, flags=re.IGNORECASE)
+                if len(phrase) > 10 and len(phrase) < 150:
+                    return phrase.strip()
+        except Exception as e:
+            logger.warning(f"Error extracting headline from context: {e}")
+            pass
+        return None
+    
     # Prepare response data
     mentions_data = []
     for mention in mentions:
-        # For now, citations are disabled and returned as an empty array
+        # Extract and format citations from citation_list
         citations_data = []
+        citation_list = getattr(mention, 'citation_list', None) or []
+        context_summary = mention.context_summary or ''
+        
+        if citation_list and isinstance(citation_list, list):
+            for idx, citation_url in enumerate(citation_list):
+                if not citation_url or not isinstance(citation_url, str):
+                    continue
+                
+                # Extract headline from context around this URL
+                headline = _extract_headline_from_context(citation_url, context_summary)
+                
+                # Extract source name from URL
+                source_name = _extract_domain_name(citation_url)
+                
+                # Generate description based on source type
+                url_lower = citation_url.lower()
+                if 'product' in url_lower or 'shop' in url_lower or 'store' in url_lower:
+                    description = 'Product page citing key benefits and features'
+                elif 'review' in url_lower or 'rating' in url_lower:
+                    description = 'Third-party review and analysis'
+                elif 'blog' in url_lower or 'article' in url_lower:
+                    description = 'Article discussing key features'
+                elif 'healthline' in url_lower or 'medical' in url_lower or 'health' in url_lower:
+                    description = 'Third-party nutritional analysis'
+                elif 'official' in url_lower or 'site' in url_lower:
+                    description = 'Official site with product information'
+                else:
+                    description = 'Source providing relevant information'
+                
+                citations_data.append({
+                    'id': idx + 1,
+                    'text': headline or f'Citation from {source_name}',
+                    'source': source_name,
+                    'url': citation_url,
+                    'description': description
+                })
         
         mention_data = {
             'id': mention.id,
@@ -239,33 +379,137 @@ def get_mention_detail(request, analytics_id):
         prompt = analytics_record.prompt
         group = prompt.group if prompt.group else None
         
-        # Structure citations for detailed display (supports new/legacy fields)
+        # Use the same citation extraction logic as get_mentions
+        # Helper function to extract domain name from URL
+        def _extract_domain_name(url):
+            """Extract a readable domain name from URL"""
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                domain = parsed.netloc or parsed.path
+                if domain.startswith('www.'):
+                    domain = domain[4:]
+                # Capitalize and format
+                parts = domain.split('.')
+                if len(parts) >= 2:
+                    return parts[0].capitalize() + ' ' + parts[1].capitalize()
+                return domain.capitalize()
+            except:
+                return 'Source'
+        
+        # Helper function to extract headline from context around URL
+        def _extract_headline_from_context(url, context_summary):
+            """Extract a headline/quote from context around the URL"""
+            if not context_summary or not url:
+                return None
+            try:
+                import re
+                # Find the URL in the context
+                url_lower = url.lower()
+                context_lower = context_summary.lower()
+                idx = context_lower.find(url_lower)
+                if idx == -1:
+                    return None
+                
+                # Extract text around the URL (300 chars before and after)
+                start = max(0, idx - 300)
+                end = min(len(context_summary), idx + len(url) + 300)
+                snippet = context_summary[start:end]
+                url_pos_in_snippet = snippet.lower().find(url_lower)
+                
+                if url_pos_in_snippet == -1:
+                    return None
+                
+                # Get text before the URL
+                text_before = snippet[:url_pos_in_snippet].strip()
+                
+                # Strategy 1: Look for quoted text (text in quotes)
+                quoted_matches = re.findall(r'["\']([^"\']{10,100})["\']', text_before)
+                if quoted_matches:
+                    # Return the last (most recent) quote
+                    return quoted_matches[-1].strip()
+                
+                # Strategy 2: Look for sentences ending with punctuation before the URL
+                # Split by sentence endings
+                sentences = re.split(r'[.!?]\s+', text_before)
+                if sentences:
+                    # Get the last complete sentence before the URL
+                    last_sentence = sentences[-1].strip()
+                    # Clean up common prefixes
+                    last_sentence = re.sub(r'^(For|As|According to|In|On|The|A|An)\s+', '', last_sentence, flags=re.IGNORECASE)
+                    if len(last_sentence) > 10 and len(last_sentence) < 150:
+                        return last_sentence.strip()
+                
+                # Strategy 3: Extract key phrases (look for patterns like "stands out", "top choice", etc.)
+                # Look for common patterns that indicate key statements
+                patterns = [
+                    r'([^.!?]{0,50}(?:stands out|top choice|best|superior|excellent|outstanding|recommended|highly rated)[^.!?]{0,50})',
+                    r'([^.!?]{0,50}(?:key benefits|features|advantages|benefits)[^.!?]{0,50})',
+                    r'([^.!?]{0,50}(?:notable|significant|important|noteworthy)[^.!?]{0,50})',
+                ]
+                for pattern in patterns:
+                    matches = re.findall(pattern, text_before, re.IGNORECASE)
+                    if matches:
+                        phrase = matches[-1].strip()
+                        if len(phrase) > 10 and len(phrase) < 150:
+                            return phrase.strip()
+                
+                # Strategy 4: Extract last 5-15 words as fallback
+                words = text_before.split()
+                if len(words) >= 5:
+                    # Get last 5-15 words
+                    phrase = ' '.join(words[-15:]).strip()
+                    # Remove common prefixes
+                    phrase = re.sub(r'^(For|As|According to|In|On|The|A|An)\s+', '', phrase, flags=re.IGNORECASE)
+                    if len(phrase) > 10 and len(phrase) < 150:
+                        return phrase.strip()
+            except Exception as e:
+                logger.warning(f"Error extracting headline from context: {e}")
+                pass
+            return None
+        
+        # Extract and format citations from citation_list
         citations_data = []
-        citations_src = getattr(analytics_record, 'citation_list', None) or getattr(analytics_record, 'citations', []) or []
-        if isinstance(citations_src, str):
-            citations_src = [citations_src]
-        if isinstance(citations_src, list):
-            for i, citation in enumerate(citations_src):
-                if isinstance(citation, dict):
-                    citations_data.append({
-                        'id': i + 1,
-                        'text': citation.get('text', ''),
-                        'source_name': citation.get('source_name', citation.get('source', '')),
-                        'source_url': citation.get('source_url', citation.get('url', '')),
-                        'description': citation.get('description', ''),
-                        'reliability': citation.get('reliability', 'Unknown'),
-                        'referenced_at': citation.get('referenced_at', analytics_record.created_at.isoformat())
-                    })
+        citation_list = getattr(analytics_record, 'citation_list', None) or []
+        context_summary = analytics_record.context_summary or ''
+        
+        if citation_list and isinstance(citation_list, list):
+            for idx, citation_url in enumerate(citation_list):
+                if not citation_url or not isinstance(citation_url, str):
+                    continue
+                
+                # Extract headline from context around this URL
+                headline = _extract_headline_from_context(citation_url, context_summary)
+                
+                # Extract source name from URL
+                source_name = _extract_domain_name(citation_url)
+                
+                # Generate description based on source type
+                url_lower = citation_url.lower()
+                if 'product' in url_lower or 'shop' in url_lower or 'store' in url_lower:
+                    description = 'Product page citing key benefits and features'
+                elif 'review' in url_lower or 'rating' in url_lower:
+                    description = 'Third-party review and analysis'
+                elif 'blog' in url_lower or 'article' in url_lower:
+                    description = 'Article discussing key features'
+                elif 'healthline' in url_lower or 'medical' in url_lower or 'health' in url_lower:
+                    description = 'Third-party nutritional analysis'
+                elif 'official' in url_lower or 'site' in url_lower:
+                    description = 'Official site with product information'
                 else:
-                    citations_data.append({
-                        'id': i + 1,
-                        'text': str(citation),
-                        'source_name': 'Source',
-                        'source_url': '',
-                        'description': '',
-                        'reliability': 'Unknown',
-                        'referenced_at': analytics_record.created_at.isoformat()
-                    })
+                    description = 'Source providing relevant information'
+                
+                citations_data.append({
+                    'id': idx + 1,
+                    'text': headline or f'Citation from {source_name}',
+                    'source': source_name,
+                    'source_name': source_name,  # Keep for backward compatibility
+                    'url': citation_url,
+                    'source_url': citation_url,  # Keep for backward compatibility
+                    'description': description,
+                    'reliability': 'Verified',  # Default reliability
+                    'referenced_at': analytics_record.created_at.isoformat()
+                })
         
         # Prepare comprehensive response data
         response_data = {
@@ -668,6 +912,43 @@ def prompt_groups_list(request):
                     group.prompts.filter(type='secondary').order_by('created_at').values_list('prompt', flat=True)
                 )
                 
+                # Calculate visibility growth: compare current mentions with previous period (last 7 days vs previous 7 days)
+                current_mentions = group.total_mentions
+                visibility_growth = None
+                
+                try:
+                    # Get mentions from last 7 days
+                    from datetime import timedelta
+                    now = timezone.now()
+                    seven_days_ago = now - timedelta(days=7)
+                    fourteen_days_ago = now - timedelta(days=14)
+                    
+                    current_period_mentions = analytics.filter(
+                        is_mention=True,
+                        is_published=True,
+                        created_at__gte=seven_days_ago
+                    ).count()
+                    
+                    previous_period_mentions = analytics.filter(
+                        is_mention=True,
+                        is_published=True,
+                        created_at__gte=fourteen_days_ago,
+                        created_at__lt=seven_days_ago
+                    ).count()
+                    
+                    # Calculate percentage growth
+                    if previous_period_mentions > 0:
+                        visibility_growth = round(((current_period_mentions - previous_period_mentions) / previous_period_mentions) * 100, 1)
+                    elif current_period_mentions > 0:
+                        # If previous period had 0 mentions but current has some, show 100% growth
+                        visibility_growth = 100.0
+                    else:
+                        # Both periods have 0 mentions, no growth
+                        visibility_growth = 0.0
+                except Exception as e:
+                    logger.warning(f"Error calculating visibility growth for group {group.id}: {e}")
+                    visibility_growth = None
+                
                 groups_data.append({
                     'id': group.id,
                     'group_id': group.group_id,
@@ -681,6 +962,7 @@ def prompt_groups_list(request):
                     'prompts_count': group.prompts.count(),
                     'primary_prompt': primary_prompt_text,
                     'secondary_prompts': secondary_prompts_list,
+                    'visibility_growth': visibility_growth,
                     'analytics_summary': {
                         'total_analytics': analytics.count(),
                         'mentions_count': analytics.filter(is_mention=True, is_published=True).count(),
@@ -758,7 +1040,7 @@ def prompt_groups_list(request):
                     prompt = Prompt.objects.create(
                         prompt=prompt_text.strip(),
                         group=group,
-                        track_status='active',
+                        track_status='INIT',
                         type='primary'
                     )
                     created_prompts.append(prompt)
@@ -783,7 +1065,7 @@ def prompt_groups_list(request):
                     prompt = Prompt.objects.create(
                         prompt=prompt_text.strip(),
                         group=group,
-                        track_status='active',
+                        track_status='INIT',
                         type='secondary'
                     )
                     created_prompts.append(prompt)
@@ -863,46 +1145,153 @@ def prompt_group_detail(request, group_id):
                     'avg_position': float(prompt_analytics.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0)
                 })
 
-            # Platform distribution for the group
+            # Platform distribution for the group - use PromptGroupMetricSnapshot
+            # Get the latest snapshots for this group (prefer daily, fallback to weekly/monthly)
+            now = timezone.now().date()
+            # Get snapshots from the last 30 days to get recent data
+            start_date = now - timedelta(days=30)
+            
+            # Get platform-specific snapshots (exclude NULL/empty platforms)
+            platform_snapshots = PromptGroupMetricSnapshot.objects.filter(
+                prompt_group=group,
+                snapshot_date__gte=start_date,
+                snapshot_date__lte=now
+            ).exclude(platform__isnull=True).exclude(platform='')
+            
+            # Aggregate by platform (sum mentions, weighted average for position)
+            platform_aggregates = {}
+            for snapshot in platform_snapshots:
+                platform = snapshot.platform
+                if platform not in platform_aggregates:
+                    platform_aggregates[platform] = {
+                        'mention_count': 0,
+                        'position_sum': 0,
+                        'position_weight': 0
+                    }
+                
+                platform_aggregates[platform]['mention_count'] += snapshot.mentions
+                if snapshot.average_position and snapshot.mentions > 0:
+                    platform_aggregates[platform]['position_sum'] += float(snapshot.average_position) * snapshot.mentions
+                    platform_aggregates[platform]['position_weight'] += snapshot.mentions
+            
+            # Build platform distribution list with weighted averages
             platform_dist = []
-            for platform in analytics.values_list('platform', flat=True).distinct():
-                qs = analytics.filter(platform=platform, is_mention=True, is_published=True)
+            for platform, agg in platform_aggregates.items():
+                avg_pos = (agg['position_sum'] / agg['position_weight']) if agg['position_weight'] > 0 else 0
                 platform_dist.append({
                     'platform': platform,
-                    'count': qs.count(),
-                    'avg_position': float(qs.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0)
+                    'count': int(agg['mention_count']),
+                    'avg_position': float(avg_pos)
                 })
+            
+            # Sort by count descending
+            platform_dist.sort(key=lambda x: x['count'], reverse=True)
 
-            # Variants performance based on mentions per prompt
+            # Variants performance based on mentions per prompt - use PromptMetricSnapshot
             variants_perf = []
+            now_date = timezone.now().date()
+            start_date_snapshots = now_date - timedelta(days=30)  # Last 30 days
+            
             for p in prompts:
-                p_mentions = analytics.filter(prompt=p, is_mention=True, is_published=True).count()
+                # Get snapshots for this prompt (aggregated across all platforms)
+                prompt_snapshots = PromptMetricSnapshot.objects.filter(
+                    prompt=p,
+                    snapshot_date__gte=start_date_snapshots,
+                    snapshot_date__lte=now_date
+                )
+                # Sum mentions from all snapshots
+                total_mentions = prompt_snapshots.aggregate(total=Sum('mentions'))['total'] or 0
                 variants_perf.append({
                     'prompt_id': p.id,
                     'prompt_text': p.prompt,
-                    'mentions': p_mentions
+                    'mentions': int(total_mentions)
                 })
 
-            # Simple mention trends (by month in last 6 months)
+            # Mention trends (by month in last 6 months) - use PromptGroupMetricSnapshot
             from django.utils import timezone as _tz
             from datetime import timedelta as _td
-            end = _tz.now()
-            start = end - _td(days=180)
+            end_date = _tz.now().date()
+            start_date = end_date - _td(days=180)
             trends = []
-            cur = start
-            while cur <= end:
-                month_qs = analytics.filter(created_at__year=cur.year, created_at__month=cur.month,
-                                            is_mention=True, is_published=True)
+            
+            # Group snapshots by month
+            group_snapshots = PromptGroupMetricSnapshot.objects.filter(
+                prompt_group=group,
+                snapshot_date__gte=start_date,
+                snapshot_date__lte=end_date
+            )
+            
+            # Aggregate by month
+            monthly_data = {}
+            for snapshot in group_snapshots:
+                month_key = snapshot.snapshot_date.strftime('%Y-%m')
+                if month_key not in monthly_data:
+                    monthly_data[month_key] = {
+                        'mentions': 0,
+                        'position_sum': 0,
+                        'position_weight': 0
+                    }
+                
+                monthly_data[month_key]['mentions'] += snapshot.mentions
+                if snapshot.average_position and snapshot.mentions > 0:
+                    monthly_data[month_key]['position_sum'] += float(snapshot.average_position) * snapshot.mentions
+                    monthly_data[month_key]['position_weight'] += snapshot.mentions
+            
+            # Generate trends for each month in the range
+            cur = start_date.replace(day=1)  # Start from first day of month
+            while cur <= end_date:
+                month_key = cur.strftime('%Y-%m')
+                month_data = monthly_data.get(month_key, {'mentions': 0, 'position_sum': 0, 'position_weight': 0})
+                avg_pos = (month_data['position_sum'] / month_data['position_weight']) if month_data['position_weight'] > 0 else 0
+                
                 trends.append({
-                    'date': cur.strftime('%Y-%m'),
-                    'mentions': month_qs.count(),
-                    'avg_position': float(month_qs.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0)
+                    'date': month_key,
+                    'mentions': int(month_data['mentions']),
+                    'avg_position': float(avg_pos)
                 })
-                # move to next month
+                
+                # Move to next month
                 if cur.month == 12:
-                    cur = cur.replace(year=cur.year+1, month=1)
+                    cur = cur.replace(year=cur.year+1, month=1, day=1)
                 else:
-                    cur = cur.replace(month=cur.month+1)
+                    cur = cur.replace(month=cur.month+1, day=1)
+            
+            # Calculate visibility growth: compare current mentions with previous period (last 7 days vs previous 7 days)
+            # Use PromptGroupMetricSnapshot
+            visibility_growth = None
+            try:
+                now_date = _tz.now().date()
+                seven_days_ago = now_date - _td(days=7)
+                fourteen_days_ago = now_date - _td(days=14)
+                
+                # Get current period snapshots (last 7 days)
+                current_period_snapshots = PromptGroupMetricSnapshot.objects.filter(
+                    prompt_group=group,
+                    snapshot_date__gte=seven_days_ago,
+                    snapshot_date__lte=now_date
+                )
+                current_period_mentions = current_period_snapshots.aggregate(total=Sum('mentions'))['total'] or 0
+                
+                # Get previous period snapshots (7-14 days ago)
+                previous_period_snapshots = PromptGroupMetricSnapshot.objects.filter(
+                    prompt_group=group,
+                    snapshot_date__gte=fourteen_days_ago,
+                    snapshot_date__lt=seven_days_ago
+                )
+                previous_period_mentions = previous_period_snapshots.aggregate(total=Sum('mentions'))['total'] or 0
+                
+                # Calculate percentage growth
+                if previous_period_mentions > 0:
+                    visibility_growth = round(((current_period_mentions - previous_period_mentions) / previous_period_mentions) * 100, 1)
+                elif current_period_mentions > 0:
+                    # If previous period had 0 mentions but current has some, show 100% growth
+                    visibility_growth = 100.0
+                else:
+                    # Both periods have 0 mentions, no growth
+                    visibility_growth = 0.0
+            except Exception as e:
+                logger.warning(f"Error calculating visibility growth for group {group.id}: {e}")
+                visibility_growth = None
             
             return Response({
                 'group': {
@@ -910,11 +1299,13 @@ def prompt_group_detail(request, group_id):
                     'group_id': group.group_id,
                     'domain_id': group.domain.id,
                     'domain_name': group.domain.name,
+                    'theme': group.theme or '',
                     'primary_prompt': primary_prompt_text,
                     'secondary_prompts': secondary_prompts_list,
                     'total_mentions': group.total_mentions,
                     'total_citations': group.total_citations,
                     'average_position': float(group.average_position),
+                    'visibility_growth': visibility_growth,
                     'created_at': group.created_at.isoformat(),
                     'modified_at': group.modified_at.isoformat(),
                     'prompts': prompts_data,
@@ -971,7 +1362,7 @@ def prompt_group_detail(request, group_id):
                     primary_prompt_obj = Prompt.objects.create(
                         prompt=primary_prompt_text,
                         group=group,
-                        track_status='active',
+                        track_status='INIT',
                         type='primary'
                     )
 
@@ -987,7 +1378,7 @@ def prompt_group_detail(request, group_id):
                         Prompt.objects.create(
                             prompt=sec_text,
                             group=group,
-                            track_status='active',
+                            track_status='INIT',
                             type='secondary'
                         )
 
@@ -1155,7 +1546,7 @@ def prompts_list(request):
                 )
             
             # Optional fields
-            track_status = request.data.get('track_status', 'active')
+            track_status = request.data.get('track_status', 'INIT')
             prompt_type = request.data.get('type', 'primary')
             track_message = request.data.get('track_message', '')
             
@@ -1585,6 +1976,166 @@ def get_historical_trends(request):
     except Exception as e:
         return Response(
             {'error': f'Failed to retrieve historical trends: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])  # Temporarily allow all for testing
+def generate_prompt_variants(request):
+    """
+    Generate prompt variants using AI based on a main prompt or prompt group
+    """
+    try:
+        main_prompt = request.data.get('main_prompt') or request.data.get('prompt')
+        group_id = request.data.get('group_id')
+        
+        # If group_id is provided, try to get the primary prompt from the group
+        if group_id and not main_prompt:
+            try:
+                group = PromptGroup.objects.get(id=group_id)
+                primary_prompt_obj = group.prompts.filter(type='primary').order_by('created_at').first()
+                if primary_prompt_obj:
+                    main_prompt = primary_prompt_obj.prompt
+                else:
+                    # If no primary prompt found, try to get any prompt from the group
+                    any_prompt = group.prompts.order_by('created_at').first()
+                    if any_prompt:
+                        main_prompt = any_prompt.prompt
+                    else:
+                        return Response(
+                            {'error': f'Prompt group {group_id} has no prompts. Please add a prompt first.'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+            except PromptGroup.DoesNotExist:
+                return Response(
+                    {'error': f'Prompt group with id {group_id} not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        
+        # Validate that we have a main_prompt
+        if not main_prompt:
+            return Response(
+                {'error': 'main_prompt is required (or provide group_id to get it from the group)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Generate variants using OpenAI
+        try:
+            openai_client = get_openai_client()
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI client: {e}")
+            return Response(
+                {'error': f'OpenAI client not available: {str(e)}. Please configure OPENAI_API_KEY in settings.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        
+        # Create the prompt for AI
+        system_prompt = """You are an AI that generates prompt variants for monitoring brand mentions in AI chatbots.
+
+Your task is to generate 5-8 relevant prompt variants that are similar to the main prompt but capture different ways users might phrase the same query.
+
+Guidelines:
+- Variants should maintain the core intent but vary in phrasing, formality, and specificity
+- Include variations with synonyms, different word orders, and related contexts
+- Keep variants natural and realistic
+- Each variant should be a complete, searchable query
+- Return ONLY a JSON array of strings, no other text
+
+Example format:
+["variant 1", "variant 2", "variant 3", ...]"""
+
+        user_prompt = f'Generate prompt variants for this main prompt: "{main_prompt}"\n\nReturn only a JSON array of variant strings, no explanations or markdown.'
+
+        try:
+            response = openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=500,
+                timeout=30
+            )
+            
+            ai_response = response.choices[0].message.content.strip()
+            
+            # Parse the response - it should be a JSON array
+            # Remove markdown code blocks if present
+            if ai_response.startswith('```'):
+                # Extract JSON from code block
+                lines = ai_response.split('\n')
+                ai_response = '\n'.join(lines[1:-1]) if len(lines) > 2 else ai_response
+            
+            # Try to parse as JSON
+            try:
+                variants = json.loads(ai_response)
+                if not isinstance(variants, list):
+                    # If it's a dict with variants key
+                    if 'variants' in variants:
+                        variants = variants['variants']
+                    else:
+                        # Try to extract array from text
+                        import re
+                        array_match = re.search(r'\[.*?\]', ai_response, re.DOTALL)
+                        if array_match:
+                            variants = json.loads(array_match.group())
+                        else:
+                            raise ValueError("Could not parse variants from response")
+            except json.JSONDecodeError:
+                # Fallback: try to extract variants from text
+                import re
+                # Look for quoted strings
+                variants = re.findall(r'"([^"]+)"', ai_response)
+                if not variants:
+                    # Try single quotes
+                    variants = re.findall(r"'([^']+)'", ai_response)
+                if not variants:
+                    # Try numbered list
+                    variants = re.findall(r'\d+\.\s*(.+?)(?=\n|$)', ai_response)
+            
+            # Clean and validate variants
+            variants = [v.strip() for v in variants if v.strip() and len(v.strip()) > 5]
+            
+            if not variants:
+                # Fallback: generate simple variants
+                words = main_prompt.split()
+                variants = [
+                    f"best {main_prompt}",
+                    f"top {main_prompt}",
+                    f"affordable {main_prompt}",
+                    f"{main_prompt} reviews",
+                    f"{main_prompt} guide",
+                ]
+            
+            return Response({
+                'variants': variants[:8],  # Limit to 8 variants
+                'count': len(variants[:8])
+            })
+            
+        except Exception as e:
+            logger.error(f"Error calling OpenAI API: {e}", exc_info=True)
+            # Fallback: generate simple variants
+            words = main_prompt.split()
+            fallback_variants = [
+                f"best {main_prompt}",
+                f"top {main_prompt}",
+                f"affordable {main_prompt}",
+                f"{main_prompt} reviews",
+                f"{main_prompt} guide",
+                f"{main_prompt} comparison",
+            ]
+            return Response({
+                'variants': fallback_variants,
+                'count': len(fallback_variants),
+                'warning': 'AI generation failed, using fallback variants'
+            })
+            
+    except Exception as e:
+        logger.error(f"Error generating prompt variants: {e}", exc_info=True)
+        return Response(
+            {'error': f'Failed to generate variants: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 

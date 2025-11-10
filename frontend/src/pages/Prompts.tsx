@@ -63,11 +63,23 @@ const Prompts = () => {
         setPromptGroups(prevGroups => [...prevGroups, ...(response.groups || [])]);
       }
     } catch (error: any) {
-      toast({
-        title: "Error loading prompt groups",
-        description: error.message || "Failed to load prompt groups",
-        variant: "destructive",
-      });
+      const errorMessage = error.message || "Failed to load prompt groups";
+      // Only show error for actual errors, not empty data
+      const isNetworkError = errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Network');
+      const isServerError = errorMessage.includes('500') || errorMessage.includes('503') || errorMessage.includes('502');
+      
+      // Only show error toast for actual errors, not for empty data (404 is normal for empty data)
+      if (isNetworkError || isServerError || (!errorMessage.includes('404') && !errorMessage.includes('Not Found'))) {
+        toast({
+          title: "Error loading prompt groups",
+          description: errorMessage,
+          variant: "destructive",
+        });
+      }
+      // For empty data, just set empty array without showing error
+      if (reset) {
+        setPromptGroups([]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -128,10 +140,11 @@ const Prompts = () => {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <Button variant="outline" onClick={handleOrganizeGroups} className="border border-border">
+          {/* Organize Groups button hidden */}
+          {/* <Button variant="outline" onClick={handleOrganizeGroups} className="border border-border">
             <FolderOpen className="h-4 w-4 mr-2" />
             Organize Groups
-          </Button>
+          </Button> */}
         </div>
       </Card>
 
@@ -159,10 +172,14 @@ const Prompts = () => {
                     <p className="text-3xl font-bold font-outfit">{group.total_mentions || 0}</p>
                     <p className="text-xs text-muted-foreground uppercase tracking-wider">mentions</p>
                   </div>
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-success/10 border border-success/20">
-                    <TrendingUp className="h-4 w-4 text-success" />
-                    <span className="text-sm font-semibold text-success">Avg: {group.average_position || 0}</span>
-                  </div>
+                  {group.visibility_growth !== undefined && group.visibility_growth !== null && (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-success/10 border border-success/20">
+                      <TrendingUp className="h-4 w-4 text-success" />
+                      <span className="text-sm font-semibold text-success">
+                        {group.visibility_growth > 0 ? '+' : ''}{group.visibility_growth}%
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -172,7 +189,11 @@ const Prompts = () => {
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {(group.secondary_prompts || []).map((variant: string, idx: number) => (
-                    <Badge key={idx} variant="secondary" className="font-mono text-xs px-3 py-1.5">
+                    <Badge 
+                      key={idx} 
+                      variant="secondary" 
+                      className="font-mono text-xs px-3 py-1.5"
+                    >
                       {variant}
                     </Badge>
                   ))}
@@ -180,13 +201,17 @@ const Prompts = () => {
               </div>
 
               <div className="flex gap-2 pt-3 border-t">
-                <Button variant="outline" size="sm" onClick={() => handleViewDetails(group.id)}>
+                <Button variant="outline" size="sm" onClick={() => handleViewDetails(group.id)} className="border border-border">
                   <Eye className="h-4 w-4 mr-1" />
                   View Details
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => handleEditGroup(group)}>
+                <Button variant="outline" size="sm" onClick={() => handleEditGroup(group)} className="border border-border">
                   <Edit className="h-4 w-4 mr-1" />
                   Edit Group
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => handleGenerateVariants(group)} className="border border-border">
+                  <Sparkles className="h-4 w-4 mr-1" />
+                  Generate Variants
                 </Button>
               </div>
             </div>
@@ -222,8 +247,9 @@ const Prompts = () => {
         open={addDialogOpen} 
         onOpenChange={setAddDialogOpen}
         onAdd={(group) => {
-          setPromptGroups([group, ...promptGroups]);
-          setTotalCount(totalCount + 1);
+          // Reload the list to get fresh data with variants
+          setOffset(0);
+          void loadPromptGroups(0, true);
         }}
       />
       <EditPromptGroupDialog 
@@ -231,13 +257,42 @@ const Prompts = () => {
         onOpenChange={setEditDialogOpen}
         promptGroup={selectedGroup}
         onEdit={(group) => {
-          setPromptGroups(promptGroups.map(g => g.id === group.id ? group : g));
+          // Reload the list to get fresh data with variants
+          setOffset(0);
+          void loadPromptGroups(0, true);
         }}
       />
       <GenerateVariantsDialog
         open={generateDialogOpen}
         onOpenChange={setGenerateDialogOpen}
         promptGroup={selectedGroup}
+        onAdd={async (variants) => {
+          // Add variants to the selected group
+          if (selectedGroup) {
+            try {
+              const detail = await apiClient.getPromptGroupDetail(selectedGroup.id);
+              const currentVariants = detail.group.secondary_prompts || [];
+              const updatedVariants = [...currentVariants, ...variants];
+              
+              await apiClient.updatePromptGroup(selectedGroup.id, {
+                group_id: selectedGroup.group_id,
+                domain_id: selectedGroup.domain_id,
+                primary_prompt: detail.group.primary_prompt,
+                secondary_prompts: updatedVariants,
+              });
+
+              // Reload the list to show updated variants
+              setOffset(0);
+              void loadPromptGroups(0, true);
+            } catch (error: any) {
+              toast({
+                title: "Error",
+                description: error.message || "Failed to add variants",
+                variant: "destructive",
+              });
+            }
+          }
+        }}
       />
     </div>
   );

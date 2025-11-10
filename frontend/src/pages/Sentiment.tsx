@@ -33,6 +33,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
+import { useDomainStore } from "@/stores/domainStore";
 
 type SentimentRow = { theme: string; positive_percentage: number; neutral_percentage: number; negative_percentage: number; mention_count: number; platform?: string | null; timestamp: string };
 
@@ -45,6 +46,7 @@ const COLORS = {
 const Sentiment = () => {
   const { toast } = useToast();
   const { user } = useAuth();
+  const { selectedDomain } = useDomainStore();
   const [days, setDays] = useState<number>(30);
   const [domainId, setDomainId] = useState<string | null>(null);
 
@@ -54,12 +56,25 @@ const Sentiment = () => {
   const [competitorRows, setCompetitorRows] = useState<any[]>([]);
   const [opportunities, setOpportunities] = useState<any[]>([]);
 
+  // Sync domainId from selectedDomain (Zustand store) or localStorage when domain changes
   useEffect(() => {
     if (!user) return;
-    // Use unified helper to get active domain ID (from localStorage, synced with server)
+    
+    // Priority 1: Use selectedDomain from Zustand store (most up-to-date when user changes domain)
+    if (selectedDomain?.id) {
+      const newDomainId = String(selectedDomain.id);
+      if (newDomainId !== domainId) {
+        setDomainId(newDomainId);
+        return;
+      }
+    }
+    
+    // Priority 2: Fallback to localStorage (synced with server)
     const id = getActiveDomainId(user);
-    if (id) setDomainId(id);
-  }, [user]);
+    if (id && id !== domainId) {
+      setDomainId(id);
+    }
+  }, [user, selectedDomain?.id, domainId]);
 
   useEffect(() => {
     const load = async () => {
@@ -85,7 +100,18 @@ const Sentiment = () => {
           setOpportunities([]);
         }
       } catch (e:any) {
-        toast({ title: 'Failed to load sentiment', description: String(e.message||e), variant: 'destructive' });
+        const errorMessage = String(e.message || e);
+        // Only show error for actual errors, not empty data
+        const isNetworkError = errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Network');
+        const isServerError = errorMessage.includes('500') || errorMessage.includes('503') || errorMessage.includes('502');
+        
+        // Only show error toast for actual errors, not for empty data (404 is normal for empty data)
+        if (isNetworkError || isServerError || (!errorMessage.includes('404') && !errorMessage.includes('Not Found'))) {
+          toast({ title: 'Failed to load sentiment', description: errorMessage, variant: 'destructive' });
+        }
+        // For empty data, set default empty values without showing error
+        setSummary({ total: 0, positive: 0, negative: 0, neutral: 0, average: 0 });
+        setRows([]);
       }
     };
     void load();

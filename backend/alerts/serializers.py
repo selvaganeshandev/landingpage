@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Alert, AlertRule, AlertNotification
+from .models import Alert, AlertRule, AlertNotification, AlertConfiguration
 
 
 class AlertSerializer(serializers.ModelSerializer):
@@ -41,4 +41,21 @@ class AlertNotificationSerializer(serializers.ModelSerializer):
             'sent_at', 'status', 'error_message'
         ]
         read_only_fields = ['id', 'sent_at', 'alert_title']
+
+
+class AlertConfigurationSerializer(serializers.ModelSerializer):
+    domain_name = serializers.CharField(source='domain.name', read_only=True, allow_null=True)
+    organisation_name = serializers.CharField(source='organisation.name', read_only=True, allow_null=True)
+    
+    class Meta:
+        model = AlertConfiguration
+        fields = [
+            'id', 'domain', 'domain_name', 'organisation', 'organisation_name',
+            'alerts_enabled', 'quiet_hours_enabled', 'quiet_hours_start', 'quiet_hours_end', 'digest_frequency',
+            'email_enabled', 'email_address',
+            'slack_enabled', 'slack_channel', 'slack_webhook_url',
+            'sms_enabled', 'phone_number',
+            'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at', 'domain_name', 'organisation_name']
 

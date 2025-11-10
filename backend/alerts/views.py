@@ -1,10 +1,11 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
-from .models import Alert, AlertRule, AlertNotification
-from .serializers import AlertSerializer, AlertRuleSerializer, AlertNotificationSerializer
+from django.shortcuts import get_object_or_404
+from .models import Alert, AlertRule, AlertNotification, AlertConfiguration
+from .serializers import AlertSerializer, AlertRuleSerializer, AlertNotificationSerializer, AlertConfigurationSerializer
 
 
 class AlertViewSet(viewsets.ModelViewSet):
@@ -56,15 +57,48 @@ class AlertViewSet(viewsets.ModelViewSet):
         if domain_id:
             queryset = queryset.filter(domain_id=domain_id)
         
+        # Calculate average response time (time from alert creation to resolution)
+        resolved_alerts = queryset.filter(
+            status='resolved',
+            resolved_at__isnull=False,
+            created_at__isnull=False
+        )
+        
+        avg_response_time = None
+        if resolved_alerts.exists():
+            response_times = []
+            for alert in resolved_alerts:
+                if alert.created_at and alert.resolved_at:
+                    delta = alert.resolved_at - alert.created_at
+                    hours = delta.total_seconds() / 3600
+                    response_times.append(hours)
+            
+            if response_times:
+                avg_response_time = round(sum(response_times) / len(response_times), 1)
+        
+        # Get email configuration for the domain
+        email_address = None
+        email_enabled = False
+        if domain_id:
+            try:
+                config = AlertConfiguration.objects.filter(domain_id=domain_id).first()
+                if config:
+                    email_address = config.email_address
+                    email_enabled = config.email_enabled
+            except Exception:
+                pass
+        
         summary = {
             'total': queryset.count(),
             'active': queryset.filter(status='active').count(),
             'high_priority': queryset.filter(status='active', severity='high').count(),
-            'investigating': queryset.filter(status='investigating').count(),
             'resolved_today': queryset.filter(
                 status='resolved',
                 resolved_at__date=timezone.now().date()
             ).count(),
+            'avg_response_time': avg_response_time,
+            'email_address': email_address,
+            'email_enabled': email_enabled,
         }
         return Response(summary)
 
@@ -103,4 +137,164 @@ class AlertNotificationViewSet(viewsets.ReadOnlyModelViewSet):
         if user.role == 'super_admin':
             return AlertNotification.objects.all()
         return AlertNotification.objects.filter(alert__domain__organisation=user.organisation)
+
+
+@api_view(['GET', 'POST', 'PUT'])
+@permission_classes([IsAuthenticated])
+def alert_configuration(request):
+    """
+    Get or update alert configuration for a domain.
+    
+    GET: Retrieve configuration for domain_id
+    POST/PUT: Create or update configuration
+    """
+    domain_id = request.query_params.get('domain_id') or request.data.get('domain_id')
+    
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        from domains.models import Domain
+        domain = Domain.objects.get(id=domain_id)
+        
+        # Check permissions
+        user = request.user
+        if user.role != 'super_admin' and domain.organisation != user.organisation:
+            return Response(
+                {'error': 'Permission denied'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if request.method == 'GET':
+            # Get existing configuration or return defaults
+            config = AlertConfiguration.objects.filter(domain_id=domain_id).first()
+            if config:
+                serializer = AlertConfigurationSerializer(config)
+                return Response(serializer.data)
+            else:
+                # Return default configuration
+                return Response({
+                    'domain': domain_id,
+                    'alerts_enabled': True,
+                    'quiet_hours_enabled': False,
+                    'quiet_hours_start': None,
+                    'quiet_hours_end': None,
+                    'digest_frequency': 'realtime',
+                    'email_enabled': True,
+                    'email_address': None,
+                    'slack_enabled': False,
+                    'slack_channel': None,
+                    'slack_webhook_url': None,
+                    'sms_enabled': False,
+                    'phone_number': None,
+                })
+        
+        elif request.method in ['POST', 'PUT']:
+            # Create or update configuration
+            config, created = AlertConfiguration.objects.get_or_create(
+                domain_id=domain_id,
+                defaults={'organisation': domain.organisation}
+            )
+            
+            # Update fields from request data
+            data = request.data.copy()
+            data['domain'] = domain_id
+            data['organisation'] = domain.organisation_id
+            
+            serializer = AlertConfigurationSerializer(config, data=data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK if not created else status.HTTP_201_CREATED)
+            else:
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': 'Domain not found'}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {'error': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def update_email_config(request):
+    """
+    Update email address for alert configuration.
+    
+    POST: Update email address for domain_id
+    """
+    domain_id = request.data.get('domain_id')
+    email_address = request.data.get('email_address')
+    
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    if not email_address:
+        return Response(
+            {'error': 'email_address is required'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Validate email format
+    from django.core.validators import validate_email
+    from django.core.exceptions import ValidationError
+    try:
+        validate_email(email_address)
+    except ValidationError:
+        return Response(
+            {'error': 'Invalid email address format'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        from domains.models import Domain
+        domain = Domain.objects.get(id=domain_id)
+        
+        # Check permissions
+        user = request.user
+        if user.role != 'super_admin' and domain.organisation != user.organisation:
+            return Response(
+                {'error': 'Permission denied'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Get or create configuration
+        config, created = AlertConfiguration.objects.get_or_create(
+            domain_id=domain_id,
+            defaults={
+                'organisation': domain.organisation,
+                'email_enabled': True,
+                'email_address': email_address
+            }
+        )
+        
+        # Update email address
+        config.email_address = email_address
+        config.email_enabled = True
+        config.save()
+        
+        serializer = AlertConfigurationSerializer(config)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': 'Domain not found'}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {'error': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 

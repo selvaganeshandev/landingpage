@@ -29,12 +29,21 @@ const Dashboard = () => {
     ? domainNameRaw.charAt(0).toUpperCase() + domainNameRaw.slice(1)
     : "Domain name";
 
-  // Sync domain_id from server on mount and when user changes
+  // Sync domain_id from selectedDomain (Zustand store) or server when domain changes
   useEffect(() => {
     if (!user) return;
     
     const syncDomain = async () => {
-      // Load from server (primary source of truth)
+      // Priority 1: Use selectedDomain from Zustand store (most up-to-date when user changes domain)
+      if (selectedDomain?.id) {
+        const newDomainId = String(selectedDomain.id);
+        if (newDomainId !== domainId) {
+          setDomainId(newDomainId);
+          return;
+        }
+      }
+      
+      // Priority 2: Fallback to server (primary source of truth on initial load)
       const serverActiveDomain = await loadActiveDomainFromServer(user.id);
       const serverDomainId = serverActiveDomain || '';
       
@@ -44,7 +53,7 @@ const Dashboard = () => {
     };
     
     void syncDomain();
-  }, [user, domainId]);
+  }, [user, selectedDomain?.id, domainId]);
 
   const handleExportReport = () => {
     toast({
@@ -80,14 +89,37 @@ const Dashboard = () => {
       const data = await api.getDashboardSummary({ domain_id: currentDomainId, days: Number(timePeriod) });
       console.log('Dashboard: API response received:', data);
       setSummary(data);
-      toast({ title: "Data Loaded", description: "Dashboard updated." });
+      // Only show success toast if there's actual data, not for empty data
+      if (data && (data.total_mentions > 0 || data.total_citations > 0 || data.visibility_score !== 0)) {
+        toast({ title: "Data Loaded", description: "Dashboard updated." });
+      }
     } catch (e) {
       console.error('Dashboard: API error:', e);
       const errorMessage = e instanceof Error ? e.message : String(e);
-      toast({ 
-        title: "Failed to load dashboard", 
-        description: errorMessage, 
-        variant: "destructive" 
+      // Only show error for actual errors, not empty data
+      const isNetworkError = errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Network');
+      const isServerError = errorMessage.includes('500') || errorMessage.includes('503') || errorMessage.includes('502');
+      
+      // Only show error toast for actual errors, not for empty data
+      if (isNetworkError || isServerError || (!errorMessage.includes('404') && !errorMessage.includes('Not Found'))) {
+        toast({ 
+          title: "Failed to load dashboard", 
+          description: errorMessage, 
+          variant: "destructive" 
+        });
+      }
+      // For empty data, set default empty summary
+      setSummary({
+        total_mentions: 0,
+        total_citations: 0,
+        visibility_score: 0,
+        average_position: 0,
+        sentiment_score: 0,
+        mentions_change: null,
+        citations_change: null,
+        visibility_change: null,
+        position_change: null,
+        sentiment_change: null
       });
     } finally {
       setLoading(false);
@@ -97,7 +129,7 @@ const Dashboard = () => {
   useEffect(() => {
     void fetchSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, domainId, timePeriod]);
+  }, [user, domainId, timePeriod, selectedDomain?.id]);
 
   return (
     <div className="p-8 space-y-8">

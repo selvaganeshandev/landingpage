@@ -205,30 +205,30 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewA
                 </div>
               </div>
 
-              <div className="flex items-center space-x-3 p-3 rounded-lg border border-border">
+              <div className="flex items-center space-x-3 p-3 rounded-lg border border-border opacity-50">
                 <Checkbox
                   id="slack"
-                  checked={channels.includes("slack")}
-                  onCheckedChange={() => handleChannelToggle("slack")}
+                  checked={false}
+                  disabled={true}
                 />
                 <div className="flex items-center gap-2 flex-1">
-                  <MessageSquare className="h-4 w-4 text-primary" />
-                  <Label htmlFor="slack" className="cursor-pointer flex-1 font-normal">
-                    Slack Notifications
+                  <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                  <Label htmlFor="slack" className="cursor-not-allowed flex-1 font-normal text-muted-foreground">
+                    Slack Notifications (Coming Soon)
                   </Label>
                 </div>
               </div>
 
-              <div className="flex items-center space-x-3 p-3 rounded-lg border border-border">
+              <div className="flex items-center space-x-3 p-3 rounded-lg border border-border opacity-50">
                 <Checkbox
                   id="sms"
-                  checked={channels.includes("sms")}
-                  onCheckedChange={() => handleChannelToggle("sms")}
+                  checked={false}
+                  disabled={true}
                 />
                 <div className="flex items-center gap-2 flex-1">
-                  <Smartphone className="h-4 w-4 text-primary" />
-                  <Label htmlFor="sms" className="cursor-pointer flex-1 font-normal">
-                    SMS Notifications
+                  <Smartphone className="h-4 w-4 text-muted-foreground" />
+                  <Label htmlFor="sms" className="cursor-not-allowed flex-1 font-normal text-muted-foreground">
+                    SMS Notifications (Coming Soon)
                   </Label>
                 </div>
               </div>

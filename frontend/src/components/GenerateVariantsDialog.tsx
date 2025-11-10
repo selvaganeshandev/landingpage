@@ -11,6 +11,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Sparkles, Loader2, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/services/api";
 
 interface GenerateVariantsDialogProps {
   open: boolean;
@@ -34,40 +35,53 @@ export const GenerateVariantsDialog = ({ open, onOpenChange, promptGroup, onAdd 
     console.log("GenerateVariantsDialog - promptGroup received:", promptGroup);
   }, [promptGroup]);
 
+  // Reset modal state when dialog closes
+  useEffect(() => {
+    if (!open) {
+      // Reset all state when dialog closes
+      setGeneratedVariants([]);
+      setSelectedVariants(new Set());
+      setIsGenerating(false);
+    }
+  }, [open]);
+
   const handleGenerate = async () => {
+    if (!promptGroup) {
+      toast({
+        title: "No Prompt Group",
+        description: "Please select a prompt group first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsGenerating(true);
     setGeneratedVariants([]);
     setSelectedVariants(new Set());
 
     try {
-      // Simulate AI generation - in real app, call your AI backend
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Generate variants based on the group ID and domain
-      const basePrompt = promptGroup?.group_id || "prompt";
-      const mockVariants = [
-        `best ${basePrompt}`,
-        `top ${basePrompt}`,
-        `affordable ${basePrompt}`,
-        `premium ${basePrompt}`,
-        `${basePrompt} reviews`,
-        `${basePrompt} comparison`,
-        `${basePrompt} guide`,
-        `${basePrompt} tips`,
-      ];
-
-      setGeneratedVariants(mockVariants);
-      // Auto-select all generated variants
-      setSelectedVariants(new Set(mockVariants.map((_, idx) => idx)));
-
-      toast({
-        title: "Variants Generated",
-        description: `${mockVariants.length} prompt variants have been created.`,
+      // Call backend API to generate variants
+      const response = await apiClient.generatePromptVariants({
+        group_id: promptGroup.id,
       });
-    } catch (error) {
+
+      if (response.variants && Array.isArray(response.variants)) {
+        setGeneratedVariants(response.variants);
+        // Auto-select all generated variants
+        setSelectedVariants(new Set(response.variants.map((_, idx) => idx)));
+
+        toast({
+          title: "Variants Generated",
+          description: `${response.variants.length} prompt variants have been generated.`,
+        });
+      } else {
+        throw new Error("Invalid response format");
+      }
+    } catch (error: any) {
+      console.error("Error generating variants:", error);
       toast({
         title: "Generation Failed",
-        description: "Failed to generate variants. Please try again.",
+        description: error.message || "Failed to generate variants. Please try again.",
         variant: "destructive",
       });
     } finally {

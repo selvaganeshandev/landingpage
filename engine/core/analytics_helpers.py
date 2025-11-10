@@ -111,6 +111,58 @@ def extract_position_from_response(response: str, user_domain: str, citation_url
 	return None
 
 
+def _count_mentions_with_word_boundaries(text: str, mention_patterns: List[str]) -> int:
+	"""
+	Count mentions using regex with word boundaries to avoid overlaps.
+	Deduplicates by matched span ranges to prevent double-counting.
+	
+	Args:
+		text: Text to search in
+		mention_patterns: List of patterns to search for
+	
+	Returns:
+		Count of unique mentions (non-overlapping matches)
+	"""
+	if not text or not mention_patterns:
+		return 0
+	
+	# Track matched spans to avoid overlaps
+	matched_spans = []
+	text_lower = text.lower()
+	
+	for pattern in mention_patterns:
+		if not pattern or len(pattern) < 3:
+			continue
+		
+		# Escape special regex characters in pattern
+		escaped_pattern = re.escape(pattern.lower())
+		# Use word boundaries to match whole words only
+		# \b matches word boundaries (between word and non-word characters)
+		pattern_regex = r'\b' + escaped_pattern + r'\b'
+		
+		try:
+			# Find all non-overlapping matches
+			for match in re.finditer(pattern_regex, text_lower, flags=re.IGNORECASE):
+				span = match.span()  # (start, end) tuple
+				
+				# Check if this span overlaps with any existing match
+				overlaps = False
+				for existing_span in matched_spans:
+					# Check for overlap: spans overlap if one starts before the other ends
+					if not (span[1] <= existing_span[0] or span[0] >= existing_span[1]):
+						overlaps = True
+						break
+				
+				# Only add if no overlap
+				if not overlaps:
+					matched_spans.append(span)
+		except re.error as e:
+			logger.warning(f"Regex error for pattern '{pattern}': {e}")
+			continue
+	
+	return len(matched_spans)
+
+
 def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
 	clean = _get_domain_from_url(user_domain)
 	sld = clean.split(".")[0] if clean else ""
@@ -122,12 +174,29 @@ def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
 	brand_url_matches = re.findall(brand_in_url_pattern, text, flags=re.IGNORECASE)
 	all_citation_matches = list(set(direct_citation_matches + brand_url_matches))
 	has_citation = len(all_citation_matches) > 0
-	mention_patterns = [p for p in [clean, sld, clean.replace('.com','').replace('.org','').replace('.net','').replace('.io',''), sld.replace(' ','') , sld.replace(' ','-'), sld.replace(' ','_')] if p and len(p) >= 3]
-	has_mention = any(p.lower() in text.lower() for p in mention_patterns)
+	
+	# Build mention patterns list
+	mention_patterns = [p for p in [
+		clean, 
+		sld, 
+		clean.replace('.com','').replace('.org','').replace('.net','').replace('.io',''), 
+		sld.replace(' ',''), 
+		sld.replace(' ','-'), 
+		sld.replace(' ','_')
+	] if p and len(p) >= 3]
+	
+	# Count mentions using regex with word boundaries and deduplication
+	mention_count = _count_mentions_with_word_boundaries(text, mention_patterns)
+	has_mention = mention_count > 0
+	
+	# FIXED: Use only domain-specific URLs for citation_count (Option B)
+	# Citations should only count URLs that reference the brand/domain
+	citation_count = len(all_citation_matches)  # Only domain URLs
+	
+	# Keep all_urls for reference but don't use for citation_count
 	all_url_pattern = r"https?://[^\s\)\]]+"
 	all_urls = re.findall(all_url_pattern, text, flags=re.IGNORECASE)
-	citation_count = len(all_urls)
-	mention_count = sum(1 for pattern in mention_patterns if pattern.lower() in text.lower())
+	
 	polarity = 0.0
 	sentiment = "neutral"
 	if TextBlob is not None:
@@ -144,9 +213,9 @@ def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
 		"sentiment": sentiment,
 		"sentiment_score": round(polarity, 3),
 		"context_summary": text,
-		"citation_count": citation_count,
+		"citation_count": citation_count,  # Now uses only domain URLs
 		"has_citation": has_citation,
-		"all_urls": all_urls,
+		"all_urls": all_urls,  # Kept for reference but not used for citation_count
 	}
 
 
@@ -201,9 +270,15 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
             sld.replace(' ', ''), sld.replace(' ', '-'), sld.replace(' ', '_')
         ] if p and len(p) >= 3]
 
+        # FIXED: Use only domain-specific URLs for citation_count (Option B)
+        # Citations should only count URLs that reference the brand/domain
+        citation_count = len(all_citation_matches)  # Only domain URLs
+        
+        # Keep all_urls for reference but don't use for citation_count
         all_urls = re.findall(r"https?://[^\s\)\]]+", text, flags=re.IGNORECASE)
-        citation_count = len(all_urls)
-        mention_count = sum(1 for pattern in mention_patterns if pattern.lower() in text.lower())
+        
+        # FIXED: Count mentions using regex with word boundaries and deduplication
+        mention_count = _count_mentions_with_word_boundaries(text, mention_patterns)
 
         polarity = 0.0
         sentiment = "neutral"
@@ -288,13 +363,65 @@ def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, c
             user_message = prompt_text
             if len(user_message) > 250:
                 user_message = user_message[:250].rsplit(' ', 1)[0] + "..."
+            
             search_response = perplexity_client.search.create(query=user_message)
+            
+            # Extract text from response - check multiple possible response structures
+            text = None
+            
+            # First, check if response has results array with snippets (search results)
             if hasattr(search_response, 'results') and search_response.results:
-                text = "\n".join([getattr(r, 'snippet', '') for r in search_response.results if getattr(r, 'snippet', '')])
+                text_parts = []
+                for result in search_response.results:
+                    snippet = getattr(result, 'snippet', '') or getattr(result, 'text', '') or getattr(result, 'content', '')
+                    if snippet and snippet.strip():
+                        text_parts.append(snippet.strip())
+                if text_parts:
+                    text = "\n".join(text_parts)
+            
+            # If no results, check the response object itself for answer/text/content
+            if not text:
+                # Check for direct answer field (most common for chat completions)
+                if hasattr(search_response, 'answer') and search_response.answer:
+                    text = str(search_response.answer).strip()
+                # Check for choices array (chat completions format)
+                elif hasattr(search_response, 'choices') and search_response.choices:
+                    choice = search_response.choices[0] if search_response.choices else None
+                    if choice:
+                        if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
+                            text = str(choice.message.content).strip()
+                        elif hasattr(choice, 'text'):
+                            text = str(choice.text).strip()
+                        elif hasattr(choice, 'content'):
+                            text = str(choice.content).strip()
+                # Check for other common response fields
+                elif hasattr(search_response, 'text') and search_response.text:
+                    text = str(search_response.text).strip()
+                elif hasattr(search_response, 'content') and search_response.content:
+                    text = str(search_response.content).strip()
+                elif hasattr(search_response, 'response') and search_response.response:
+                    text = str(search_response.response).strip()
+                elif hasattr(search_response, 'message') and search_response.message:
+                    text = str(search_response.message).strip()
+            
+            # If still no text found, use empty string instead of the prompt
+            if not text or not text.strip():
+                logger.warning(f"Perplexity API returned no response content for query: {user_message[:50]}...")
+                text = ""
             else:
-                text = user_message
-        except Exception:
-            text = prompt_text
+                logger.info(f"Perplexity API returned response of length {len(text)} for query: {user_message[:50]}...")
+            
+            # Close the client
+            try:
+                perplexity_client.close()
+            except:
+                pass
+                
+        except Exception as lib_error:
+            logger.error(f"Perplexity API call failed: {str(lib_error)}")
+            # Return empty string instead of the prompt text
+            text = ""
+        
         return _basic_text_metrics(text, user_domain)
     except Exception as e:
         logger.error(f"Perplexity processing failed: {e}")

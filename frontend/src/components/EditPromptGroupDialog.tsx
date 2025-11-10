@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { X, Plus } from "lucide-react";
+import { X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
 
@@ -41,9 +41,10 @@ export const EditPromptGroupDialog = ({ open, onOpenChange, promptGroup, onEdit 
   const { toast } = useToast();
   const [groupId, setGroupId] = useState("");
   const [domainId, setDomainId] = useState<number>(0);
-  const [primaryPrompt, setPrimaryPrompt] = useState("");
-  const [secondaryPrompts, setSecondaryPrompts] = useState<string[]>([]);
-  const [secondaryInput, setSecondaryInput] = useState("");
+  const [mainPrompt, setMainPrompt] = useState("");
+  const [description, setDescription] = useState("");
+  const [variants, setVariants] = useState<string[]>([]);
+  const [variantInput, setVariantInput] = useState("");
 
   useEffect(() => {
     if (promptGroup) {
@@ -53,41 +54,35 @@ export const EditPromptGroupDialog = ({ open, onOpenChange, promptGroup, onEdit 
       (async () => {
         try {
           const detail = await apiClient.getPromptGroupDetail(promptGroup.id);
-          setPrimaryPrompt(detail.group.primary_prompt || "");
-          setSecondaryPrompts(detail.group.prompts?.filter((p: any) => p.type === 'secondary').map((p: any) => p.prompt_text) || detail.group.secondary_prompts || []);
+          setMainPrompt(detail.group.primary_prompt || "");
+          setVariants(detail.group.prompts?.filter((p: any) => p.type === 'secondary').map((p: any) => p.prompt_text) || detail.group.secondary_prompts || []);
+          setDescription(detail.group.description || "");
         } catch (e) {
           // Fallback to list data if detail missing
-          setPrimaryPrompt((promptGroup as any).primary_prompt || "");
-          setSecondaryPrompts(((promptGroup as any).secondary_prompts as string[]) || []);
+          setMainPrompt((promptGroup as any).primary_prompt || "");
+          setVariants(((promptGroup as any).secondary_prompts as string[]) || []);
+          setDescription("");
         }
       })();
     }
   }, [promptGroup]);
 
-  const handleAddSecondaryPrompt = () => {
-    if (secondaryInput.trim() && !secondaryPrompts.includes(secondaryInput.trim())) {
-      setSecondaryPrompts([...secondaryPrompts, secondaryInput.trim()]);
-      setSecondaryInput("");
+  const handleAddVariant = () => {
+    if (variantInput.trim() && !variants.includes(variantInput.trim())) {
+      setVariants([...variants, variantInput.trim()]);
+      setVariantInput("");
     }
   };
 
-  const handleRemoveSecondaryPrompt = (index: number) => {
-    setSecondaryPrompts(secondaryPrompts.filter((_, i) => i !== index));
+  const handleRemoveVariant = (index: number) => {
+    setVariants(variants.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async () => {
-    if (!groupId.trim() || !promptGroup) {
+    if (!groupId.trim() || !mainPrompt.trim() || !promptGroup) {
       toast({
         title: "Missing Information",
-        description: "Please provide a group name.",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (!primaryPrompt.trim()) {
-      toast({
-        title: "Main Prompt required",
-        description: "Please enter the main prompt.",
+        description: "Please provide a name and main prompt.",
         variant: "destructive",
       });
       return;
@@ -97,18 +92,19 @@ export const EditPromptGroupDialog = ({ open, onOpenChange, promptGroup, onEdit 
       const response = await apiClient.updatePromptGroup(promptGroup.id, {
         group_id: groupId.trim(),
         domain_id: domainId,
-        primary_prompt: primaryPrompt.trim(),
-        secondary_prompts: secondaryPrompts,
+        primary_prompt: mainPrompt.trim(),
+        secondary_prompts: variants,
       });
-
-      if (onEdit) {
-        onEdit(response.group as any);
-      }
 
       toast({
         title: "Prompt Group Updated",
         description: `"${groupId}" has been updated successfully.`,
       });
+
+      // Call onEdit callback to refresh the list
+      if (onEdit) {
+        onEdit(response.group as any);
+      }
 
       onOpenChange(false);
     } catch (error: any) {
@@ -123,13 +119,13 @@ export const EditPromptGroupDialog = ({ open, onOpenChange, promptGroup, onEdit 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      setPrimaryPrompt(primaryPrompt);
+      handleAddVariant();
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-outfit text-2xl">Edit Prompt Group</DialogTitle>
           <DialogDescription>
@@ -140,51 +136,69 @@ export const EditPromptGroupDialog = ({ open, onOpenChange, promptGroup, onEdit 
         <div className="space-y-6 py-4">
           {/* Group Name */}
           <div className="space-y-2">
-            <Label htmlFor="edit-groupId">Group ID*</Label>
+            <Label htmlFor="edit-name">Group Name*</Label>
             <Input
-              id="edit-groupId"
+              id="edit-name"
               placeholder="e.g., Vegan Protein - Athletes"
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
-              className="border border-border"
+              className="border-border/50"
             />
           </div>
 
           {/* Main Prompt */}
           <div className="space-y-2">
-            <Label htmlFor="main-prompt">Main Prompt*</Label>
+            <Label htmlFor="edit-mainPrompt">Main Prompt*</Label>
             <Input
-              id="main-prompt"
+              id="edit-mainPrompt"
               placeholder="e.g., best vegan protein powder for athletes"
-              value={primaryPrompt}
-              onChange={(e) => setPrimaryPrompt(e.target.value)}
-              className="border border-border font-mono"
+              value={mainPrompt}
+              onChange={(e) => setMainPrompt(e.target.value)}
+              className="border-border/50 font-mono"
+            />
+          </div>
+
+          {/* Description */}
+          <div className="space-y-2">
+            <Label htmlFor="edit-description">Description (Optional)</Label>
+            <Textarea
+              id="edit-description"
+              placeholder="Brief description of what this prompt group tracks..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="border-border/50 min-h-[80px]"
             />
           </div>
 
           {/* Prompt Variants */}
           <div className="space-y-2">
-            <Label>Prompt Variants</Label>
+            <Label htmlFor="edit-variant">Prompt Variants</Label>
             <div className="flex gap-2">
               <Input
+                id="edit-variant"
                 placeholder="Add a variant prompt..."
-                value={secondaryInput}
-                onChange={(e) => setSecondaryInput(e.target.value)}
-                className="border border-border font-mono flex-1"
-                onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSecondaryPrompt())}
+                value={variantInput}
+                onChange={(e) => setVariantInput(e.target.value)}
+                onKeyPress={handleKeyPress}
+                className="border-border/50 font-mono"
               />
-              <Button type="button" onClick={handleAddSecondaryPrompt} size="sm">
-                <Plus className="h-4 w-4" />
+              <Button type="button" onClick={handleAddVariant} variant="outline">
+                Add
               </Button>
             </div>
-            {secondaryPrompts.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {secondaryPrompts.map((prompt, index) => (
-                  <Badge key={index} variant="secondary" className="px-3 py-1">
-                    {prompt}
+            
+            {variants.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                {variants.map((variant, idx) => (
+                  <Badge
+                    key={idx}
+                    variant="secondary"
+                    className="pl-3 pr-2 py-1.5 text-sm font-mono"
+                  >
+                    {variant}
                     <button
-                      onClick={() => handleRemoveSecondaryPrompt(index)}
-                      className="ml-2 hover:bg-white/20 rounded-full p-0.5"
+                      onClick={() => handleRemoveVariant(idx)}
+                      className="ml-2 hover:text-destructive transition-colors"
                     >
                       <X className="h-3 w-3" />
                     </button>

@@ -82,7 +82,19 @@ const ShareOfVoice = () => {
         setRows(byDomain as any);
         setOpportunities(Array.isArray(gaps) ? gaps : gaps?.results || []);
       } catch (e:any) {
-        toast({ title: 'Failed to load share of voice', description: String(e.message||e), variant: 'destructive' });
+        const errorMessage = String(e.message || e);
+        // Only show error for actual errors, not empty data
+        const isNetworkError = errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Network');
+        const isServerError = errorMessage.includes('500') || errorMessage.includes('503') || errorMessage.includes('502');
+        
+        // Only show error toast for actual errors, not for empty data (404 is normal for empty data)
+        if (isNetworkError || isServerError || (!errorMessage.includes('404') && !errorMessage.includes('Not Found'))) {
+          toast({ title: 'Failed to load share of voice', description: errorMessage, variant: 'destructive' });
+        }
+        // For empty data, set default empty values without showing error
+        setLatest(null);
+        setRows([]);
+        setOpportunities([]);
       }
     };
     void load();

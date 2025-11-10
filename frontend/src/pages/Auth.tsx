@@ -31,8 +31,12 @@ export default function Auth() {
 
   const handleSignIn = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    e.stopPropagation(); // Prevent event bubbling
+    
+    // Clear previous errors
     setError(null);
 
+    // Validate fields
     if (!formData.email || !formData.password) {
       setError("Please fill in all fields");
       return;
@@ -44,6 +48,7 @@ export default function Auth() {
         password: formData.password,
       });
 
+      // Only navigate on success
       toast({
         title: "Welcome back!",
         description: "You have successfully signed in.",
@@ -51,14 +56,29 @@ export default function Auth() {
       
       navigate("/");
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Login failed. Please try again.";
+      // Extract error message
+      let errorMessage = "Login failed. Please try again.";
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      } else if (error && typeof error === 'object' && 'message' in error) {
+        errorMessage = String(error.message);
+      }
+      
+      // Set error state (this will display the alert)
       setError(errorMessage);
       
+      // Also show toast notification
       toast({
         title: "Login Failed",
         description: errorMessage,
         variant: "destructive",
       });
+      
+      // Prevent any navigation or page refresh
+      return false;
     }
   };
 
@@ -91,7 +111,6 @@ export default function Auth() {
                 id="email"
                 name="email"
                 type="email"
-                placeholder="you@company.com"
                 value={formData.email}
                 onChange={handleInputChange}
                 required

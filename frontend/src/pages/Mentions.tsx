@@ -150,11 +150,23 @@ const Mentions = () => {
       }
     } catch (error: any) {
       console.error('Mentions: API error', error);
-      toast({
-        title: "Error loading mentions",
-        description: error.message || "Failed to load mentions",
-        variant: "destructive",
-      });
+      const errorMessage = error.message || "Failed to load mentions";
+      // Only show error for actual errors, not empty data
+      const isNetworkError = errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Network');
+      const isServerError = errorMessage.includes('500') || errorMessage.includes('503') || errorMessage.includes('502');
+      
+      // Only show error toast for actual errors, not for empty data (404 is normal for empty data)
+      if (isNetworkError || isServerError || (!errorMessage.includes('404') && !errorMessage.includes('Not Found'))) {
+        toast({
+          title: "Error loading mentions",
+          description: errorMessage,
+          variant: "destructive",
+        });
+      }
+      // For empty data, just set empty array without showing error
+      if (reset) {
+        setMentions([]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -270,10 +282,11 @@ const Mentions = () => {
                 </TabsTrigger>
               ))}
             </TabsList>
-            <Button variant="outline" onClick={handleMoreFilters} className="border border-border">
+            {/* More Filters button hidden */}
+            {/* <Button variant="outline" onClick={handleMoreFilters} className="border border-border">
               <Filter className="h-4 w-4 mr-2" />
               More Filters
-            </Button>
+            </Button> */}
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4">
@@ -377,17 +390,17 @@ const Mentions = () => {
                       <div key={idx} className="p-3 bg-muted/20 rounded-lg border border-border/30">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium mb-1">"{citation.text}"</p>
+                            <p className="text-sm font-semibold text-foreground mb-2">"{citation.text}"</p>
                             <a 
                               href={citation.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-xs text-primary hover:underline flex items-center gap-1"
+                              className="text-xs text-primary hover:underline flex items-center gap-1 mb-1"
                             >
                               <ExternalLink className="h-3 w-3" />
                               {citation.source}
                             </a>
-                            <p className="text-xs text-muted-foreground mt-1">{citation.description}</p>
+                            <p className="text-xs text-muted-foreground">{citation.description}</p>
                           </div>
                         </div>
                       </div>

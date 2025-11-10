@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,6 +21,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { Mail, MessageSquare, Smartphone, Bell, Clock } from "lucide-react";
+import { apiClient } from "@/services/api";
+import { useDomainStore } from "@/stores/domainStore";
 
 interface AlertConfigDialogProps {
   open: boolean;
@@ -29,6 +31,8 @@ interface AlertConfigDialogProps {
 
 export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps) => {
   const { toast } = useToast();
+  const { selectedDomain } = useDomainStore();
+  const [loading, setLoading] = useState(false);
   
   // General Settings
   const [alertsEnabled, setAlertsEnabled] = useState(true);
@@ -39,23 +43,101 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
 
   // Email Settings
   const [emailEnabled, setEmailEnabled] = useState(true);
-  const [emailAddress, setEmailAddress] = useState("team@vegfitpro.com");
+  const [emailAddress, setEmailAddress] = useState("");
 
   // Slack Settings
-  const [slackEnabled, setSlackEnabled] = useState(true);
-  const [slackChannel, setSlackChannel] = useState("#ai-monitoring");
+  const [slackEnabled, setSlackEnabled] = useState(false);
+  const [slackChannel, setSlackChannel] = useState("");
   const [slackWebhook, setSlackWebhook] = useState("");
 
   // SMS Settings
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
 
-  const handleSave = () => {
-    toast({
-      title: "Settings Saved",
-      description: "Your alert configuration has been updated successfully.",
-    });
-    onOpenChange(false);
+  // Load configuration when dialog opens
+  useEffect(() => {
+    if (open && selectedDomain?.id) {
+      loadConfiguration();
+    }
+  }, [open, selectedDomain?.id]);
+
+  const loadConfiguration = async () => {
+    if (!selectedDomain?.id) return;
+    
+    setLoading(true);
+    try {
+      const config = await apiClient.getAlertConfiguration(selectedDomain.id);
+      if (config) {
+        setAlertsEnabled(config.alerts_enabled ?? true);
+        setQuietHoursEnabled(config.quiet_hours_enabled ?? false);
+        setQuietHoursStart(config.quiet_hours_start || "22:00");
+        setQuietHoursEnd(config.quiet_hours_end || "08:00");
+        setDigestFrequency(config.digest_frequency || "daily");
+        setEmailEnabled(config.email_enabled ?? true);
+        setEmailAddress(config.email_address || "");
+        setSlackEnabled(config.slack_enabled ?? false);
+        setSlackChannel(config.slack_channel || "");
+        setSlackWebhook(config.slack_webhook_url || "");
+        setSmsEnabled(config.sms_enabled ?? false);
+        setPhoneNumber(config.phone_number || "");
+      }
+    } catch (e: any) {
+      toast({
+        title: 'Failed to load configuration',
+        description: String(e.message || e),
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!selectedDomain?.id) {
+      toast({
+        title: 'No Domain Selected',
+        description: 'Please select a domain first',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Convert time strings to proper format
+      const quietStart = quietHoursEnabled && quietHoursStart ? quietHoursStart : null;
+      const quietEnd = quietHoursEnabled && quietHoursEnd ? quietHoursEnd : null;
+
+      await apiClient.updateAlertConfiguration({
+        domain_id: selectedDomain.id,
+        alerts_enabled: alertsEnabled,
+        quiet_hours_enabled: quietHoursEnabled,
+        quiet_hours_start: quietStart,
+        quiet_hours_end: quietEnd,
+        digest_frequency: digestFrequency,
+        email_enabled: emailEnabled,
+        email_address: emailAddress || null,
+        slack_enabled: slackEnabled,
+        slack_channel: slackChannel || null,
+        slack_webhook_url: slackWebhook || null,
+        sms_enabled: smsEnabled,
+        phone_number: phoneNumber || null,
+      });
+
+      toast({
+        title: "Settings Saved",
+        description: "Your alert configuration has been updated successfully.",
+      });
+      onOpenChange(false);
+    } catch (e: any) {
+      toast({
+        title: 'Failed to save configuration',
+        description: String(e.message || e),
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -308,11 +390,11 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
         </Tabs>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
             Cancel
           </Button>
-          <Button onClick={handleSave} className="gradient-primary">
-            Save Configuration
+          <Button onClick={handleSave} className="gradient-primary" disabled={loading}>
+            {loading ? 'Saving...' : 'Save Configuration'}
           </Button>
         </DialogFooter>
       </DialogContent>

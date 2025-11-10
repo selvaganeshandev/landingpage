@@ -1,6 +1,5 @@
 from django.urls import path
 from . import views
-from . import dashboard_api
 
 app_name = 'core'
 
@@ -36,9 +35,6 @@ urlpatterns = [
     # Share of Voice Analytics
     path('share-of-voice/', views.share_of_voice, name='share_of_voice'),
     path('competitor-analytics/trends/', views.competitor_analytics_trends, name='competitor_analytics_trends'),
-    
-    # Dashboard API
-    path('dashboard/summary/', dashboard_api.dashboard_summary, name='dashboard_summary'),
     
     # Reset track status (for testing)
     path('reset-track-status/', views.reset_track_status, name='reset_track_status'),

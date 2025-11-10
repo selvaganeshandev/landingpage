@@ -43,18 +43,23 @@ async function apiRequest<T>(
     headers,
   });
 
-  // Handle unauthorized (token expired)
+  // Handle unauthorized (token expired) - but don't redirect for login endpoint
   if (response.status === 401) {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    window.location.href = '/signin';
-    throw new Error('Unauthorized');
+    // Only redirect if not on login endpoint (to avoid redirecting during login attempts)
+    if (!endpoint.includes('/auth/login/')) {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      window.location.href = '/signin';
+      throw new Error('Unauthorized');
+    }
+    // For login endpoint, let it fall through to error handling below
   }
 
   // Handle other errors
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
+    const errorMessage = error.detail || error.error || error.message || `HTTP ${response.status}: ${response.statusText}`;
+    throw new Error(errorMessage);
   }
 
   // Handle empty responses
@@ -314,6 +319,12 @@ export const apiClient = {
     method: 'DELETE',
   }),
 
+  generatePromptVariants: (data: { main_prompt?: string; prompt?: string; group_id?: number }) => 
+    apiRequest('/prompts/groups/generate-variants/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   // ===== Prompts =====
   getPrompts: (params?: any) => {
     const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
@@ -373,6 +384,14 @@ export const apiClient = {
     method: 'DELETE',
   }),
 
+  resolveAlert: (id: number) => apiRequest(`/alerts/alerts/${id}/resolve/`, {
+    method: 'POST',
+  }),
+
+  investigateAlert: (id: number) => apiRequest(`/alerts/alerts/${id}/investigate/`, {
+    method: 'POST',
+  }),
+
   // ===== Alert Rules =====
   getAlertRules: (params?: any) => {
     const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
@@ -394,6 +413,26 @@ export const apiClient = {
   deleteAlertRule: (id: number) => apiRequest(`/alerts/alert-rules/${id}/`, {
     method: 'DELETE',
   }),
+
+  // ===== Alert Configuration =====
+  getAlertConfiguration: (domainId?: number) => {
+    const queryParams = domainId ? `?domain_id=${domainId}` : '';
+    return apiRequest(`/alerts/alert-configuration${queryParams}`);
+  },
+
+  updateAlertConfiguration: (data: any) => {
+    return apiRequest('/alerts/alert-configuration/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateEmailConfig: (data: { domain_id: number; email_address: string }) => {
+    return apiRequest('/alerts/alert-configuration/email/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
 
   // ===== Competitors =====
   getCompetitors: (params?: any) => {
@@ -558,27 +597,8 @@ export const apiClient = {
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
     }).toString()}`;
-    // Use engine API (port 8001) instead of backend
-    const engineBaseUrl = import.meta.env.VITE_ENGINE_API_URL || 'http://localhost:8001';
-    const apiUrl = `${engineBaseUrl}/api/dashboard/summary/${queryParams}`;
-    console.log('Dashboard API: Calling', apiUrl);
-    return fetch(apiUrl, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(localStorage.getItem('access_token') ? {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        } : {}),
-      },
-    }).then(async (response) => {
-      console.log('Dashboard API: Response status', response.status);
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
-        console.error('Dashboard API: Error response', error);
-        throw new Error(error.detail || error.error || `HTTP ${response.status}`);
-      }
-      return response.json();
-    });
+    // Use backend API endpoint
+    return apiClient.get(`/analytics/dashboard/summary/${queryParams}`);
   },
 
   // ===== Integrations =====

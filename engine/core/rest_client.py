@@ -82,7 +82,7 @@ class DataForSEOClient:
                 "ignore_synonyms": False,
                 "include_clickstream_data": False,
                 "load_rank_absolute": False,
-                "order_by": ["ranked_serp_element.serp_item.rank_absolute,desc"],
+                "order_by": ["ranked_serp_element.serp_item.rank_absolute,asc"],
                 "limit": limit,
                 "offset": 0
             }

@@ -10,17 +10,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { X, Loader2, Plus } from "lucide-react";
+import { X, Loader2, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { useDomainStore } from "@/stores/domainStore";
+import { useAuth } from "@/contexts/AuthContext";
+import { getActiveDomainIdNumber } from "@/utils/activeDomain";
 
 interface AddPromptGroupDialogProps {
   open: boolean;
@@ -30,68 +27,102 @@ interface AddPromptGroupDialogProps {
 
 export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGroupDialogProps) => {
   const { toast } = useToast();
+  const { selectedDomain } = useDomainStore();
+  const { user } = useAuth();
   const [groupId, setGroupId] = useState("");
-  const [domainId, setDomainId] = useState<number | null>(null);
-  const [primaryPrompts, setPrimaryPrompts] = useState<string[]>([]);
-  const [secondaryPrompts, setSecondaryPrompts] = useState<string[]>([]);
-  const [primaryInput, setPrimaryInput] = useState("");
-  const [secondaryInput, setSecondaryInput] = useState("");
+  const [mainPrompt, setMainPrompt] = useState("");
+  const [description, setDescription] = useState("");
+  const [variants, setVariants] = useState<string[]>([]);
+  const [variantInput, setVariantInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [domains, setDomains] = useState<any[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
 
-  // Load domains when dialog opens
+  // Reset form when dialog opens/closes
   useEffect(() => {
-    if (open) {
-      loadDomains();
+    if (!open) {
+      setGroupId("");
+      setMainPrompt("");
+      setDescription("");
+      setVariants([]);
+      setVariantInput("");
     }
   }, [open]);
 
-  const loadDomains = async () => {
-    try {
-      const response = await apiClient.getDomains();
-      setDomains(response.domains);
-    } catch (error) {
-      console.error("Failed to load domains:", error);
+  const handleAddVariant = () => {
+    if (variantInput.trim() && !variants.includes(variantInput.trim())) {
+      setVariants([...variants, variantInput.trim()]);
+      setVariantInput("");
     }
   };
 
-  const handleAddPrimaryPrompt = () => {
-    if (primaryInput.trim() && !primaryPrompts.includes(primaryInput.trim())) {
-      setPrimaryPrompts([...primaryPrompts, primaryInput.trim()]);
-      setPrimaryInput("");
-    }
+  const handleRemoveVariant = (index: number) => {
+    setVariants(variants.filter((_, i) => i !== index));
   };
 
-  const handleAddSecondaryPrompt = () => {
-    if (secondaryInput.trim() && !secondaryPrompts.includes(secondaryInput.trim())) {
-      setSecondaryPrompts([...secondaryPrompts, secondaryInput.trim()]);
-      setSecondaryInput("");
-    }
-  };
-
-  const handleRemovePrimaryPrompt = (index: number) => {
-    setPrimaryPrompts(primaryPrompts.filter((_, i) => i !== index));
-  };
-
-  const handleRemoveSecondaryPrompt = (index: number) => {
-    setSecondaryPrompts(secondaryPrompts.filter((_, i) => i !== index));
-  };
-
-  const handleSubmit = async () => {
-    if (!groupId.trim() || !domainId) {
+  const handleGenerateSuggestions = async () => {
+    if (!mainPrompt.trim()) {
       toast({
-        title: "Missing Information",
-        description: "Please provide a group ID and select a domain.",
+        title: "Missing Main Prompt",
+        description: "Please enter a main prompt first.",
         variant: "destructive",
       });
       return;
     }
 
-    // Treat the "Main Prompt" input as required primary prompt
-    if (primaryPrompts.length === 0) {
+    setIsGenerating(true);
+    try {
+      // Call backend API to generate variants
+      const response = await apiClient.generatePromptVariants({
+        main_prompt: mainPrompt.trim(),
+      });
+
+      if (response.variants && Array.isArray(response.variants)) {
+        // Generate a group name from the main prompt if not set
+        if (!groupId.trim()) {
+          const words = mainPrompt.trim().split(' ');
+          const capitalized = words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+          setGroupId(capitalized);
+        }
+        
+        // Add generated variants (avoid duplicates)
+        const newVariants = response.variants.filter(v => !variants.includes(v));
+        setVariants([...variants, ...newVariants]);
+        
+        toast({
+          title: "Suggestions Generated",
+          description: `Generated ${response.variants.length} prompt variants.`,
+        });
+      } else {
+        throw new Error("Invalid response format");
+      }
+    } catch (error: any) {
+      console.error("Error generating suggestions:", error);
       toast({
-        title: "Main Prompt required",
-        description: "Please add a main prompt.",
+        title: "Generation Failed",
+        description: error.message || "Failed to generate suggestions. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    const activeDomainId = selectedDomain?.id ?? getActiveDomainIdNumber(user);
+    
+    if (!activeDomainId) {
+      toast({
+        title: "No Domain Selected",
+        description: "Please select a domain first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!groupId.trim() || !mainPrompt.trim()) {
+      toast({
+        title: "Missing Information",
+        description: "Please provide a group name and main prompt.",
         variant: "destructive",
       });
       return;
@@ -101,27 +132,21 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
       setIsLoading(true);
       const response = await apiClient.createPromptGroup({
         group_id: groupId.trim(),
-        domain_id: domainId,
-        primary_prompts: primaryPrompts,
-        secondary_prompts: secondaryPrompts,
+        domain_id: activeDomainId,
+        primary_prompts: [mainPrompt.trim()],
+        secondary_prompts: variants,
       });
 
       toast({
         title: "Success",
-        description: `Created prompt group with ${response.prompts_created} prompts and ${response.analytics_created} analytics records.`,
+        description: `Created prompt group "${groupId}" successfully.`,
       });
 
+      // Call onAdd callback to refresh the list
       if (onAdd) {
         onAdd(response.group);
       }
 
-      // Reset form
-      setGroupId("");
-      setDomainId(null);
-      setPrimaryPrompts([]);
-      setSecondaryPrompts([]);
-      setPrimaryInput("");
-      setSecondaryInput("");
       onOpenChange(false);
     } catch (error: any) {
       toast({
@@ -134,101 +159,106 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
     }
   };
 
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleAddVariant();
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-outfit text-2xl">Add Prompt Group</DialogTitle>
           <DialogDescription>
-            Create a prompt group and variants like in the reference design
+            Create a new prompt group to track related search queries
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6 py-4">
           {/* Group Name */}
           <div className="space-y-2">
-            <Label htmlFor="groupId">Group Name*</Label>
+            <Label htmlFor="name">Group Name*</Label>
             <Input
-              id="groupId"
+              id="name"
               placeholder="e.g., Vegan Protein - Athletes"
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
-              className="border border-border"
+              className="border-border/50"
             />
-          </div>
-
-          {/* Domain Selection */}
-          <div className="space-y-2">
-            <Label htmlFor="domain">Domain*</Label>
-            <Select value={domainId?.toString() || ""} onValueChange={(value) => setDomainId(parseInt(value))}>
-              <SelectTrigger className="border border-border">
-                <SelectValue placeholder="Select a domain" />
-              </SelectTrigger>
-              <SelectContent>
-                {domains.map((domain) => (
-                  <SelectItem key={domain.id} value={domain.id.toString()}>
-                    {domain.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
 
           {/* Main Prompt */}
           <div className="space-y-2">
-            <Label>Main Prompt*</Label>
+            <Label htmlFor="mainPrompt">Main Prompt*</Label>
             <div className="flex gap-2">
               <Input
+                id="mainPrompt"
                 placeholder="e.g., best vegan protein powder for athletes"
-                value={primaryInput}
-                onChange={(e) => setPrimaryInput(e.target.value)}
-                className="border border-border font-mono flex-1"
-                onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddPrimaryPrompt())}
+                value={mainPrompt}
+                onChange={(e) => setMainPrompt(e.target.value)}
+                className="border-border/50 font-mono flex-1"
               />
-              <Button type="button" onClick={handleAddPrimaryPrompt} size="sm">
-                <Plus className="h-4 w-4" />
+              <Button 
+                type="button" 
+                onClick={handleGenerateSuggestions}
+                disabled={isGenerating || !mainPrompt.trim()}
+                className="gradient-primary"
+              >
+                {isGenerating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
               </Button>
             </div>
-            {primaryPrompts.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {primaryPrompts.map((prompt, index) => (
-                  <Badge key={index} variant="default" className="px-3 py-1">
-                    {prompt}
-                    <button
-                      onClick={() => handleRemovePrimaryPrompt(index)}
-                      className="ml-2 hover:bg-white/20 rounded-full p-0.5"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            )}
+            <p className="text-xs text-muted-foreground">
+              Enter your main prompt, then click the ✨ button to auto-generate group name and variants
+            </p>
+          </div>
+
+          {/* Description */}
+          <div className="space-y-2">
+            <Label htmlFor="description">Description (Optional)</Label>
+            <Textarea
+              id="description"
+              placeholder="Brief description of what this prompt group tracks..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="border-border/50 min-h-[80px]"
+            />
           </div>
 
           {/* Prompt Variants */}
           <div className="space-y-2">
-            <Label>Prompt Variants (Optional)</Label>
+            <Label htmlFor="variant">Prompt Variants</Label>
             <div className="flex gap-2">
               <Input
+                id="variant"
                 placeholder="Add a variant prompt..."
-                value={secondaryInput}
-                onChange={(e) => setSecondaryInput(e.target.value)}
-                className="border border-border font-mono flex-1"
-                onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSecondaryPrompt())}
+                value={variantInput}
+                onChange={(e) => setVariantInput(e.target.value)}
+                onKeyPress={handleKeyPress}
+                className="border-border/50 font-mono"
               />
-              <Button type="button" onClick={handleAddSecondaryPrompt} size="sm">
-                <Plus className="h-4 w-4" />
+              <Button type="button" onClick={handleAddVariant} variant="outline">
+                Add
               </Button>
             </div>
-            {secondaryPrompts.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {secondaryPrompts.map((prompt, index) => (
-                  <Badge key={index} variant="secondary" className="px-3 py-1">
-                    {prompt}
+            
+            {variants.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                {variants.map((variant, idx) => (
+                  <Badge
+                    key={idx}
+                    variant="secondary"
+                    className="pl-3 pr-2 py-1.5 text-sm font-mono"
+                  >
+                    {variant}
                     <button
-                      onClick={() => handleRemoveSecondaryPrompt(index)}
-                      className="ml-2 hover:bg-white/20 rounded-full p-0.5"
+                      onClick={() => handleRemoveVariant(idx)}
+                      className="ml-2 hover:text-destructive transition-colors"
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -240,14 +270,10 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="border border-border">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button 
-            onClick={handleSubmit} 
-            disabled={isLoading}
-            className="gradient-primary"
-          >
+          <Button onClick={handleSubmit} disabled={isLoading} className="gradient-primary">
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />

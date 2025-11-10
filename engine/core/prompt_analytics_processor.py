@@ -200,8 +200,8 @@ class PromptAnalyticsProcessor:
             user_domain = prompt.group.domain.name
             group = prompt.group
 
-            # Process with each platform
-            platforms = ['chatgpt']
+            # Process with each platform - get enabled platforms from settings (lowercase keys)
+            platforms = getattr(settings, 'ENABLED_PLATFORMS', ['chatgpt'])
             results = {}
             
             for platform in platforms:
@@ -238,6 +238,31 @@ class PromptAnalyticsProcessor:
             prompt.track_status = 'COMP'
             prompt.tracked_at = timezone.now()
             prompt.save(update_fields=['track_status', 'tracked_at', 'modified_at'])
+
+            # Create prompt metric snapshots and sentiment analytics immediately
+            # This ensures records are created even if the group is not complete
+            today = date.today()
+            try:
+                # Get analytics for this prompt (analytics are created with track_status='COMP')
+                prompt_analytics = PromptAnalytics.objects.filter(
+                    prompt=prompt
+                )
+                
+                # Create prompt metric snapshots for this prompt
+                if prompt_analytics.exists():
+                    logger.info(f"Creating prompt metric snapshots for prompt {prompt_id}")
+                    self._create_prompt_metric_snapshots(prompt_analytics, today, period_type='daily')
+                    
+                    # Update sentiment analytics for the theme if applicable
+                    if group.theme:
+                        logger.info(f"Updating sentiment analytics for theme '{group.theme}' after processing prompt {prompt_id}")
+                        try:
+                            self._update_sentiment_analytics_for_theme(group, prompt_analytics)
+                        except Exception as sentiment_error:
+                            logger.error(f"Error updating sentiment analytics for theme '{group.theme}': {str(sentiment_error)}", exc_info=True)
+            except Exception as snapshot_error:
+                logger.error(f"Error creating snapshots for prompt {prompt_id}: {str(snapshot_error)}", exc_info=True)
+                # Don't fail the entire process if snapshots fail
 
             # Check if all prompts in group are done, then aggregate
             self._check_and_aggregate_group(group)
@@ -296,7 +321,8 @@ class PromptAnalyticsProcessor:
                     defaults={
                         'is_mention': bool(result.get('is_mention') or (result.get('mention_count', 0) or 0) > 0),
                         'total_mentions': int(result.get('mention_count', 0) or 0),
-                        'total_citations': int(result.get('citation_count', 0) or len(result.get('citations') or [])),
+                        # citation_count is now consistent: only domain URLs (same as citations list)
+                        'total_citations': int(result.get('citation_count', 0) or 0),
                         'position': float(extracted_position or 0),
                         'sentiment_category': str(result.get('sentiment') or 'neutral'),
                         'sentiment_score': float(result.get('sentiment_score', 0.0) or 0.0),

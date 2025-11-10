@@ -505,7 +505,13 @@ def start_prompt_processing(request):
     """Start processing for a specific prompt (sync or async)."""
     try:
         prompt_id = request.data.get('prompt_id')
-        sync = bool(request.data.get('sync'))
+        # Properly handle sync parameter - can be boolean or string "true"/"false"
+        sync_param = request.data.get('sync')
+        if isinstance(sync_param, str):
+            sync = sync_param.lower() in ('true', '1', 'yes')
+        else:
+            sync = bool(sync_param)
+        
         if not prompt_id:
             return Response({
                 'success': False,

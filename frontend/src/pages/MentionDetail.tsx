@@ -312,55 +312,46 @@ const MentionDetail = () => {
               <div className="space-y-4 pt-4 border-t">
                 <div>
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                    Citations & Sources ({mention.citations?.length || 0})
+                    Citations ({mention.citations?.length || 0})
                   </h3>
                   {mention.citations && mention.citations.length > 0 ? (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {mention.citations.map((citation, idx) => (
-                        <div key={idx} className="p-4 bg-gradient-to-br from-muted/20 to-muted/30 rounded-lg border border-border/30">
-                          <div className="flex items-start gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                              <span className="text-sm font-bold text-primary">{idx + 1}</span>
-                            </div>
+                        <div key={idx} className="p-3 bg-muted/20 rounded-lg border border-border/30">
+                          <div className="flex items-start justify-between gap-3">
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium mb-2 leading-relaxed">"{citation.text}"</p>
-                              <div className="space-y-1">
-                                {citation.url && (
-                                  <a 
-                                    href={citation.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-sm text-primary hover:underline flex items-center gap-1 font-medium"
-                                  >
-                                    <ExternalLink className="h-3 w-3" />
-                                    {citation.source || citation.source_name || "Source"}
-                                  </a>
-                                )}
-                                {citation.description && (
-                                  <p className="text-xs text-muted-foreground">{citation.description}</p>
-                                )}
-                                <div className="flex items-center gap-2 mt-2">
-                                  <Badge variant="outline" className="text-xs">
-                                    {citation.reliability || "Verified"}
-                                  </Badge>
-                                  <span className="text-xs text-muted-foreground">{citation.referenced_at ? formatDateTime(citation.referenced_at) : "Recently referenced"}</span>
-                                </div>
-                              </div>
+                              <p className="text-sm font-semibold text-foreground mb-2">"{citation.text}"</p>
+                              <a 
+                                href={citation.url || citation.source_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-primary hover:underline flex items-center gap-1 mb-1"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                                {citation.source || citation.source_name || "Source"}
+                              </a>
+                              <p className="text-xs text-muted-foreground">{citation.description}</p>
                             </div>
                           </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">No detailed citations available</p>
+                    <p className="text-sm text-muted-foreground">No citations available</p>
                   )}
                 </div>
-                <Button variant="outline" size="sm" asChild className="border border-border">
-                  <a href={mention.url} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="h-3 w-3 mr-1" />
-                    View Original AI Response
-                  </a>
-                </Button>
+                <div className="flex gap-2 pt-2">
+                  <Button variant="outline" size="sm" onClick={handleCopy} className="border border-border">
+                    <Copy className="h-3 w-3 mr-1" />
+                    Copy
+                  </Button>
+                  <Button variant="outline" size="sm" asChild className="border border-border">
+                    <a href={mention.domain_url} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="h-3 w-3 mr-1" />
+                      View Full Details
+                    </a>
+                  </Button>
+                </div>
               </div>
             </div>
           </Card>
