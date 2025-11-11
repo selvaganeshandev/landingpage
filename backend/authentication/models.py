@@ -2,7 +2,18 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
 from django.core.exceptions import ValidationError
+from datetime import timedelta
 import uuid
+
+
+def default_expires_in_7_days():
+    """Default function for expires_at field (7 days from now)"""
+    return timezone.now() + timedelta(days=7)
+
+
+def default_expires_in_1_hour():
+    """Default function for expires_at field (1 hour from now)"""
+    return timezone.now() + timedelta(hours=1)
 
 
 class Organisation(models.Model):
@@ -132,7 +143,7 @@ class TeamInvitation(models.Model):
         help_text="Optional message to include with the invitation"
     )
     expires_at = models.DateTimeField(
-        default=timezone.now() + timezone.timedelta(days=7),
+        default=default_expires_in_7_days,
         help_text="When the invitation expires"
     )
     accepted_at = models.DateTimeField(null=True, blank=True, help_text="When the invitation was accepted")
@@ -272,7 +283,7 @@ class PasswordResetToken(models.Model):
         help_text="Current status of the reset token"
     )
     expires_at = models.DateTimeField(
-        default=timezone.now() + timezone.timedelta(hours=1),
+        default=default_expires_in_1_hour,
         help_text="When the reset token expires"
     )
     used_at = models.DateTimeField(null=True, blank=True, help_text="When the token was used")

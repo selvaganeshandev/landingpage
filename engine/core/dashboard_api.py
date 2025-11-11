@@ -508,27 +508,32 @@ def dashboard_summary(request):
     # This is the only part that still uses raw analytics (for recent activity)
     # Use the same datetime range as calculated above for consistency
     # end_datetime and start_datetime are already calculated above
+    # Only include records with position > 0
     
     recent_analytics = PromptAnalytics.objects.filter(
         prompt__group__domain_id=domain_id,
         track_status='COMP',
         created_at__gte=start_datetime,
-        created_at__lte=end_datetime
+        created_at__lte=end_datetime,
+        position__gt=0  # Only include records with position greater than zero
     ).order_by('-created_at')[:10]
     
     recent_mentions = []
     for a in recent_analytics:
-        recent_mentions.append({
-            'id': a.id,
-            'platform': a.platform,
-            'prompt': a.prompt.prompt if a.prompt else '',
-            'position': int(round(float(a.position or 0))),
-            'sentiment': get_sentiment_category(a.sentiment_score),
-            'sentiment_score': float(a.sentiment_score or 0),
-            'created_at': a.created_at.isoformat(),
-            'relative_time': calculate_relative_time(a.created_at),
-            'citations': int(a.total_citations or 0)
-        })
+        position = int(round(float(a.position or 0)))
+        # Double-check position > 0 in case of any edge cases
+        if position > 0:
+            recent_mentions.append({
+                'id': a.id,
+                'platform': a.platform,
+                'prompt': a.prompt.prompt if a.prompt else '',
+                'position': position,
+                'sentiment': get_sentiment_category(a.sentiment_score),
+                'sentiment_score': float(a.sentiment_score or 0),
+                'created_at': a.created_at.isoformat(),
+                'relative_time': calculate_relative_time(a.created_at),
+                'citations': int(a.total_citations or 0)
+            })
     
     return Response({
         'period_days': days,
