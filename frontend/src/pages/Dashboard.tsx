@@ -136,7 +136,7 @@ const Dashboard = () => {
       <div className="space-y-4">
         <div className="flex items-start justify-between pb-4">
           <div>
-            <h1 className="text-4xl font-bold tracking-tight">Dashboard</h1>
+            <h1 className="text-4xl font-bold tracking-tight">Insights</h1>
             <p className="text-muted-foreground mt-2">
               Overview of your domain's AI search visibility performance
             </p>

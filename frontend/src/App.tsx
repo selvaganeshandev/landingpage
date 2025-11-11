@@ -57,7 +57,12 @@ const App = () => (
             <Route path="/reset-password/:tokenId" element={<ResetPassword />} />
             <Route path="/accept-invitation/:invitationId" element={<AcceptInvitation />} />
             <Route element={<Layout />}>
-              {/* Chat */}
+              {/* Chat - Landing Page */}
+              <Route path="/" element={
+                <ProtectedRoute requiredPermission={MODULES.DASHBOARD}>
+                  <Chat />
+                </ProtectedRoute>
+              } />
               <Route path="/chat" element={
                 <ProtectedRoute requiredPermission={MODULES.DASHBOARD}>
                   <Chat />
@@ -65,7 +70,7 @@ const App = () => (
               } />
 
               {/* Overview */}
-              <Route path="/" element={
+              <Route path="/insights" element={
                 <ProtectedRoute requiredPermission={MODULES.DASHBOARD}>
                   <Dashboard />
                 </ProtectedRoute>

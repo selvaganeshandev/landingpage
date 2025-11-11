@@ -30,6 +30,8 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Check,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { DomainSelector } from "./DomainSelector";
 import { Separator } from "@/components/ui/separator";
@@ -58,6 +60,7 @@ import {
 
 const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void; navigate: any }) => {
   const [submenuOpen, setSubmenuOpen] = useState(false);
+  const [recentsVisible, setRecentsVisible] = useState(true);
 
   // Check if any item in group is active
   const hasActiveItem = group.items.some((item: any) => location.pathname === item.path);
@@ -66,8 +69,22 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { g
   if (group.scrollable && isSidebarOpen) {
     return (
       <div className="flex flex-col">
-        <p className="text-xs font-semibold text-muted-foreground px-3 py-2 mt-2">{group.name}</p>
-        <div className="max-h-[300px] overflow-y-auto space-y-0.5">
+        <div className="flex items-center justify-between px-3 py-2 mt-2">
+          <p className="text-xs font-semibold text-muted-foreground">{group.name}</p>
+          <button
+            onClick={() => setRecentsVisible(!recentsVisible)}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            {recentsVisible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+        <div
+          className={cn(
+            "overflow-hidden transition-all duration-300 ease-in-out",
+            recentsVisible ? "max-h-[300px] opacity-100" : "max-h-0 opacity-0"
+          )}
+        >
+          <div className="overflow-y-auto space-y-0.5" style={{ maxHeight: '300px' }}>
           {group.items.map((item: any, idx: number) => {
             const isActive = location.pathname === item.path;
 
@@ -89,6 +106,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { g
             );
           })}
         </div>
+        </div>
       </div>
     );
   }
@@ -102,7 +120,10 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { g
   if (group.items.length === 1) {
     const item = group.items[0];
     const Icon = (item.icon as any) || LayoutDashboard;
-    const isActive = location.pathname === item.path;
+    // Check if active - for chat routes, match both / and /chat
+    const isActive = item.path === '/chat'
+      ? (location.pathname === '/' || location.pathname === '/chat')
+      : location.pathname === item.path;
 
     return (
       <Link
@@ -369,7 +390,7 @@ export const Sidebar = () => {
       <nav className={cn("space-y-1 flex-1", isOpen ? "p-4" : "px-3 py-4")}>
           {filteredNavGroups.map((group, index) => (
             <div key={index}>
-              {group.separator && <Separator className="mt-4 mb-0" />}
+              {group.separator && isOpen && <Separator className="mt-4 mb-0" />}
               <NavGroup
                 group={group}
                 location={location}

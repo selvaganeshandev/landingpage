@@ -3,6 +3,7 @@ import { Send, Sparkles, TrendingUp, Lightbulb, Users, Search } from "lucide-rea
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDomainStore } from "@/stores/domainStore";
 import {
   Popover,
   PopoverContent,
@@ -11,6 +12,7 @@ import {
 
 export const Chat = () => {
   const { user } = useAuth();
+  const { selectedDomain } = useDomainStore();
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -51,42 +53,66 @@ export const Chat = () => {
 
   const userName = user?.first_name || user?.email?.split('@')[0] || "there";
 
+  // Get domain favicon URL
+  const getDomainFavicon = () => {
+    if (selectedDomain?.url) {
+      try {
+        const url = new URL(selectedDomain.url.startsWith('http') ? selectedDomain.url : `https://${selectedDomain.url}`);
+        return `${url.protocol}//${url.hostname}/favicon.ico`;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
+  // Fallback to initials if favicon fails
+  const getUserInitials = () => {
+    if (user?.first_name && user?.last_name) {
+      return `${user.first_name.charAt(0)}${user.last_name.charAt(0)}`.toUpperCase();
+    } else if (user?.first_name) {
+      return user.first_name.charAt(0).toUpperCase();
+    } else if (user?.email) {
+      return user.email.charAt(0).toUpperCase();
+    }
+    return "U";
+  };
+
   return (
     <div className="flex flex-col h-screen bg-background">
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto flex items-center">
-        {messages.length === 0 ? (
-          <div className="flex flex-col justify-center items-center w-full px-4 -mt-[100px]">
-            <div className="max-w-3xl w-full text-center">
-              {/* Greeting - above input */}
-              <div className="mb-8 flex items-center justify-center gap-3">
-                <div className="flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-r from-primary to-secondary flex-shrink-0">
-                  <Sparkles className="h-6 w-6 text-white" />
-                </div>
-                <h2 className="text-4xl font-bold">
-                  {getGreeting()}, {userName}
-                </h2>
+      {messages.length === 0 ? (
+        /* Initial Mode - Centered input with quick actions */
+        <div className="flex-1 flex flex-col justify-center items-center w-full px-4 -mt-[100px]">
+          <div className="w-[60%] text-center">
+            {/* Greeting - above input */}
+            <div className="mb-8 flex items-center justify-center gap-3">
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-r from-primary to-secondary flex-shrink-0">
+                <Sparkles className="h-6 w-6 text-white" />
               </div>
+              <h2 className="text-4xl font-bold">
+                {getGreeting()}, {userName}
+              </h2>
+            </div>
 
-              {/* Input Box */}
-              <div className="relative mb-4">
-                <Textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Ask me anything..."
-                  className="min-h-[120px] pr-12 resize-none text-base shadow-glow"
-                  disabled={isLoading}
-                />
-                <Button
-                  onClick={handleSend}
-                  disabled={!input.trim() || isLoading}
-                  size="icon"
-                  className="absolute right-2 bottom-2 rounded-full"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
+            {/* Input Box */}
+            <div className="relative mb-4">
+              <Textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask me anything..."
+                className="min-h-[120px] pr-12 resize-none text-base shadow-glow"
+                disabled={isLoading}
+              />
+              <Button
+                onClick={handleSend}
+                disabled={!input.trim() || isLoading}
+                size="icon"
+                className="absolute right-2 bottom-2 rounded-full"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
 
               {/* Quick actions - below input */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4" style={{ animation: 'none' }}>
@@ -251,49 +277,71 @@ export const Chat = () => {
                 </Popover>
               </div>
 
-              {/* Disclaimer */}
-              <p className="text-xs text-muted-foreground">
-                AI can make mistakes. Check important info.
-              </p>
-            </div>
+            {/* Disclaimer */}
+            <p className="text-xs text-muted-foreground">
+              AI can make mistakes. Check important info.
+            </p>
           </div>
-        ) : (
-          <>
-            <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+        </div>
+      ) : (
+        /* Conversation Mode - Messages with bottom input */
+        <>
+          <div className="flex-1 overflow-y-auto">
+            <div className="w-full flex justify-center pt-16">
+              <div className="w-[60%]">
               {messages.map((message, index) => (
                 <div
                   key={index}
-                  className={`flex gap-4 ${
-                    message.role === 'user' ? 'justify-end' : 'justify-start'
-                  }`}
+                  className="flex gap-4 items-start px-6 py-4 transition-colors rounded-2xl"
+                  style={{
+                    backgroundColor: message.role === 'user' ? 'hsl(240, 10%, 96%)' : 'transparent'
+                  }}
                 >
-                  {message.role === 'assistant' && (
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-r from-primary to-secondary flex items-center justify-center">
-                      <Sparkles className="h-4 w-4 text-white" />
-                    </div>
-                  )}
-                  <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                      message.role === 'user'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted'
-                    }`}
-                  >
-                    <p className="whitespace-pre-wrap">{message.content}</p>
+                  <div className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center">
+                    {message.role === 'assistant' ? (
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-r from-primary to-secondary flex items-center justify-center">
+                        <Sparkles className="h-4 w-4 text-white" />
+                      </div>
+                    ) : (
+                      <>
+                        {getDomainFavicon() ? (
+                          <img
+                            src={getDomainFavicon()!}
+                            alt="Domain favicon"
+                            className="w-9 h-9 rounded-full object-cover"
+                            onError={(e) => {
+                              // Fallback to initials on error
+                              e.currentTarget.style.display = 'none';
+                              const parent = e.currentTarget.parentElement;
+                              if (parent) {
+                                parent.innerHTML = `<div class="w-9 h-9 rounded-full bg-muted-foreground/70 flex items-center justify-center"><span class="text-sm font-semibold text-white">${getUserInitials()}</span></div>`;
+                              }
+                            }}
+                          />
+                        ) : (
+                          <div className="w-9 h-9 rounded-full bg-muted-foreground/70 flex items-center justify-center">
+                            <span className="text-sm font-semibold text-white">{getUserInitials()}</span>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
-                  {message.role === 'user' && (
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent flex items-center justify-center">
-                      <span className="text-xs font-medium">You</span>
+                  <div className="flex-1 min-w-0 py-1">
+                    <div className="text-[15px] leading-normal">
+                      <p className="whitespace-pre-wrap">{message.content}</p>
                     </div>
-                  )}
+                  </div>
                 </div>
               ))}
               {isLoading && (
-                <div className="flex gap-4">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-r from-primary to-secondary flex items-center justify-center">
+                <div
+                  className="flex gap-4 items-start px-6 py-4 rounded-2xl"
+                  style={{ backgroundColor: 'transparent' }}
+                >
+                  <div className="flex-shrink-0 w-9 h-9 rounded-full bg-gradient-to-r from-primary to-secondary flex items-center justify-center">
                     <Sparkles className="h-4 w-4 text-white" />
                   </div>
-                  <div className="bg-muted rounded-2xl px-4 py-3">
+                  <div className="flex-1 min-w-0 py-1">
                     <div className="flex gap-1">
                       <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
                       <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
@@ -302,37 +350,38 @@ export const Chat = () => {
                   </div>
                 </div>
               )}
-            </div>
-
-            {/* Input Area at bottom when there are messages */}
-            <div className="border-t border-border px-4 py-4 sticky bottom-0 bg-background">
-              <div className="max-w-3xl mx-auto">
-                <div className="relative">
-                  <Textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Ask me anything..."
-                    className="min-h-[60px] pr-12 resize-none"
-                    disabled={isLoading}
-                  />
-                  <Button
-                    onClick={handleSend}
-                    disabled={!input.trim() || isLoading}
-                    size="icon"
-                    className="absolute right-2 bottom-2 rounded-full"
-                  >
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2 text-center">
-                  AI can make mistakes. Check important info.
-                </p>
               </div>
             </div>
-          </>
-        )}
-      </div>
+          </div>
+
+          {/* Input Area at bottom - only in conversation mode */}
+          <div className="px-4 py-4 bg-background w-full flex justify-center">
+            <div className="w-[60%]">
+              <div className="relative">
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Ask me anything..."
+                  className="min-h-[84px] pr-12 resize-none shadow-glow"
+                  disabled={isLoading}
+                />
+                <Button
+                  onClick={handleSend}
+                  disabled={!input.trim() || isLoading}
+                  size="icon"
+                  className="absolute right-2 bottom-2 rounded-full"
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2 text-center">
+                AI can make mistakes. Check important info.
+              </p>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };
