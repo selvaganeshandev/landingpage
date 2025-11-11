@@ -80,10 +80,8 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { g
                   onItemClick();
                 }}
                 className={cn(
-                  "w-full flex items-center px-3 py-1.5 text-sm rounded-lg text-left",
-                  isActive
-                    ? "text-primary"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  "recent-chat-item w-full flex items-center px-3 py-1.5 text-sm rounded-lg text-left",
+                  isActive && "text-primary"
                 )}
               >
                 <span className="truncate">{item.name}</span>

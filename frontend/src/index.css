@@ -147,6 +147,15 @@ All colors MUST be HSL.
     @apply font-outfit;
   }
 
+  /* Force recent chats button styling */
+  .recent-chat-item {
+    color: hsl(240, 5%, 45%) !important;
+  }
+
+  .recent-chat-item:hover {
+    background-color: hsl(var(--accent)) !important;
+  }
+
   /* Ultra-Thin Modern Scrollbar */
   * {
     scrollbar-width: thin;
