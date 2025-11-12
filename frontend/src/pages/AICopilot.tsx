@@ -93,7 +93,7 @@ const AICopilot = () => {
   };
 
   return (
-    <div className="p-8 h-[calc(100vh-4rem)] flex flex-col">
+    <div className="p-8 h-[calc(100vh-4rem)] flex flex-col animate-fade-in">
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-12 h-12 rounded-2xl gradient-primary flex items-center justify-center shadow-glow">

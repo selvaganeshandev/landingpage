@@ -212,7 +212,7 @@ All colors MUST be HSL.
   .shadow-elegant {
     box-shadow: var(--shadow-lg);
   }
-  
+
   .shadow-elegant-xl {
     box-shadow: var(--shadow-xl);
   }
@@ -231,5 +231,20 @@ All colors MUST be HSL.
 
   .gradient-subtle {
     background: var(--gradient-subtle);
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-in;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }

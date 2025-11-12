@@ -79,7 +79,7 @@ export const Chat = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <div className="flex flex-col h-screen bg-background animate-fade-in">
       {messages.length === 0 ? (
         /* Initial Mode - Centered input with quick actions */
         <div className="flex-1 flex flex-col justify-center items-center w-full px-4 -mt-[100px]">

@@ -353,7 +353,7 @@ export default function TeamMemberPermissions() {
   const totalCount = Object.keys(permissions).length;
 
   return (
-    <div className="p-8 space-y-6 bg-background">
+    <div className="p-8 space-y-6 bg-background animate-fade-in">
       <div className="flex items-center gap-4">
         <Button 
           variant="ghost" 

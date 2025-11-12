@@ -182,7 +182,7 @@ const ContentCalendar = () => {
   );
 
   return (
-    <div className="p-8 space-y-6 bg-background">
+    <div className="p-8 space-y-6 bg-background animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

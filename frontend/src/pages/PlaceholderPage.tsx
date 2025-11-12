@@ -10,7 +10,7 @@ interface PlaceholderPageProps {
 
 const PlaceholderPage = ({ title, description, features = [] }: PlaceholderPageProps) => {
   return (
-    <div className="p-8 space-y-8 bg-background">
+    <div className="p-8 space-y-8 bg-background animate-fade-in">
       <div>
         <h1 className="text-4xl font-bold tracking-tight">{title}</h1>
         <p className="text-muted-foreground mt-2">{description}</p>

@@ -124,7 +124,7 @@ const Multilingual = () => {
   }));
 
   return (
-    <div className="p-8 space-y-8 bg-background">
+    <div className="p-8 space-y-8 bg-background animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold tracking-tight">Multilingual Monitoring</h1>
