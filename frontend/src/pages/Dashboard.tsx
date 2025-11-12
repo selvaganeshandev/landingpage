@@ -132,7 +132,7 @@ const Dashboard = () => {
   }, [user, domainId, timePeriod, selectedDomain?.id]);
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-8 space-y-8 bg-background">
       <div className="space-y-4">
         <div className="flex items-start justify-between pb-4">
           <div>

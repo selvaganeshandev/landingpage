@@ -273,7 +273,7 @@ const MisinformationAlerts = () => {
   };
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-8 space-y-8 bg-background">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold tracking-tight">Misinformation Alerts</h1>

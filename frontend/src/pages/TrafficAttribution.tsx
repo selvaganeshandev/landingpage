@@ -94,7 +94,7 @@ export default function TrafficAttribution() {
   ];
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-8 space-y-6 bg-background">
       <div>
         <h1 className="text-3xl font-bold">Traffic Attribution</h1>
         <p className="text-muted-foreground mt-2">

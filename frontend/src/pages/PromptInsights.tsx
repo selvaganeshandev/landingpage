@@ -37,7 +37,7 @@ export default function PromptInsights() {
   ];
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-8 space-y-6 bg-background">
       <div>
         <h1 className="text-3xl font-bold">Prompt Volume Insights</h1>
         <p className="text-muted-foreground mt-2">
