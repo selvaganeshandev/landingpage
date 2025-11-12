@@ -50,7 +50,7 @@ export const MentionTable = ({ mentions = [] }: MentionTableProps) => {
   if (mentions.length === 0) {
     return (
       <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-        <h3 className="text-lg font-semibold mb-6 font-outfit">Recent Mentions</h3>
+        <h3 className="text-lg font-semibold mb-6 font-inter">Recent Mentions</h3>
         <p className="text-muted-foreground text-center py-8">No mentions found</p>
       </Card>
     );
@@ -58,7 +58,7 @@ export const MentionTable = ({ mentions = [] }: MentionTableProps) => {
 
   return (
     <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-      <h3 className="text-lg font-semibold mb-6 font-outfit">Recent Mentions</h3>
+      <h3 className="text-lg font-semibold mb-6 font-inter">Recent Mentions</h3>
       <Table>
         <TableHeader>
           <TableRow>

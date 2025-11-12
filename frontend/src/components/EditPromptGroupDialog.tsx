@@ -127,7 +127,7 @@ export const EditPromptGroupDialog = ({ open, onOpenChange, promptGroup, onEdit 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-outfit text-2xl">Edit Prompt Group</DialogTitle>
+          <DialogTitle className="font-inter text-2xl">Edit Prompt Group</DialogTitle>
           <DialogDescription>
             Update your prompt group settings and variants
           </DialogDescription>

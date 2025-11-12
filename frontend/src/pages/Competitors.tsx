@@ -506,14 +506,14 @@ const Competitors = () => {
                     <div className="flex items-start justify-between">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
-                          <h3 className="text-xl font-semibold font-outfit">{competitor.name}</h3>
+                          <h3 className="text-xl font-semibold font-inter">{competitor.name}</h3>
                           {competitor.isYou && (
                             <Badge variant="default" className="gradient-primary border-0">You</Badge>
                           )}
                         </div>
                         <p className="text-sm text-muted-foreground">{competitor.url}</p>
                       </div>
-                      <div className="w-12 h-12 rounded-xl gradient-primary shadow-glow flex items-center justify-center font-bold text-white text-lg font-outfit">
+                      <div className="w-12 h-12 rounded-xl gradient-primary shadow-glow flex items-center justify-center font-bold text-white text-lg font-inter">
                         #{idx + 1}
                       </div>
                     </div>
@@ -521,20 +521,20 @@ const Competitors = () => {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Mentions</p>
-                        <p className="text-2xl font-bold font-outfit">{competitor.mentions}</p>
+                        <p className="text-2xl font-bold font-inter">{competitor.mentions}</p>
                       </div>
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Share</p>
-                        <p className="text-2xl font-bold font-outfit">{competitor.shareOfVoice}%</p>
+                        <p className="text-2xl font-bold font-inter">{competitor.shareOfVoice}%</p>
                       </div>
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Visibility</p>
-                        <p className="text-lg font-bold font-outfit">{competitor.visibility}%</p>
+                        <p className="text-lg font-bold font-inter">{competitor.visibility}%</p>
                         <Progress value={competitor.visibility} className="h-1.5 mt-2" />
                       </div>
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Sentiment</p>
-                        <p className="text-lg font-bold font-outfit">{competitor.sentiment}%</p>
+                        <p className="text-lg font-bold font-inter">{competitor.sentiment}%</p>
                         <Progress value={competitor.sentiment} className="h-1.5 mt-2" />
                       </div>
                     </div>
@@ -568,7 +568,7 @@ const Competitors = () => {
             <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
               <div className="space-y-6">
                 <div className="pb-4 border-b border-border">
-                  <h3 className="text-lg font-semibold flex items-center gap-2 font-outfit">
+                  <h3 className="text-lg font-semibold flex items-center gap-2 font-inter">
                     <TrendingUp className="h-5 w-5 text-primary" />
                     Brand Visibility Over Time
                   </h3>
@@ -672,7 +672,7 @@ const Competitors = () => {
               </Card>
 
               <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-                <h3 className="text-lg font-semibold mb-6 font-outfit">Competitive Intelligence</h3>
+                <h3 className="text-lg font-semibold mb-6 font-inter">Competitive Intelligence</h3>
                 <div className="space-y-3">
                   {competitiveInsights.map((insight, idx) => (
                     <div key={idx} className="p-5 rounded-xl transition-all duration-300 border border-border hover:border-primary bg-card/50">
@@ -686,7 +686,7 @@ const Competitors = () => {
                         </div>
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-2">
-                            <h4 className="font-semibold text-sm font-outfit">{insight.title}</h4>
+                            <h4 className="font-semibold text-sm font-inter">{insight.title}</h4>
                             <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
                               {insight.impact}
                             </Badge>
@@ -702,7 +702,7 @@ const Competitors = () => {
 
             {/* Platform Breakdown */}
             <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-              <h3 className="text-lg font-semibold mb-6 font-outfit">Platform-Specific Competition</h3>
+              <h3 className="text-lg font-semibold mb-6 font-inter">Platform-Specific Competition</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {Object.entries(Object.keys(platformMap).length ? platformMap : platformComparison).map(([platform, data]) => (
                   <div key={platform} className="space-y-4">
@@ -739,7 +739,7 @@ const Competitors = () => {
               <div className="space-y-6">
                 <div className="flex items-center justify-between pb-4 border-b border-border">
                   <div>
-                    <h3 className="text-lg font-semibold font-outfit">Prompt Performance Analysis</h3>
+                    <h3 className="text-lg font-semibold font-inter">Prompt Performance Analysis</h3>
                     <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
                   </div>
                   <Badge variant="secondary">
@@ -800,13 +800,13 @@ const Competitors = () => {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
                         <div className="w-16 h-16 rounded-2xl gradient-primary shadow-glow flex items-center justify-center">
-                          <span className="text-2xl font-bold text-white font-outfit">
+                          <span className="text-2xl font-bold text-white font-inter">
                             {competitor.name.substring(0, 1)}
                           </span>
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <h3 className="text-2xl font-bold font-outfit">{competitor.name}</h3>
+                            <h3 className="text-2xl font-bold font-inter">{competitor.name}</h3>
                             {competitor.isYou && (
                               <Badge className="gradient-primary border-0">You</Badge>
                             )}
@@ -824,23 +824,23 @@ const Competitors = () => {
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                       <div className="p-4 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Mentions</p>
-                        <p className="text-3xl font-bold font-outfit">{competitor.mentions}</p>
+                        <p className="text-3xl font-bold font-inter">{competitor.mentions}</p>
                       </div>
                       <div className="p-4 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Visibility</p>
-                        <p className="text-3xl font-bold font-outfit">{competitor.visibility}%</p>
+                        <p className="text-3xl font-bold font-inter">{competitor.visibility}%</p>
                       </div>
                       <div className="p-4 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Sentiment</p>
-                        <p className="text-3xl font-bold font-outfit">{competitor.sentiment}%</p>
+                        <p className="text-3xl font-bold font-inter">{competitor.sentiment}%</p>
                       </div>
                       <div className="p-4 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Position</p>
-                        <p className="text-3xl font-bold font-outfit">{competitor.avgPosition}</p>
+                        <p className="text-3xl font-bold font-inter">{competitor.avgPosition}</p>
                       </div>
                       <div className="p-4 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Share</p>
-                        <p className="text-3xl font-bold font-outfit">{competitor.shareOfVoice}%</p>
+                        <p className="text-3xl font-bold font-inter">{competitor.shareOfVoice}%</p>
                       </div>
                     </div>
                   </div>
@@ -855,7 +855,7 @@ const Competitors = () => {
               <div className="space-y-6">
                 <div className="flex items-center justify-between pb-4 border-b border-border">
                   <div>
-                    <h3 className="text-lg font-semibold font-outfit">Answer Gap Analysis</h3>
+                    <h3 className="text-lg font-semibold font-inter">Answer Gap Analysis</h3>
                     <p className="text-sm text-muted-foreground mt-1">
                       Queries where competitors appear but you don't
                     </p>

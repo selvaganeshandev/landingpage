@@ -101,7 +101,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewA
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-outfit text-2xl">Create New Alert Rule</DialogTitle>
+          <DialogTitle className="font-inter text-2xl">Create New Alert Rule</DialogTitle>
           <DialogDescription>
             Configure conditions and notifications for monitoring your brand visibility
           </DialogDescription>

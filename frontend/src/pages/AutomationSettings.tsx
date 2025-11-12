@@ -56,7 +56,7 @@ const AutomationSettings = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight font-outfit">Automation Settings</h1>
+          <h1 className="text-3xl font-bold tracking-tight font-inter">Automation Settings</h1>
           <p className="text-muted-foreground mt-1">
             Configure automation behavior for generated articles
           </p>

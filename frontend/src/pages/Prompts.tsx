@@ -167,7 +167,7 @@ const Prompts = () => {
             <div className="space-y-5">
               <div className="flex items-start justify-between">
                 <div className="space-y-2">
-                  <h3 className="text-xl font-semibold font-outfit">{group.group_id}</h3>
+                  <h3 className="text-xl font-semibold font-inter">{group.group_id}</h3>
                   {group.primary_prompt && (
                     <p className="text-sm text-muted-foreground font-mono bg-gradient-to-br from-muted/30 to-muted/50 px-3 py-2 rounded-xl inline-block border border-border">
                       {group.primary_prompt}
@@ -176,7 +176,7 @@ const Prompts = () => {
                 </div>
                 <div className="flex items-center gap-6">
                   <div className="text-right">
-                    <p className="text-3xl font-bold font-outfit">{group.total_mentions || 0}</p>
+                    <p className="text-3xl font-bold font-inter">{group.total_mentions || 0}</p>
                     <p className="text-xs text-muted-foreground uppercase tracking-wider">mentions</p>
                   </div>
                   {group.visibility_growth !== undefined && group.visibility_growth !== null && (

@@ -126,7 +126,7 @@ export const GenerateVariantsDialog = ({ open, onOpenChange, promptGroup, onAdd 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-outfit text-2xl flex items-center gap-2">
+          <DialogTitle className="font-inter text-2xl flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
             Generate Prompt Variants
           </DialogTitle>

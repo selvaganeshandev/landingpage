@@ -134,7 +134,7 @@ const PromptDetail = () => {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight font-outfit">{promptGroup?.group_id || 'N/A'}</h1>
+            <h1 className="text-3xl font-bold tracking-tight font-inter">{promptGroup?.group_id || 'N/A'}</h1>
             <p className="text-muted-foreground mt-1">
               {promptGroup?.theme || promptGroup?.primary_prompt || 'No description available'}
             </p>
@@ -157,7 +157,7 @@ const PromptDetail = () => {
         <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Mentions</p>
-            <p className="text-4xl font-bold font-outfit">{promptGroup?.total_mentions || 0}</p>
+            <p className="text-4xl font-bold font-inter">{promptGroup?.total_mentions || 0}</p>
             <div className="flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-success" />
               <span className="text-sm font-semibold text-success">+{promptGroup?.visibility_growth || 0}%</span>
@@ -169,7 +169,7 @@ const PromptDetail = () => {
         <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Active Variants</p>
-            <p className="text-4xl font-bold font-outfit">{promptGroup?.active_variants || prompts?.length || 0}</p>
+            <p className="text-4xl font-bold font-inter">{promptGroup?.active_variants || prompts?.length || 0}</p>
             <p className="text-sm text-muted-foreground">Prompt variations being tracked</p>
           </div>
         </Card>
@@ -177,7 +177,7 @@ const PromptDetail = () => {
         <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Avg Position</p>
-            <p className="text-4xl font-bold font-outfit">{promptGroup?.average_position || 0}</p>
+            <p className="text-4xl font-bold font-inter">{promptGroup?.average_position || 0}</p>
             <p className="text-sm text-muted-foreground">Across all platforms</p>
           </div>
         </Card>
@@ -190,7 +190,7 @@ const PromptDetail = () => {
           <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold font-outfit">Main Prompt</h3>
+                <h3 className="text-lg font-semibold font-inter">Main Prompt</h3>
                 <Button variant="ghost" size="sm" onClick={() => handleCopy(promptGroup?.primary_prompt || '')}>
                   <Copy className="h-4 w-4 mr-1" />
                   Copy
@@ -206,7 +206,7 @@ const PromptDetail = () => {
           <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
             <div className="space-y-6">
               <div className="pb-4 border-b border-border/50">
-                <h3 className="text-lg font-semibold font-outfit">Mention Volume Trends</h3>
+                <h3 className="text-lg font-semibold font-inter">Mention Volume Trends</h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   Track how mention frequency changes over time
                 </p>
@@ -230,7 +230,7 @@ const PromptDetail = () => {
           <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
             <div className="space-y-6">
               <div className="pb-4 border-b border-border/50">
-                <h3 className="text-lg font-semibold font-outfit">Variant Performance</h3>
+                <h3 className="text-lg font-semibold font-inter">Variant Performance</h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   Compare performance across prompt variations
                 </p>
@@ -254,7 +254,7 @@ const PromptDetail = () => {
           <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
             <div className="space-y-4">
               <div className="flex items-center justify-between pb-4 border-b border-border/50">
-                <h3 className="text-lg font-semibold font-outfit">Prompt Variants</h3>
+                <h3 className="text-lg font-semibold font-inter">Prompt Variants</h3>
                 <Badge variant="secondary">{(promptGroup?.secondary_prompts || []).length}</Badge>
               </div>
               <div className="space-y-3">
@@ -283,13 +283,13 @@ const PromptDetail = () => {
           {/* Platform Distribution */}
           <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold font-outfit pb-4 border-b border-border/50">Platform Distribution</h3>
+              <h3 className="text-lg font-semibold font-inter pb-4 border-b border-border/50">Platform Distribution</h3>
               <div className="space-y-3">
                 {platformBreakdown.map((platform: any, idx: number) => (
                   <div key={idx} className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">{platform.platform}</span>
-                      <span className="text-sm font-bold font-outfit">{platform.mentions}</span>
+                      <span className="text-sm font-bold font-inter">{platform.mentions}</span>
                     </div>
                     <div className="h-2 bg-muted rounded-full overflow-hidden">
                       <div className={`h-full bg-chart-${(idx % 4) + 1} transition-all duration-500`} style={{ width: `${platform.mentions > 0 ? (platform.mentions / maxMentions) * 100 : 0}%` }} />
@@ -303,7 +303,7 @@ const PromptDetail = () => {
           {/* Quick Actions */}
           <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
             <div className="space-y-3">
-              <h3 className="text-lg font-semibold font-outfit pb-4 border-b border-border/50">Quick Actions</h3>
+              <h3 className="text-lg font-semibold font-inter pb-4 border-b border-border/50">Quick Actions</h3>
               <Button variant="outline" className="w-full justify-start border-border/50">
                 <Sparkles className="h-4 w-4 mr-2" />
                 Generate More Variants

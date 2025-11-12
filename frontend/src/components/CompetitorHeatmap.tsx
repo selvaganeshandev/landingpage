@@ -27,7 +27,7 @@ export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) =
     <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
       <div className="space-y-6">
         <div className="pb-4 border-b border-border/50">
-          <h3 className="text-lg font-semibold flex items-center gap-2 font-outfit">
+          <h3 className="text-lg font-semibold flex items-center gap-2 font-inter">
             <Building2 className="h-5 w-5 text-primary" />
             Competitor Analysis Heatmap
           </h3>
@@ -64,7 +64,7 @@ export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) =
                     <div className="w-8 h-8 rounded-xl gradient-primary shadow-md flex items-center justify-center">
                       <Building2 className="h-4 w-4 text-white" />
                     </div>
-                    <span className="truncate font-outfit font-semibold">{row.competitor}</span>
+                    <span className="truncate font-inter font-semibold">{row.competitor}</span>
                   </div>
                   {platforms.map((platform) => (
                     <div

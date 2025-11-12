@@ -62,7 +62,7 @@ export const AddCompetitorDialog = ({ open, onOpenChange, onAdd }: AddCompetitor
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle className="font-outfit text-2xl flex items-center gap-2">
+          <DialogTitle className="font-inter text-2xl flex items-center gap-2">
             <Building2 className="h-6 w-6 text-primary" />
             Add Competitor
           </DialogTitle>

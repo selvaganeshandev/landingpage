@@ -159,7 +159,7 @@ const CompetitorDetail = () => {
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Mentions</p>
-            <p className="text-4xl font-bold font-outfit">{competitor.mentions}</p>
+            <p className="text-4xl font-bold font-inter">{competitor.mentions}</p>
             <div className="flex items-center gap-2">
               {competitor.trend > 0 ? (
                 <TrendingUp className="h-4 w-4 text-success" />
@@ -176,7 +176,7 @@ const CompetitorDetail = () => {
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Visibility Score</p>
-            <p className="text-4xl font-bold font-outfit">{competitor.visibility}%</p>
+            <p className="text-4xl font-bold font-inter">{competitor.visibility}%</p>
             <Progress value={competitor.visibility} className="h-2" />
           </div>
         </Card>
@@ -184,7 +184,7 @@ const CompetitorDetail = () => {
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Avg Position</p>
-            <p className="text-4xl font-bold font-outfit">{competitor.avgPosition}</p>
+            <p className="text-4xl font-bold font-inter">{competitor.avgPosition}</p>
             <p className="text-sm text-muted-foreground">Across all platforms</p>
           </div>
         </Card>
@@ -192,7 +192,7 @@ const CompetitorDetail = () => {
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Share of Voice</p>
-            <p className="text-4xl font-bold font-outfit">{competitor.shareOfVoice}%</p>
+            <p className="text-4xl font-bold font-inter">{competitor.shareOfVoice}%</p>
             <p className="text-sm text-muted-foreground">Market share</p>
           </div>
         </Card>
@@ -205,7 +205,7 @@ const CompetitorDetail = () => {
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-6">
               <div className="pb-4 border-b border-border">
-                <h3 className="text-lg font-semibold font-outfit">Mention Volume & Position Trends</h3>
+                <h3 className="text-lg font-semibold font-inter">Mention Volume & Position Trends</h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   Track mention frequency and average position over time
                 </p>
@@ -251,7 +251,7 @@ const CompetitorDetail = () => {
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
             <div className="space-y-6">
               <div className="pb-4 border-b border-border">
-                <h3 className="text-lg font-semibold font-outfit">Platform Distribution</h3>
+                <h3 className="text-lg font-semibold font-inter">Platform Distribution</h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   Mention breakdown across AI platforms
                 </p>
@@ -284,7 +284,7 @@ const CompetitorDetail = () => {
                         <span className="font-medium">{platform.platform}</span>
                       </div>
                       <div className="text-right">
-                        <p className="font-bold font-outfit">{platform.mentions}</p>
+                        <p className="font-bold font-inter">{platform.mentions}</p>
                         <p className="text-xs text-muted-foreground">{platform.percentage}%</p>
                       </div>
                     </div>
@@ -311,16 +311,16 @@ const CompetitorDetail = () => {
 
               <TabsContent value="overview" className="space-y-4">
                 <div>
-                  <h3 className="text-lg font-semibold mb-3 font-outfit">About {competitor.name}</h3>
+                  <h3 className="text-lg font-semibold mb-3 font-inter">About {competitor.name}</h3>
                   <p className="text-muted-foreground leading-relaxed">{competitor.description}</p>
                 </div>
                 <div className="pt-4">
-                  <h3 className="text-lg font-semibold mb-4 font-outfit">Sentiment Distribution</h3>
+                  <h3 className="text-lg font-semibold mb-4 font-inter">Sentiment Distribution</h3>
                   <div className="grid grid-cols-3 gap-4">
                     {sentimentData.map((item) => (
                       <div key={item.name} className="p-4 rounded-xl border border-border bg-muted/30">
                         <p className="text-sm text-muted-foreground mb-2">{item.name}</p>
-                        <p className="text-3xl font-bold font-outfit">{item.value}%</p>
+                        <p className="text-3xl font-bold font-inter">{item.value}%</p>
                         <Progress value={item.value} className="h-2 mt-2" />
                       </div>
                     ))}
@@ -333,7 +333,7 @@ const CompetitorDetail = () => {
                   <div key={idx} className="p-4 rounded-xl border border-border hover:shadow-md transition-all bg-card/50">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl gradient-primary shadow-md flex items-center justify-center font-bold text-white font-outfit">
+                        <div className="w-10 h-10 rounded-xl gradient-primary shadow-md flex items-center justify-center font-bold text-white font-inter">
                           #{mention.position}
                         </div>
                         <div>
@@ -355,7 +355,7 @@ const CompetitorDetail = () => {
               <TabsContent value="swot" className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="p-5 rounded-xl border border-success/20 bg-success/5">
-                    <h4 className="font-semibold mb-3 font-outfit text-success flex items-center gap-2">
+                    <h4 className="font-semibold mb-3 font-inter text-success flex items-center gap-2">
                       <TrendingUp className="h-4 w-4" />
                       Strengths
                     </h4>
@@ -369,7 +369,7 @@ const CompetitorDetail = () => {
                     </ul>
                   </div>
                   <div className="p-5 rounded-xl border border-warning/20 bg-warning/5">
-                    <h4 className="font-semibold mb-3 font-outfit text-warning flex items-center gap-2">
+                    <h4 className="font-semibold mb-3 font-inter text-warning flex items-center gap-2">
                       <Target className="h-4 w-4" />
                       Weaknesses
                     </h4>
@@ -392,26 +392,26 @@ const CompetitorDetail = () => {
         <div className="space-y-6">
           {/* Quick Stats */}
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-            <h3 className="text-lg font-semibold mb-4 font-outfit">Quick Stats</h3>
+            <h3 className="text-lg font-semibold mb-4 font-inter">Quick Stats</h3>
             <div className="space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-border">
                 <span className="text-sm text-muted-foreground">Positive Sentiment</span>
-                <span className="text-lg font-bold font-outfit text-success">{competitor.sentiment}%</span>
+                <span className="text-lg font-bold font-inter text-success">{competitor.sentiment}%</span>
               </div>
               <div className="flex items-center justify-between pb-3 border-b border-border">
                 <span className="text-sm text-muted-foreground">Market Rank</span>
-                <span className="text-lg font-bold font-outfit">#2</span>
+                <span className="text-lg font-bold font-inter">#2</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Growth Rate</span>
-                <span className="text-lg font-bold font-outfit text-success">+{competitor.trend}%</span>
+                <span className="text-lg font-bold font-inter text-success">+{competitor.trend}%</span>
               </div>
             </div>
           </Card>
 
           {/* Quick Actions */}
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-            <h3 className="text-lg font-semibold mb-4 font-outfit">Quick Actions</h3>
+            <h3 className="text-lg font-semibold mb-4 font-inter">Quick Actions</h3>
             <div className="space-y-2">
               <Button variant="outline" className="w-full justify-start border border-border" asChild>
                 <a href={`https://${competitor.url}`} target="_blank" rel="noopener noreferrer">
