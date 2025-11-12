@@ -55,6 +55,12 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
 
@@ -125,7 +131,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { g
       ? (location.pathname === '/' || location.pathname === '/chat')
       : location.pathname === item.path;
 
-    return (
+    const linkContent = (
       <Link
         to={item.path}
         onClick={onItemClick}
@@ -138,18 +144,32 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { g
             ? "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
             : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
         )}
-        title={!isSidebarOpen ? item.name : undefined}
       >
         <Icon className={cn("h-5 w-5 flex-shrink-0", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
         {isSidebarOpen && <span>{item.name}</span>}
       </Link>
     );
+
+    if (!isSidebarOpen) {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {linkContent}
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            <p>{item.name}</p>
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    return linkContent;
   }
 
   const GroupIcon = (group.icon as any) || LayoutDashboard;
 
   // Always use popover for submenus (both open and closed states)
-  return (
+  const popoverContent = (
     <Popover open={submenuOpen} onOpenChange={setSubmenuOpen}>
       <PopoverTrigger asChild>
         {isSidebarOpen ? (
@@ -173,7 +193,6 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { g
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             )}
-            title={group.name}
           >
             <GroupIcon className="h-5 w-5 flex-shrink-0" />
           </button>
@@ -210,6 +229,23 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { g
       </PopoverContent>
     </Popover>
   );
+
+  if (!isSidebarOpen) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div>
+            {popoverContent}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          <p>{group.name}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return popoverContent;
 };
 
 export const Sidebar = () => {
@@ -273,12 +309,13 @@ export const Sidebar = () => {
   };
 
   return (
-    <aside className={cn(
-      "bg-card border-r border-border h-screen sticky top-0 overflow-y-auto flex flex-col transition-all duration-150",
-      isOpen ? "w-64" : "w-16"
-    )}>
-      <div className={cn("border-b border-border transition-all duration-150", isOpen ? "px-4 pt-4 pb-3" : "px-3 py-4")}>
-        <div className="flex items-center justify-between">
+    <TooltipProvider>
+      <aside className={cn(
+        "bg-card border-r border-border h-screen sticky top-0 overflow-y-auto flex flex-col transition-all duration-150",
+        isOpen ? "w-64" : "w-16"
+      )}>
+        <div className={cn("border-b border-border transition-all duration-150", isOpen ? "px-4 pt-4 pb-3" : "px-3 py-4")}>
+          <div className="flex items-center justify-between">
           {isOpen ? (
             <>
               <div>
@@ -407,76 +444,150 @@ export const Sidebar = () => {
           {user && (
             <div className="space-y-1 mt-4">
               {(user.role === 'admin' || user.role === 'super_admin') && (
-                <Link
-                  to="/organization-settings"
-                  className={cn(
-                    "flex items-center",
-                    location.pathname === "/organization-settings"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    isOpen
-                      ? "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
-                      : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
-                  )}
-                  title={!isOpen ? "Organization" : undefined}
-                >
-                  <Settings className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/organization-settings" ? "text-primary-foreground" : "text-muted-foreground")} />
-                  {isOpen && <span>Organization</span>}
-                </Link>
+                !isOpen ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Link
+                        to="/organization-settings"
+                        className={cn(
+                          "flex items-center",
+                          location.pathname === "/organization-settings"
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                          "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
+                        )}
+                      >
+                        <Settings className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/organization-settings" ? "text-primary-foreground" : "text-muted-foreground")} />
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <p>Organization</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Link
+                    to="/organization-settings"
+                    className={cn(
+                      "flex items-center",
+                      location.pathname === "/organization-settings"
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+                    )}
+                  >
+                    <Settings className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/organization-settings" ? "text-primary-foreground" : "text-muted-foreground")} />
+                    <span>Organization</span>
+                  </Link>
+                )
               )}
               {user.role === 'admin' && (
-                <Link
-                  to="/profile"
-                  className={cn(
-                    "flex items-center",
-                    location.pathname === "/profile"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    isOpen
-                      ? "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
-                      : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
-                  )}
-                  title={!isOpen ? "Profile" : undefined}
-                >
-                  <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
-                  {isOpen && <span>Profile</span>}
-                </Link>
+                !isOpen ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Link
+                        to="/profile"
+                        className={cn(
+                          "flex items-center",
+                          location.pathname === "/profile"
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                          "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
+                        )}
+                      >
+                        <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <p>Profile</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Link
+                    to="/profile"
+                    className={cn(
+                      "flex items-center",
+                      location.pathname === "/profile"
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+                    )}
+                  >
+                    <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
+                    <span>Profile</span>
+                  </Link>
+                )
               )}
               {user.role === 'user' && (
-                <Link
-                  to="/profile"
-                  className={cn(
-                    "flex items-center",
-                    location.pathname === "/profile"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    isOpen
-                      ? "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
-                      : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
-                  )}
-                  title={!isOpen ? "Profile" : undefined}
-                >
-                  <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
-                  {isOpen && <span>Profile</span>}
-                </Link>
+                !isOpen ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Link
+                        to="/profile"
+                        className={cn(
+                          "flex items-center",
+                          location.pathname === "/profile"
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                          "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
+                        )}
+                      >
+                        <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <p>Profile</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Link
+                    to="/profile"
+                    className={cn(
+                      "flex items-center",
+                      location.pathname === "/profile"
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+                    )}
+                  >
+                    <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
+                    <span>Profile</span>
+                  </Link>
+                )
               )}
             </div>
           )}
 
-          <button
-            onClick={handleLogout}
-            className={cn(
-              "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-              isOpen
-                ? "w-full gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
-                : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
-            )}
-            title={!isOpen ? "Sign Out" : undefined}
-          >
-            <LogOut className="h-5 w-5 flex-shrink-0" />
-            {isOpen && <span>Sign Out</span>}
-          </button>
+          {!isOpen ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={handleLogout}
+                  className={cn(
+                    "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                    "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
+                  )}
+                >
+                  <LogOut className="h-5 w-5 flex-shrink-0" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Sign Out</p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <button
+              onClick={handleLogout}
+              className={cn(
+                "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                "w-full gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+              )}
+            >
+              <LogOut className="h-5 w-5 flex-shrink-0" />
+              <span>Sign Out</span>
+            </button>
+          )}
       </div>
     </aside>
+    </TooltipProvider>
   );
 };
