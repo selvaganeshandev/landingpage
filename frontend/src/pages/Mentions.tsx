@@ -261,7 +261,7 @@ const Mentions = () => {
 
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
-      <div className="flex items-center justify-between pb-4">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold tracking-tight">Real-Time Mention Tracking</h1>
           <p className="text-muted-foreground mt-2">
