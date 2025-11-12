@@ -55,6 +55,10 @@ class ChatGPTClient:
                 logger.warning(f"Failed to initialize OpenAI client, using local generation for {len(keywords)} keywords")
             return self._local_generate_prompts(keywords, domain_name)
 
+        # Calculate total prompts: keywords * PROMPT_MIN_COUNT (prompts per keyword)
+        prompts_per_keyword = getattr(settings, 'PROMPT_MIN_COUNT', 2)
+        total_prompts = len(keywords) * prompts_per_keyword
+        
         # Create a system prompt for generating short, natural prompts like real ChatGPT users write
         system_prompt = f"""Generate short, natural prompts that real ChatGPT users would type for keywords related to "{domain_name}".
 
@@ -76,7 +80,7 @@ Return ONLY a JSON array with this structure:
   ...
 ]
 
-Generate 10-15 distinct short prompts. Return ONLY the JSON array, no markdown, no explanations."""
+Generate exactly {total_prompts} distinct short prompts ({prompts_per_keyword} prompts per keyword). Return ONLY the JSON array, no markdown, no explanations."""
         
         # Prepare the user message with keywords
         # Use up to KEYWORD_EXTRACT_LIMIT keywords to ensure diversity
@@ -103,6 +107,14 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
             content = response.choices[0].message.content.strip()
             logger.debug(f"Received ChatGPT response (length: {len(content)} chars)")
             parsed_prompts = self._parse_prompts_response(content, keywords)
+            
+            # Limit to calculated total (keywords * prompts_per_keyword)
+            prompts_per_keyword = getattr(settings, 'PROMPT_MIN_COUNT', 2)
+            expected_total = len(keywords) * prompts_per_keyword
+            if len(parsed_prompts) > expected_total:
+                logger.info(f"Limiting prompts from {len(parsed_prompts)} to {expected_total} (calculated: {len(keywords)} keywords × {prompts_per_keyword} prompts per keyword)")
+                parsed_prompts = parsed_prompts[:expected_total]
+            
             logger.info(f"Successfully parsed {len(parsed_prompts)} prompts from ChatGPT response")
             return parsed_prompts
             
@@ -235,6 +247,8 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         if not prompts:
             logger.warning(f"No prompts could be parsed from ChatGPT response, using template-based fallback")
             kw_limit = getattr(settings, 'KEYWORD_EXTRACT_LIMIT', 50)
+            prompts_per_keyword = getattr(settings, 'PROMPT_MIN_COUNT', 2)
+            prompt_limit = len(original_keywords) * prompts_per_keyword
             # Short, natural templates like real ChatGPT users write
             diverse_templates = [
                 "What is {kw}?",
@@ -253,25 +267,49 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
                 "Tell me everything about {kw}.",
                 "What makes {kw} good?"
             ]
-            for i, keyword in enumerate(original_keywords[:kw_limit]):
-                tpl = diverse_templates[i % len(diverse_templates)]
-                prompts.append({
-                    'prompt_text': tpl.format(kw=keyword),
-                    'keyword': keyword,
-                    'category': 'General',
-                    'priority': 'Medium'
-                })
+            # Generate prompts_per_keyword prompts for each keyword
+            prompt_count = 0
+            for keyword in original_keywords[:kw_limit]:
+                if prompt_count >= prompt_limit:
+                    break
+                # Generate prompts_per_keyword prompts for this keyword
+                for i in range(prompts_per_keyword):
+                    if prompt_count >= prompt_limit:
+                        break
+                    tpl = diverse_templates[prompt_count % len(diverse_templates)]
+                    prompts.append({
+                        'prompt_text': tpl.format(kw=keyword),
+                        'keyword': keyword,
+                        'category': 'General',
+                        'priority': 'Medium'
+                    })
+                    prompt_count += 1
         
         # Ensure we have at least some prompts
         if not prompts and original_keywords:
             logger.warning(f"Failed to generate any prompts, creating minimal prompts from keywords")
-            for keyword in original_keywords[:10]:
+            prompts_per_keyword = getattr(settings, 'PROMPT_MIN_COUNT', 2)
+            prompt_limit = len(original_keywords) * prompts_per_keyword
+            keyword_index = 0
+            prompt_count = 0
+            while prompt_count < prompt_limit and keyword_index < len(original_keywords):
+                keyword = original_keywords[keyword_index]
                 prompts.append({
                     'prompt_text': f"What is {keyword}?",
                     'keyword': keyword,
                     'category': 'General',
                     'priority': 'Medium'
                 })
+                prompt_count += 1
+                # Move to next keyword after generating prompts_per_keyword prompts for current keyword
+                if prompt_count % prompts_per_keyword == 0:
+                    keyword_index += 1
+        
+        # Final limit check to ensure we don't exceed the calculated limit
+        prompts_per_keyword = getattr(settings, 'PROMPT_MIN_COUNT', 2)
+        prompt_limit = len(original_keywords) * prompts_per_keyword
+        if len(prompts) > prompt_limit:
+            prompts = prompts[:prompt_limit]
         
         return prompts
 
@@ -279,6 +317,8 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         # Generate short, natural prompts like real ChatGPT users write
         prompts: List[Dict[str, Any]] = []
         kw_limit = getattr(settings, 'KEYWORD_EXTRACT_LIMIT', 50)
+        prompts_per_keyword = getattr(settings, 'PROMPT_MIN_COUNT', 2)
+        prompt_limit = len(keywords) * prompts_per_keyword
         # Short, conversational templates (1 sentence, max 15-20 words)
         diverse_templates = [
             "What is {kw}?",
@@ -302,14 +342,23 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
             "Should I use {kw}?",
             "What do I need to know about {kw}?"
         ]
-        for i, kw in enumerate(keywords[:kw_limit]):
-            tpl = diverse_templates[i % len(diverse_templates)]
-            prompts.append({
-                'prompt_text': tpl.format(kw=kw),
-                'keyword': kw,
-                'category': 'General',
-                'priority': 'Medium'
-            })
+        # Generate prompts_per_keyword prompts for each keyword
+        prompt_count = 0
+        for kw in keywords[:kw_limit]:
+            if prompt_count >= prompt_limit:
+                break
+            # Generate prompts_per_keyword prompts for this keyword
+            for i in range(prompts_per_keyword):
+                if prompt_count >= prompt_limit:
+                    break
+                tpl = diverse_templates[prompt_count % len(diverse_templates)]
+                prompts.append({
+                    'prompt_text': tpl.format(kw=kw),
+                    'keyword': kw,
+                    'category': 'General',
+                    'priority': 'Medium'
+                })
+                prompt_count += 1
         return prompts
     
     def group_prompts_with_nlp(self, prompts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

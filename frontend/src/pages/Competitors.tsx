@@ -52,205 +52,7 @@ import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
 
-const competitorsStatic = [
-  {
-    id: 1,
-    name: "VegFit Pro",
-    url: "vegfitpro.com",
-    mentions: 221,
-    visibility: 94,
-    sentiment: 74,
-    avgPosition: 1.6,
-    shareOfVoice: 42,
-    trend: 15,
-    color: "hsl(var(--primary))",
-    isYou: true
-  },
-  {
-    id: 2,
-    name: "MyProtein",
-    url: "myprotein.com",
-    mentions: 187,
-    visibility: 85,
-    sentiment: 68,
-    avgPosition: 2.1,
-    shareOfVoice: 35,
-    trend: 8,
-    color: "hsl(var(--chart-2))",
-    isYou: false
-  },
-  {
-    id: 3,
-    name: "Naked Nutrition",
-    url: "nakednutrition.com",
-    mentions: 123,
-    visibility: 78,
-    sentiment: 71,
-    avgPosition: 2.3,
-    shareOfVoice: 23,
-    trend: -3,
-    color: "hsl(var(--chart-3))",
-    isYou: false
-  },
-];
-
-const competitiveMetrics = [
-  { metric: "Visibility", vegfit: 94, myprotein: 85, naked: 78 },
-  { metric: "Sentiment", vegfit: 74, myprotein: 68, naked: 71 },
-  { metric: "Position", vegfit: 88, myprotein: 75, naked: 70 },
-  { metric: "Coverage", vegfit: 82, myprotein: 78, naked: 68 },
-  { metric: "Growth", vegfit: 85, myprotein: 72, naked: 65 },
-];
-
-const mentionHistory = [
-  { month: "Jul", vegfit: 145, myprotein: 178, naked: 132 },
-  { month: "Aug", vegfit: 158, myprotein: 182, naked: 135 },
-  { month: "Sep", vegfit: 172, myprotein: 185, naked: 138 },
-  { month: "Oct", vegfit: 184, myprotein: 188, naked: 140 },
-  { month: "Nov", vegfit: 193, myprotein: 190, naked: 138 },
-  { month: "Dec", vegfit: 205, myprotein: 191, naked: 135 },
-  { month: "Jan", vegfit: 212, myprotein: 189, naked: 132 },
-  { month: "Feb", vegfit: 218, myprotein: 188, naked: 128 },
-  { month: "Mar", vegfit: 219, myprotein: 186, naked: 125 },
-  { month: "Apr", vegfit: 221, myprotein: 187, naked: 123 },
-];
-
-const platformComparison = {
-  "ChatGPT": [
-    { brand: "VegFit Pro", mentions: 89 },
-    { brand: "MyProtein", mentions: 72 },
-    { brand: "Naked Nutrition", mentions: 45 },
-  ],
-  "Claude": [
-    { brand: "VegFit Pro", mentions: 64 },
-    { brand: "MyProtein", mentions: 58 },
-    { brand: "Naked Nutrition", mentions: 38 },
-  ],
-  "Perplexity": [
-    { brand: "VegFit Pro", mentions: 42 },
-    { brand: "MyProtein", mentions: 35 },
-    { brand: "Naked Nutrition", mentions: 25 },
-  ],
-  "Gemini": [
-    { brand: "VegFit Pro", mentions: 26 },
-    { brand: "MyProtein", mentions: 22 },
-    { brand: "Naked Nutrition", mentions: 15 },
-  ],
-};
-
-const competitiveInsights = [
-  {
-    title: "Market Leadership Maintained",
-    description: "VegFit Pro maintains #1 position with 42% market share, 7% ahead of nearest competitor",
-    type: "success",
-    impact: "high"
-  },
-  {
-    title: "Sentiment Advantage",
-    description: "6% higher positive sentiment than MyProtein, driven by ingredient quality mentions",
-    type: "success",
-    impact: "medium"
-  },
-  {
-    title: "MyProtein Gaining Momentum",
-    description: "MyProtein increased mentions by 8% this month, focused on pricing positioning",
-    type: "warning",
-    impact: "medium"
-  },
-  {
-    title: "Opportunity in Weight Loss",
-    description: "Naked Nutrition dominates weight loss category - opportunity to increase presence",
-    type: "opportunity",
-    impact: "high"
-  },
-];
-
-const promptData = [
-  {
-    id: 1,
-    prompt: "Best plant-based protein powder for weight loss",
-    vegfit: 89,
-    myprotein: 72,
-    naked: 45,
-    total: 206,
-    winner: "VegFit Pro"
-  },
-  {
-    id: 2,
-    prompt: "Vegan protein powder with best taste",
-    vegfit: 64,
-    myprotein: 78,
-    naked: 38,
-    total: 180,
-    winner: "MyProtein"
-  },
-  {
-    id: 3,
-    prompt: "Affordable plant protein supplements",
-    vegfit: 42,
-    myprotein: 85,
-    naked: 25,
-    total: 152,
-    winner: "MyProtein"
-  },
-  {
-    id: 4,
-    prompt: "Natural vegan protein without additives",
-    vegfit: 78,
-    myprotein: 45,
-    naked: 67,
-    total: 190,
-    winner: "VegFit Pro"
-  },
-  {
-    id: 5,
-    prompt: "Organic plant-based protein powder",
-    vegfit: 92,
-    myprotein: 56,
-    naked: 48,
-    total: 196,
-    winner: "VegFit Pro"
-  }
-];
-
-const answerGapData = [
-  {
-    id: 1,
-    query: "Best vegan BCAA supplements",
-    competitor: "MyProtein",
-    mentions: 45,
-    yourMentions: 0,
-    opportunity: "high",
-    platforms: ["ChatGPT", "Claude", "Perplexity"]
-  },
-  {
-    id: 2,
-    query: "Plant protein for muscle recovery",
-    competitor: "Naked Nutrition",
-    mentions: 38,
-    yourMentions: 12,
-    opportunity: "medium",
-    platforms: ["ChatGPT", "Gemini"]
-  },
-  {
-    id: 3,
-    query: "Vegan protein powder for athletes",
-    competitor: "MyProtein",
-    mentions: 67,
-    yourMentions: 8,
-    opportunity: "high",
-    platforms: ["ChatGPT", "Claude", "Perplexity", "Gemini"]
-  },
-  {
-    id: 4,
-    query: "Best tasting unflavored plant protein",
-    competitor: "Naked Nutrition",
-    mentions: 52,
-    yourMentions: 0,
-    opportunity: "high",
-    platforms: ["ChatGPT", "Perplexity"]
-  }
-];
+// Static data constants removed - all data now comes from APIs
 
 const Competitors = () => {
   const navigate = useNavigate();
@@ -261,13 +63,17 @@ const Competitors = () => {
   const [addCompetitorDialogOpen, setAddCompetitorDialogOpen] = useState(false);
   const { user } = useAuth();
   const [domainId, setDomainId] = useState<string | null>(null);
-  const [competitors, setCompetitors] = useState<any[]>(competitorsStatic);
+  const [competitors, setCompetitors] = useState<any[]>([]);
   const [sovLatest, setSovLatest] = useState<any>(null);
   const [sovSeries, setSovSeries] = useState<any[]>([]);
   const [platformMap, setPlatformMap] = useState<Record<string, Array<{ brand: string; mentions: number }>>>({});
   const [heatmap, setHeatmap] = useState<any[]>([]);
   const [topBrands, setTopBrands] = useState<any[]>([]);
-  const [promptCards, setPromptCards] = useState<any[]>(promptData);
+  const [promptCards, setPromptCards] = useState<any[]>([]);
+  const [competitiveMetrics, setCompetitiveMetrics] = useState<any[]>([]);
+  const [competitiveInsights, setCompetitiveInsights] = useState<any[]>([]);
+  const [answerGapData, setAnswerGapData] = useState<any[]>([]);
+  const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
 
   const handleExportReport = () => {
     toast({
@@ -286,6 +92,7 @@ const Competitors = () => {
     const load = async () => {
       if (!domainId) return;
       try {
+        // Load main competitor data first
         const [list, latest, byDomain, compPromptAnalytics] = await Promise.all([
           apiClient.getEngineCompetitors({ domain_id: domainId }),
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }),
@@ -293,21 +100,93 @@ const Competitors = () => {
           apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId }),
         ] as any);
 
+        // Load competitive analysis APIs separately with better error handling
+        setIsLoadingAnalysis(true);
+        let strengthAnalysis: any = undefined;
+        let insights: any = undefined;
+        let gaps: any = undefined;
+
+        try {
+          console.log('🔵 API CALL: Loading competitive strength analysis for domain:', domainId);
+          const url = `/competitors/competitive-strength-analysis?domain_id=${domainId}`;
+          console.log('🔵 API URL:', url);
+          strengthAnalysis = await apiClient.getCompetitiveStrengthAnalysis({ domain_id: domainId });
+          console.log('✅ Competitive strength analysis response:', strengthAnalysis);
+          console.log('✅ Response type:', typeof strengthAnalysis, 'Is array:', Array.isArray(strengthAnalysis));
+          // If API returns empty array, that's valid - we'll show empty state
+          if (Array.isArray(strengthAnalysis) && strengthAnalysis.length === 0) {
+            console.log('ℹ️ API returned empty array - will show empty state');
+          }
+        } catch (e: any) {
+          console.error('❌ Failed to load competitive strength analysis:', e);
+          console.error('❌ Error message:', e?.message);
+          console.error('❌ Error stack:', e?.stack);
+          // Don't set to empty array - leave as undefined to indicate API call failed
+          strengthAnalysis = undefined;
+        }
+
+        try {
+          console.log('🔵 API CALL: Loading competitive insights for domain:', domainId);
+          const url = `/competitors/competitive-insights?domain_id=${domainId}`;
+          console.log('🔵 API URL:', url);
+          insights = await apiClient.getCompetitiveInsights({ domain_id: domainId });
+          console.log('✅ Competitive insights response:', insights);
+          console.log('✅ Response type:', typeof insights, 'Is array:', Array.isArray(insights));
+          // If API returns empty array, that's valid - we'll show empty state
+          if (Array.isArray(insights) && insights.length === 0) {
+            console.log('ℹ️ API returned empty array - will show empty state');
+          }
+        } catch (e: any) {
+          console.error('❌ Failed to load competitive insights:', e);
+          console.error('❌ Error message:', e?.message);
+          console.error('❌ Error stack:', e?.stack);
+          // Don't set to empty array - leave as undefined to indicate API call failed
+          insights = undefined;
+        }
+
+        try {
+          console.log('🔵 API CALL: Loading answer gap analysis for domain:', domainId);
+          const url = `/competitors/answer-gap-analysis?domain_id=${domainId}`;
+          console.log('🔵 API URL:', url);
+          gaps = await apiClient.getAnswerGapAnalysis({ domain_id: domainId });
+          console.log('✅ Answer gap analysis response:', gaps);
+          console.log('✅ Response type:', typeof gaps, 'Is array:', Array.isArray(gaps));
+          // If API returns empty array, that's valid - we'll show empty state
+          if (Array.isArray(gaps) && gaps.length === 0) {
+            console.log('ℹ️ API returned empty array - will show empty state');
+          }
+        } catch (e: any) {
+          console.error('❌ Failed to load answer gap analysis:', e);
+          console.error('❌ Error message:', e?.message);
+          console.error('❌ Error stack:', e?.stack);
+          // Don't set to empty array - leave as undefined to indicate API call failed
+          gaps = undefined;
+        }
+        
+        setIsLoadingAnalysis(false);
+
         // Normalize competitor list
-        const mapped = (Array.isArray(list) ? list : list?.results || []).map((c: any, idx: number) => ({
-          id: c.id,
-          name: c.name,
-          url: c.url || (c.domain_name || '').toLowerCase(),
-          mentions: c.total_mentions || 0,
-          visibility: Math.round(Number(c.visibility_score || 0)),
-          sentiment: Math.round(Number(c.sentiment_score || 0)),
-          avgPosition: Number(c.average_position || 0).toFixed ? Number(c.average_position).toFixed(1) : (c.average_position || 0),
-          shareOfVoice: Math.round(Number(c.share_of_voice_percentage || 0)),
-          trend: 0,
-          color: idx === 0 ? 'hsl(var(--primary))' : idx === 1 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-3))',
-          isYou: c.is_you || false,
-        }));
-        setCompetitors(mapped.length ? mapped : competitorsStatic);
+        const mapped = (Array.isArray(list) ? list : list?.results || []).map((c: any, idx: number) => {
+          // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
+          // Formula: (sentiment + 1) * 50 to normalize -1..1 to 0..100
+          const rawSentiment = Number(c.sentiment_score || 0);
+          const sentimentPercent = Math.round((rawSentiment + 1) * 50);
+          
+          return {
+            id: c.id,
+            name: c.name,
+            url: c.url || (c.domain_name || '').toLowerCase(),
+            mentions: c.total_mentions || 0,
+            visibility: Math.round(Number(c.visibility_score || 0)),
+            sentiment: sentimentPercent,
+            avgPosition: Number(c.average_position || 0).toFixed ? Number(c.average_position).toFixed(1) : (c.average_position || 0),
+            shareOfVoice: Math.round(Number(c.share_of_voice_percentage || 0)),
+            trend: Number(c.trend_percentage || 0),
+            color: idx === 0 ? 'hsl(var(--primary))' : idx === 1 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-3))',
+            isYou: false, // Competitors are never "you" - "Your Brand" is shown separately in ShareOfVoice
+          };
+        });
+        setCompetitors(mapped.length ? mapped : []);
 
         setSovLatest(latest);
 
@@ -323,13 +202,16 @@ const Competitors = () => {
         const months = Object.keys(grouped).sort();
         const brands = new Set<string>();
         Object.values(grouped).forEach(m => Object.keys(m).forEach(b => brands.add(b)));
-        const [b1, b2, b3] = Array.from(brands);
-        const series = months.map(m => ({
-          month: m,
-          [b1 || 'BrandA']: grouped[m][b1 || ''] || 0,
-          [b2 || 'BrandB']: grouped[m][b2 || ''] || 0,
-          [b3 || 'BrandC']: grouped[m][b3 || ''] || 0,
-        }));
+        const brandArray = Array.from(brands);
+        
+        // Build series dynamically based on actual brands
+        const series = months.map(m => {
+          const entry: any = { month: m };
+          brandArray.forEach(brand => {
+            entry[brand] = grouped[m][brand] || 0;
+          });
+          return entry;
+        });
         setSovSeries(series);
 
         // Platform-specific share for latest month using byDomain rows
@@ -379,7 +261,7 @@ const Competitors = () => {
         if (tb.length) setTopBrands(tb);
 
         // Build dynamic prompt performance cards
-        const displayBrands = (mapped.length ? mapped : competitorsStatic)
+        const displayBrands = (mapped.length ? mapped : [])
           .sort((a: any, b: any) => (b.isYou ? 1 : 0) - (a.isYou ? 1 : 0))
           .slice(0, 3)
           .map((c: any) => c.name);
@@ -409,6 +291,51 @@ const Competitors = () => {
           };
         });
         if (cards.length) setPromptCards(cards);
+
+        // Set competitive strength analysis data - ALWAYS use API response (even if empty)
+        if (strengthAnalysis !== undefined && strengthAnalysis !== null) {
+          if (Array.isArray(strengthAnalysis)) {
+            setCompetitiveMetrics(strengthAnalysis);
+            console.log('✅ Competitive strength analysis loaded:', strengthAnalysis.length, 'metrics', strengthAnalysis);
+          } else {
+            console.warn('⚠️ Competitive strength analysis API returned non-array data:', strengthAnalysis);
+            setCompetitiveMetrics([]);
+          }
+        } else {
+          // API call failed - set to empty array (no fallback)
+          console.warn('⚠️ Competitive strength analysis API call failed');
+          setCompetitiveMetrics([]);
+        }
+
+        // Set competitive insights - ALWAYS use API response (even if empty)
+        if (insights !== undefined && insights !== null) {
+          if (Array.isArray(insights)) {
+            setCompetitiveInsights(insights);
+            console.log('✅ Competitive insights loaded:', insights.length, 'insights', insights);
+          } else {
+            console.warn('⚠️ Competitive insights API returned non-array data:', insights);
+            setCompetitiveInsights([]);
+          }
+        } else {
+          // API call failed - set to empty array (no fallback)
+          console.warn('⚠️ Competitive insights API call failed');
+          setCompetitiveInsights([]);
+        }
+
+        // Set answer gap data - ALWAYS use API response (even if empty)
+        if (gaps !== undefined && gaps !== null) {
+          if (Array.isArray(gaps)) {
+            setAnswerGapData(gaps);
+            console.log('✅ Answer gap analysis loaded:', gaps.length, 'gaps', gaps);
+          } else {
+            console.warn('⚠️ Answer gap analysis API returned non-array data:', gaps);
+            setAnswerGapData([]);
+          }
+        } else {
+          // API call failed - set to empty array (no fallback)
+          console.warn('⚠️ Answer gap analysis API call failed');
+          setAnswerGapData([]);
+        }
       } catch (e: any) {
         toast({ title: 'Failed to load competitors', description: String(e.message || e), variant: 'destructive' });
       }
@@ -418,6 +345,78 @@ const Competitors = () => {
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
+  };
+
+  const handleAddCompetitorSubmit = async (competitorData: any) => {
+    if (!domainId) {
+      toast({
+        title: "Error",
+        description: "No domain selected. Please select a domain first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Ensure URL has protocol
+      let websiteUrl = competitorData.website.trim();
+      if (!websiteUrl.startsWith('http://') && !websiteUrl.startsWith('https://')) {
+        websiteUrl = `https://${websiteUrl}`;
+      }
+
+      const payload = {
+        domain: domainId,
+        name: competitorData.name.trim(),
+        url: websiteUrl,
+      };
+
+      const response = await apiClient.createCompetitor(payload);
+      
+      toast({
+        title: "Competitor Added",
+        description: `"${competitorData.name}" has been added to tracking. Analysis will begin shortly.`,
+      });
+
+      // Refresh the competitor list by reloading the main data
+      // The useEffect will automatically reload all data when domainId changes
+      // For immediate refresh, we'll reload just the competitor list
+      try {
+        const list = await apiClient.getEngineCompetitors({ domain_id: domainId });
+        if (list && Array.isArray(list)) {
+          const mapped = list.map((c: any) => {
+            // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
+            const rawSentiment = Number(c.sentiment_score || 0);
+            const sentimentPercent = Math.round((rawSentiment + 1) * 50);
+            
+            return {
+              id: c.id,
+              name: c.name || 'Unknown',
+              url: c.url || '',
+              mentions: c.total_mentions || 0,
+              visibility: Number(c.visibility_score || 0),
+              sentiment: sentimentPercent,
+              avgPosition: Number(c.average_position || 0),
+              shareOfVoice: Number(c.share_of_voice_percentage || 0),
+              trend: Number(c.trend_percentage || 0),
+              isYou: false,
+            };
+          });
+          setCompetitors(mapped);
+        }
+      } catch (e: any) {
+        console.error('Failed to refresh competitors list:', e);
+        // Don't show error toast here - the competitor was already added successfully
+      }
+
+      setAddCompetitorDialogOpen(false);
+    } catch (error: any) {
+      console.error('Failed to add competitor:', error);
+      toast({
+        title: "Failed to Add Competitor",
+        description: error?.message || "An error occurred while adding the competitor. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleGenerateForGap = (gap: typeof answerGapData[0]) => {
@@ -430,17 +429,7 @@ const Competitors = () => {
     });
   };
 
-  const heatmapData = heatmap.length ? heatmap : [
-    {
-      competitor: "Your Brand",
-      platforms: { ChatGPT: 50.0, Claude: 25.0, Perplexity: 15.0, Gemini: 10.0 },
-      isYou: true
-    }
-  ];
-
-  const topBrandsDefault = [
-    { name: "Your Brand", url: "", mentions: 0, percentage: 0, isYou: true },
-  ];
+  const heatmapData = heatmap;
 
   return (
     <div className="p-8 space-y-6">
@@ -483,16 +472,19 @@ const Competitors = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Competitors</SelectItem>
-                  <SelectItem value="vegfit">VegFit Pro</SelectItem>
-                  <SelectItem value="myprotein">MyProtein</SelectItem>
-                  <SelectItem value="naked">Naked Nutrition</SelectItem>
+                  {competitors.length > 0 && competitors.map((comp) => (
+                    <SelectItem key={comp.id} value={String(comp.id)}>
+                      {comp.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
             {/* Competitor Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {competitors.map((competitor, idx) => (
+              {competitors.length > 0 ? (
+                competitors.map((competitor, idx) => (
                 <Card
                   key={competitor.id}
                   className={`p-6 transition-all duration-300 backdrop-blur-sm bg-card/80 ${
@@ -561,7 +553,13 @@ const Competitors = () => {
                     </div>
                   </div>
                 </Card>
-              ))}
+                ))
+              ) : (
+                <div className="col-span-full flex flex-col items-center justify-center py-12 space-y-2">
+                  <p className="text-sm text-muted-foreground">No competitors data available yet.</p>
+                  <p className="text-xs text-muted-foreground">Check console for API response details.</p>
+                </div>
+              )}
             </div>
 
             {/* Brand Visibility Over Time */}
@@ -576,45 +574,46 @@ const Competitors = () => {
                     Track how often each brand is mentioned by AI providers
                   </p>
                 </div>
-                <ResponsiveContainer width="100%" height={350}>
-                  <LineChart data={sovSeries.length ? sovSeries : mentionHistory}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <Tooltip 
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "var(--radius)",
-                      }}
-                    />
-                    <Legend />
-                    <Line 
-                      type="monotone" 
-                      dataKey="vegfit" 
-                      name="VegFit Pro"
-                      stroke="hsl(var(--primary))" 
-                      strokeWidth={3}
-                      dot={{ fill: "hsl(var(--primary))", r: 4 }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="myprotein" 
-                      name="MyProtein"
-                      stroke="hsl(var(--chart-2))" 
-                      strokeWidth={2}
-                      dot={{ fill: "hsl(var(--chart-2))", r: 3 }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="naked" 
-                      name="Naked Nutrition"
-                      stroke="hsl(var(--chart-3))" 
-                      strokeWidth={2}
-                      dot={{ fill: "hsl(var(--chart-3))", r: 3 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                {sovSeries.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={350}>
+                    <LineChart data={sovSeries}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                      <Tooltip 
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "var(--radius)",
+                        }}
+                      />
+                      <Legend />
+                      {Object.keys(sovSeries[0] || {}).filter(k => k !== 'month').map((brandKey, idx) => {
+                        const colors = [
+                          { stroke: "hsl(var(--primary))", fill: "hsl(var(--primary))", width: 3, r: 4 },
+                          { stroke: "hsl(var(--chart-2))", fill: "hsl(var(--chart-2))", width: 2, r: 3 },
+                          { stroke: "hsl(var(--chart-3))", fill: "hsl(var(--chart-3))", width: 2, r: 3 },
+                        ];
+                        const color = colors[idx] || colors[0];
+                        return (
+                          <Line 
+                            key={brandKey}
+                            type="monotone" 
+                            dataKey={brandKey}
+                            name={brandKey}
+                            stroke={color.stroke}
+                            strokeWidth={color.width}
+                            dot={{ fill: color.fill, r: color.r }}
+                          />
+                        );
+                      })}
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-64">
+                    <p className="text-sm text-muted-foreground">No mention history data available yet.</p>
+                  </div>
+                )}
               </div>
             </Card>
 
@@ -623,79 +622,109 @@ const Competitors = () => {
               <div className="lg:col-span-2">
                 <CompetitorHeatmap 
                   data={heatmapData} 
-                  platforms={Object.keys(platformMap).length ? Object.keys(platformMap) : ["ChatGPT","Claude","Perplexity","Gemini"]} 
+                  platforms={Object.keys(platformMap).length > 0 ? Object.keys(platformMap) : []} 
                 />
               </div>
               <div>
-                <TopBrandsList brands={(topBrands.length ? topBrands : topBrandsDefault)} totalMentions={(topBrands.length ? topBrands.reduce((s,b)=>s+b.mentions,0) : 0)} />
+                <TopBrandsList brands={topBrands} totalMentions={topBrands.length ? topBrands.reduce((s,b)=>s+b.mentions,0) : 0} />
               </div>
             </div>
 
             {/* Competitive Analysis */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card className="p-6">
-                <h3 className="text-lg font-semibold mb-6">Competitive Strength Analysis</h3>
-                <ResponsiveContainer width="100%" height={350}>
-                  <RadarChart data={competitiveMetrics}>
-                    <PolarGrid stroke="hsl(var(--border))" />
-                    <PolarAngleAxis 
-                      dataKey="metric" 
-                      stroke="hsl(var(--muted-foreground))"
-                      fontSize={12}
-                    />
-                    <PolarRadiusAxis angle={90} domain={[0, 100]} stroke="hsl(var(--muted-foreground))" />
-                    <Radar 
-                      name="VegFit Pro" 
-                      dataKey="vegfit" 
-                      stroke="hsl(var(--primary))" 
-                      fill="hsl(var(--primary))" 
-                      fillOpacity={0.3}
-                      strokeWidth={2}
-                    />
-                    <Radar 
-                      name="MyProtein" 
-                      dataKey="myprotein" 
-                      stroke="hsl(var(--chart-2))" 
-                      fill="hsl(var(--chart-2))" 
-                      fillOpacity={0.2}
-                    />
-                    <Radar 
-                      name="Naked Nutrition" 
-                      dataKey="naked" 
-                      stroke="hsl(var(--chart-3))" 
-                      fill="hsl(var(--chart-3))" 
-                      fillOpacity={0.2}
-                    />
-                    <Legend />
-                  </RadarChart>
-                </ResponsiveContainer>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold">Competitive Strength Analysis</h3>
+                  {isLoadingAnalysis && (
+                    <span className="text-xs text-muted-foreground">Loading...</span>
+                  )}
+                </div>
+                {competitiveMetrics && competitiveMetrics.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={350}>
+                    <RadarChart data={competitiveMetrics}>
+                      <PolarGrid stroke="hsl(var(--border))" />
+                      <PolarAngleAxis 
+                        dataKey="metric" 
+                        stroke="hsl(var(--muted-foreground))"
+                        fontSize={12}
+                      />
+                      <PolarRadiusAxis angle={90} domain={[0, 100]} stroke="hsl(var(--muted-foreground))" />
+                      <Tooltip 
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "var(--radius)",
+                        }}
+                      />
+                      <Legend />
+                      {competitiveMetrics[0] && Object.keys(competitiveMetrics[0]).filter(k => k !== 'metric').map((brandKey, idx) => {
+                        const colors = [
+                          { stroke: "hsl(var(--primary))", fill: "hsl(var(--primary))", opacity: 0.3 },
+                          { stroke: "hsl(var(--chart-2))", fill: "hsl(var(--chart-2))", opacity: 0.2 },
+                          { stroke: "hsl(var(--chart-3))", fill: "hsl(var(--chart-3))", opacity: 0.2 },
+                        ];
+                        const color = colors[idx] || colors[0];
+                        // Format brand name for display
+                        const displayName = brandKey.charAt(0).toUpperCase() + brandKey.slice(1).replace(/([A-Z])/g, ' $1');
+                        return (
+                          <Radar 
+                            key={brandKey}
+                            name={displayName}
+                            dataKey={brandKey}
+                            stroke={color.stroke}
+                            fill={color.fill}
+                            fillOpacity={color.opacity}
+                            strokeWidth={idx === 0 ? 2 : 1.5}
+                          />
+                        );
+                      })}
+                    </RadarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-64 space-y-2">
+                    <p className="text-sm text-muted-foreground">No competitive strength data available yet.</p>
+                    <p className="text-xs text-muted-foreground">Check console for API response details.</p>
+                  </div>
+                )}
               </Card>
 
               <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-                <h3 className="text-lg font-semibold mb-6 font-outfit">Competitive Intelligence</h3>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold font-outfit">Competitive Intelligence</h3>
+                  {isLoadingAnalysis && (
+                    <span className="text-xs text-muted-foreground">Loading...</span>
+                  )}
+                </div>
                 <div className="space-y-3">
-                  {competitiveInsights.map((insight, idx) => (
-                    <div key={idx} className="p-5 rounded-xl transition-all duration-300 border border-border hover:border-primary bg-card/50">
-                      <div className="flex items-start gap-3">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md ${
-                          insight.type === 'success' ? 'bg-success/10 text-success' :
-                          insight.type === 'warning' ? 'bg-warning/10 text-warning' :
-                          'gradient-primary text-white'
-                        }`}>
-                          <Target className="h-5 w-5" />
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <h4 className="font-semibold text-sm font-outfit">{insight.title}</h4>
-                            <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
-                              {insight.impact}
-                            </Badge>
+                  {competitiveInsights && competitiveInsights.length > 0 ? (
+                    competitiveInsights.map((insight: any, idx: number) => (
+                      <div key={idx} className="p-5 rounded-xl transition-all duration-300 border border-border hover:border-primary bg-card/50">
+                        <div className="flex items-start gap-3">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md ${
+                            insight.type === 'success' ? 'bg-success/10 text-success' :
+                            insight.type === 'warning' ? 'bg-warning/10 text-warning' :
+                            'gradient-primary text-white'
+                          }`}>
+                            <Target className="h-5 w-5" />
                           </div>
-                          <p className="text-sm text-muted-foreground leading-relaxed">{insight.description}</p>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <h4 className="font-semibold text-sm font-outfit">{insight.title}</h4>
+                              <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
+                                {insight.impact}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-muted-foreground leading-relaxed">{insight.description}</p>
+                          </div>
                         </div>
                       </div>
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 space-y-2">
+                      <p className="text-sm text-muted-foreground">No competitive insights available yet.</p>
+                      <p className="text-xs text-muted-foreground">Check console for API response details.</p>
                     </div>
-                  ))}
+                  )}
                 </div>
               </Card>
             </div>
@@ -704,31 +733,37 @@ const Competitors = () => {
             <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
               <h3 className="text-lg font-semibold mb-6 font-outfit">Platform-Specific Competition</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {Object.entries(Object.keys(platformMap).length ? platformMap : platformComparison).map(([platform, data]) => (
-                  <div key={platform} className="space-y-4">
-                    <h4 className="font-medium text-center">{platform}</h4>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={data}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis 
-                          dataKey="brand" 
-                          stroke="hsl(var(--muted-foreground))" 
-                          fontSize={10}
-                          angle={-45}
-                          textAnchor="end"
-                          height={80}
-                        />
-                        <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} />
-                        <Tooltip />
-                        <Bar dataKey="mentions" radius={[8, 8, 0, 0]}>
-                          <Cell fill="hsl(var(--primary))" />
-                          <Cell fill="hsl(var(--chart-2))" />
-                          <Cell fill="hsl(var(--chart-3))" />
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+                {Object.keys(platformMap).length > 0 ? (
+                  Object.entries(platformMap).map(([platform, data]) => (
+                    <div key={platform} className="space-y-4">
+                      <h4 className="font-medium text-center">{platform}</h4>
+                      <ResponsiveContainer width="100%" height={200}>
+                        <BarChart data={data}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                          <XAxis 
+                            dataKey="brand" 
+                            stroke="hsl(var(--muted-foreground))" 
+                            fontSize={10}
+                            angle={-45}
+                            textAnchor="end"
+                            height={80}
+                          />
+                          <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} />
+                          <Tooltip />
+                          <Bar dataKey="mentions" radius={[8, 8, 0, 0]}>
+                            <Cell fill="hsl(var(--primary))" />
+                            <Cell fill="hsl(var(--chart-2))" />
+                            <Cell fill="hsl(var(--chart-3))" />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ))
+                ) : (
+                  <div className="col-span-full flex items-center justify-center py-8">
+                    <p className="text-sm text-muted-foreground">No platform data available yet.</p>
                   </div>
-                ))}
+                )}
               </div>
             </Card>
           </TabsContent>
@@ -744,12 +779,13 @@ const Competitors = () => {
                   </div>
                   <Badge variant="secondary">
                     <MessageSquare className="h-3 w-3 mr-1" />
-                    {(promptCards.length ? promptCards.length : promptData.length)} Prompts Tracked
+                    {promptCards.length} Prompts Tracked
                   </Badge>
                 </div>
 
                 <div className="space-y-4">
-                  {(promptCards.length ? promptCards : promptData).map((prompt: any) => (
+                  {promptCards.length > 0 ? (
+                    promptCards.map((prompt: any) => (
                     <Card key={prompt.id} className="p-5 transition-all duration-300 border border-border hover:border-primary">
                       <div className="space-y-4">
                         <div className="flex items-start justify-between">
@@ -757,7 +793,7 @@ const Competitors = () => {
                             <h4 className="font-medium mb-2">{prompt.prompt}</h4>
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
                               <Eye className="h-4 w-4" />
-                              <span>{(typeof prompt.total === 'number' ? prompt.total : Array.isArray(prompt.counts) ? prompt.counts.reduce((s:number,v:number)=>s+v,0) : (Number(prompt.vegfit||0)+Number(prompt.myprotein||0)+Number(prompt.naked||0)))} total mentions</span>
+                              <span>{(prompt.total || (Array.isArray(prompt.counts) ? prompt.counts.reduce((s:number,v:number)=>s+v,0) : 0))} total mentions</span>
                               <span className="text-xs">•</span>
                               {prompt.winner && (
                                 <Badge variant="outline" className="text-xs">
@@ -769,15 +805,15 @@ const Competitors = () => {
                         </div>
 
                         <div className="space-y-3">
-                          {(prompt.brands ? prompt.brands : ["VegFit Pro","MyProtein","Naked Nutrition"]).map((brand: string, idx: number) => (
+                          {(prompt.brands || []).map((brand: string, idx: number) => (
                             <div key={brand} className="space-y-2">
                               <div className="flex items-center justify-between text-sm">
                                 <span className="font-medium">{brand}</span>
-                                <span className="text-muted-foreground">{(prompt.counts ? prompt.counts[idx] : (idx===0?Number(prompt.vegfit||0):idx===1?Number(prompt.myprotein||0):Number(prompt.naked||0)))} mentions</span>
+                                <span className="text-muted-foreground">{(prompt.counts && prompt.counts[idx]) || 0} mentions</span>
                               </div>
                               <Progress value={(() => {
-                                const val = (prompt.counts ? prompt.counts[idx] : (idx===0?Number(prompt.vegfit||0):idx===1?Number(prompt.myprotein||0):Number(prompt.naked||0)));
-                                const denom = (typeof prompt.total === 'number' ? prompt.total : Array.isArray(prompt.counts) ? prompt.counts.reduce((s:number,v:number)=>s+v,0) : (Number(prompt.vegfit||0)+Number(prompt.myprotein||0)+Number(prompt.naked||0)));
+                                const val = (prompt.counts && prompt.counts[idx]) || 0;
+                                const denom = prompt.total || (Array.isArray(prompt.counts) ? prompt.counts.reduce((s:number,v:number)=>s+v,0) : 0);
                                 return denom > 0 ? (val / denom) * 100 : 0;
                               })()} className="h-2" />
                             </div>
@@ -785,7 +821,13 @@ const Competitors = () => {
                         </div>
                       </div>
                     </Card>
-                  ))}
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 space-y-2">
+                      <p className="text-sm text-muted-foreground">No prompt performance data available yet.</p>
+                      <p className="text-xs text-muted-foreground">Check console for API response details.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </Card>
@@ -794,7 +836,8 @@ const Competitors = () => {
           {/* Competitors Tab */}
           <TabsContent value="competitors" className="space-y-6 mt-6">
             <div className="grid grid-cols-1 gap-6">
-              {competitors.map((competitor) => (
+              {competitors.length > 0 ? (
+                competitors.map((competitor) => (
                 <Card key={competitor.id} className="p-6">
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
@@ -845,7 +888,13 @@ const Competitors = () => {
                     </div>
                   </div>
                 </Card>
-              ))}
+                ))
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 space-y-2">
+                  <p className="text-sm text-muted-foreground">No competitors data available yet.</p>
+                  <p className="text-xs text-muted-foreground">Check console for API response details.</p>
+                </div>
+              )}
             </div>
           </TabsContent>
 
@@ -862,57 +911,64 @@ const Competitors = () => {
                   </div>
                   <Badge variant="destructive">
                     <AlertCircle className="h-3 w-3 mr-1" />
-                    {answerGapData.length} Gaps Identified
+                    {answerGapData && answerGapData.length > 0 ? answerGapData.length : 0} Gaps Identified
                   </Badge>
                 </div>
 
                 <div className="space-y-4">
-                  {answerGapData.map((gap) => (
-                    <Card key={gap.id} className="p-5 transition-all duration-300 border border-border hover:border-primary">
-                      <div className="space-y-4">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Search className="h-4 w-4 text-muted-foreground" />
-                              <h4 className="font-medium">{gap.query}</h4>
+                  {answerGapData && answerGapData.length > 0 ? (
+                    answerGapData.map((gap: any) => (
+                      <Card key={gap.id} className="p-5 transition-all duration-300 border border-border hover:border-primary">
+                        <div className="space-y-4">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <Search className="h-4 w-4 text-muted-foreground" />
+                                <h4 className="font-medium">{gap.query}</h4>
+                              </div>
+                              <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                                <span>{gap.competitor} has {gap.mentions} mentions</span>
+                                <span className="text-xs">•</span>
+                                <span>You have {gap.yourMentions} mentions</span>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                              <span>{gap.competitor} has {gap.mentions} mentions</span>
-                              <span className="text-xs">•</span>
-                              <span>You have {gap.yourMentions} mentions</span>
-                            </div>
-                          </div>
-                          <Badge 
-                            variant={gap.opportunity === 'high' ? 'destructive' : 'secondary'}
-                            className="ml-4"
-                          >
-                            {gap.opportunity} opportunity
-                          </Badge>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <span className="text-xs text-muted-foreground">Platforms:</span>
-                          {gap.platforms.map((platform) => (
-                            <Badge key={platform} variant="outline" className="text-xs">
-                              {platform}
+                            <Badge 
+                              variant={gap.opportunity === 'high' ? 'destructive' : 'secondary'}
+                              className="ml-4"
+                            >
+                              {gap.opportunity} opportunity
                             </Badge>
-                          ))}
-                        </div>
+                          </div>
 
-                        <div className="pt-3 border-t">
-                          <Button 
-                            variant="default" 
-                            size="sm" 
-                            className="w-full gradient-primary"
-                            onClick={() => handleGenerateForGap(gap)}
-                          >
-                            <Sparkles className="h-3 w-3 mr-1" />
-                            Generate Content
-                          </Button>
+                          <div className="flex flex-wrap gap-2">
+                            <span className="text-xs text-muted-foreground">Platforms:</span>
+                            {gap.platforms && gap.platforms.map((platform: string) => (
+                              <Badge key={platform} variant="outline" className="text-xs">
+                                {platform}
+                              </Badge>
+                            ))}
+                          </div>
+
+                          <div className="pt-3 border-t">
+                            <Button 
+                              variant="default" 
+                              size="sm" 
+                              className="w-full gradient-primary"
+                              onClick={() => handleGenerateForGap(gap)}
+                            >
+                              <Sparkles className="h-3 w-3 mr-1" />
+                              Generate Content
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                    </Card>
-                  ))}
+                      </Card>
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 space-y-2">
+                      <p className="text-sm text-muted-foreground">No answer gaps identified yet.</p>
+                      <p className="text-xs text-muted-foreground">Check console for API response details.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </Card>
@@ -924,6 +980,7 @@ const Competitors = () => {
       <AddCompetitorDialog
         open={addCompetitorDialogOpen}
         onOpenChange={setAddCompetitorDialogOpen}
+        onAdd={handleAddCompetitorSubmit}
       />
     </div>
   );

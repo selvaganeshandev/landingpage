@@ -6,11 +6,13 @@ from django.db.models import Q, Count, Avg, F, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta, datetime
-from .models import PromptGroup, Prompt, PromptAnalytics, PromptGroupMetricSnapshot, PromptMetricSnapshot
+from .models import PromptGroup, Prompt, PromptAnalytics, PromptGroupMetricSnapshot, PromptMetricSnapshot, DomainMetricSnapshot
 from domains.models import Domain, DomainAccess
 from .serializers import PromptAnalyticsSerializer, PromptGroupSerializer, PromptSerializer
 import json
 import logging
+import statistics
+from dateutil.relativedelta import relativedelta
 
 logger = logging.getLogger(__name__)
 
@@ -1817,6 +1819,7 @@ def prompt_analytics(request, prompt_id):
 def get_historical_trends(request):
     """
     Get comprehensive historical trends data for the Historical Trends page
+    Uses DomainMetricSnapshot for efficient time-series queries
     Returns: visibility progression, platform growth, competitor comparison, seasonal patterns, summary metrics
     """
     try:
@@ -1828,89 +1831,148 @@ def get_historical_trends(request):
         if not domain_id:
             return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Calculate date range (prefer explicit start/end; fallback to months)
-        tz_now = timezone.now()
-        end_date = tz_now
+        # Calculate date range
+        from datetime import date as date_class
+        today = date_class.today()
+        end_date = today
         if end_date_qs:
             try:
-                end_date = timezone.make_aware(datetime.strptime(end_date_qs, '%Y-%m-%d'))
+                end_date = datetime.strptime(end_date_qs, '%Y-%m-%d').date()
             except Exception:
                 pass
         if start_date_qs:
             try:
-                start_date = timezone.make_aware(datetime.strptime(start_date_qs, '%Y-%m-%d'))
+                start_date = datetime.strptime(start_date_qs, '%Y-%m-%d').date()
             except Exception:
                 start_date = end_date - timedelta(days=months * 30)
         else:
             start_date = end_date - timedelta(days=months * 30)
         
-        # Get all analytics for this domain
-        analytics = PromptAnalytics.objects.filter(
-            prompt__group__domain_id=domain_id,
-            is_mention=True,
-            is_published=True,
-            created_at__gte=start_date
-        )
+        # Use monthly snapshots if available, fallback to weekly/daily
+        # Try monthly first, then weekly, then daily
+        # Note: DomainMetricSnapshot records are created per platform (not aggregated)
+        # So we need to query platform-specific snapshots and aggregate them
+        period_types = ['monthly', 'weekly', 'daily']
+        snapshots = None
+        selected_period_type = None
         
-        # Group by month
+        for period_type in period_types:
+            snapshots = DomainMetricSnapshot.objects.filter(
+                domain_id=domain_id,
+                snapshot_date__gte=start_date,
+                snapshot_date__lte=end_date,
+                period_type=period_type
+            ).exclude(platform__isnull=True).exclude(platform='')  # Only platform-specific snapshots
+            
+            if snapshots.exists():
+                selected_period_type = period_type
+                break
+        
+        # If no snapshots found, return empty data
+        if not snapshots or not snapshots.exists():
+            return Response({
+                'visibility_trend': [],
+                'platform_growth': [],
+                'competitor_comparison': [],
+                'seasonal_pattern': [],
+                'summary': {
+                    'visibility_growth': 0,
+                    'mention_growth': 0,
+                    'position_improvement': 0,
+                    'market_share_gain': 0
+                },
+                'period_months': months,
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat()
+            })
+        
+        # Helper to get month key from date
+        def get_month_key(d):
+            return d.strftime('%Y-%m')
+        
+        def get_month_name(d):
+            return d.strftime('%b')
+        
+        # Map platform names from database to frontend keys
+        platform_mapping = {
+            'ChatGPT': 'chatgpt',
+            'Google Gemini': 'gemini',
+            'Gemini': 'gemini',
+            'Perplexity': 'perplexity',
+            'Claude': 'claude'
+        }
+        
+        # Aggregate snapshots by month (across all platforms for overall metrics)
         monthly_data = {}
-        current = start_date.replace(day=1)
-        # Helper to add 1 month without external deps
-        def add_one_month(d):
-            year = d.year + (d.month // 12)
-            month = 1 if d.month == 12 else d.month + 1
-            if d.month == 12:
-                year = d.year + 1
-            return d.replace(year=year, month=month, day=1)
-
-        while current <= end_date:
-            month_key = current.strftime('%Y-%m')
-            month_start = current
-            month_end = add_one_month(current) - timedelta(seconds=1)
+        for snapshot in snapshots:
+            month_key = get_month_key(snapshot.snapshot_date)
+            if month_key not in monthly_data:
+                monthly_data[month_key] = {
+                    'month': get_month_name(snapshot.snapshot_date),
+                    'mentions': 0,
+                    'avg_position': 0.0,
+                    'sentiment': 0.0,
+                    'visibility_score': 0.0,
+                    'position_sum': 0.0,
+                    'sentiment_sum': 0.0,
+                    'visibility_sum': 0.0,
+                    'total_mentions': 0,
+                    'platforms': {}
+                }
             
-            month_analytics = analytics.filter(created_at__gte=month_start, created_at__lte=month_end)
+            data = monthly_data[month_key]
+            # Aggregate overall metrics (weighted by mentions)
+            data['mentions'] += snapshot.mentions
+            data['total_mentions'] += snapshot.mentions
+            data['position_sum'] += float(snapshot.average_position) * snapshot.mentions if snapshot.mentions > 0 else 0
+            data['sentiment_sum'] += float(snapshot.sentiment_score) * snapshot.mentions if snapshot.mentions > 0 else 0
+            data['visibility_sum'] += float(snapshot.visibility_score) * snapshot.mentions if snapshot.mentions > 0 else 0
             
-            total_mentions = month_analytics.count()
-            avg_position = float(month_analytics.aggregate(avg=Avg('position'))['avg'] or 0)
-            avg_sentiment = float(month_analytics.aggregate(avg=Avg('sentiment_score'))['avg'] or 0)
-            # Derive a proxy visibility score since PromptAnalytics has no visibility_score field
-            # Higher visibility corresponds to lower average position; cap to [0,100]
-            visibility_score = max(0.0, min(100.0, 100.0 - (avg_position * 20.0) if avg_position else 0.0))
-            
-            # Platform breakdown
-            platforms = {}
-            for platform in ['ChatGPT', 'Claude', 'Perplexity', 'Gemini']:
-                plat_analytics = month_analytics.filter(platform=platform)
-                platforms[platform.lower()] = plat_analytics.count()
-            
-            monthly_data[month_key] = {
-                'month': current.strftime('%b'),
-                'mentions': total_mentions,
-                'avg_position': round(avg_position, 2),
-                'sentiment': round(avg_sentiment, 2),
-                'visibility_score': round(visibility_score, 2),
-                'platforms': platforms
-            }
-            
-            current = add_one_month(current)
+            # Track platform-specific mentions for platform growth chart
+            platform_key = platform_mapping.get(snapshot.platform, snapshot.platform.lower() if snapshot.platform else 'other')
+            if platform_key not in data['platforms']:
+                data['platforms'][platform_key] = 0
+            data['platforms'][platform_key] += snapshot.mentions
+        
+        # Calculate weighted averages for each month
+        for month_key, data in monthly_data.items():
+            if data['total_mentions'] > 0:
+                data['avg_position'] = round(data['position_sum'] / data['total_mentions'], 2)
+                data['sentiment'] = round(data['sentiment_sum'] / data['total_mentions'], 2)
+                data['visibility_score'] = round(data['visibility_sum'] / data['total_mentions'], 2)
+            # Clean up helper fields
+            del data['position_sum']
+            del data['sentiment_sum']
+            del data['visibility_sum']
+            del data['total_mentions']
         
         # Build visibility trend (sorted by month)
         sorted_months = sorted(monthly_data.keys())
-        visibility_trend = [monthly_data[k] for k in sorted_months]
+        visibility_trend = []
+        for k in sorted_months:
+            data = monthly_data[k]
+            visibility_trend.append({
+                'month': data['month'],
+                'mentions': data['mentions'],
+                'avg_position': data['avg_position'],
+                'sentiment': data['sentiment'],
+                'visibility_score': data['visibility_score']
+            })
         
         # Platform growth (aggregate by month)
         platform_growth = []
         for k in sorted_months:
             data = monthly_data[k]
+            platforms = data.get('platforms', {})
             platform_growth.append({
                 'month': data['month'],
-                'chatgpt': data['platforms'].get('chatgpt', 0),
-                'claude': data['platforms'].get('claude', 0),
-                'perplexity': data['platforms'].get('perplexity', 0),
-                'gemini': data['platforms'].get('gemini', 0),
+                'chatgpt': platforms.get('chatgpt', 0),
+                'claude': platforms.get('claude', 0),
+                'perplexity': platforms.get('perplexity', 0),
+                'gemini': platforms.get('gemini', 0),
             })
         
-        # Calculate summary metrics
+        # Calculate summary metrics (first vs last period)
         if len(visibility_trend) >= 2:
             first = visibility_trend[0]
             last = visibility_trend[-1]
@@ -1923,20 +1985,23 @@ def get_historical_trends(request):
             mention_growth = 0
             position_improvement = 0
         
-        # Competitor comparison (from ShareOfVoiceAnalytics if available)
+        # Competitor comparison (from ShareOfVoiceAnalytics)
         from analytics.models import ShareOfVoiceAnalytics
         competitor_data = {}
         sov_records = ShareOfVoiceAnalytics.objects.filter(
             domain_id=domain_id,
-            timestamp__gte=start_date.date()
+            timestamp__gte=start_date,
+            timestamp__lte=end_date
         ).order_by('timestamp')
         
         for record in sov_records:
-            month_key = record.timestamp.strftime('%Y-%m')
+            month_key = get_month_key(record.timestamp)
             if month_key not in competitor_data:
                 competitor_data[month_key] = {}
             competitor_name = record.competitor.name if record.competitor else 'Your Brand'
-            competitor_data[month_key][competitor_name.lower().replace(' ', '')] = record.mention_count
+            # Normalize competitor name for frontend
+            comp_key = competitor_name.lower().replace(' ', '').replace('-', '')
+            competitor_data[month_key][comp_key] = record.mention_count
         
         competitor_comparison = []
         for k in sorted_months:
@@ -1947,33 +2012,214 @@ def get_historical_trends(request):
                 comp_data['yourbrand'] = monthly_data[k]['mentions']
             competitor_comparison.append(comp_data)
         
-        # Seasonal patterns (current year vs average)
+        # Calculate market share gain
+        market_share_gain = 0
+        if len(competitor_comparison) >= 2:
+            first_comp = competitor_comparison[0]
+            last_comp = competitor_comparison[-1]
+            first_total = sum(v for k, v in first_comp.items() if k != 'month')
+            last_total = sum(v for k, v in last_comp.items() if k != 'month')
+            first_share = (first_comp.get('yourbrand', 0) / first_total * 100) if first_total > 0 else 0
+            last_share = (last_comp.get('yourbrand', 0) / last_total * 100) if last_total > 0 else 0
+            market_share_gain = round(last_share - first_share, 1)
+        
+        # Seasonal patterns (calculate historical average by month name)
+        # Get all historical data for the same months across different years
+        # Query platform-specific snapshots and aggregate
+        all_historical_snapshots = DomainMetricSnapshot.objects.filter(
+            domain_id=domain_id,
+            period_type=selected_period_type
+        ).exclude(platform__isnull=True).exclude(platform='').order_by('snapshot_date')
+        
+        # Group by month name (Jan, Feb, etc.) across all years
+        month_historical_avg = {}
+        for snapshot in all_historical_snapshots:
+            month_name = get_month_name(snapshot.snapshot_date)
+            if month_name not in month_historical_avg:
+                month_historical_avg[month_name] = {'total': 0, 'count': 0}
+            month_historical_avg[month_name]['total'] += snapshot.mentions
+            month_historical_avg[month_name]['count'] += 1
+        
+        # Calculate averages
+        for month_name, data in month_historical_avg.items():
+            month_historical_avg[month_name] = round(data['total'] / data['count'] if data['count'] > 0 else 0, 0)
+        
         seasonal_pattern = []
         for k in sorted_months:
             data = monthly_data[k]
+            month_name = data['month']
+            avg_year = month_historical_avg.get(month_name, data['mentions'])
             seasonal_pattern.append({
-                'month': data['month'],
+                'month': month_name,
                 'mentions': data['mentions'],
-                'avgYear': data['mentions']  # For now, use same value; can compute historical average later
+                'avgYear': int(avg_year)
             })
+        
+        # Performance Forecast - Calculate future projections
+        forecast = []
+        if len(visibility_trend) >= 3:  # Need at least 3 data points for forecasting
+            # Extract mentions values for trend analysis
+            mentions_values = [v['mentions'] for v in visibility_trend]
+            
+            # Calculate linear regression for mentions
+            n = len(mentions_values)
+            x = list(range(n))
+            x_mean = sum(x) / n
+            y_mean = sum(mentions_values) / n
+            
+            numerator = sum((x[i] - x_mean) * (mentions_values[i] - y_mean) for i in range(n))
+            denominator = sum((x[i] - x_mean) ** 2 for i in range(n))
+            
+            if denominator != 0:
+                slope_mentions = numerator / denominator
+                intercept_mentions = y_mean - slope_mentions * x_mean
+            else:
+                slope_mentions = 0
+                intercept_mentions = y_mean
+            
+            # Calculate standard deviation for confidence intervals
+            if n > 1:
+                std_dev_mentions = statistics.stdev(mentions_values) if len(mentions_values) > 1 else 0
+            else:
+                std_dev_mentions = 0
+            
+            # Generate forecast for next 3 months
+            forecast_months = 3
+            last_month_date = datetime.strptime(sorted_months[-1] + '-01', '%Y-%m-%d').date()
+            
+            # Include last actual data point
+            last_actual = visibility_trend[-1]
+            forecast.append({
+                'month': last_actual['month'],
+                'actual': last_actual['mentions'],
+                'forecast': round(last_actual['mentions'], 0),
+                'upper': round(last_actual['mentions'] + (1.645 * std_dev_mentions), 0),
+                'lower': round(max(0, last_actual['mentions'] - (1.645 * std_dev_mentions)), 0)
+            })
+            
+            # Generate future forecasts
+            for i in range(1, forecast_months + 1):
+                future_month_date = last_month_date + relativedelta(months=i)
+                month_name = future_month_date.strftime('%b')
+                future_x = n + i - 1
+                
+                # Forecast mentions
+                forecast_mentions = slope_mentions * future_x + intercept_mentions
+                forecast_mentions = max(0, forecast_mentions)  # Ensure non-negative
+                
+                # Calculate confidence intervals (90% = 1.645 standard deviations)
+                upper_mentions = forecast_mentions + (1.645 * std_dev_mentions)
+                lower_mentions = max(0, forecast_mentions - (1.645 * std_dev_mentions))
+                
+                forecast.append({
+                    'month': month_name,
+                    'actual': None,  # No actual data for future
+                    'forecast': round(forecast_mentions, 0),
+                    'upper': round(upper_mentions, 0),
+                    'lower': round(lower_mentions, 0)
+                })
+        
+        # Key Milestones - Detect significant events
+        milestones = []
+        if len(visibility_trend) >= 2:
+            # Track record highs and significant achievements
+            max_mentions = 0
+            max_visibility = 0
+            best_position = float('inf')
+            milestones_list = []  # Use list instead of dict to allow multiple milestones per month
+            
+            for i, trend in enumerate(visibility_trend):
+                month_key = sorted_months[i]
+                mentions = trend['mentions']
+                visibility = trend['visibility_score']
+                position = trend['avg_position']
+                
+                # Record high mentions
+                if mentions > max_mentions:
+                    prev_max = max_mentions
+                    max_mentions = mentions
+                    # Check if it's a significant milestone (round numbers or large increases)
+                    if mentions >= 100 and (mentions % 100 == 0 or (prev_max > 0 and mentions > prev_max * 1.5)):
+                        milestones_list.append({
+                            'date': month_key + '-01',
+                            'title': f'Reached {int(mentions)} mentions',
+                            'description': f'Monthly mentions reached {int(mentions)}, a new record high',
+                            'type': 'achievement',
+                            'metric': 'mentions',
+                            'value': int(mentions)
+                        })
+                
+                # Record high visibility score
+                if visibility > max_visibility:
+                    prev_max_vis = max_visibility
+                    max_visibility = visibility
+                    if visibility >= 50 and (prev_max_vis == 0 or visibility > prev_max_vis * 1.2):
+                        milestones_list.append({
+                            'date': month_key + '-01',
+                            'title': f'Visibility score: {visibility:.1f}',
+                            'description': f'Reached visibility score of {visibility:.1f}, highest to date',
+                            'type': 'achievement',
+                            'metric': 'visibility_score',
+                            'value': round(visibility, 1)
+                        })
+                
+                # Best position (lowest is better)
+                if position > 0 and position < best_position:
+                    prev_best = best_position
+                    best_position = position
+                    if position <= 10 and (prev_best == float('inf') or position < prev_best * 0.8):
+                        milestones_list.append({
+                            'date': month_key + '-01',
+                            'title': f'Average position: {position:.1f}',
+                            'description': f'Improved to average position {position:.1f}, best performance yet',
+                            'type': 'achievement',
+                            'metric': 'position',
+                            'value': round(position, 1)
+                        })
+                
+                # Significant growth milestones
+                if i > 0:
+                    prev_mentions = visibility_trend[i-1]['mentions']
+                    if prev_mentions > 0:
+                        growth_rate = ((mentions - prev_mentions) / prev_mentions) * 100
+                        if growth_rate >= 50:  # 50% or more growth
+                            milestones_list.append({
+                                'date': month_key + '-01',
+                                'title': f'{growth_rate:.0f}% growth',
+                                'description': f'Month-over-month growth of {growth_rate:.0f}% in mentions',
+                                'type': 'growth',
+                                'metric': 'mentions',
+                                'value': round(growth_rate, 1)
+                            })
+            
+            # Sort by date (most recent first) and limit to top 10
+            milestones = sorted(
+                milestones_list,
+                key=lambda x: x['date'],
+                reverse=True
+            )[:10]
         
         return Response({
             'visibility_trend': visibility_trend,
             'platform_growth': platform_growth,
             'competitor_comparison': competitor_comparison,
             'seasonal_pattern': seasonal_pattern,
+            'forecast': forecast,
+            'milestones': milestones,
             'summary': {
                 'visibility_growth': visibility_growth,
                 'mention_growth': mention_growth,
                 'position_improvement': position_improvement,
-                'market_share_gain': 0  # Can be computed from ShareOfVoiceAnalytics
+                'market_share_gain': market_share_gain
             },
             'period_months': months,
-            'start_date': start_date.date().isoformat(),
-            'end_date': end_date.date().isoformat()
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat()
         })
         
     except Exception as e:
+        import traceback
+        logger.error(f"Error in get_historical_trends: {str(e)}\n{traceback.format_exc()}")
         return Response(
             {'error': f'Failed to retrieve historical trends: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR

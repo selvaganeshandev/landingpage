@@ -157,7 +157,7 @@ class CompetitorPromptAnalyticsSerializer(serializers.ModelSerializer):
     Serializer for CompetitorPromptAnalytics model
     """
     competitor_name = serializers.CharField(source='competitor.name', read_only=True)
-    prompt_text = serializers.CharField(source='prompt.prompt_text', read_only=True)
+    prompt_text = serializers.CharField(source='prompt.prompt', read_only=True)
     domain_name = serializers.CharField(source='competitor.domain.name', read_only=True)
     
     class Meta:

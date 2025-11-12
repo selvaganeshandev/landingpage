@@ -175,11 +175,12 @@ class DomainProcessor:
             print(f"Generating prompts for {domain.name}")
             prompts = self.chatgpt_client.generate_prompts_from_keywords(keywords, domain.name)
 
-            # Ensure distinct prompts and a minimum of 10 prompts
+            # Ensure distinct prompts and ensure we have PROMPT_MIN_COUNT prompts per keyword
             prompts = self._deduplicate_prompts(prompts)
-            min_prompts = getattr(settings, 'PROMPT_MIN_COUNT', 10)
-            if len(prompts) < min_prompts:
-                prompts = self._supplement_prompts_to_minimum(prompts, keywords, min_count=min_prompts)
+            prompts_per_keyword = getattr(settings, 'PROMPT_MIN_COUNT', 2)
+            expected_total = len(keywords) * prompts_per_keyword
+            if len(prompts) < expected_total:
+                prompts = self._supplement_prompts_to_minimum(prompts, keywords, min_count=expected_total)
 
             # Sanitize generic boilerplate from prompt texts
             for p in prompts:
@@ -349,12 +350,28 @@ class DomainProcessor:
                 print(f"Created prompt group: {group_data.get('title', 'Untitled')} with {len(primary_prompts)} primary and {len(secondary_prompts)} secondary prompts")
 
     def _create_default_analytics_for_prompt(self, prompt: Prompt, domain: Domain) -> None:
-        for platform in [
-            'ChatGPT'
-        ]:
+        """
+        Create default analytics records for a prompt for all enabled platforms.
+        Maps lowercase platform keys from settings to proper database platform names.
+        """
+        # Get enabled platforms from settings (lowercase keys)
+        enabled_platforms = getattr(settings, 'ENABLED_PLATFORMS', ['chatgpt'])
+        
+        # Map lowercase platform keys to database platform names
+        platform_map = {
+            'chatgpt': 'ChatGPT',
+            'gemini': 'Google Gemini',
+            'perplexity': 'Perplexity'
+        }
+        
+        # Create default analytics for each enabled platform
+        for platform_key in enabled_platforms:
+            platform_key = platform_key.strip().lower()
+            platform_name = platform_map.get(platform_key, platform_key.title())
+            
             PromptAnalytics.objects.get_or_create(
                 prompt=prompt,
-                platform=platform,
+                platform=platform_name,
                 defaults={
                     'is_mention': False,
                     'total_mentions': 0,

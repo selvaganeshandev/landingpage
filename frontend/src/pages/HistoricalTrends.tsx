@@ -61,7 +61,31 @@ const HistoricalTrends = () => {
         const data = await apiClient.getHistoricalTrends({ domain_id: domainId, months });
         setTrendsData(data);
       } catch (e:any) {
-        toast({ title: 'Failed to load historical trends', description: String(e.message||e), variant: 'destructive' });
+        // Only show error if it's not a 404 (empty data is expected)
+        const errorMessage = e?.message || String(e);
+        const isNotFound = errorMessage.includes('404') || errorMessage.includes('Not Found');
+        if (!isNotFound) {
+          toast({ 
+            title: 'Failed to load historical trends', 
+            description: errorMessage, 
+            variant: 'destructive' 
+          });
+        }
+        // Set empty data structure on error
+        setTrendsData({
+          visibility_trend: [],
+          platform_growth: [],
+          competitor_comparison: [],
+          seasonal_pattern: [],
+          forecast: [],
+          milestones: [],
+          summary: {
+            visibility_growth: 0,
+            mention_growth: 0,
+            position_improvement: 0,
+            market_share_gain: 0
+          }
+        });
       } finally {
         setIsLoading(false);
       }
@@ -85,8 +109,11 @@ const HistoricalTrends = () => {
   const seasonalPattern = useMemo(() => trendsData?.seasonal_pattern || [], [trendsData]);
   const summary = useMemo(() => trendsData?.summary || { visibility_growth: 0, mention_growth: 0, position_improvement: 0, market_share_gain: 0 }, [trendsData]);
   
-  // Forecast - empty for now (can be computed later)
-  const forecast = useMemo(() => [], []);
+  // Forecast - get from API
+  const forecast = useMemo(() => trendsData?.forecast || [], [trendsData]);
+  
+  // Milestones - get from API
+  const milestones = useMemo(() => trendsData?.milestones || [], [trendsData]);
 
   const handleExportReport = () => {
     toast({
@@ -101,6 +128,35 @@ const HistoricalTrends = () => {
         <div className="flex items-center justify-center h-64">
           <p className="text-muted-foreground">Loading historical trends...</p>
         </div>
+      </div>
+    );
+  }
+
+  // Check if we have any data
+  const hasData = trendsData && (
+    (trendsData.visibility_trend && trendsData.visibility_trend.length > 0) ||
+    (trendsData.platform_growth && trendsData.platform_growth.length > 0)
+  );
+
+  if (!hasData) {
+    return (
+      <div className="p-8 space-y-8">
+        <div className="flex items-center justify-between pb-4">
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight">Historical Trends</h1>
+            <p className="text-muted-foreground mt-2">
+              Long-term performance tracking and forecasting
+            </p>
+          </div>
+        </div>
+        <Card className="p-12 border border-border">
+          <div className="flex flex-col items-center justify-center text-center">
+            <p className="text-muted-foreground text-lg mb-2">No historical trends data available</p>
+            <p className="text-muted-foreground text-sm">
+              Historical trends will appear here once you have sufficient data collected over time.
+            </p>
+          </div>
+        </Card>
       </div>
     );
   }
@@ -438,7 +494,29 @@ const HistoricalTrends = () => {
       <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Key Milestones</h3>
         <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">No milestones available yet.</p>
+          {milestones && milestones.length > 0 ? (
+            milestones.map((milestone: any, index: number) => (
+              <div key={index} className="flex items-start gap-4 p-4 border border-border rounded-lg hover:border-primary transition-colors">
+                <div className="flex-shrink-0 w-2 h-2 rounded-full bg-primary mt-2"></div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="font-semibold text-sm">{milestone.title}</h4>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(milestone.date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{milestone.description}</p>
+                  <div className="mt-2">
+                    <Badge variant="outline" className="text-xs">
+                      {milestone.metric}: {milestone.value}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">No milestones available yet.</p>
+          )}
         </div>
       </Card>
     </div>

@@ -4,15 +4,16 @@ from .models import SentimentAnalytics, ShareOfVoiceAnalytics
 
 class SentimentAnalyticsSerializer(serializers.ModelSerializer):
     domain_name = serializers.CharField(source='domain.name', read_only=True)
+    timestamp = serializers.DateField(source='snapshot_date', read_only=True)
     
     class Meta:
         model = SentimentAnalytics
         fields = [
             'id', 'domain', 'domain_name', 'theme', 'positive_percentage',
             'neutral_percentage', 'negative_percentage', 'mention_count',
-            'platform', 'timestamp', 'created_at'
+            'platform', 'timestamp', 'snapshot_date', 'period_type', 'created_at'
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'timestamp']
 
 
 class ShareOfVoiceAnalyticsSerializer(serializers.ModelSerializer):

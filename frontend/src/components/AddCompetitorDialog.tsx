@@ -25,8 +25,9 @@ export const AddCompetitorDialog = ({ open, onOpenChange, onAdd }: AddCompetitor
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
   const [description, setDescription] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!name.trim() || !website.trim()) {
       toast({
         title: "Missing Information",
@@ -43,19 +44,28 @@ export const AddCompetitorDialog = ({ open, onOpenChange, onAdd }: AddCompetitor
     };
 
     if (onAdd) {
-      onAdd(newCompetitor);
+      setIsSubmitting(true);
+      try {
+        await onAdd(newCompetitor);
+        // Reset form only on success
+        setName("");
+        setWebsite("");
+        setDescription("");
+        onOpenChange(false);
+      } catch (error) {
+        // Error handling is done in parent component
+        console.error('Error adding competitor:', error);
+      } finally {
+        setIsSubmitting(false);
+      }
+    } else {
+      // Fallback if no onAdd handler (shouldn't happen)
+      toast({
+        title: "Error",
+        description: "Add competitor handler not configured.",
+        variant: "destructive",
+      });
     }
-
-    toast({
-      title: "Competitor Added",
-      description: `"${name}" has been added to tracking. Analysis will begin shortly.`,
-    });
-
-    // Reset form
-    setName("");
-    setWebsite("");
-    setDescription("");
-    onOpenChange(false);
   };
 
   return (
@@ -122,11 +132,19 @@ export const AddCompetitorDialog = ({ open, onOpenChange, onAdd }: AddCompetitor
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button 
+            variant="outline" 
+            onClick={() => onOpenChange(false)}
+            disabled={isSubmitting}
+          >
             Cancel
           </Button>
-          <Button onClick={handleSubmit} className="gradient-primary">
-            Add Competitor
+          <Button 
+            onClick={handleSubmit} 
+            className="gradient-primary"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? "Adding..." : "Add Competitor"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -156,7 +156,7 @@ MAX_CONCURRENT_PROMPT_ANALYTICS = config('MAX_CONCURRENT_PROMPT_ANALYTICS', defa
 # Prompt engine knobs
 # How many keywords to fetch from DataForSEO per domain
 KEYWORD_EXTRACT_LIMIT = config('KEYWORD_EXTRACT_LIMIT', default=5, cast=int)
-# Minimum number of distinct prompts to produce overall
+# Number of prompts to generate per keyword (total prompts = KEYWORD_EXTRACT_LIMIT * PROMPT_MIN_COUNT)
 PROMPT_MIN_COUNT = config('PROMPT_MIN_COUNT', default=2, cast=int)
 DATAFORSEO_USERNAME = config('DATAFORSEO_USERNAME', default='')
 DATAFORSEO_PASSWORD = config('DATAFORSEO_PASSWORD', default='')

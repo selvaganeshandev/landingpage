@@ -16,6 +16,26 @@ interface TopBrandsListProps {
 }
 
 export const TopBrandsList = ({ brands, totalMentions }: TopBrandsListProps) => {
+  // Handle empty data
+  if (!brands || brands.length === 0) {
+    return (
+      <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
+        <div className="space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-border/50">
+            <h3 className="text-lg font-semibold font-outfit">Top Brands by Visibility</h3>
+            <div className="text-right">
+              <p className="text-3xl font-bold font-outfit gradient-primary bg-clip-text text-transparent">0</p>
+              <p className="text-xs text-muted-foreground uppercase tracking-wider">total mentions</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-center py-12">
+            <p className="text-sm text-muted-foreground">No brands data available yet.</p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
       <div className="space-y-6">

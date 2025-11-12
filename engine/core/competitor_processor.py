@@ -54,27 +54,33 @@ class CompetitorProcessor:
         self.max_concurrent_prompts = max_concurrent_prompts
         logger.info(f"CompetitorProcessor initialized with max_concurrent_prompts={max_concurrent_prompts}")
     
-    def schedule_tick(self) -> Dict[str, Any]:
+    def process_competitor(self, competitor: Competitor) -> Dict[str, Any]:
         """
-        Main scheduling method - picks one INIT competitor and processes it.
+        Process a specific competitor. This is the main entry point for processing a single competitor.
+        
+        Args:
+            competitor: Competitor instance to process
         
         Returns:
-            dict: Status information about what was scheduled
+            dict: Status information about the processing result
         """
         try:
-            # If a competitor is in progress, skip scheduling
-            if Competitor.objects.filter(track_status='SCHD').exists():
-                return {'scheduled': False, 'reason': 'competitor_in_progress'}
+            # Check if competitor can be processed
+            if competitor.track_status not in ['INIT', 'FAIL', 'COMP']:
+                return {
+                    'scheduled': False,
+                    'reason': 'invalid_status',
+                    'error': f'Competitor is in status {competitor.track_status}. Cannot process.',
+                    'current_status': competitor.track_status
+                }
             
-            # Select one INIT competitor
-            competitor = (
-                Competitor.objects.filter(track_status='INIT')
-                .select_related('domain')
-                .order_by('modified_at')
-                .first()
-            )
-            if competitor is None:
-                return {'scheduled': False, 'reason': 'no_init_competitor'}
+            # Reset if COMP (allow reprocessing)
+            if competitor.track_status == 'COMP':
+                with transaction.atomic():
+                    competitor = Competitor.objects.select_for_update().get(id=competitor.id)
+                    competitor.track_status = 'INIT'
+                    competitor.track_message = 'Resetting for reprocessing'
+                    competitor.save(update_fields=['track_status', 'track_message', 'modified_at'])
             
             # Link prompts and schedule processing
             with transaction.atomic():
@@ -99,24 +105,42 @@ class CompetitorProcessor:
             try:
                 self._process_competitor_prompts(competitor)
                 
-                # Mark as complete
+                # Check if we have any completed analytics before marking as COMP
+                completed_count = CompetitorPromptAnalytics.objects.filter(
+                    competitor=competitor,
+                    track_status='COMP'
+                ).count()
+                
+                failed_count = CompetitorPromptAnalytics.objects.filter(
+                    competitor=competitor,
+                    track_status='FAIL'
+                ).count()
+                
+                total_count = CompetitorPromptAnalytics.objects.filter(
+                    competitor=competitor
+                ).count()
+                
+                # Mark as complete even if some failed (partial success is still success)
                 with transaction.atomic():
                     competitor = Competitor.objects.select_for_update().get(id=competitor.id)
                     competitor.track_status = 'COMP'
-                    competitor.track_message = f"Completed at {timezone.now()}"
+                    competitor.track_message = f"Completed at {timezone.now()}. Processed {completed_count}/{total_count} prompts successfully."
                     competitor.tracked_at = timezone.now()
                     competitor.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
                 
-                logger.info(f"Successfully completed competitor {competitor.id}")
+                logger.info(f"Successfully completed competitor {competitor.id}: {completed_count} succeeded, {failed_count} failed out of {total_count} total")
                 return {
                     'scheduled': True,
                     'competitor_id': competitor.id,
                     'competitor_name': competitor.name,
-                    'status': 'completed'
+                    'status': 'completed',
+                    'processed': completed_count,
+                    'failed': failed_count,
+                    'total': total_count
                 }
                 
             except Exception as processing_error:
-                logger.error(f"Error processing competitor {competitor.id}: {str(processing_error)}")
+                logger.error(f"Error processing competitor {competitor.id}: {str(processing_error)}", exc_info=True)
                 with transaction.atomic():
                     competitor = Competitor.objects.select_for_update().get(id=competitor.id)
                     competitor.track_status = 'FAIL'
@@ -131,7 +155,36 @@ class CompetitorProcessor:
                 }
         
         except Exception as e:
-            logger.error(f"Error in schedule_tick: {str(e)}")
+            logger.error(f"Error in process_competitor: {str(e)}", exc_info=True)
+            return {'scheduled': False, 'reason': 'error', 'error': str(e)}
+    
+    def schedule_tick(self) -> Dict[str, Any]:
+        """
+        Main scheduling method - picks one INIT competitor and processes it.
+        
+        Returns:
+            dict: Status information about what was scheduled
+        """
+        try:
+            # If a competitor is in progress, skip scheduling
+            if Competitor.objects.filter(track_status='SCHD').exists():
+                return {'scheduled': False, 'reason': 'competitor_in_progress'}
+            
+            # Select one INIT competitor
+            competitor = (
+                Competitor.objects.filter(track_status='INIT')
+                .select_related('domain')
+                .order_by('modified_at')
+                .first()
+            )
+            if competitor is None:
+                return {'scheduled': False, 'reason': 'no_init_competitor'}
+            
+            # Use the process_competitor method
+            return self.process_competitor(competitor)
+        
+        except Exception as e:
+            logger.error(f"Error in schedule_tick: {str(e)}", exc_info=True)
             return {'scheduled': False, 'reason': 'error', 'error': str(e)}
     
     def _link_prompts_to_competitor(self, competitor: Competitor) -> int:
@@ -157,33 +210,55 @@ class CompetitorProcessor:
             
             # Get all prompts for this domain that have completed analytics
             # Note: Prompt doesn't have domain field directly, it's through group.domain
-            prompts_with_analytics = Prompt.objects.filter(
-                group__domain_id=domain_id,  # Use domain_id instead of domain object
-                analytics__track_status='COMP'  # Only prompts with completed analytics
-            ).distinct().select_related('group')
+            # First, get all prompts for the domain
+            domain_prompts = Prompt.objects.filter(
+                group__domain_id=domain_id
+            ).select_related('group').distinct()
+            
+            logger.info(f"Found {domain_prompts.count()} prompts for domain {domain_id}")
+            
+            # Then filter to only those with completed analytics
+            prompts_with_analytics = []
+            for prompt in domain_prompts:
+                # Check if this prompt has any completed PromptAnalytics
+                has_completed_analytics = PromptAnalytics.objects.filter(
+                    prompt=prompt,
+                    track_status='COMP'
+                ).exists()
+                
+                if has_completed_analytics:
+                    prompts_with_analytics.append(prompt)
+            
+            logger.info(f"Found {len(prompts_with_analytics)} prompts with completed analytics for domain {domain_id}")
             
             created_count = 0
+            skipped_count = 0
             with transaction.atomic():
                 for prompt in prompts_with_analytics:
                     # Ensure prompt is a Prompt instance
                     if not isinstance(prompt, Prompt):
                         logger.error(f"Invalid prompt object: {type(prompt)}, skipping")
+                        skipped_count += 1
                         continue
                     
                     # Create CompetitorPromptAnalytics if not exists
-                    _, created = CompetitorPromptAnalytics.objects.get_or_create(
-                        competitor=competitor,
-                        prompt=prompt,
-                        defaults={
-                            'track_status': 'INIT',
-                            'track_message': 'Ready for processing',
-                            'platform': 'ChatGPT',  # Default platform
-                        }
-                    )
-                    if created:
-                        created_count += 1
+                    try:
+                        _, created = CompetitorPromptAnalytics.objects.get_or_create(
+                            competitor=competitor,
+                            prompt=prompt,
+                            defaults={
+                                'track_status': 'INIT',
+                                'track_message': 'Ready for processing',
+                                'platform': 'ChatGPT',  # Default platform
+                            }
+                        )
+                        if created:
+                            created_count += 1
+                    except Exception as create_error:
+                        logger.error(f"Error creating CompetitorPromptAnalytics for prompt {prompt.id}: {str(create_error)}")
+                        skipped_count += 1
             
-            logger.info(f"Linked {created_count} new prompts (with completed analytics) to competitor {competitor.id}")
+            logger.info(f"Linked {created_count} new prompts (with completed analytics) to competitor {competitor.id}, skipped {skipped_count}")
             return created_count
         
         except Exception as e:
@@ -199,44 +274,61 @@ class CompetitorProcessor:
             competitor: Competitor instance
         """
         try:
-            # Get all INIT competitor-prompt pairs
+            # Get all INIT competitor-prompt pairs (process all, not just first batch)
             competitor_prompts = CompetitorPromptAnalytics.objects.filter(
                 competitor=competitor,
                 track_status='INIT'
-            ).select_related('prompt')[:self.max_concurrent_prompts]
+            ).select_related('prompt', 'competitor')
             
-            if not competitor_prompts.exists():
+            total_count = competitor_prompts.count()
+            if total_count == 0:
                 logger.info(f"No INIT prompts found for competitor {competitor.id}")
+                # Still try to aggregate if there are any completed ones
+                self._aggregate_competitor_analytics(competitor)
                 return
             
-            logger.info(f"Processing {competitor_prompts.count()} prompts for competitor {competitor.id}")
+            logger.info(f"Processing {total_count} prompts for competitor {competitor.id}")
+            
+            # Process in batches
+            processed_count = 0
+            failed_count = 0
             
             for comp_prompt in competitor_prompts:
                 try:
                     # Mark as scheduled
                     with transaction.atomic():
                         cp = CompetitorPromptAnalytics.objects.select_for_update().get(id=comp_prompt.id)
+                        if cp.track_status != 'INIT':
+                            logger.warning(f"CompetitorPromptAnalytics {cp.id} is not INIT (status: {cp.track_status}), skipping")
+                            continue
                         cp.track_status = 'SCHD'
-                        cp.track_message = "Scheduled for ChatGPT processing"
+                        cp.track_message = "Scheduled for processing"
                         cp.save(update_fields=['track_status', 'track_message', 'modified_at'])
                     
                     # Process this prompt-competitor pair
                     self._process_single_competitor_prompt(comp_prompt)
+                    processed_count += 1
                     
                 except Exception as prompt_error:
-                    logger.error(f"Error processing competitor-prompt {comp_prompt.id}: {str(prompt_error)}")
+                    failed_count += 1
+                    logger.error(f"Error processing competitor-prompt {comp_prompt.id}: {str(prompt_error)}", exc_info=True)
                     # Mark as failed
-                    with transaction.atomic():
-                        cp = CompetitorPromptAnalytics.objects.select_for_update().get(id=comp_prompt.id)
-                        cp.track_status = 'FAIL'
-                        cp.track_message = f"Failed: {str(prompt_error)}"
-                        cp.save(update_fields=['track_status', 'track_message', 'modified_at'])
+                    try:
+                        with transaction.atomic():
+                            cp = CompetitorPromptAnalytics.objects.select_for_update().get(id=comp_prompt.id)
+                            cp.track_status = 'FAIL'
+                            cp.track_message = f"Failed: {str(prompt_error)}"
+                            cp.save(update_fields=['track_status', 'track_message', 'modified_at'])
+                    except Exception as save_error:
+                        logger.error(f"Failed to save error status for competitor-prompt {comp_prompt.id}: {str(save_error)}")
             
-            # Aggregate after all prompts processed
+            logger.info(f"Completed processing for competitor {competitor.id}: {processed_count} succeeded, {failed_count} failed out of {total_count} total")
+            
+            # Aggregate after all prompts processed (even if some failed)
             self._aggregate_competitor_analytics(competitor)
             
         except Exception as e:
-            logger.error(f"Error processing competitor prompts for {competitor.id}: {str(e)}")
+            logger.error(f"Error processing competitor prompts for {competitor.id}: {str(e)}", exc_info=True)
             raise
     
     def _process_single_competitor_prompt(self, comp_prompt: CompetitorPromptAnalytics) -> None:
@@ -256,18 +348,36 @@ class CompetitorProcessor:
                 cp.save(update_fields=['track_status', 'track_message', 'modified_at'])
             
             # Get existing PromptAnalytics for this prompt
+            # Try to get the most recent completed analytics with context_summary
             prompt_analytics = PromptAnalytics.objects.filter(
                 prompt=comp_prompt.prompt,
                 track_status='COMP'  # Only use completed analytics
-            ).order_by('-tracked_at').first()
+            ).exclude(
+                context_summary__isnull=True
+            ).exclude(
+                context_summary=''
+            ).order_by('-tracked_at', '-created_at').first()
+            
+            # If no analytics with context_summary, try any completed analytics
+            if not prompt_analytics:
+                prompt_analytics = PromptAnalytics.objects.filter(
+                    prompt=comp_prompt.prompt,
+                    track_status='COMP'
+                ).order_by('-tracked_at', '-created_at').first()
             
             if not prompt_analytics:
-                raise ValueError(f"No completed PromptAnalytics found for prompt {comp_prompt.prompt.id}")
+                raise ValueError(f"No completed PromptAnalytics found for prompt {comp_prompt.prompt.id} (prompt text: {comp_prompt.prompt.prompt[:50]}...)")
             
             # Use existing context_summary from PromptAnalytics
-            response_text = prompt_analytics.context_summary
+            response_text = prompt_analytics.context_summary or ''
+            
+            # If context_summary is empty, try to use response_text or other fields
             if not response_text:
-                raise ValueError(f"PromptAnalytics {prompt_analytics.id} has no context_summary")
+                # Check if there's any text we can use
+                # Some analytics might have the response in a different field
+                logger.warning(f"PromptAnalytics {prompt_analytics.id} has empty context_summary for prompt {comp_prompt.prompt.id}")
+                # Still proceed but with empty text - competitor won't be found, which is correct
+                response_text = ''
             
             competitor_name = comp_prompt.competitor.name
             

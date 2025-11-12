@@ -283,7 +283,7 @@ export const apiClient = {
       domain_id: params.domain_id,
       ...(params.months ? { months: String(params.months) } : {}),
     }).toString()}`;
-    return apiRequest(`/prompts/historical-trends/${queryParams}`);
+    return apiRequest(`/prompts/historical-trends${queryParams}`);
   },
 
   exportMentions: (data: any) => apiRequest('/prompts/mentions/export/', {
@@ -590,6 +590,25 @@ export const apiClient = {
 
   getEngineCompetitorDetail: (id: number) => apiClient.getEngine(`/api/competitors/${id}/`),
   getEngineCompetitorAnalytics: (id: number) => apiClient.getEngine(`/api/competitors/${id}/analytics/`),
+
+  // Competitor Analysis APIs
+  getCompetitiveStrengthAnalysis: (params: { domain_id: string }) => {
+    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
+    return apiRequest(`/competitors/competitive-strength-analysis${queryParams}`);
+  },
+
+  getCompetitiveInsights: (params: { domain_id: string }) => {
+    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
+    return apiRequest(`/competitors/competitive-insights${queryParams}`);
+  },
+
+  getAnswerGapAnalysis: (params: { domain_id: string; competitor_id?: string }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/answer-gap-analysis${queryParams}`);
+  },
 
   // ===== Dashboard =====
   getDashboardSummary: (params: { domain_id: string; days?: number }) => {

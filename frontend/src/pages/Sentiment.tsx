@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TimeFilter } from "@/components/TimeFilter";
 import { useToast } from "@/hooks/use-toast";
 import { 
   TrendingUp, 
@@ -12,7 +13,8 @@ import {
   Frown,
   ArrowUpRight,
   ArrowDownRight,
-  FileText
+  FileText,
+  RefreshCw
 } from "lucide-react";
 import { 
   LineChart, 
@@ -47,14 +49,15 @@ const Sentiment = () => {
   const { toast } = useToast();
   const { user } = useAuth();
   const { selectedDomain } = useDomainStore();
+  const [timePeriod, setTimePeriod] = useState<string>("30");
   const [days, setDays] = useState<number>(30);
   const [domainId, setDomainId] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
 
   // API data
   const [summary, setSummary] = useState<{ positive_percentage: number; neutral_percentage: number; negative_percentage: number; total_mentions: number } | null>(null);
   const [rows, setRows] = useState<SentimentRow[]>([]);
   const [competitorRows, setCompetitorRows] = useState<any[]>([]);
-  const [opportunities, setOpportunities] = useState<any[]>([]);
 
   // Sync domainId from selectedDomain (Zustand store) or localStorage when domain changes
   useEffect(() => {
@@ -76,28 +79,34 @@ const Sentiment = () => {
     }
   }, [user, selectedDomain?.id, domainId]);
 
+  // Update days when timePeriod changes
+  useEffect(() => {
+    const daysMap: Record<string, number> = {
+      '7': 7,
+      '30': 30,
+      '90': 90,
+      '365': 365,
+    };
+    setDays(daysMap[timePeriod] || 30);
+  }, [timePeriod]);
+
   useEffect(() => {
     const load = async () => {
       if (!domainId) return;
+      setLoading(true);
       try {
         const [sum, list] = await Promise.all([
           apiClient.getSentimentSummary({ domain_id: domainId, days }),
           apiClient.getSentimentByDomain({ domain_id: domainId, days })
         ]);
         setSummary(sum as any);
-        setRows(list as any);
+        setRows(Array.isArray(list) ? list : []);
         // Optional: competitor sentiment (engine)
         try {
           const cp = await apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId });
           setCompetitorRows(Array.isArray(cp) ? cp : cp || []);
         } catch {
           setCompetitorRows([]);
-        }
-        try {
-          const gaps = await apiClient.getCompetitorGapsEngine({ domain_id: domainId });
-          setOpportunities(Array.isArray(gaps) ? gaps : gaps || []);
-        } catch {
-          setOpportunities([]);
         }
       } catch (e:any) {
         const errorMessage = String(e.message || e);
@@ -110,8 +119,10 @@ const Sentiment = () => {
           toast({ title: 'Failed to load sentiment', description: errorMessage, variant: 'destructive' });
         }
         // For empty data, set default empty values without showing error
-        setSummary({ total: 0, positive: 0, negative: 0, neutral: 0, average: 0 });
+        setSummary({ positive_percentage: 0, neutral_percentage: 0, negative_percentage: 0, total_mentions: 0 });
         setRows([]);
+      } finally {
+        setLoading(false);
       }
     };
     void load();
@@ -128,6 +139,10 @@ const Sentiment = () => {
     positive: summary?.positive_percentage || 0,
     neutral: summary?.neutral_percentage || 0,
     negative: summary?.negative_percentage || 0,
+    total_mentions: summary?.total_mentions || 0,
+    positive_change: summary?.positive_change || 0,
+    neutral_change: summary?.neutral_change || 0,
+    negative_change: summary?.negative_change || 0,
   }), [summary]);
 
   const pieData = [
@@ -213,6 +228,28 @@ const Sentiment = () => {
     }));
   }, [competitorRows]);
 
+  const handleRefresh = () => {
+    if (domainId) {
+      const load = async () => {
+        setLoading(true);
+        try {
+          const [sum, list] = await Promise.all([
+            apiClient.getSentimentSummary({ domain_id: domainId, days }),
+            apiClient.getSentimentByDomain({ domain_id: domainId, days })
+          ]);
+          setSummary(sum as any);
+          setRows(Array.isArray(list) ? list : []);
+          toast({ title: 'Data refreshed', description: 'Sentiment data has been updated.' });
+        } catch (e: any) {
+          toast({ title: 'Failed to refresh', description: String(e.message || e), variant: 'destructive' });
+        } finally {
+          setLoading(false);
+        }
+      };
+      void load();
+    }
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -222,12 +259,33 @@ const Sentiment = () => {
             Deep dive into brand sentiment across AI platforms
           </p>
         </div>
-        <Button onClick={handleExportReport} className="gradient-primary shadow-md shadow-primary/20">
-          <FileText className="h-4 w-4 mr-2" />
-          Export Sentiment Report
-        </Button>
+        <div className="flex items-center gap-4">
+          <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
+          <Button 
+            onClick={handleRefresh} 
+            variant="outline"
+            disabled={loading}
+            className="border-border"
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          <Button onClick={handleExportReport} className="gradient-primary shadow-md shadow-primary/20">
+            <FileText className="h-4 w-4 mr-2" />
+            Export Sentiment Report
+          </Button>
+        </div>
       </div>
 
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+          <span className="ml-3 text-muted-foreground">Loading sentiment data...</span>
+        </div>
+      )}
+
+      {!loading && (
+        <>
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
@@ -241,9 +299,23 @@ const Sentiment = () => {
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
-            <ArrowUpRight className="h-4 w-4 text-success" />
-            <span className="text-success font-medium">+3.2%</span>
-            <span className="text-muted-foreground">vs last period</span>
+            {sentimentOverview.positive_change !== 0 ? (
+              <>
+                {sentimentOverview.positive_change > 0 ? (
+                  <ArrowUpRight className="h-4 w-4 text-success" />
+                ) : (
+                  <ArrowDownRight className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span className={`font-medium ${
+                  sentimentOverview.positive_change > 0 ? 'text-success' : 'text-muted-foreground'
+                }`}>
+                  {sentimentOverview.positive_change > 0 ? '+' : ''}{sentimentOverview.positive_change.toFixed(1)}%
+                </span>
+                <span className="text-muted-foreground">vs last period</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">No change vs last period</span>
+            )}
           </div>
         </Card>
 
@@ -258,9 +330,21 @@ const Sentiment = () => {
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
-            <ArrowDownRight className="h-4 w-4 text-muted-foreground" />
-            <span className="text-muted-foreground font-medium">-1.8%</span>
-            <span className="text-muted-foreground">vs last period</span>
+            {sentimentOverview.neutral_change !== 0 ? (
+              <>
+                {sentimentOverview.neutral_change > 0 ? (
+                  <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ArrowDownRight className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span className="text-muted-foreground font-medium">
+                  {sentimentOverview.neutral_change > 0 ? '+' : ''}{sentimentOverview.neutral_change.toFixed(1)}%
+                </span>
+                <span className="text-muted-foreground">vs last period</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">No change vs last period</span>
+            )}
           </div>
         </Card>
 
@@ -275,9 +359,23 @@ const Sentiment = () => {
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
-            <ArrowDownRight className="h-4 w-4 text-success" />
-            <span className="text-success font-medium">-1.4%</span>
-            <span className="text-muted-foreground">vs last period</span>
+            {sentimentOverview.negative_change !== 0 ? (
+              <>
+                {sentimentOverview.negative_change < 0 ? (
+                  <ArrowDownRight className="h-4 w-4 text-success" />
+                ) : (
+                  <ArrowUpRight className="h-4 w-4 text-destructive" />
+                )}
+                <span className={`font-medium ${
+                  sentimentOverview.negative_change < 0 ? 'text-success' : 'text-destructive'
+                }`}>
+                  {sentimentOverview.negative_change > 0 ? '+' : ''}{sentimentOverview.negative_change.toFixed(1)}%
+                </span>
+                <span className="text-muted-foreground">vs last period</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">No change vs last period</span>
+            )}
           </div>
         </Card>
       </div>
@@ -469,39 +567,8 @@ const Sentiment = () => {
           </Card>
         </TabsContent>
       </Tabs>
-
-      {/* Market Opportunities */}
-      <Card className="p-6 border border-border">
-        <h3 className="text-lg font-semibold mb-6">Market Opportunities</h3>
-        <div className="space-y-4">
-          {opportunities && opportunities.length > 0 ? opportunities.map((opp:any, idx:number) => (
-            <div key={`${opp.prompt_id||idx}`} className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex-1">
-                  <p className="font-mono text-sm mb-2">{opp.prompt?.prompt || opp.prompt_text || opp.prompt_id || 'Prompt'}</p>
-                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                    <span>{opp.mention_count || 0} mentions</span>
-                    {typeof opp.position === 'number' && <span>Top position: {opp.position}</span>}
-                  </div>
-                </div>
-                <Badge 
-                  variant="secondary"
-                >
-                  competitor: {opp.competitor?.name || opp.competitor_name || 'Unknown'}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-muted-foreground">Platforms:</span>
-                {(opp.platform ? [opp.platform] : (opp.citation_list || [])).slice(0,4).map((p:any,i:number)=>(
-                  <Badge key={i} variant="outline" className="text-xs">{String(p||'AI')}</Badge>
-                ))}
-              </div>
-            </div>
-          )) : (
-            <p className="text-sm text-muted-foreground">No opportunities detected yet.</p>
-          )}
-        </div>
-      </Card>
+        </>
+      )}
     </div>
   );
 };

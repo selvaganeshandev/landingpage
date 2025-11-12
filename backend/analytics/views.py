@@ -34,17 +34,17 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
         start_date = timezone.now().date() - timedelta(days=days)
         queryset = self.get_queryset().filter(
             domain_id=domain_id,
-            timestamp__gte=start_date
-        )
+            snapshot_date__gte=start_date
+        ).order_by('-snapshot_date', 'theme')
         
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
     
     @action(detail=False, methods=['get'])
     def summary(self, request):
-        """Get sentiment summary for a domain."""
+        """Get sentiment summary for a domain with previous period comparison."""
         domain_id = request.query_params.get('domain_id')
-        days = int(request.query_params.get('days', 7))
+        days = int(request.query_params.get('days', 30))
         
         if not domain_id:
             return Response(
@@ -52,13 +52,17 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        start_date = timezone.now().date() - timedelta(days=days)
+        today = timezone.now().date()
+        start_date = today - timedelta(days=days)
+        
+        # Current period
         queryset = self.get_queryset().filter(
             domain_id=domain_id,
-            timestamp__gte=start_date
+            snapshot_date__gte=start_date,
+            snapshot_date__lte=today
         )
         
-        # Calculate weighted averages
+        # Calculate weighted averages for current period
         total_mentions = queryset.aggregate(Sum('mention_count'))['mention_count__sum'] or 0
         
         if total_mentions == 0:
@@ -67,19 +71,53 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
                 'neutral_percentage': 0,
                 'negative_percentage': 0,
                 'total_mentions': 0,
+                'positive_change': 0,
+                'neutral_change': 0,
+                'negative_change': 0,
                 'themes': []
             })
         
-        # Calculate weighted percentages
+        # Calculate weighted percentages for current period
         weighted_positive = sum(
-            (item.positive_percentage * item.mention_count) for item in queryset
+            (float(item.positive_percentage) * item.mention_count) for item in queryset
         ) / total_mentions
         weighted_neutral = sum(
-            (item.neutral_percentage * item.mention_count) for item in queryset
+            (float(item.neutral_percentage) * item.mention_count) for item in queryset
         ) / total_mentions
         weighted_negative = sum(
-            (item.negative_percentage * item.mention_count) for item in queryset
+            (float(item.negative_percentage) * item.mention_count) for item in queryset
         ) / total_mentions
+        
+        # Previous period (same duration before current period)
+        prev_start_date = start_date - timedelta(days=days)
+        prev_queryset = self.get_queryset().filter(
+            domain_id=domain_id,
+            snapshot_date__gte=prev_start_date,
+            snapshot_date__lt=start_date
+        )
+        
+        # Calculate weighted averages for previous period
+        prev_total_mentions = prev_queryset.aggregate(Sum('mention_count'))['mention_count__sum'] or 0
+        
+        if prev_total_mentions > 0:
+            prev_weighted_positive = sum(
+                (float(item.positive_percentage) * item.mention_count) for item in prev_queryset
+            ) / prev_total_mentions
+            prev_weighted_neutral = sum(
+                (float(item.neutral_percentage) * item.mention_count) for item in prev_queryset
+            ) / prev_total_mentions
+            prev_weighted_negative = sum(
+                (float(item.negative_percentage) * item.mention_count) for item in prev_queryset
+            ) / prev_total_mentions
+            
+            # Calculate changes (percentage point difference)
+            positive_change = round(weighted_positive - prev_weighted_positive, 2)
+            neutral_change = round(weighted_neutral - prev_weighted_neutral, 2)
+            negative_change = round(weighted_negative - prev_weighted_negative, 2)
+        else:
+            positive_change = 0
+            neutral_change = 0
+            negative_change = 0
         
         # Get top themes
         themes = queryset.values('theme').annotate(
@@ -91,6 +129,9 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
             'neutral_percentage': round(weighted_neutral, 2),
             'negative_percentage': round(weighted_negative, 2),
             'total_mentions': total_mentions,
+            'positive_change': positive_change,
+            'neutral_change': neutral_change,
+            'negative_change': negative_change,
             'themes': list(themes)
         })
 

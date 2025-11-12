@@ -23,6 +23,28 @@ const getHeatmapColor = (value: number) => {
 };
 
 export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) => {
+  // Handle empty data
+  if (!data || data.length === 0 || !platforms || platforms.length === 0) {
+    return (
+      <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
+        <div className="space-y-6">
+          <div className="pb-4 border-b border-border/50">
+            <h3 className="text-lg font-semibold flex items-center gap-2 font-outfit">
+              <Building2 className="h-5 w-5 text-primary" />
+              Competitor Analysis Heatmap
+            </h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Percentage of mentions per AI provider for each brand
+            </p>
+          </div>
+          <div className="flex items-center justify-center py-12">
+            <p className="text-sm text-muted-foreground">No heatmap data available yet.</p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
       <div className="space-y-6">
