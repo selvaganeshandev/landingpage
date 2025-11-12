@@ -141,10 +141,14 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground font-inter antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply font-outfit;
+    @apply font-inter;
+    font-weight: 600;
   }
 
   /* Force recent chats button styling */

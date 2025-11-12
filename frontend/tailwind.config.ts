@@ -14,7 +14,7 @@ export default {
     },
     extend: {
       fontFamily: {
-        inter: ['Inter', 'sans-serif'],
+        inter: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'sans-serif'],
         outfit: ['Outfit', 'sans-serif'],
       },
       colors: {
