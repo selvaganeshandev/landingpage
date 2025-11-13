@@ -51,6 +51,7 @@ import {
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
+import { useDomainStore } from "@/stores/domainStore";
 
 // Static data constants removed - all data now comes from APIs
 
@@ -62,6 +63,7 @@ const Competitors = () => {
   const { navigateToContentGeneration } = useContentGeneration();
   const [addCompetitorDialogOpen, setAddCompetitorDialogOpen] = useState(false);
   const { user } = useAuth();
+  const { selectedDomain } = useDomainStore();
   const [domainId, setDomainId] = useState<string | null>(null);
   const [competitors, setCompetitors] = useState<any[]>([]);
   const [sovLatest, setSovLatest] = useState<any>(null);
@@ -81,12 +83,32 @@ const Competitors = () => {
       description: "Your competitor analysis report is being generated...",
     });
   };
+  
+  // Sync domainId from selectedDomain (Zustand store) or server when domain changes
   useEffect(() => {
     if (!user) return;
-    // Use unified helper to get active domain ID (from localStorage, synced with server)
-    const id = getActiveDomainId(user);
-    if (id) setDomainId(id);
-  }, [user]);
+    
+    const syncDomain = async () => {
+      // Priority 1: Use selectedDomain from Zustand store (most up-to-date when user changes domain)
+      if (selectedDomain?.id) {
+        const newDomainId = String(selectedDomain.id);
+        if (newDomainId !== domainId) {
+          setDomainId(newDomainId);
+          return;
+        }
+      }
+      
+      // Priority 2: Fallback to server (primary source of truth on initial load)
+      const serverActiveDomain = await getActiveDomainId(user);
+      const serverDomainId = serverActiveDomain || '';
+      
+      if (serverDomainId !== domainId) {
+        setDomainId(serverDomainId);
+      }
+    };
+    
+    void syncDomain();
+  }, [user, selectedDomain?.id, domainId]);
 
   useEffect(() => {
     const load = async () => {
