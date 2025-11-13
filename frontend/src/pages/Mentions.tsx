@@ -14,6 +14,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Breadcrumb,
+  BreadcrumbList,
+  BreadcrumbItem,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
 import { useAuth } from "@/contexts/AuthContext";
@@ -253,8 +260,8 @@ const Mentions = () => {
   };
 
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex items-center justify-between pb-4">
+    <div className="p-8 space-y-8 bg-background animate-fade-in">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold tracking-tight">Real-Time Mention Tracking</h1>
           <p className="text-muted-foreground mt-2">
@@ -322,7 +329,7 @@ const Mentions = () => {
             <div className="flex flex-col items-center gap-4">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               <div>
-                <h3 className="text-lg font-semibold mb-2 font-outfit">Loading mentions...</h3>
+                <h3 className="text-lg font-semibold mb-2 font-inter">Loading mentions...</h3>
                 <p className="text-muted-foreground">
                   Please wait while we fetch your mentions
                 </p>
@@ -336,7 +343,7 @@ const Mentions = () => {
                 <Search className="h-8 w-8 text-muted-foreground" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold mb-2 font-outfit">No mentions found</h3>
+                <h3 className="text-lg font-semibold mb-2 font-inter">No mentions found</h3>
                 <p className="text-muted-foreground">
                   Try adjusting your filters to see more results
                 </p>
@@ -350,7 +357,7 @@ const Mentions = () => {
             <div className="space-y-5">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl gradient-primary shadow-glow flex items-center justify-center font-bold text-white text-lg font-outfit">
+                  <div className="w-14 h-14 rounded-2xl gradient-primary shadow-glow flex items-center justify-center font-bold text-white text-lg font-inter">
                     #{mention.position}
                   </div>
                   <div>

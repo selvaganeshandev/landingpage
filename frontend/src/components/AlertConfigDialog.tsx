@@ -144,7 +144,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-outfit text-2xl">Alert Configuration</DialogTitle>
+          <DialogTitle className="font-inter text-2xl">Alert Configuration</DialogTitle>
           <DialogDescription>
             Manage your alert preferences and notification channels
           </DialogDescription>

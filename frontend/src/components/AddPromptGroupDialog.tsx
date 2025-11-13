@@ -170,7 +170,7 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-outfit text-2xl">Add Prompt Group</DialogTitle>
+          <DialogTitle className="font-inter text-2xl">Add Prompt Group</DialogTitle>
           <DialogDescription>
             Create a new prompt group to track related search queries
           </DialogDescription>

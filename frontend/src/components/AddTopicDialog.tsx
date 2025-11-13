@@ -96,7 +96,7 @@ export const AddTopicDialog = ({ open, onOpenChange, onAdd }: AddTopicDialogProp
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-outfit text-2xl">Add New Topic</DialogTitle>
+          <DialogTitle className="font-inter text-2xl">Add New Topic</DialogTitle>
           <DialogDescription>
             Create a custom topic to track specific categories or themes
           </DialogDescription>

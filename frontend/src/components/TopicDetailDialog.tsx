@@ -84,7 +84,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-outfit text-2xl">{topic.name}</DialogTitle>
+          <DialogTitle className="font-inter text-2xl">{topic.name}</DialogTitle>
           <DialogDescription>
             Comprehensive analysis and performance metrics for this topic
           </DialogDescription>

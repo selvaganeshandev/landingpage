@@ -132,9 +132,9 @@ const Dashboard = () => {
   }, [user, domainId, timePeriod, selectedDomain?.id]);
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-8 space-y-8 bg-background animate-fade-in">
       <div className="space-y-4">
-        <div className="flex items-start justify-between pb-4">
+        <div className="flex items-start justify-between">
           <div>
             <h1 className="text-4xl font-bold tracking-tight">Insights</h1>
             <p className="text-muted-foreground mt-2">

@@ -182,11 +182,11 @@ const ContentCalendar = () => {
   );
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-8 space-y-6 bg-background animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight font-outfit">Content Calendar</h1>
+          <h1 className="text-3xl font-bold tracking-tight font-inter">Content Calendar</h1>
           <p className="text-muted-foreground mt-1">
             AI-powered content generation prioritized by opportunity
           </p>
@@ -223,7 +223,7 @@ const ContentCalendar = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Scheduled</p>
-              <p className="text-2xl font-bold font-outfit">12</p>
+              <p className="text-2xl font-bold font-inter">12</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
               <Clock className="h-5 w-5 text-primary" />
@@ -234,7 +234,7 @@ const ContentCalendar = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">High Priority</p>
-              <p className="text-2xl font-bold font-outfit">8</p>
+              <p className="text-2xl font-bold font-inter">8</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-destructive/10 flex items-center justify-center">
               <AlertCircle className="h-5 w-5 text-destructive" />
@@ -245,7 +245,7 @@ const ContentCalendar = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Generated</p>
-              <p className="text-2xl font-bold font-outfit">24</p>
+              <p className="text-2xl font-bold font-inter">24</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center">
               <CheckCircle2 className="h-5 w-5 text-success" />
@@ -256,7 +256,7 @@ const ContentCalendar = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Avg Impact</p>
-              <p className="text-2xl font-bold font-outfit">82%</p>
+              <p className="text-2xl font-bold font-inter">82%</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
               <TrendingUp className="h-5 w-5 text-primary" />

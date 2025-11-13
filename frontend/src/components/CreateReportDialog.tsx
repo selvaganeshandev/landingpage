@@ -97,7 +97,7 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-outfit text-2xl flex items-center gap-2">
+          <DialogTitle className="font-inter text-2xl flex items-center gap-2">
             <FileText className="h-6 w-6 text-primary" />
             Create Custom Report
           </DialogTitle>

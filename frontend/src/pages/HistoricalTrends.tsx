@@ -124,7 +124,7 @@ const HistoricalTrends = () => {
 
   if (isLoading) {
     return (
-      <div className="p-8 space-y-8">
+      <div className="p-8 space-y-8 bg-background animate-fade-in">
         <div className="flex items-center justify-center h-64">
           <p className="text-muted-foreground">Loading historical trends...</p>
         </div>
@@ -162,8 +162,8 @@ const HistoricalTrends = () => {
   }
 
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex items-center justify-between pb-4">
+    <div className="p-8 space-y-8 bg-background animate-fade-in">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold tracking-tight">Historical Trends</h1>
           <p className="text-muted-foreground mt-2">

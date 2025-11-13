@@ -129,7 +129,7 @@ export const GenerateTopicsDialog = ({ open, onOpenChange, onAdd }: GenerateTopi
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-outfit text-2xl flex items-center gap-2">
+          <DialogTitle className="font-inter text-2xl flex items-center gap-2">
             <Sparkles className="h-6 w-6 text-primary" />
             AI Topic Generation
           </DialogTitle>

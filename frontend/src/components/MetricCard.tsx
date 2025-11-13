@@ -26,7 +26,7 @@ export const MetricCard = ({ title, value, change, icon, trend }: MetricCardProp
           <div className="h-10">
             <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider leading-tight">{title}</p>
           </div>
-          <h3 className="text-4xl font-bold tracking-tight font-outfit">{value}</h3>
+          <h3 className="text-4xl font-bold tracking-tight font-inter">{value}</h3>
           {change !== undefined && change !== 0 && (
             <div className="flex items-center gap-2 text-sm whitespace-nowrap">
               {trend === "up" ? (

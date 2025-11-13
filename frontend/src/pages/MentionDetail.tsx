@@ -221,9 +221,9 @@ const MentionDetail = () => {
   const trendData: Array<{ date: string; mentions: number; position: number }> = [];
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-8 space-y-6 bg-background animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between pb-4">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button
             variant="outline"
@@ -233,7 +233,7 @@ const MentionDetail = () => {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight font-outfit">Mention Details</h1>
+            <h1 className="text-3xl font-bold tracking-tight font-inter">Mention Details</h1>
             <p className="text-muted-foreground mt-1">
               In-depth analysis of this brand mention
             </p>
@@ -259,7 +259,7 @@ const MentionDetail = () => {
             <div className="space-y-6">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-2xl gradient-primary shadow-glow flex items-center justify-center font-bold text-white text-2xl font-outfit">
+                  <div className="w-16 h-16 rounded-2xl gradient-primary shadow-glow flex items-center justify-center font-bold text-white text-2xl font-inter">
                     #{mention.position}
                   </div>
                   <div>
@@ -373,7 +373,7 @@ const MentionDetail = () => {
 
               <TabsContent value="overview" className="space-y-4">
                 <div>
-                  <h3 className="text-lg font-semibold mb-4 font-outfit">Key Topics Mentioned</h3>
+                  <h3 className="text-lg font-semibold mb-4 font-inter">Key Topics Mentioned</h3>
                   <div className="flex flex-wrap gap-2">
                     {mention.key_topics && mention.key_topics.length > 0 ? (
                       mention.key_topics.map((topic, idx) => (
@@ -388,7 +388,7 @@ const MentionDetail = () => {
                 </div>
 
                 <div className="pt-4">
-                  <h3 className="text-lg font-semibold mb-4 font-outfit">Position Trend</h3>
+                  <h3 className="text-lg font-semibold mb-4 font-inter">Position Trend</h3>
                   {trendData.length === 0 ? (
                     <div className="h-[250px] flex items-center justify-center text-sm text-muted-foreground border border-border rounded-md">
                       No trend data available
@@ -427,19 +427,19 @@ const MentionDetail = () => {
                       <MessageSquare className="h-4 w-4 text-primary" />
                       <p className="text-sm text-muted-foreground">Citations</p>
                     </div>
-                    <p className="text-3xl font-bold font-outfit">{mention.total_citations}</p>
+                    <p className="text-3xl font-bold font-inter">{mention.total_citations}</p>
                   </div>
                   <div className="p-4 rounded-xl bg-gradient-to-br from-success/5 to-success/10 border border-border">
                     <div className="flex items-center gap-2 mb-2">
                       <TrendingUp className="h-4 w-4 text-success" />
                       <p className="text-sm text-muted-foreground">Position Rank</p>
                     </div>
-                    <p className="text-3xl font-bold font-outfit">#{mention.position}</p>
+                    <p className="text-3xl font-bold font-inter">#{mention.position}</p>
                   </div>
                 </div>
 
                 <div className="p-5 rounded-xl border border-border bg-muted/30">
-                  <h4 className="font-semibold mb-3 font-outfit">Sentiment Analysis</h4>
+                  <h4 className="font-semibold mb-3 font-inter">Sentiment Analysis</h4>
                   <p className="text-sm text-muted-foreground leading-relaxed">
                     This mention shows {mention.sentiment} sentiment with a score of {mention.sentiment_score}. 
                     {mention.sentiment === 'positive' && ' The response highlights positive aspects and benefits.'}
@@ -451,7 +451,7 @@ const MentionDetail = () => {
 
               <TabsContent value="competitors" className="space-y-4">
                 <div>
-                  <h3 className="text-lg font-semibold mb-3 font-outfit">Competitors Mentioned</h3>
+                  <h3 className="text-lg font-semibold mb-3 font-inter">Competitors Mentioned</h3>
                   <div className="flex flex-wrap gap-2 mb-6">
                     {mention.competitor_mentions && mention.competitor_mentions.length > 0 ? (
                       mention.competitor_mentions.map((competitor, idx) => (
@@ -466,14 +466,14 @@ const MentionDetail = () => {
                 </div>
 
                 <div>
-                  <h3 className="text-lg font-semibold mb-3 font-outfit">Related Mentions</h3>
+                  <h3 className="text-lg font-semibold mb-3 font-inter">Related Mentions</h3>
                   <div className="space-y-3">
                     {relatedMentions && relatedMentions.length > 0 ? (
                       relatedMentions.map((related, idx) => (
                         <div key={idx} className="p-4 rounded-xl border border-border hover:shadow-md transition-all bg-card/50">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-xl gradient-primary shadow-md flex items-center justify-center font-bold text-white font-outfit">
+                              <div className="w-10 h-10 rounded-xl gradient-primary shadow-md flex items-center justify-center font-bold text-white font-inter">
                                 #{related.position}
                               </div>
                               <div>
@@ -506,26 +506,26 @@ const MentionDetail = () => {
         <div className="space-y-6">
           {/* Engagement Stats */}
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-            <h3 className="text-lg font-semibold mb-4 font-outfit">Engagement Metrics</h3>
+            <h3 className="text-lg font-semibold mb-4 font-inter">Engagement Metrics</h3>
             <div className="space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-border">
                 <span className="text-sm text-muted-foreground">Views</span>
-                <span className="text-lg font-bold font-outfit">{mention.views ? mention.views.toLocaleString() : '0'}</span>
+                <span className="text-lg font-bold font-inter">{mention.views ? mention.views.toLocaleString() : '0'}</span>
               </div>
               <div className="flex items-center justify-between pb-3 border-b border-border">
                 <span className="text-sm text-muted-foreground">Shares</span>
-                <span className="text-lg font-bold font-outfit">{mention.shares || '0'}</span>
+                <span className="text-lg font-bold font-inter">{mention.shares || '0'}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Citations</span>
-                <span className="text-lg font-bold font-outfit">{mention.total_citations || '0'}</span>
+                <span className="text-lg font-bold font-inter">{mention.total_citations || '0'}</span>
               </div>
             </div>
           </Card>
 
           {/* Quick Actions */}
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-            <h3 className="text-lg font-semibold mb-4 font-outfit">Quick Actions</h3>
+            <h3 className="text-lg font-semibold mb-4 font-inter">Quick Actions</h3>
             <div className="space-y-2">
               <Button variant="outline" className="w-full justify-start border border-border">
                 <Target className="h-4 w-4 mr-2" />

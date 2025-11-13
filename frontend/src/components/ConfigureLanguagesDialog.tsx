@@ -97,7 +97,7 @@ export const ConfigureLanguagesDialog = ({ open, onOpenChange }: ConfigureLangua
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-outfit text-2xl flex items-center gap-2">
+          <DialogTitle className="font-inter text-2xl flex items-center gap-2">
             <Settings className="h-6 w-6 text-primary" />
             Language Configuration
           </DialogTitle>

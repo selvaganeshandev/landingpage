@@ -37,14 +37,14 @@ export const PlatformMentions = ({ data }: PlatformMentionsProps) => {
   const maxCount = Math.max(1, ...platforms.map(p => p.count));
   return (
     <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80 h-full flex flex-col">
-      <h3 className="text-lg font-semibold mb-6 font-outfit">Platform Distribution</h3>
+      <h3 className="text-lg font-semibold mb-6 font-inter">Platform Distribution</h3>
       <div className="space-y-5 flex-1">
         {platforms.map((platform) => (
           <div key={platform.platform} className="space-y-3 group">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className={`w-3 h-3 rounded-full ${platform.color} transition-all group-hover:scale-125 group-hover:shadow-lg`} />
-                <span className="font-semibold font-outfit">{platform.platform}</span>
+                <span className="font-semibold font-inter">{platform.platform}</span>
               </div>
               <Badge variant="secondary" className="font-medium">{platform.count} mentions</Badge>
             </div>

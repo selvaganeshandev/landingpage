@@ -40,9 +40,9 @@ export const TopBrandsList = ({ brands, totalMentions }: TopBrandsListProps) => 
     <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
       <div className="space-y-6">
         <div className="flex items-center justify-between pb-4 border-b border-border/50">
-          <h3 className="text-lg font-semibold font-outfit">Top Brands by Visibility</h3>
+          <h3 className="text-lg font-semibold font-inter">Top Brands by Visibility</h3>
           <div className="text-right">
-            <p className="text-3xl font-bold font-outfit gradient-primary bg-clip-text text-transparent">{totalMentions}</p>
+            <p className="text-3xl font-bold font-inter gradient-primary bg-clip-text text-transparent">{totalMentions}</p>
             <p className="text-xs text-muted-foreground uppercase tracking-wider">total mentions</p>
           </div>
         </div>
@@ -63,7 +63,7 @@ export const TopBrandsList = ({ brands, totalMentions }: TopBrandsListProps) => 
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <h4 className="font-semibold truncate font-outfit">{brand.name}</h4>
+                    <h4 className="font-semibold truncate font-inter">{brand.name}</h4>
                     {brand.isYou && (
                       <Badge variant="default" className="text-xs gradient-primary border-0">You</Badge>
                     )}
@@ -71,7 +71,7 @@ export const TopBrandsList = ({ brands, totalMentions }: TopBrandsListProps) => 
                   <p className="text-xs text-muted-foreground truncate">{brand.url}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-xl font-bold font-outfit">{brand.mentions}</p>
+                  <p className="text-xl font-bold font-inter">{brand.mentions}</p>
                   <p className="text-xs text-muted-foreground">{brand.percentage}%</p>
                 </div>
               </div>

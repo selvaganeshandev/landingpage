@@ -5,7 +5,7 @@ interface PageLoaderProps {
 export const PageLoader = ({ sidebarOpen = true }: PageLoaderProps) => {
   return (
     <div
-      className="fixed top-0 bottom-0 right-0 z-50 flex items-center justify-center bg-white"
+      className="fixed top-0 bottom-0 right-0 z-50 flex items-center justify-center bg-background"
       style={{ left: sidebarOpen ? '256px' : '64px' }}
     >
       <div className="flex flex-col items-center gap-4">

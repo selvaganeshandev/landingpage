@@ -141,10 +141,14 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground font-inter antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply font-outfit;
+    @apply font-inter;
+    font-weight: 600;
   }
 
   /* Force recent chats button styling */
@@ -212,7 +216,7 @@ All colors MUST be HSL.
   .shadow-elegant {
     box-shadow: var(--shadow-lg);
   }
-  
+
   .shadow-elegant-xl {
     box-shadow: var(--shadow-xl);
   }
@@ -231,5 +235,20 @@ All colors MUST be HSL.
 
   .gradient-subtle {
     background: var(--gradient-subtle);
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-in;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }
