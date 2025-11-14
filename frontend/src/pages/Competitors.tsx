@@ -88,26 +88,22 @@ const Competitors = () => {
   useEffect(() => {
     if (!user) return;
     
-    const syncDomain = async () => {
-      // Priority 1: Use selectedDomain from Zustand store (most up-to-date when user changes domain)
-      if (selectedDomain?.id) {
-        const newDomainId = String(selectedDomain.id);
-        if (newDomainId !== domainId) {
-          setDomainId(newDomainId);
-          return;
-        }
+    // Priority 1: Use selectedDomain from Zustand store (most up-to-date when user changes domain)
+    if (selectedDomain?.id) {
+      const newDomainId = String(selectedDomain.id);
+      if (newDomainId !== domainId) {
+        setDomainId(newDomainId);
+        return;
       }
-      
-      // Priority 2: Fallback to server (primary source of truth on initial load)
-      const serverActiveDomain = await getActiveDomainId(user);
-      const serverDomainId = serverActiveDomain || '';
-      
-      if (serverDomainId !== domainId) {
-        setDomainId(serverDomainId);
-      }
-    };
+    }
     
-    void syncDomain();
+    // Priority 2: Fallback to localStorage (synced with server)
+    const serverActiveDomain = getActiveDomainId(user);
+    const serverDomainId = serverActiveDomain || '';
+    
+    if (serverDomainId !== domainId) {
+      setDomainId(serverDomainId);
+    }
   }, [user, selectedDomain?.id, domainId]);
 
   useEffect(() => {

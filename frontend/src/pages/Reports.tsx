@@ -235,7 +235,7 @@ const Reports = () => {
   };
 
   return (
-    <div className="p-8 space-y-8 bg-background animate-fade-in">
+    <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold tracking-tight">Custom Reports</h1>
@@ -248,7 +248,7 @@ const Reports = () => {
             <Settings className="h-4 w-4 mr-2" />
             Manage Templates
           </Button>
-          <Button onClick={handleCreateReport} className="gradient-primary shadow-md shadow-primary/20">
+          <Button onClick={handleCreateReport}>
             <Plus className="h-4 w-4 mr-2" />
             Create Report
           </Button>
@@ -276,11 +276,11 @@ const Reports = () => {
       </div>
 
       {/* Scheduled Reports */}
-      <Card className="p-6 border border-border">
+      <Card className="p-6">
         <h3 className="text-lg font-semibold mb-6">Scheduled Reports</h3>
         <div className="space-y-4">
           {scheduledReports.map((report) => (
-            <div key={report.id} className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
+            <div key={report.id} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
@@ -329,14 +329,14 @@ const Reports = () => {
       </Card>
 
       {/* Recent Reports */}
-      <Card className="p-6 border border-border">
+      <Card className="p-6">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold">Recent Reports</h3>
           <Button variant="outline" size="sm">View All</Button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {recentReports.map((report) => (
-            <div key={report.id} className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
+            <div key={report.id} className="p-4 rounded-lg border border-border hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between mb-3">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                   <FileText className="h-5 w-5 text-primary" />
@@ -364,11 +364,11 @@ const Reports = () => {
       </Card>
 
       {/* Templates */}
-      <Card className="p-6 border border-border">
+      <Card className="p-6">
         <h3 className="text-lg font-semibold mb-6">Report Templates</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {templates.map((template) => (
-            <div key={template.id} className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
+            <div key={template.id} className="p-4 rounded-lg border border-border hover:shadow-md transition-shadow">
               <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-primary/10 to-secondary/10 mb-4 flex items-center justify-center">
                 <FileText className="h-12 w-12 text-muted-foreground" />
               </div>
@@ -403,7 +403,7 @@ const Reports = () => {
       </Card>
 
       {/* API Access */}
-      <Card className="p-6 border border-border">
+      <Card className="p-6">
         <h3 className="text-lg font-semibold mb-4">API Access</h3>
         <p className="text-sm text-muted-foreground mb-4">
           Integrate visibility data directly into your systems with our REST API
