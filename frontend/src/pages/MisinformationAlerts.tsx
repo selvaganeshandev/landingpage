@@ -322,21 +322,24 @@ const MisinformationAlerts = () => {
       </div>
 
       {/* Main Content Tabs */}
-      <Tabs value={selectedTab} onValueChange={setSelectedTab}>
-        <TabsList className="bg-muted/50 p-1 border border-border">
-          <TabsTrigger value="active" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
-            <AlertCircle className="h-4 w-4 mr-2" />
-            Active Cases ({activeMisinformation.length})
-          </TabsTrigger>
-          <TabsTrigger value="resolved" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
-            <CheckCircle className="h-4 w-4 mr-2" />
-            Resolved ({resolvedCases.length})
-          </TabsTrigger>
-          <TabsTrigger value="monitoring" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
-            <Shield className="h-4 w-4 mr-2" />
-            Monitoring Rules
-          </TabsTrigger>
-        </TabsList>
+      <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
+        <Tabs value={selectedTab} onValueChange={setSelectedTab}>
+          <div className="mb-6">
+            <TabsList className="bg-muted/50 p-1 border border-border">
+              <TabsTrigger value="active" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
+                <AlertCircle className="h-4 w-4 mr-2" />
+                Active Cases ({activeMisinformation.length})
+              </TabsTrigger>
+              <TabsTrigger value="resolved" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
+                <CheckCircle className="h-4 w-4 mr-2" />
+                Resolved ({resolvedCases.length})
+              </TabsTrigger>
+              <TabsTrigger value="monitoring" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
+                <Shield className="h-4 w-4 mr-2" />
+                Monitoring Rules
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
         {/* Active Cases Tab */}
         <TabsContent value="active" className="space-y-6">
@@ -602,36 +605,37 @@ const MisinformationAlerts = () => {
           </Card>
         </TabsContent>
       </Tabs>
+    </Card>
 
-      {/* Dialogs */}
-      <MisinformationDetailDialog
-        open={detailDialogOpen}
-        onOpenChange={setDetailDialogOpen}
-        misinformationCase={selectedCase}
-      />
-      <MisinformationActionDialog
-        open={actionDialogOpen}
-        onOpenChange={setActionDialogOpen}
-        misinformationCase={selectedCase}
-      />
-      <AddMonitoringRuleDialog
-        open={addRuleDialogOpen}
-        onOpenChange={setAddRuleDialogOpen}
-        rule={selectedRule}
-        onSave={handleSaveRule}
-      />
-      <ConfigureDetectionDialog
-        open={configureDialogOpen}
-        onOpenChange={setConfigureDialogOpen}
-      />
-      <StartScanDialog
-        open={startScanDialogOpen}
-        onOpenChange={setStartScanDialogOpen}
-      />
-      <ContentComparisonDialog
-        open={comparisonDialogOpen}
-        onOpenChange={setComparisonDialogOpen}
-      />
+    {/* Dialogs */}
+    <MisinformationDetailDialog
+      open={detailDialogOpen}
+      onOpenChange={setDetailDialogOpen}
+      misinformationCase={selectedCase}
+    />
+    <MisinformationActionDialog
+      open={actionDialogOpen}
+      onOpenChange={setActionDialogOpen}
+      misinformationCase={selectedCase}
+    />
+    <AddMonitoringRuleDialog
+      open={addRuleDialogOpen}
+      onOpenChange={setAddRuleDialogOpen}
+      rule={selectedRule}
+      onSave={handleSaveRule}
+    />
+    <ConfigureDetectionDialog
+      open={configureDialogOpen}
+      onOpenChange={setConfigureDialogOpen}
+    />
+    <StartScanDialog
+      open={startScanDialogOpen}
+      onOpenChange={setStartScanDialogOpen}
+    />
+    <ContentComparisonDialog
+      open={comparisonDialogOpen}
+      onOpenChange={setComparisonDialogOpen}
+    />
     </div>
   );
 };
