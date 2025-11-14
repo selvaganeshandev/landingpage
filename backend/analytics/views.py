@@ -243,4 +243,45 @@ class ShareOfVoiceAnalyticsViewSet(viewsets.ModelViewSet):
             'brands': all_brands,  # Unified list with "You" first
             'total_market_mentions': queryset.aggregate(Sum('mention_count'))['mention_count__sum'] or 0
         })
+    
+    @action(detail=False, methods=['get'])
+    def latest(self, request):
+        """
+        Get latest Share of Voice analytics for a domain (matches engine endpoint).
+        Returns data in the same format as engine /api/share-of-voice/
+        """
+        domain_id = request.query_params.get('domain_id')
+        
+        if not domain_id:
+            return Response(
+                {'error': 'domain_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get latest timestamp
+        latest = self.get_queryset().filter(
+            domain_id=domain_id
+        ).order_by('-timestamp').first()
+        
+        if not latest:
+            return Response({
+                'domain_id': int(domain_id),
+                'message': 'No share of voice data available yet',
+                'players': []
+            })
+        
+        # Get all records for latest timestamp
+        sov_data = self.get_queryset().filter(
+            domain_id=domain_id,
+            timestamp=latest.timestamp
+        ).select_related('competitor', 'domain').order_by('market_position')
+        
+        serializer = self.get_serializer(sov_data, many=True)
+        
+        return Response({
+            'domain_id': int(domain_id),
+            'timestamp': latest.timestamp,
+            'platform': latest.platform or 'Overall',
+            'players': serializer.data
+        })
 

@@ -547,35 +547,16 @@ export const apiClient = {
     return apiRequest(`/analytics/share-of-voice/comparison/${queryParams}`);
   },
 
+  // ===== Share of Voice (moved from engine to backend)
   getShareOfVoiceLatestEngine: (params: { domain_id: string }) => {
     const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiClient.getEngine(`/api/share-of-voice/${queryParams}`);
+    return apiClient.get(`/analytics/share-of-voice/latest/${queryParams}`);
   },
 
-  // ===== Engine (port 8001) helpers for competitor sentiment (optional for Sentiment page)
-  getEngine: <T>(endpoint: string) => {
-    const engineBaseUrl = import.meta.env.VITE_ENGINE_API_URL || 'http://localhost:8001';
-    const apiUrl = `${engineBaseUrl}${endpoint}`;
-    return fetch(apiUrl, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(localStorage.getItem('access_token') ? {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        } : {}),
-      },
-    }).then(async (response) => {
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
-        throw new Error(error.detail || error.error || `HTTP ${response.status}`);
-      }
-      return response.json();
-    });
-  },
-
+  // ===== Competitor Prompt Analytics (moved from engine to backend)
   getCompetitorPromptAnalyticsEngine: (params: { domain_id: string }) => {
     const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiClient.getEngine(`/api/competitor-prompt-analytics/${queryParams}`);
+    return apiClient.get(`/competitors/competitor-prompt-analytics/${queryParams}`);
   },
 
   getCompetitorGapsEngine: (params: { domain_id: string; competitor_id?: string }) => {
@@ -583,16 +564,17 @@ export const apiClient = {
       domain_id: params.domain_id,
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
     }).toString()}`;
-    return apiClient.getEngine(`/api/competitor-prompt-analytics/gaps/${queryParams}`);
+    return apiClient.get(`/competitors/competitor-prompt-analytics/gaps/${queryParams}`);
   },
 
+  // ===== Competitor endpoints (moved from engine to backend)
   getEngineCompetitors: (params: { domain_id: string }) => {
     const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiClient.getEngine(`/api/competitors/${queryParams}`);
+    return apiClient.get(`/competitors/competitors/${queryParams}`);
   },
 
-  getEngineCompetitorDetail: (id: number) => apiClient.getEngine(`/api/competitors/${id}/`),
-  getEngineCompetitorAnalytics: (id: number) => apiClient.getEngine(`/api/competitors/${id}/analytics/`),
+  getEngineCompetitorDetail: (id: number) => apiClient.get(`/competitors/competitors/${id}/`),
+  getEngineCompetitorAnalytics: (id: number) => apiClient.get(`/competitors/competitors/${id}/analytics/`),
 
   // Competitor Analysis APIs
   getCompetitiveStrengthAnalysis: (params: { domain_id: string }) => {

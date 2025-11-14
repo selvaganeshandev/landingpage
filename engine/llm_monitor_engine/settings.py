@@ -152,6 +152,7 @@ CORS_ALLOW_CREDENTIALS = True
 # Domain processing settings
 MAX_CONCURRENT_DOMAINS = config('MAX_CONCURRENT_DOMAINS', default=10, cast=int)
 MAX_CONCURRENT_PROMPT_ANALYTICS = config('MAX_CONCURRENT_PROMPT_ANALYTICS', default=10, cast=int)
+MAX_CONCURRENT_COMPETITOR_PROMPTS = config('MAX_CONCURRENT_COMPETITOR_PROMPTS', default=10, cast=int)
 
 # Prompt engine knobs
 # How many keywords to fetch from DataForSEO per domain
@@ -189,5 +190,9 @@ CELERY_BEAT_SCHEDULE = {
     'prompt-analytics-scheduler-every-15s': {
         'task': 'core.processing_tasks.process_prompt_analytics_scheduler',
         'schedule': config('CELERY_BEAT_SCHEDULE_PROMPT_ANALYTICS', default=15.0, cast=float),
+    },
+    'competitor-scheduler-every-15s': {
+        'task': 'core.processing_tasks.process_competitor_scheduler',
+        'schedule': config('CELERY_BEAT_SCHEDULE_COMPETITOR', default=15.0, cast=float),
     },
 }

@@ -157,6 +157,47 @@ class CompetitorViewSet(viewsets.ModelViewSet):
             }
         }
         return Response(data)
+    
+    @action(detail=True, methods=['get'])
+    def analytics(self, request, pk=None):
+        """
+        Get detailed analytics for a competitor (matches engine endpoint).
+        Returns data in the same format as engine /api/competitors/{id}/analytics/
+        """
+        competitor = self.get_object()
+        
+        # Get competitor-prompt analytics
+        prompt_analytics = CompetitorPromptAnalytics.objects.filter(
+            competitor=competitor
+        ).select_related('prompt')
+        
+        # Calculate statistics
+        stats = prompt_analytics.aggregate(
+            total_tested=Count('id'),
+            total_mentioned=Count('id', filter=Q(is_mentioned=True)),
+            avg_position=Avg('position'),
+            avg_sentiment=Avg('sentiment_score'),
+            total_mentions=Sum('mention_count')
+        )
+        
+        mention_rate = 0
+        if stats['total_tested'] and stats['total_tested'] > 0:
+            mention_rate = (stats['total_mentioned'] / stats['total_tested']) * 100
+        
+        return Response({
+            'competitor': CompetitorSerializer(competitor).data,
+            'statistics': {
+                'total_prompts_tested': stats['total_tested'] or 0,
+                'times_mentioned': stats['total_mentioned'] or 0,
+                'mention_rate': round(mention_rate, 2),
+                'average_position': round(float(stats['avg_position'] or 0), 2),
+                'average_sentiment': round(float(stats['avg_sentiment'] or 0), 2),
+                'total_mention_count': stats['total_mentions'] or 0,
+            },
+            'recent_prompts': CompetitorPromptAnalyticsSerializer(
+                prompt_analytics.order_by('-tracked_at')[:10], many=True
+            ).data
+        })
 
 
 class CompetitorAnalyticsViewSet(viewsets.ModelViewSet):

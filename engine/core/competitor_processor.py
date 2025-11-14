@@ -167,7 +167,8 @@ class CompetitorProcessor:
         """
         try:
             # If a competitor is in progress, skip scheduling
-            if Competitor.objects.filter(track_status='SCHD').exists():
+            # Check for 'PROC' (actual processing) or 'SCHD' (scheduled but not yet processing)
+            if Competitor.objects.filter(track_status__in=['SCHD', 'PROC']).exists():
                 return {'scheduled': False, 'reason': 'competitor_in_progress'}
             
             # Select one INIT competitor
