@@ -13,15 +13,33 @@ import { api } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { loadActiveDomain, loadActiveDomainFromServer } from "@/utils/activeDomain";
 import { useDomainStore } from "@/stores/domainStore";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const Dashboard = () => {
   const { user } = useAuth();
   const { selectedDomain } = useDomainStore();
   const [timePeriod, setTimePeriod] = useState("30");
+  const [selectedLLM, setSelectedLLM] = useState("all");
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [domainId, setDomainId] = useState<string>("");
   const { toast } = useToast();
+
+  // LLM modules configuration
+  const llmModules = [
+    { value: "all", label: "All LLMs" },
+    { value: "chatgpt", label: "ChatGPT" },
+    { value: "claude", label: "Claude" },
+    { value: "gemini", label: "Gemini" },
+    { value: "perplexity", label: "Perplexity" },
+    { value: "grok", label: "Grok" },
+  ];
   
   // Get domain name for display
   const domainNameRaw = selectedDomain?.name || "Domain name";
@@ -85,8 +103,12 @@ const Dashboard = () => {
     
     try {
       setLoading(true);
-      console.log('Dashboard: Fetching summary for domain:', currentDomainId, 'days:', timePeriod);
-      const data = await api.getDashboardSummary({ domain_id: currentDomainId, days: Number(timePeriod) });
+      console.log('Dashboard: Fetching summary for domain:', currentDomainId, 'days:', timePeriod, 'llm:', selectedLLM);
+      const data = await api.getDashboardSummary({
+        domain_id: currentDomainId,
+        days: Number(timePeriod),
+        llm_model: selectedLLM !== 'all' ? selectedLLM : undefined
+      });
       console.log('Dashboard: API response received:', data);
       setSummary(data);
       // Only show success toast if there's actual data, not for empty data
@@ -129,7 +151,7 @@ const Dashboard = () => {
   useEffect(() => {
     void fetchSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, domainId, timePeriod, selectedDomain?.id]);
+  }, [user, domainId, timePeriod, selectedLLM, selectedDomain?.id]);
 
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
@@ -142,6 +164,18 @@ const Dashboard = () => {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <Select value={selectedLLM} onValueChange={setSelectedLLM}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Select LLM" />
+              </SelectTrigger>
+              <SelectContent>
+                {llmModules.map((llm) => (
+                  <SelectItem key={llm.value} value={llm.value}>
+                    {llm.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
             <Button variant="outline" onClick={handleExportReport}>Export Report</Button>
             <Button onClick={handleRefreshData} className="gradient-primary shadow-md shadow-primary/20">
