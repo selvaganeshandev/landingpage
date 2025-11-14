@@ -64,8 +64,8 @@ const allNavGroups: NavGroup[] = [
     name: "Tracking",
     icon: Activity,
     items: [
-      { name: "Mentions", path: "/mentions", icon: MessageSquare, module: MODULES.MENTIONS },
       { name: "Prompts", path: "/prompts", icon: Search, module: MODULES.PROMPTS },
+      { name: "Mentions", path: "/mentions", icon: MessageSquare, module: MODULES.MENTIONS },
       { name: "Alerts", path: "/alerts", icon: Bell, module: MODULES.ALERTS },
     ],
   },

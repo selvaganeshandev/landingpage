@@ -76,6 +76,9 @@ const Competitors = () => {
   const [competitiveInsights, setCompetitiveInsights] = useState<any[]>([]);
   const [answerGapData, setAnswerGapData] = useState<any[]>([]);
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
+  const [promptsDisplayLimit, setPromptsDisplayLimit] = useState(10); // Load more state for prompts
+  const [promptPlatformFilter, setPromptPlatformFilter] = useState<string>("all"); // Platform filter for prompts
+  const [availablePromptPlatforms, setAvailablePromptPlatforms] = useState<string[]>([]); // Available platforms for filter
 
   const handleExportReport = () => {
     toast({
@@ -110,9 +113,9 @@ const Competitors = () => {
     const load = async () => {
       if (!domainId) return;
       try {
-        // Load main competitor data first
+        // Load main competitor data first - use backend API which includes "You"
         const [list, latest, byDomain, compPromptAnalytics] = await Promise.all([
-          apiClient.getEngineCompetitors({ domain_id: domainId }),
+          apiClient.get(`/competitors/competitors/by_domain/?domain_id=${domainId}`),
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }),
           apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }),
           apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId }),
@@ -183,16 +186,37 @@ const Competitors = () => {
         
         setIsLoadingAnalysis(false);
 
-        // Normalize competitor list
+        // Color array for different competitors
+        const competitorColors = [
+          'hsl(var(--primary))',
+          'hsl(var(--chart-2))',
+          'hsl(var(--chart-3))',
+          'hsl(var(--chart-4))',
+          'hsl(var(--chart-5))',
+          'hsl(var(--success))',
+          'hsl(var(--warning))',
+          'hsl(var(--destructive))',
+        ];
+        
+        // Normalize competitor list - now includes "You" as first item
         const mapped = (Array.isArray(list) ? list : list?.results || []).map((c: any, idx: number) => {
           // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
           // Formula: (sentiment + 1) * 50 to normalize -1..1 to 0..100
           const rawSentiment = Number(c.sentiment_score || 0);
           const sentimentPercent = Math.round((rawSentiment + 1) * 50);
           
+          const isYou = c.is_you === true || c.name === 'You';
+          
+          // Format name: "Brand Name (You)" for your brand, otherwise just the name
+          const displayName = isYou && c.domain_name 
+            ? `${c.domain_name} (You)`
+            : (c.name || 'Unknown');
+          
           return {
             id: c.id,
-            name: c.name,
+            name: displayName,
+            originalName: c.name || 'Unknown', // Keep original for reference
+            domainName: c.domain_name || c.name || 'Unknown', // Domain name for "You"
             url: c.url || (c.domain_name || '').toLowerCase(),
             mentions: c.total_mentions || 0,
             visibility: Math.round(Number(c.visibility_score || 0)),
@@ -200,8 +224,8 @@ const Competitors = () => {
             avgPosition: Number(c.average_position || 0).toFixed ? Number(c.average_position).toFixed(1) : (c.average_position || 0),
             shareOfVoice: Math.round(Number(c.share_of_voice_percentage || 0)),
             trend: Number(c.trend_percentage || 0),
-            color: idx === 0 ? 'hsl(var(--primary))' : idx === 1 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-3))',
-            isYou: false, // Competitors are never "you" - "Your Brand" is shown separately in ShareOfVoice
+            color: competitorColors[idx % competitorColors.length], // Different color for each competitor
+            isYou: isYou, // "You" is now included in the list
           };
         });
         setCompetitors(mapped.length ? mapped : []);
@@ -209,12 +233,23 @@ const Competitors = () => {
         setSovLatest(latest);
 
         // Build mention history series from SoV by_domain (use mention_count)
+        // API now returns unified list with "You" first
         const rows = Array.isArray(byDomain) ? byDomain : byDomain?.results || [];
         const grouped: Record<string, Record<string, number>> = {};
         rows.forEach((r: any) => {
           const month = r.timestamp || r.date || '';
           if (!grouped[month]) grouped[month] = {};
-          const brand = r.competitor?.name || 'Your Brand';
+          // Format brand name: "Brand Name (You)" for your brand
+          let brand = r.brand_name || r.competitor?.name || (r.is_you ? 'You' : 'Your Brand');
+          if (r.is_you && r.domain_name) {
+            brand = `${r.domain_name} (You)`;
+          } else if (r.is_you && !r.competitor) {
+            // Try to get domain name from the first mapped competitor if available
+            const youCompetitor = mapped.find(c => c.isYou);
+            if (youCompetitor?.domainName) {
+              brand = `${youCompetitor.domainName} (You)`;
+            }
+          }
           grouped[month][brand] = (grouped[month][brand] || 0) + (Number(r.mention_count || 0));
         });
         const months = Object.keys(grouped).sort();
@@ -238,7 +273,16 @@ const Competitors = () => {
         const platMap: Record<string, Record<string, number>> = {};
         latestRows.forEach((r: any) => {
           const plat = r.platform || 'Overall';
-          const brand = r.competitor?.name || 'Your Brand';
+          // Format brand name: "Brand Name (You)" for your brand
+          let brand = r.brand_name || r.competitor?.name || (r.is_you ? 'You' : 'Your Brand');
+          if (r.is_you && r.domain_name) {
+            brand = `${r.domain_name} (You)`;
+          } else if (r.is_you && !r.competitor) {
+            const youCompetitor = mapped.find(c => c.isYou);
+            if (youCompetitor?.domainName) {
+              brand = `${youCompetitor.domainName} (You)`;
+            }
+          }
           if (!platMap[plat]) platMap[plat] = {};
           platMap[plat][brand] = (platMap[plat][brand] || 0) + (Number(r.mention_count || 0));
         });
@@ -264,51 +308,229 @@ const Competitors = () => {
             acc[p] = item ? Number(((item.mentions / total) * 100).toFixed(1)) : 0;
             return acc;
           }, {}),
-          isYou: brand.toLowerCase().includes('your')
+          isYou: brand.includes('(You)') || brand.toLowerCase().includes('(you)')
         }));
         setHeatmap(heatArr);
 
-        // Top brands list from latest snapshot
-        const tb = (latest?.players || []).map((p: any) => ({
-          name: p?.competitor?.name || 'Your Brand',
-          url: '',
-          mentions: p?.mention_count || 0,
-          percentage: Number(p?.share_percentage || 0),
-          isYou: !p?.competitor,
-        })).sort((a: any, b: any) => b.mentions - a.mentions).slice(0, 5);
+        // Top brands list - use mapped competitors which already has correct data and formatting
+        // This data comes from the backend API and includes all necessary metrics
+        const tb = mapped
+          .map((c: any) => ({
+            name: c.name,
+            url: c.url || '',
+            mentions: c.mentions || 0,
+            percentage: c.shareOfVoice || 0,
+            isYou: c.isYou || false,
+          }))
+          .sort((a: any, b: any) => {
+            // Sort "You" first, then by mentions (descending)
+            if (a.isYou && !b.isYou) return -1;
+            if (!a.isYou && b.isYou) return 1;
+            return b.mentions - a.mentions;
+          })
+          .slice(0, 5); // Top 5 brands
+        
+        console.log('🏆 Top Brands by Visibility:', {
+          totalBrands: tb.length,
+          brands: tb.map(b => ({ name: b.name, mentions: b.mentions, percentage: b.percentage, isYou: b.isYou })),
+        });
+        
         if (tb.length) setTopBrands(tb);
 
         // Build dynamic prompt performance cards
         const displayBrands = (mapped.length ? mapped : [])
           .sort((a: any, b: any) => (b.isYou ? 1 : 0) - (a.isYou ? 1 : 0))
-          .slice(0, 3)
-          .map((c: any) => c.name);
+          .slice(0, 3);
+        
+        // Create a mapping from original names to display names for prompt analytics
+        const brandNameMap = new Map<string, string>();
+        displayBrands.forEach((c: any) => {
+          brandNameMap.set(c.originalName || c.name, c.name);
+          brandNameMap.set(c.domainName || c.name, c.name);
+        });
 
-        const compPromptRows = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
-        const pmap: Record<string, { counts: Record<string, number>; total: number }> = {};
+        // Handle different API response formats
+        let compPromptRows: any[] = [];
+        if (Array.isArray(compPromptAnalytics)) {
+          compPromptRows = compPromptAnalytics;
+        } else if (compPromptAnalytics?.results && Array.isArray(compPromptAnalytics.results)) {
+          compPromptRows = compPromptAnalytics.results;
+        } else if (compPromptAnalytics?.data && Array.isArray(compPromptAnalytics.data)) {
+          compPromptRows = compPromptAnalytics.data;
+        }
+        
+        // First, collect ALL unique prompts from the data (before any filtering)
+        // This ensures we show all prompts, not just those with data for top 3 brands
+        const allUniquePrompts = new Set<string>();
         compPromptRows.forEach((row: any) => {
           const promptText = row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`;
-          const brand = row?.competitor?.name || 'Your Brand';
-          const count = Number(row?.mention_count || (row?.is_mentioned ? 1 : 0));
-          if (!pmap[promptText]) pmap[promptText] = { counts: {}, total: 0 };
+          if (promptText && promptText !== 'Prompt #') {
+            allUniquePrompts.add(promptText);
+          }
+        });
+        
+        // Filter by platform if selected (before processing)
+        let filteredRows = compPromptRows;
+        if (promptPlatformFilter && promptPlatformFilter !== "all") {
+          filteredRows = compPromptRows.filter((row: any) => {
+            const rowPlatform = (row?.platform || '').toLowerCase();
+            const filterPlatform = promptPlatformFilter.toLowerCase();
+            return rowPlatform === filterPlatform;
+          });
+          
+          // Also collect prompts from filtered rows to ensure we have all prompts for the selected platform
+          filteredRows.forEach((row: any) => {
+            const promptText = row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`;
+            if (promptText && promptText !== 'Prompt #') {
+              allUniquePrompts.add(promptText);
+            }
+          });
+        }
+        
+        console.log('📊 Prompt Analytics Data:', {
+          totalRows: compPromptRows.length,
+          filteredRows: filteredRows.length,
+          platformFilter: promptPlatformFilter,
+          totalUniquePrompts: allUniquePrompts.size,
+          displayBrands: displayBrands.map((b: any) => ({ name: b.name, originalName: b.originalName, id: b.id })),
+          sampleRow: filteredRows[0],
+        });
+        
+        // Initialize pmap with ALL unique prompts and all display brands set to 0
+        const pmap: Record<string, { counts: Record<string, number>; total: number; brandColors: Record<string, string> }> = {};
+        allUniquePrompts.forEach((promptText) => {
+          pmap[promptText] = { counts: {}, total: 0, brandColors: {} };
+          displayBrands.forEach((b: any) => {
+            pmap[promptText].counts[b.name] = 0;
+            pmap[promptText].brandColors[b.name] = b.color;
+          });
+        });
+        
+        // Now process the actual data (only for top 3 brands, but all prompts are already initialized)
+        filteredRows.forEach((row: any) => {
+          const promptText = row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`;
+          if (!promptText) return;
+          
+          // Get the brand name - try multiple ways to match
+          let brand = '';
+          // Try different ways to get competitor info from API response
+          const competitorName = row?.competitor?.name || row?.competitor_name || '';
+          const competitorId = row?.competitor?.id || row?.competitor || row?.competitor_id;
+          
+          // Try to find matching brand in displayBrands
+          let matchingBrand = null;
+          
+          // Match by ID first (most reliable)
+          if (competitorId) {
+            matchingBrand = displayBrands.find((b: any) => b.id === competitorId || b.id === String(competitorId));
+          }
+          
+          // If no ID match, try name matching
+          if (!matchingBrand && competitorName) {
+            // Match by original name, display name, or domain name (case-insensitive)
+            const normalizedCompetitorName = competitorName.toLowerCase().trim();
+            matchingBrand = displayBrands.find((b: any) => {
+              const normalizedOriginal = (b.originalName || '').toLowerCase().trim();
+              const normalizedDisplay = (b.name || '').toLowerCase().trim();
+              const normalizedDomain = (b.domainName || '').toLowerCase().trim();
+              
+              return normalizedOriginal === normalizedCompetitorName ||
+                     normalizedDisplay === normalizedCompetitorName ||
+                     normalizedDomain === normalizedCompetitorName ||
+                     normalizedDisplay.includes(normalizedCompetitorName) ||
+                     normalizedCompetitorName.includes(normalizedDisplay);
+            });
+          }
+          
+          if (matchingBrand) {
+            brand = matchingBrand.name;
+          } else {
+            // If no match found, skip this row (not in top 3)
+            console.log('⚠️ Skipping row - no matching brand:', {
+              competitorName,
+              competitorId,
+              availableBrands: displayBrands.map((b: any) => ({ id: b.id, name: b.name, originalName: b.originalName })),
+            });
+            return;
+          }
+          
+          // Only process if brand is in displayBrands
+          if (!displayBrands.some((b: any) => b.name === brand)) {
+            return;
+          }
+          
+          const count = Number(row?.mention_count || row?.total_mentions || (row?.is_mentioned ? 1 : 0));
+          if (!pmap[promptText]) {
+            pmap[promptText] = { counts: {}, total: 0, brandColors: {} };
+            displayBrands.forEach((b: any) => {
+              pmap[promptText].counts[b.name] = 0;
+              pmap[promptText].brandColors[b.name] = b.color;
+            });
+          }
+          
           pmap[promptText].counts[brand] = (pmap[promptText].counts[brand] || 0) + count;
           pmap[promptText].total += count;
         });
+        
+        // Create cards - show ALL prompts (even if some brands have 0 mentions)
         const cards = Object.entries(pmap)
           .sort((a, b) => b[1].total - a[1].total)
           .map(([promptText, v], idx) => {
-          const countsForDisplay = displayBrands.map((b) => v.counts[b] || 0);
-          const winnerIdx = countsForDisplay.reduce((mi, val, i, arr) => (val > arr[mi] ? i : mi), 0);
+          const countsForDisplay = displayBrands.map((b: any) => v.counts[b.name] || 0);
+          
+          // Find winner - brand with highest mentions (only if there are mentions)
+          let winnerIdx = -1;
+          if (v.total > 0) {
+            winnerIdx = countsForDisplay.reduce((mi, val, i, arr) => {
+              // Only consider brands with actual mentions
+              if (val > 0 && (arr[mi] === 0 || val > arr[mi])) {
+                return i;
+              }
+              return mi;
+            }, 0);
+            // Verify the winner actually has mentions
+            if (countsForDisplay[winnerIdx] === 0) {
+              winnerIdx = -1;
+            }
+          }
+          
           return {
             id: idx + 1,
             prompt: promptText,
-            brands: displayBrands,
+            brands: displayBrands.map((b: any) => b.name),
             counts: countsForDisplay,
+            colors: displayBrands.map((b: any) => b.color),
             total: v.total,
-            winner: displayBrands[winnerIdx],
+            winner: winnerIdx >= 0 ? displayBrands[winnerIdx]?.name : null,
           };
         });
+        
+        // Get available platforms for the filter dropdown
+        const platformsSet = new Set<string>();
+        compPromptRows.forEach((row: any) => {
+          if (row?.platform) {
+            platformsSet.add(row.platform);
+          }
+        });
+        const availablePlatforms = Array.from(platformsSet).sort();
+        
+        console.log('📊 Processed Prompt Cards:', {
+          totalCards: cards.length,
+          availablePlatforms: availablePlatforms,
+          platformFilter: promptPlatformFilter,
+          sampleCard: cards[0] ? {
+            prompt: cards[0].prompt,
+            brands: cards[0].brands,
+            counts: cards[0].counts,
+            total: cards[0].total,
+            winner: cards[0].winner,
+          } : null,
+        });
+        
         if (cards.length) setPromptCards(cards);
+        
+        // Store available platforms in state for the filter dropdown
+        setAvailablePromptPlatforms(availablePlatforms);
 
         // Set competitive strength analysis data - ALWAYS use API response (even if empty)
         if (strengthAnalysis !== undefined && strengthAnalysis !== null) {
@@ -359,7 +581,7 @@ const Competitors = () => {
       }
     };
     void load();
-  }, [domainId, timePeriod]);
+  }, [domainId, timePeriod, promptPlatformFilter]);
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
@@ -397,18 +619,37 @@ const Competitors = () => {
 
       // Refresh the competitor list by reloading the main data
       // The useEffect will automatically reload all data when domainId changes
-      // For immediate refresh, we'll reload just the competitor list
+      // For immediate refresh, we'll reload just the competitor list - use backend API which includes "You"
       try {
-        const list = await apiClient.getEngineCompetitors({ domain_id: domainId });
+        const list = await apiClient.get(`/competitors/competitors/by_domain/?domain_id=${domainId}`);
         if (list && Array.isArray(list)) {
-          const mapped = list.map((c: any) => {
+          const competitorColors = [
+            'hsl(var(--primary))',
+            'hsl(var(--chart-2))',
+            'hsl(var(--chart-3))',
+            'hsl(var(--chart-4))',
+            'hsl(var(--chart-5))',
+            'hsl(var(--success))',
+            'hsl(var(--warning))',
+            'hsl(var(--destructive))',
+          ];
+          
+          const mapped = list.map((c: any, idx: number) => {
             // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
             const rawSentiment = Number(c.sentiment_score || 0);
             const sentimentPercent = Math.round((rawSentiment + 1) * 50);
+            const isYou = c.is_you === true || c.name === 'You';
+            
+            // Format name: "Brand Name (You)" for your brand
+            const displayName = isYou && c.domain_name 
+              ? `${c.domain_name} (You)`
+              : (c.name || 'Unknown');
             
             return {
               id: c.id,
-              name: c.name || 'Unknown',
+              name: displayName,
+              originalName: c.name || 'Unknown',
+              domainName: c.domain_name || c.name || 'Unknown',
               url: c.url || '',
               mentions: c.total_mentions || 0,
               visibility: Number(c.visibility_score || 0),
@@ -416,7 +657,8 @@ const Competitors = () => {
               avgPosition: Number(c.average_position || 0),
               shareOfVoice: Number(c.share_of_voice_percentage || 0),
               trend: Number(c.trend_percentage || 0),
-              isYou: false,
+              isYou: isYou,
+              color: competitorColors[idx % competitorColors.length],
             };
           });
           setCompetitors(mapped);
@@ -484,25 +726,12 @@ const Competitors = () => {
           <TabsContent value="overview" className="space-y-6 mt-6">
             <div className="flex items-center justify-between">
               <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
-              <Select defaultValue="all">
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue placeholder="All Competitors" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Competitors</SelectItem>
-                  {competitors.length > 0 && competitors.map((comp) => (
-                    <SelectItem key={comp.id} value={String(comp.id)}>
-                      {comp.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
 
-            {/* Competitor Cards */}
+            {/* Competitor Cards - Limited to 3 in overview */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {competitors.length > 0 ? (
-                competitors.map((competitor, idx) => (
+                competitors.slice(0, 3).map((competitor, idx) => (
                 <Card
                   key={competitor.id}
                   className={`p-6 transition-all duration-300 backdrop-blur-sm bg-card/80 ${
@@ -510,21 +739,29 @@ const Competitors = () => {
                       ? 'border-2 border-primary cursor-default'
                       : 'cursor-pointer border border-border hover:border-primary'
                   }`}
-                  onClick={() => !competitor.isYou && navigate(`/competitors/${competitor.url.replace('.com', '')}`)}
+                  onClick={() => {
+                    if (!competitor.isYou) {
+                      // Create URL slug from competitor URL or name
+                      const urlSlug = competitor.url 
+                        ? competitor.url.replace(/^https?:\/\//, '').replace(/\.com$/, '').replace(/\./g, '').toLowerCase()
+                        : competitor.name.toLowerCase().replace(/\s+/g, '');
+                      navigate(`/competitors/${urlSlug}`);
+                    }
+                  }}
                 >
                   <div className="space-y-4">
                     <div className="flex items-start justify-between">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="text-xl font-semibold font-inter">{competitor.name}</h3>
-                          {competitor.isYou && (
-                            <Badge variant="default" className="gradient-primary border-0">You</Badge>
-                          )}
                         </div>
                         <p className="text-sm text-muted-foreground">{competitor.url}</p>
                       </div>
-                      <div className="w-12 h-12 rounded-xl gradient-primary shadow-glow flex items-center justify-center font-bold text-white text-lg font-inter">
-                        #{idx + 1}
+                      <div 
+                        className="w-12 h-12 rounded-xl shadow-glow flex items-center justify-center font-bold text-white text-lg font-inter"
+                        style={{ backgroundColor: competitor.color }}
+                      >
+                        #{competitor.isYou ? 1 : idx + 1}
                       </div>
                     </div>
 
@@ -539,7 +776,7 @@ const Competitors = () => {
                       </div>
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Visibility</p>
-                        <p className="text-lg font-bold font-inter">{competitor.visibility}%</p>
+                        <p className="text-lg font-bold font-inter">{competitor.visibility}</p>
                         <Progress value={competitor.visibility} className="h-1.5 mt-2" />
                       </div>
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
@@ -682,8 +919,8 @@ const Competitors = () => {
                           { stroke: "hsl(var(--chart-3))", fill: "hsl(var(--chart-3))", opacity: 0.2 },
                         ];
                         const color = colors[idx] || colors[0];
-                        // Format brand name for display
-                        const displayName = brandKey.charAt(0).toUpperCase() + brandKey.slice(1).replace(/([A-Z])/g, ' $1');
+                        // Format brand name for display - "you" becomes "You", others get formatted
+                        const displayName = brandKey === 'you' ? 'You' : brandKey.charAt(0).toUpperCase() + brandKey.slice(1).replace(/([A-Z])/g, ' $1');
                         return (
                           <Radar 
                             key={brandKey}
@@ -692,7 +929,7 @@ const Competitors = () => {
                             stroke={color.stroke}
                             fill={color.fill}
                             fillOpacity={color.opacity}
-                            strokeWidth={idx === 0 ? 2 : 1.5}
+                            strokeWidth={brandKey === 'you' ? 2 : 1.5}  // Make "You" thicker
                           />
                         );
                       })}
@@ -795,15 +1032,31 @@ const Competitors = () => {
                     <h3 className="text-lg font-semibold font-inter">Prompt Performance Analysis</h3>
                     <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
                   </div>
-                  <Badge variant="secondary">
-                    <MessageSquare className="h-3 w-3 mr-1" />
-                    {promptCards.length} Prompts Tracked
-                  </Badge>
+                  <div className="flex items-center gap-3">
+                    <Select value={promptPlatformFilter} onValueChange={setPromptPlatformFilter}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="All Platforms" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Platforms</SelectItem>
+                        {availablePromptPlatforms.map((platform) => (
+                          <SelectItem key={platform} value={platform}>
+                            {platform}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Badge variant="secondary">
+                      <MessageSquare className="h-3 w-3 mr-1" />
+                      {promptCards.length} Prompts Tracked
+                    </Badge>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
                   {promptCards.length > 0 ? (
-                    promptCards.map((prompt: any) => (
+                    <>
+                      {promptCards.slice(0, promptsDisplayLimit).map((prompt: any) => (
                     <Card key={prompt.id} className="p-5 transition-all duration-300 border border-border hover:border-primary">
                       <div className="space-y-4">
                         <div className="flex items-start justify-between">
@@ -811,35 +1064,59 @@ const Competitors = () => {
                             <h4 className="font-medium mb-2">{prompt.prompt}</h4>
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
                               <Eye className="h-4 w-4" />
-                              <span>{(prompt.total || (Array.isArray(prompt.counts) ? prompt.counts.reduce((s:number,v:number)=>s+v,0) : 0))} total mentions</span>
-                              <span className="text-xs">•</span>
+                              <span>{prompt.total || 0} total mentions</span>
                               {prompt.winner && (
-                                <Badge variant="outline" className="text-xs">
-                                  Winner: {prompt.winner}
-                                </Badge>
+                                <>
+                                  <span className="text-xs">•</span>
+                                  <Badge variant="outline" className="text-xs">
+                                    Winner: {prompt.winner}
+                                  </Badge>
+                                </>
                               )}
                             </div>
                           </div>
                         </div>
 
                         <div className="space-y-3">
-                          {(prompt.brands || []).map((brand: string, idx: number) => (
-                            <div key={brand} className="space-y-2">
-                              <div className="flex items-center justify-between text-sm">
-                                <span className="font-medium">{brand}</span>
-                                <span className="text-muted-foreground">{(prompt.counts && prompt.counts[idx]) || 0} mentions</span>
+                          {(prompt.brands || []).map((brand: string, idx: number) => {
+                            const mentionCount = (prompt.counts && prompt.counts[idx]) || 0;
+                            const brandColor = (prompt.colors && prompt.colors[idx]) || 'hsl(var(--muted))';
+                            const percentage = prompt.total > 0 ? (mentionCount / prompt.total) * 100 : 0;
+                            
+                            return (
+                              <div key={brand} className="space-y-2">
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="font-medium">{brand}</span>
+                                  <span className="text-muted-foreground">{mentionCount} mentions</span>
+                                </div>
+                                <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
+                                  <div
+                                    className="h-full transition-all"
+                                    style={{
+                                      width: `${percentage}%`,
+                                      backgroundColor: brandColor,
+                                    }}
+                                  />
+                                </div>
                               </div>
-                              <Progress value={(() => {
-                                const val = (prompt.counts && prompt.counts[idx]) || 0;
-                                const denom = prompt.total || (Array.isArray(prompt.counts) ? prompt.counts.reduce((s:number,v:number)=>s+v,0) : 0);
-                                return denom > 0 ? (val / denom) * 100 : 0;
-                              })()} className="h-2" />
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     </Card>
-                    ))
+                      ))}
+                      {promptCards.length > promptsDisplayLimit && (
+                        <div className="flex justify-center pt-4">
+                          <Button 
+                            variant="outline" 
+                            onClick={() => setPromptsDisplayLimit(prev => prev + 10)}
+                            className="w-full max-w-md"
+                          >
+                            Load More ({promptCards.length - promptsDisplayLimit} remaining)
+                          </Button>
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-8 space-y-2">
                       <p className="text-sm text-muted-foreground">No prompt performance data available yet.</p>
@@ -866,20 +1143,21 @@ const Competitors = () => {
                           </span>
                         </div>
                         <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-2xl font-bold font-inter">{competitor.name}</h3>
-                            {competitor.isYou && (
-                              <Badge className="gradient-primary border-0">You</Badge>
-                            )}
-                          </div>
+                          <h3 className="text-2xl font-bold font-inter">{competitor.name}</h3>
                           <p className="text-muted-foreground">{competitor.url}</p>
                         </div>
                       </div>
-                      {!competitor.isYou && (
-                        <Button onClick={() => navigate(`/competitors/${competitor.url.replace('.com', '')}`)}>
+                      {/* {!competitor.isYou && (
+                        <Button onClick={() => {
+                          // Create URL slug from competitor URL or name
+                          const urlSlug = competitor.url 
+                            ? competitor.url.replace(/^https?:\/\//, '').replace(/\.com$/, '').replace(/\./g, '').toLowerCase()
+                            : competitor.name.toLowerCase().replace(/\s+/g, '');
+                          navigate(`/competitors/${urlSlug}`);
+                        }}>
                           View Full Analysis
                         </Button>
-                      )}
+                      )} */}
                     </div>
 
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -889,7 +1167,7 @@ const Competitors = () => {
                       </div>
                       <div className="p-4 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Visibility</p>
-                        <p className="text-3xl font-bold font-inter">{competitor.visibility}%</p>
+                        <p className="text-3xl font-bold font-inter">{competitor.visibility}</p>
                       </div>
                       <div className="p-4 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Sentiment</p>

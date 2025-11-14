@@ -37,7 +37,6 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewA
   const [description, setDescription] = useState("");
   const [triggerType, setTriggerType] = useState("");
   const [threshold, setThreshold] = useState("");
-  const [timeWindow, setTimeWindow] = useState("24");
   const [channels, setChannels] = useState<string[]>([]);
 
   const handleChannelToggle = (channel: string) => {
@@ -73,7 +72,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewA
       conditions: {
         trigger_type: triggerType,
         threshold_percent: Number(threshold),
-        time_window_hours: Number(timeWindow),
+        time_window_hours: 168, // Weekly default (7 days = 168 hours)
       },
       notification_channel_list: channels,
       enabled: true,
@@ -89,7 +88,6 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewA
       setDescription("");
       setTriggerType("");
       setThreshold("");
-      setTimeWindow("24");
       setChannels([]);
       onOpenChange(false);
     } catch (e:any) {
@@ -153,37 +151,18 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewA
           </div>
 
           {/* Threshold */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="threshold">Threshold Value*</Label>
-              <div className="flex gap-2 items-center">
-                <Input
-                  id="threshold"
-                  type="number"
-                  placeholder="e.g., 10"
-                  value={threshold}
-                  onChange={(e) => setThreshold(e.target.value)}
-                  className="border border-border"
-                />
-                <span className="text-muted-foreground">%</span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="timeWindow">Time Window</Label>
-              <Select value={timeWindow} onValueChange={setTimeWindow}>
-                <SelectTrigger className="border border-border">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">1 hour</SelectItem>
-                  <SelectItem value="6">6 hours</SelectItem>
-                  <SelectItem value="12">12 hours</SelectItem>
-                  <SelectItem value="24">24 hours</SelectItem>
-                  <SelectItem value="48">48 hours</SelectItem>
-                  <SelectItem value="168">7 days</SelectItem>
-                </SelectContent>
-              </Select>
+          <div className="space-y-2">
+            <Label htmlFor="threshold">Threshold Value*</Label>
+            <div className="flex gap-2 items-center">
+              <Input
+                id="threshold"
+                type="number"
+                placeholder="e.g., 10"
+                value={threshold}
+                onChange={(e) => setThreshold(e.target.value)}
+                className="border border-border"
+              />
+              <span className="text-muted-foreground">%</span>
             </div>
           </div>
 

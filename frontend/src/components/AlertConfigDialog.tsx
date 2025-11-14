@@ -39,7 +39,6 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(false);
   const [quietHoursStart, setQuietHoursStart] = useState("22:00");
   const [quietHoursEnd, setQuietHoursEnd] = useState("08:00");
-  const [digestFrequency, setDigestFrequency] = useState("daily");
 
   // Email Settings
   const [emailEnabled, setEmailEnabled] = useState(true);
@@ -72,7 +71,6 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
         setQuietHoursEnabled(config.quiet_hours_enabled ?? false);
         setQuietHoursStart(config.quiet_hours_start || "22:00");
         setQuietHoursEnd(config.quiet_hours_end || "08:00");
-        setDigestFrequency(config.digest_frequency || "daily");
         setEmailEnabled(config.email_enabled ?? true);
         setEmailAddress(config.email_address || "");
         setSlackEnabled(config.slack_enabled ?? false);
@@ -114,7 +112,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
         quiet_hours_enabled: quietHoursEnabled,
         quiet_hours_start: quietStart,
         quiet_hours_end: quietEnd,
-        digest_frequency: digestFrequency,
+        digest_frequency: "weekly", // Default to weekly
         email_enabled: emailEnabled,
         email_address: emailAddress || null,
         slack_enabled: slackEnabled,
@@ -151,11 +149,11 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
         </DialogHeader>
 
         <Tabs defaultValue="general" className="py-4">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="email">Email</TabsTrigger>
-            <TabsTrigger value="slack">Slack</TabsTrigger>
-            <TabsTrigger value="sms">SMS</TabsTrigger>
+            {/* <TabsTrigger value="slack" disabled>Slack</TabsTrigger> */}
+            {/* <TabsTrigger value="sms" disabled>SMS</TabsTrigger> */}
           </TabsList>
 
           {/* General Settings */}
@@ -218,24 +216,6 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
                 </div>
               )}
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="digest">Alert Digest Frequency</Label>
-              <Select value={digestFrequency} onValueChange={setDigestFrequency}>
-                <SelectTrigger className="border border-border">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="realtime">Real-time (No digest)</SelectItem>
-                  <SelectItem value="hourly">Hourly Summary</SelectItem>
-                  <SelectItem value="daily">Daily Summary</SelectItem>
-                  <SelectItem value="weekly">Weekly Summary</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Combine multiple alerts into a single notification
-              </p>
-            </div>
           </TabsContent>
 
           {/* Email Settings */}
@@ -283,8 +263,8 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
             )}
           </TabsContent>
 
-          {/* Slack Settings */}
-          <TabsContent value="slack" className="space-y-6 mt-6">
+          {/* Slack Settings - Commented out for now */}
+          {/* <TabsContent value="slack" className="space-y-6 mt-6">
             <div className="flex items-center justify-between p-4 rounded-lg border border-border">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
@@ -337,10 +317,10 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
                 </Button>
               </div>
             )}
-          </TabsContent>
+          </TabsContent> */}
 
-          {/* SMS Settings */}
-          <TabsContent value="sms" className="space-y-6 mt-6">
+          {/* SMS Settings - Commented out for now */}
+          {/* <TabsContent value="sms" className="space-y-6 mt-6">
             <div className="flex items-center justify-between p-4 rounded-lg border border-border">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
@@ -386,7 +366,7 @@ export const AlertConfigDialog = ({ open, onOpenChange }: AlertConfigDialogProps
                 </Button>
               </div>
             )}
-          </TabsContent>
+          </TabsContent> */}
         </Tabs>
 
         <DialogFooter>

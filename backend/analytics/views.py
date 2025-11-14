@@ -148,7 +148,7 @@ class ShareOfVoiceAnalyticsViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'])
     def by_domain(self, request):
-        """Get share of voice for a specific domain."""
+        """Get share of voice for a specific domain, including 'You' (your domain) as first item."""
         domain_id = request.query_params.get('domain_id')
         days = int(request.query_params.get('days', 30))
         platform = request.query_params.get('platform')
@@ -168,12 +168,37 @@ class ShareOfVoiceAnalyticsViewSet(viewsets.ModelViewSet):
         if platform:
             queryset = queryset.filter(platform=platform)
         
+        # Get latest data point for "You" and competitors
+        latest_date = queryset.values_list('timestamp', flat=True).order_by('-timestamp').first()
+        if latest_date:
+            latest_queryset = queryset.filter(timestamp=latest_date)
+            your_data = latest_queryset.filter(competitor__isnull=True).first()
+            competitors_data = latest_queryset.filter(competitor__isnull=False).order_by('market_position')
+            
+            # Build unified list with "You" first
+            result = []
+            if your_data:
+                you_dict = ShareOfVoiceAnalyticsSerializer(your_data).data
+                # Format as "Domain Name (You)" - get domain name from the data
+                domain_name = your_data.domain.name if hasattr(your_data, 'domain') and your_data.domain else 'You'
+                you_dict['brand_name'] = f'{domain_name} (You)'  # Format as "Brand Name (You)"
+                you_dict['domain_name'] = domain_name  # Include domain_name for reference
+                you_dict['is_you'] = True
+                result.append(you_dict)
+            
+            for comp_data in competitors_data:
+                comp_dict = ShareOfVoiceAnalyticsSerializer(comp_data).data
+                comp_dict['is_you'] = False
+                result.append(comp_dict)
+            
+            return Response(result)
+        
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
     
     @action(detail=False, methods=['get'])
     def comparison(self, request):
-        """Get market share comparison for a domain."""
+        """Get market share comparison for a domain, including 'You' (your domain) as first item."""
         domain_id = request.query_params.get('domain_id')
         date = request.query_params.get('date', timezone.now().date())
         platform = request.query_params.get('platform')
@@ -194,13 +219,28 @@ class ShareOfVoiceAnalyticsViewSet(viewsets.ModelViewSet):
         else:
             queryset = queryset.filter(platform__isnull=True)  # Overall data
         
-        # Separate your brand vs competitors
+        # Get your brand and competitors
         your_data = queryset.filter(competitor__isnull=True).first()
         competitors_data = queryset.filter(competitor__isnull=False).order_by('market_position')
         
+        # Build unified list with "You" first
+        all_brands = []
+        if your_data:
+            you_dict = ShareOfVoiceAnalyticsSerializer(your_data).data
+            # Format as "Domain Name (You)" - get domain name from the data
+            domain_name = your_data.domain.name if hasattr(your_data, 'domain') and your_data.domain else 'You'
+            you_dict['brand_name'] = f'{domain_name} (You)'  # Format as "Brand Name (You)"
+            you_dict['domain_name'] = domain_name  # Include domain_name for reference
+            you_dict['is_you'] = True
+            all_brands.append(you_dict)
+        
+        for comp_data in competitors_data:
+            comp_dict = ShareOfVoiceAnalyticsSerializer(comp_data).data
+            comp_dict['is_you'] = False
+            all_brands.append(comp_dict)
+        
         return Response({
-            'your_brand': ShareOfVoiceAnalyticsSerializer(your_data).data if your_data else None,
-            'competitors': ShareOfVoiceAnalyticsSerializer(competitors_data, many=True).data,
+            'brands': all_brands,  # Unified list with "You" first
             'total_market_mentions': queryset.aggregate(Sum('mention_count'))['mention_count__sum'] or 0
         })
 

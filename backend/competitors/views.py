@@ -30,7 +30,7 @@ class CompetitorViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'])
     def by_domain(self, request):
-        """Get competitors for a specific domain."""
+        """Get competitors for a specific domain, including 'You' (your domain) as first item."""
         domain_id = request.query_params.get('domain_id')
         if not domain_id:
             return Response(
@@ -38,13 +38,58 @@ class CompetitorViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Get domain to include as "You"
+        from domains.models import Domain
+        from analytics.models import ShareOfVoiceAnalytics
+        try:
+            domain = Domain.objects.get(id=domain_id)
+        except Domain.DoesNotExist:
+            return Response(
+                {'error': 'Domain not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get latest share of voice for "You"
+        your_sov = ShareOfVoiceAnalytics.objects.filter(
+            domain_id=domain_id,
+            competitor__isnull=True
+        ).order_by('-timestamp').first()
+        
+        # Build "You" entry
+        you_entry = {
+            'id': None,  # No competitor ID for "You"
+            'domain': domain.id,
+            'domain_name': domain.name,
+            'name': 'You',  # Label as "You"
+            'url': domain.url,
+            'track_status': domain.processing_status,
+            'track_message': domain.track_message,
+            'tracked_at': domain.tracked_at.isoformat() if domain.tracked_at else None,
+            'total_mentions': domain.total_mentions,
+            'visibility_score': float(domain.visibility_score),
+            'sentiment_score': float(domain.sentiment_score),
+            'average_position': float(domain.average_position),
+            'share_of_voice_percentage': float(your_sov.share_percentage) if your_sov else 0.0,
+            'trend_percentage': 0.0,  # Can be calculated if needed
+            'created_by': None,
+            'created_by_email': None,
+            'created_at': domain.created_at.isoformat(),
+            'modified_at': domain.modified_at.isoformat(),
+            'is_you': True  # Flag to identify "You" in frontend
+        }
+        
+        # Get competitors
         queryset = self.get_queryset().filter(domain_id=domain_id)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+        competitors_data = CompetitorSerializer(queryset, many=True).data
+        for comp in competitors_data:
+            comp['is_you'] = False  # Flag competitors
+        
+        # Return "You" first, then competitors
+        return Response([you_entry] + competitors_data)
     
     @action(detail=False, methods=['get'])
     def comparison(self, request):
-        """Get competitive comparison data."""
+        """Get competitive comparison data, including 'You' (your domain) as first item."""
         domain_id = request.query_params.get('domain_id')
         if not domain_id:
             return Response(
@@ -52,14 +97,63 @@ class CompetitorViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Get domain to include as "You"
+        from domains.models import Domain
+        from analytics.models import ShareOfVoiceAnalytics
+        try:
+            domain = Domain.objects.get(id=domain_id)
+        except Domain.DoesNotExist:
+            return Response(
+                {'error': 'Domain not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get latest share of voice for "You"
+        your_sov = ShareOfVoiceAnalytics.objects.filter(
+            domain_id=domain_id,
+            competitor__isnull=True
+        ).order_by('-timestamp').first()
+        
+        # Build "You" entry
+        you_entry = {
+            'id': None,
+            'domain': domain.id,
+            'domain_name': domain.name,
+            'name': 'You',
+            'url': domain.url,
+            'track_status': domain.processing_status,
+            'track_message': domain.track_message,
+            'tracked_at': domain.tracked_at.isoformat() if domain.tracked_at else None,
+            'total_mentions': domain.total_mentions,
+            'visibility_score': float(domain.visibility_score),
+            'sentiment_score': float(domain.sentiment_score),
+            'average_position': float(domain.average_position),
+            'share_of_voice_percentage': float(your_sov.share_percentage) if your_sov else 0.0,
+            'trend_percentage': 0.0,
+            'created_by': None,
+            'created_by_email': None,
+            'created_at': domain.created_at.isoformat(),
+            'modified_at': domain.modified_at.isoformat(),
+            'is_you': True
+        }
+        
+        # Get competitors
         competitors = self.get_queryset().filter(domain_id=domain_id)
+        competitors_data = CompetitorSerializer(competitors, many=True).data
+        for comp in competitors_data:
+            comp['is_you'] = False
+        
+        # Calculate summary including "You"
+        all_mentions = [domain.total_mentions] + [c.total_mentions for c in competitors]
+        total_market_mentions = sum(all_mentions)
+        avg_mentions = sum(all_mentions) / len(all_mentions) if all_mentions else 0
         
         data = {
-            'competitors': CompetitorSerializer(competitors, many=True).data,
+            'competitors': [you_entry] + competitors_data,  # "You" first
             'summary': {
-                'total_competitors': competitors.count(),
-                'avg_mentions': competitors.aggregate(Avg('mentions'))['mentions__avg'] or 0,
-                'total_market_mentions': competitors.aggregate(Sum('mentions'))['mentions__sum'] or 0,
+                'total_competitors': competitors.count() + 1,  # Include "You"
+                'avg_mentions': avg_mentions,
+                'total_market_mentions': total_market_mentions,
             }
         }
         return Response(data)
@@ -242,14 +336,14 @@ def competitive_strength_analysis(request):
         # Build metrics array
         metrics = []
         
-        # Normalize brand names for frontend (match the frontend expectations)
-        # Frontend expects: vegfit, myprotein, naked (lowercase, no spaces/hyphens)
+        # Normalize brand names for frontend
+        # Use "You" for your brand, normalize competitor names
         def normalize_brand_name(name):
             return name.lower().replace(' ', '').replace('-', '').replace('_', '')
         
         # Visibility metric
         visibility_data = {'metric': 'Visibility'}
-        visibility_data[normalize_brand_name(domain.name)] = round(your_visibility, 0)
+        visibility_data['you'] = round(your_visibility, 0)  # Use "you" as key for your brand
         for idx, comp in enumerate(competitors):
             comp_name = normalize_brand_name(comp.name)
             visibility_data[comp_name] = round(float(comp.visibility_score or 0), 0)
@@ -257,7 +351,7 @@ def competitive_strength_analysis(request):
         
         # Sentiment metric
         sentiment_data = {'metric': 'Sentiment'}
-        sentiment_data[normalize_brand_name(domain.name)] = round(your_sentiment * 100, 0) if your_sentiment else 0
+        sentiment_data['you'] = round(your_sentiment * 100, 0) if your_sentiment else 0
         for idx, comp in enumerate(competitors):
             comp_name = normalize_brand_name(comp.name)
             sentiment_data[comp_name] = round(float(comp.sentiment_score or 0) * 100, 0)
@@ -267,7 +361,7 @@ def competitive_strength_analysis(request):
         position_data = {'metric': 'Position'}
         position_score = 100.0 - (your_avg_position * 10.0) if your_avg_position > 0 else 0.0
         position_score = max(0.0, min(100.0, position_score))
-        position_data[normalize_brand_name(domain.name)] = round(position_score, 0)
+        position_data['you'] = round(position_score, 0)
         for idx, comp in enumerate(competitors):
             comp_name = normalize_brand_name(comp.name)
             comp_pos_score = 100.0 - (float(comp.average_position or 0) * 10.0)
@@ -277,7 +371,7 @@ def competitive_strength_analysis(request):
         
         # Coverage metric
         coverage_data = {'metric': 'Coverage'}
-        coverage_data[normalize_brand_name(domain.name)] = round(your_coverage, 0)
+        coverage_data['you'] = round(your_coverage, 0)
         # For competitors, calculate coverage from CompetitorPromptAnalytics
         for idx, comp in enumerate(competitors):
             comp_name = normalize_brand_name(comp.name)
@@ -293,7 +387,7 @@ def competitive_strength_analysis(request):
         
         # Growth metric
         growth_data = {'metric': 'Growth'}
-        growth_data[normalize_brand_name(domain.name)] = round(your_growth, 0)
+        growth_data['you'] = round(your_growth, 0)
         # For competitors, calculate growth from CompetitorAnalytics
         for idx, comp in enumerate(competitors):
             comp_name = normalize_brand_name(comp.name)

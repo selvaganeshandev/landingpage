@@ -32,17 +32,17 @@ export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonP
         ) : (
           list.map((competitor, index) => (
           <div key={competitor.name} className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary text-primary-foreground flex items-center justify-center font-bold text-sm">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary text-primary-foreground flex items-center justify-center font-bold text-sm flex-shrink-0">
                   {index + 1}
                 </div>
-                <div>
-                  <p className="font-medium">{competitor.name}</p>
-                  <p className="text-xs text-muted-foreground">{competitor.url}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium truncate">{competitor.name}</p>
+                  <p className="text-xs text-muted-foreground truncate">{competitor.url}</p>
                 </div>
               </div>
-              <div className="text-right">
+              <div className="text-right flex-shrink-0">
                 <p className="text-sm font-medium">{competitor.mentions} mentions</p>
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <TrendingUp className="h-3 w-3" />
