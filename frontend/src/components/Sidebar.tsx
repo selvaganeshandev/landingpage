@@ -319,9 +319,11 @@ export const Sidebar = () => {
           {isOpen ? (
             <>
               <div>
-                <h2 className="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-                  PromptMaxx
-                </h2>
+                <img
+                  src="/logo.png"
+                  alt="PromptMaxx"
+                  className="h-8"
+                />
               </div>
               <Button
                 variant="ghost"

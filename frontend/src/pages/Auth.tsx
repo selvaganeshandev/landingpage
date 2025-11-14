@@ -87,11 +87,12 @@ export default function Auth() {
       <Card className="w-full max-w-md border border-border">
         <CardHeader className="space-y-1">
           <div className="flex items-center justify-center mb-4">
-            <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Building2 className="h-6 w-6 text-primary" />
-            </div>
+            <img
+              src="/logo.png"
+              alt="PromptMaxx"
+              className="h-10"
+            />
           </div>
-          <CardTitle className="text-2xl text-center">PromptMaxx</CardTitle>
           <CardDescription className="text-center">
             Sign in to your account
           </CardDescription>
