@@ -636,6 +636,63 @@ export const apiClient = {
   deleteIntegration: (id: number) => apiRequest(`/integrations/integrations/${id}/`, {
     method: 'DELETE',
   }),
+
+  // ===== Reports =====
+  // Report Templates
+  getReportTemplates: () => apiRequest('/reports/templates/'),
+
+  getReportTemplate: (id: number) => apiRequest(`/reports/templates/${id}/`),
+
+  // Scheduled Reports
+  getScheduledReports: (params?: any) => {
+    const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return apiRequest(`/reports/scheduled/${queryParams}`);
+  },
+
+  createScheduledReport: (data: any) => apiRequest('/reports/scheduled/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  getScheduledReport: (id: number) => apiRequest(`/reports/scheduled/${id}/`),
+
+  updateScheduledReport: (id: number, data: any) => apiRequest(`/reports/scheduled/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  }),
+
+  deleteScheduledReport: (id: number) => apiRequest(`/reports/scheduled/${id}/`, {
+    method: 'DELETE',
+  }),
+
+  pauseScheduledReport: (id: number) => apiRequest(`/reports/scheduled/${id}/pause/`, {
+    method: 'POST',
+  }),
+
+  resumeScheduledReport: (id: number) => apiRequest(`/reports/scheduled/${id}/resume/`, {
+    method: 'POST',
+  }),
+
+  // Generated Reports
+  getGeneratedReports: (params?: any) => {
+    const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return apiRequest(`/reports/generated/${queryParams}`);
+  },
+
+  getGeneratedReport: (id: number) => apiRequest(`/reports/generated/${id}/`),
+
+  downloadReport: (id: number) => apiRequest(`/reports/generated/${id}/download/`),
+
+  // Report Generation
+  generateReport: (data: any) => apiRequest('/reports/generation/generate_now/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  checkGenerationTask: (taskId: string) => {
+    const queryParams = `?task_id=${taskId}`;
+    return apiRequest(`/reports/generation/task_status/${queryParams}`);
+  },
 };
 
 // Also export as 'api' for flexibility

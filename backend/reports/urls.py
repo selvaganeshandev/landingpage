@@ -1,0 +1,18 @@
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import (
+    ReportTemplateViewSet,
+    ScheduledReportViewSet,
+    GeneratedReportViewSet,
+    ReportGenerationViewSet
+)
+
+router = DefaultRouter()
+router.register(r'templates', ReportTemplateViewSet, basename='report-template')
+router.register(r'scheduled', ScheduledReportViewSet, basename='scheduled-report')
+router.register(r'generated', GeneratedReportViewSet, basename='generated-report')
+router.register(r'generation', ReportGenerationViewSet, basename='report-generation')
+
+urlpatterns = [
+    path('', include(router.urls)),
+]
