@@ -256,16 +256,25 @@ class ReportGenerationViewSet(viewsets.ViewSet):
             }
         )
 
-        # TODO: Phase 2 - Trigger async Celery task here
-        # task = generate_report_task.delay(
-        #     report_id=generated_report.id,
-        #     domain_id=domain_id,
-        #     template_id=template_id,
-        #     ...
-        # )
-        # return Response({'task_id': task.id, 'report_id': generated_report.id})
+        # Generate report synchronously for now
+        # TODO: Phase 3 - Move to async Celery task for production
+        from reports.services.main import generate_report
+        try:
+            success = generate_report(generated_report.id)
+            if not success:
+                return Response(
+                    {'error': 'Report generation failed'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        except Exception as e:
+            return Response(
+                {'error': f'Report generation error: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-        # For now, return the report record
+        # Refresh from database to get updated file info
+        generated_report.refresh_from_db()
+
         serializer = GeneratedReportSerializer(
             generated_report,
             context={'request': request}
