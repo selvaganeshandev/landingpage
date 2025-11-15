@@ -538,8 +538,8 @@ const Reports = () => {
         </div>
       </Card>
 
-      {/* API Access */}
-      <Card className="p-6">
+      {/* API Access - Commented out for now */}
+      {/* <Card className="p-6">
         <h3 className="text-lg font-semibold mb-4">API Access</h3>
         <p className="text-sm text-muted-foreground mb-4">
           Integrate visibility data directly into your systems with our REST API
@@ -559,7 +559,7 @@ const Reports = () => {
             <Button variant="outline" onClick={handleGenerateAPIKey}>Generate API Key</Button>
           </div>
         </div>
-      </Card>
+      </Card> */}
 
       {/* Dialogs */}
       <CreateReportDialog
