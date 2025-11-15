@@ -283,18 +283,6 @@ const Reports = () => {
     return `${diffDays} days ago`;
   };
 
-  // Show loading state
-  if (templatesLoading || scheduledLoading || generatedLoading) {
-    return (
-      <div className="p-8 flex items-center justify-center min-h-screen">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-muted-foreground">Loading reports...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
