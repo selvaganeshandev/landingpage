@@ -24,6 +24,7 @@ class ReportTemplateViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ReportTemplate.objects.filter(is_active=True)
     serializer_class = ReportTemplateSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None  # Disable pagination
 
 
 class ScheduledReportViewSet(viewsets.ModelViewSet):
@@ -31,6 +32,7 @@ class ScheduledReportViewSet(viewsets.ModelViewSet):
     CRUD operations for scheduled reports
     """
     permission_classes = [IsAuthenticated]
+    pagination_class = None  # Disable pagination
 
     def get_queryset(self):
         # Filter by user's organisation
@@ -152,6 +154,7 @@ class GeneratedReportViewSet(viewsets.ReadOnlyModelViewSet):
     """
     serializer_class = GeneratedReportSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None  # Disable pagination
 
     def get_queryset(self):
         # Filter by user's organisation
