@@ -25,7 +25,11 @@ import {
   XCircle
 } from "lucide-react";
 
-export const CompetitorFocusTemplate = () => {
+interface CompetitorFocusTemplateProps {
+  data: any;
+}
+
+export const CompetitorFocusTemplate = ({ data }: CompetitorFocusTemplateProps) => {
   return (
     <div className="w-full bg-background space-y-8">
       {/* Header Section */}

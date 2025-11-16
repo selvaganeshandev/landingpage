@@ -2,12 +2,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { FileText, Download, Share2 } from "lucide-react";
+import { FileText, Download, Share2, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ExecutiveDashboardTemplate } from "@/components/report-templates/ExecutiveDashboardTemplate";
 import { DetailedAnalyticsTemplate } from "@/components/report-templates/DetailedAnalyticsTemplate";
 import { CompetitorFocusTemplate } from "@/components/report-templates/CompetitorFocusTemplate";
 import { ContentStrategyTemplate } from "@/components/report-templates/ContentStrategyTemplate";
+import { useEffect, useState } from "react";
 
 interface ReportPreviewDialogProps {
   open: boolean;
@@ -17,11 +18,53 @@ interface ReportPreviewDialogProps {
     name: string;
     description: string;
     format: string[];
+    domain?: number;
+    data_period_start?: string;
+    data_period_end?: string;
   } | null;
 }
 
 export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPreviewDialogProps) => {
   const { toast } = useToast();
+  const [reportData, setReportData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (open && report?.domain) {
+      // Fetch report data from the backend
+      const fetchReportData = async () => {
+        setLoading(true);
+        try {
+          const token = localStorage.getItem('access_token');
+          const response = await fetch(`http://localhost:8000/analytics/dashboard/summary/?domain_id=${report.domain}&days=30`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to fetch report data');
+          }
+
+          const data = await response.json();
+          console.log('[ReportPreviewDialog] Fetched report data:', data);
+          console.log('[ReportPreviewDialog] Metrics:', data?.metrics);
+          setReportData(data);
+        } catch (error) {
+          console.error('Error fetching report data:', error);
+          toast({
+            title: "Error",
+            description: "Failed to load report data",
+            variant: "destructive",
+          });
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      fetchReportData();
+    }
+  }, [open, report]);
 
   if (!report) return null;
 
@@ -41,16 +84,25 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
 
   // Determine which template to render based on report name
   const renderTemplate = () => {
+    if (loading) {
+      return (
+        <div className="flex flex-col items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+          <p className="text-muted-foreground">Loading report data...</p>
+        </div>
+      );
+    }
+
     const reportNameLower = report.name.toLowerCase();
 
     if (reportNameLower.includes('executive')) {
-      return <ExecutiveDashboardTemplate />;
+      return <ExecutiveDashboardTemplate data={reportData} />;
     } else if (reportNameLower.includes('detailed') || reportNameLower.includes('analytics')) {
-      return <DetailedAnalyticsTemplate />;
+      return <DetailedAnalyticsTemplate data={reportData} />;
     } else if (reportNameLower.includes('competitor')) {
-      return <CompetitorFocusTemplate />;
+      return <CompetitorFocusTemplate data={reportData} />;
     } else if (reportNameLower.includes('content') || reportNameLower.includes('strategy')) {
-      return <ContentStrategyTemplate />;
+      return <ContentStrategyTemplate data={reportData} />;
     }
 
     // Default generic template for other reports
@@ -103,12 +155,19 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
               <p className="text-sm text-muted-foreground mt-1">{report.description}</p>
             </div>
             <div className="flex gap-2">
-              {report.format.map((fmt) => (
-                <Button key={fmt} size="sm" variant="outline" onClick={() => handleDownload(fmt)}>
+              {Array.isArray(report.format) ? (
+                report.format.map((fmt) => (
+                  <Button key={fmt} size="sm" variant="outline" onClick={() => handleDownload(fmt)}>
+                    <Download className="h-3 w-3 mr-1" />
+                    {fmt}
+                  </Button>
+                ))
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => handleDownload(report.format)}>
                   <Download className="h-3 w-3 mr-1" />
-                  {fmt}
+                  {report.format}
                 </Button>
-              ))}
+              )}
               <Button size="sm" variant="outline" onClick={handleShare}>
                 <Share2 className="h-3 w-3 mr-1" />
                 Share

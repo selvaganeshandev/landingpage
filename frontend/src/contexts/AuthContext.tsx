@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { AuthState, User, Permission, LoginRequest } from '@/types/auth';
 import { apiClient } from '@/services/api';
-import { 
-  loadActiveDomain, 
-  saveActiveDomain, 
+import { PageLoader } from '@/components/PageLoader';
+import {
+  loadActiveDomain,
+  saveActiveDomain,
   loadActiveDomainFromServer,
   updateActiveDomain,
   clearAllActiveDomainStorage
@@ -379,7 +380,7 @@ export function ProtectedRoute({
   const { isAuthenticated, isLoading, checkPermission } = useAuth();
 
   if (isLoading) {
-    return <div>Loading...</div>;
+    return <PageLoader />;
   }
 
   if (!isAuthenticated) {

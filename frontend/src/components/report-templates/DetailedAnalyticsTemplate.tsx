@@ -24,7 +24,11 @@ import {
   Minus
 } from "lucide-react";
 
-export const DetailedAnalyticsTemplate = () => {
+interface DetailedAnalyticsTemplateProps {
+  data: any;
+}
+
+export const DetailedAnalyticsTemplate = ({ data }: DetailedAnalyticsTemplateProps) => {
   return (
     <div className="w-full bg-background space-y-8">
       {/* Header Section */}

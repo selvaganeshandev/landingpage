@@ -1,12 +1,19 @@
 // utils/activeDomain.ts
 // Active domain management with server sync
 
+// Track the last update timestamp to prevent race conditions
+const lastUpdateTimestamp: { [key: string]: number } = {};
+
 export function getActiveDomainKey(userId: string | number): string {
   return `active_domain_id:${String(userId)}`;
 }
 
 function getLegacyKey(userId: string | number): string {
   return `selected_domain_user_${String(userId)}`;
+}
+
+function getTimestampKey(userId: string | number): string {
+  return `active_domain_timestamp:${String(userId)}`;
 }
 
 /**
@@ -36,13 +43,15 @@ export function loadActiveDomain(userId: string | number): string | null {
  * Use syncActiveDomainToServer() to persist to database
  * NOTE: Only stores in active_domain_id key, legacy key is no longer written
  */
-export function saveActiveDomain(userId: string | number, domainId: string | number | null): void {
+export function saveActiveDomain(userId: string | number, domainId: string | number | null, skipTimestamp = false): void {
   try {
     const userIdStr = String(userId);
     const activeKey = getActiveDomainKey(userIdStr);
-    
+    const timestampKey = getTimestampKey(userIdStr);
+
     if (domainId === null || domainId === undefined) {
       localStorage.removeItem(activeKey);
+      localStorage.removeItem(timestampKey);
       // Also remove legacy key if it exists (cleanup)
       const legacyKey = getLegacyKey(userIdStr);
       localStorage.removeItem(legacyKey);
@@ -50,6 +59,11 @@ export function saveActiveDomain(userId: string | number, domainId: string | num
     } else {
       const idStr = String(domainId);
       localStorage.setItem(activeKey, idStr);
+      if (!skipTimestamp) {
+        const timestamp = Date.now();
+        localStorage.setItem(timestampKey, String(timestamp));
+        lastUpdateTimestamp[userIdStr] = timestamp;
+      }
       console.log(`[activeDomain] Saved active domain ${idStr} for user ${userIdStr} to localStorage`);
     }
   } catch (error) {
@@ -77,24 +91,39 @@ export async function syncActiveDomainToServer(domainId: number | null): Promise
 /**
  * Load active domain from server and cache in localStorage
  * Returns the active domain ID from server, or null if not set
+ * NOTE: This will NOT overwrite a recent local update (within 2 seconds)
  */
 export async function loadActiveDomainFromServer(userId: string | number): Promise<string | null> {
   try {
+    const userIdStr = String(userId);
+    const timestampKey = getTimestampKey(userIdStr);
+
+    // Check if there was a recent update (within 2 seconds)
+    const lastTimestamp = localStorage.getItem(timestampKey);
+    if (lastTimestamp) {
+      const timeSinceUpdate = Date.now() - parseInt(lastTimestamp, 10);
+      if (timeSinceUpdate < 2000) {
+        console.log(`[activeDomain] Skipping server load - recent update ${timeSinceUpdate}ms ago`);
+        return loadActiveDomain(userId);
+      }
+    }
+
     const { apiClient } = await import('@/services/api');
     const profile: any = await apiClient.getProfile();
     console.log(`[activeDomain] Profile response:`, profile);
     const activeDomainId = profile?.user?.active_domain_id;
     console.log(`[activeDomain] Extracted active_domain_id: ${activeDomainId} (type: ${typeof activeDomainId}) from profile for user ${userId}`);
-    
+
     // Explicitly check for null, undefined, or falsy values
     if (activeDomainId !== null && activeDomainId !== undefined && activeDomainId !== '') {
       const idStr = String(activeDomainId);
-      saveActiveDomain(userId, idStr);
+      // Save but skip timestamp update (this is from server, not user action)
+      saveActiveDomain(userId, idStr, true);
       console.log(`[activeDomain] Loaded active domain ${idStr} from server for user ${userId}`);
       return idStr;
     } else {
       // Clear cache if server has no active domain (null or undefined)
-      saveActiveDomain(userId, null);
+      saveActiveDomain(userId, null, true);
       console.log(`[activeDomain] No active domain found on server for user ${userId} (active_domain_id: ${activeDomainId})`);
       return null;
     }

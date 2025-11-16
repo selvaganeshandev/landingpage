@@ -26,14 +26,14 @@ class ReportDataService:
 
         # Get prompt analytics in date range
         analytics = PromptAnalytics.objects.filter(
-            prompt__domain=self.domain,
+            prompt__group__domain=self.domain,
             created_at__gte=self.start_date,
             created_at__lte=self.end_date
         )
 
         # Calculate key metrics
-        total_prompts = Prompt.objects.filter(domain=self.domain).count()
-        total_mentions = analytics.filter(is_mentioned=True).count()
+        total_prompts = Prompt.objects.filter(group__domain=self.domain).count()
+        total_mentions = analytics.filter(is_mention=True).count()
         avg_sentiment = analytics.aggregate(
             avg_sentiment=Avg('sentiment_score')
         )['avg_sentiment'] or 0
@@ -45,15 +45,15 @@ class ReportDataService:
 
         # Get mention rate
         if total_prompts > 0:
-            mention_rate = (total_mentions / (total_prompts * analytics.values('llm_model').distinct().count() or 1)) * 100
+            mention_rate = (total_mentions / (total_prompts * analytics.values('platform').distinct().count() or 1)) * 100
         else:
             mention_rate = 0
 
         # Get top performing prompts
         top_prompts = Prompt.objects.filter(
-            domain=self.domain
+            group__domain=self.domain
         ).annotate(
-            mention_count=Count('promptanalytics', filter=Q(promptanalytics__is_mentioned=True))
+            mention_count=Count('analytics', filter=Q(analytics__is_mention=True))
         ).order_by('-mention_count')[:5]
 
         return {
@@ -70,9 +70,9 @@ class ReportDataService:
             },
             'top_prompts': [
                 {
-                    'text': p.prompt_text[:100],
+                    'text': p.prompt[:100],
                     'mentions': p.mention_count,
-                    'type': p.prompt_type,
+                    'type': p.type,
                 }
                 for p in top_prompts
             ],
@@ -86,7 +86,7 @@ class ReportDataService:
 
         # Get all analytics
         analytics = PromptAnalytics.objects.filter(
-            prompt__domain=self.domain,
+            prompt__group__domain=self.domain,
             created_at__gte=self.start_date,
             created_at__lte=self.end_date
         )
@@ -94,10 +94,10 @@ class ReportDataService:
         # Group by LLM model
         llm_performance = {}
         for llm in ['chatgpt', 'claude', 'gemini', 'perplexity']:
-            llm_analytics = analytics.filter(llm_model=llm)
+            llm_analytics = analytics.filter(platform=llm)
             llm_performance[llm] = {
                 'total': llm_analytics.count(),
-                'mentions': llm_analytics.filter(is_mentioned=True).count(),
+                'mentions': llm_analytics.filter(is_mention=True).count(),
                 'avg_sentiment': llm_analytics.aggregate(
                     avg=Avg('sentiment_score')
                 )['avg'] or 0,
@@ -115,7 +115,7 @@ class ReportDataService:
 
             daily_stats.append({
                 'date': current_date.strftime('%Y-%m-%d'),
-                'mentions': day_analytics.filter(is_mentioned=True).count(),
+                'mentions': day_analytics.filter(is_mention=True).count(),
                 'total': day_analytics.count(),
             })
 
@@ -143,7 +143,7 @@ class ReportDataService:
         for competitor in competitors:
             # Get mention count for competitor
             mentions = PromptAnalytics.objects.filter(
-                prompt__domain=self.domain,
+                prompt__group__domain=self.domain,
                 created_at__gte=self.start_date,
                 created_at__lte=self.end_date,
                 response_text__icontains=competitor.name
@@ -161,10 +161,10 @@ class ReportDataService:
 
         # Get our domain's mention count
         our_mentions = PromptAnalytics.objects.filter(
-            prompt__domain=self.domain,
+            prompt__group__domain=self.domain,
             created_at__gte=self.start_date,
             created_at__lte=self.end_date,
-            is_mentioned=True
+            is_mention=True
         ).count()
 
         return {
@@ -183,22 +183,22 @@ class ReportDataService:
         from topics.models import Topic
 
         # Get all prompts
-        all_prompts = Prompt.objects.filter(domain=self.domain)
+        all_prompts = Prompt.objects.filter(group__domain=self.domain)
 
         # Get prompts with no mentions (content gaps)
         gap_prompts = []
         for prompt in all_prompts:
             mentions = PromptAnalytics.objects.filter(
                 prompt=prompt,
-                is_mentioned=True,
+                is_mention=True,
                 created_at__gte=self.start_date,
                 created_at__lte=self.end_date
             ).count()
 
             if mentions == 0:
                 gap_prompts.append({
-                    'text': prompt.prompt_text[:100],
-                    'type': prompt.prompt_type,
+                    'text': prompt.prompt[:100],
+                    'type': prompt.type,
                 })
 
         # Get topics
@@ -221,10 +221,10 @@ class ReportDataService:
             )
 
             if analytics.exists():
-                mention_rate = analytics.filter(is_mentioned=True).count() / analytics.count()
+                mention_rate = analytics.filter(is_mention=True).count() / analytics.count()
                 if mention_rate < 0.3:  # Less than 30% mention rate
                     low_performers.append({
-                        'text': prompt.prompt_text[:100],
+                        'text': prompt.prompt[:100],
                         'mention_rate': round(mention_rate * 100, 1),
                     })
 

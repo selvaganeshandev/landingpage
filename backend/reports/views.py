@@ -182,12 +182,18 @@ class GeneratedReportViewSet(viewsets.ReadOnlyModelViewSet):
 
         try:
             file_handle = report.file_path.open('rb')
+
+            # Determine content type based on format
+            content_type = 'application/pdf' if report.format.upper() == 'PDF' else 'application/octet-stream'
+
             response = FileResponse(
                 file_handle,
-                content_type='application/octet-stream'
+                content_type=content_type
             )
             filename = f"{report.name}.{report.format.lower()}"
-            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+            # Use 'inline' instead of 'attachment' to display in browser
+            response['Content-Disposition'] = f'inline; filename="{filename}"'
             return response
         except FileNotFoundError:
             return Response(

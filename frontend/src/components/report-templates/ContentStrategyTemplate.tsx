@@ -27,7 +27,11 @@ import {
   Trophy
 } from "lucide-react";
 
-export const ContentStrategyTemplate = () => {
+interface ContentStrategyTemplateProps {
+  data: any;
+}
+
+export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) => {
   return (
     <div className="w-full bg-background space-y-8">
       {/* Header Section */}

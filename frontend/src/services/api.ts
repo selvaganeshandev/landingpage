@@ -70,6 +70,41 @@ async function apiRequest<T>(
   return response.json();
 }
 
+/**
+ * Download file handler (for binary responses like PDFs)
+ */
+async function downloadFile(endpoint: string, filename: string): Promise<void> {
+  const token = getAuthToken();
+  const headers: HeadersInit = {};
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.statusText}`);
+  }
+
+  // Get the blob from response
+  const blob = await response.blob();
+
+  // Create download link
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+
+  // Cleanup
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+}
+
 // ==================== API Client with All Methods ====================
 
 export const apiClient = {
@@ -681,7 +716,12 @@ export const apiClient = {
 
   getGeneratedReport: (id: number) => apiRequest(`/reports/generated/${id}/`),
 
-  downloadReport: (id: number) => apiRequest(`/reports/generated/${id}/download/`),
+  downloadReport: async (id: number, filename?: string) => {
+    // Get report details first to get the correct filename
+    const report: any = await apiRequest(`/reports/generated/${id}/`);
+    const downloadFilename = filename || `${report.name}.${report.format.toLowerCase()}`;
+    return downloadFile(`/reports/generated/${id}/download/`, downloadFilename);
+  },
 
   // Report Generation
   generateReport: (data: any) => apiRequest('/reports/generation/generate_now/', {

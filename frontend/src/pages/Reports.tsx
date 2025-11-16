@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,9 @@ import { ReportPreviewDialog } from "@/components/ReportPreviewDialog";
 import { EditReportDialog } from "@/components/EditReportDialog";
 import { GenerateNowDialog } from "@/components/GenerateNowDialog";
 import { ScheduleReportDialog } from "@/components/ScheduleReportDialog";
+import { PDFViewerDialog } from "@/components/PDFViewerDialog";
 import { apiClient } from "@/services/api";
+import { useDomainStore } from "@/stores/domainStore";
 import {
   FileText,
   Plus,
@@ -26,12 +28,29 @@ import {
 const Reports = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { selectedDomain } = useDomainStore();
   const [createReportDialogOpen, setCreateReportDialogOpen] = useState(false);
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [generateNowDialogOpen, setGenerateNowDialogOpen] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<any>(null);
+  const [viewingReportId, setViewingReportId] = useState<number | null>(null);
+
+  // Get domain ID for filtering
+  const domainId = selectedDomain?.id;
+
+  console.log('[Reports] Selected domain:', selectedDomain?.name, 'ID:', domainId);
+
+  // Invalidate queries when domain changes
+  useEffect(() => {
+    if (domainId) {
+      console.log('[Reports] Domain changed to', domainId, '- invalidating queries');
+      queryClient.invalidateQueries({ queryKey: ['scheduledReports'] });
+      queryClient.invalidateQueries({ queryKey: ['generatedReports'] });
+    }
+  }, [domainId, queryClient]);
 
   // Fetch report templates
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
@@ -39,16 +58,18 @@ const Reports = () => {
     queryFn: () => apiClient.getReportTemplates(),
   });
 
-  // Fetch scheduled reports
+  // Fetch scheduled reports (filtered by domain)
   const { data: scheduledReports = [], isLoading: scheduledLoading } = useQuery({
-    queryKey: ['scheduledReports'],
-    queryFn: () => apiClient.getScheduledReports(),
+    queryKey: ['scheduledReports', domainId],
+    queryFn: () => apiClient.getScheduledReports(domainId ? { domain_id: domainId } : {}),
+    enabled: !!domainId,
   });
 
-  // Fetch generated reports
+  // Fetch generated reports (filtered by domain)
   const { data: generatedReports = [], isLoading: generatedLoading } = useQuery({
-    queryKey: ['generatedReports'],
-    queryFn: () => apiClient.getGeneratedReports(),
+    queryKey: ['generatedReports', domainId],
+    queryFn: () => apiClient.getGeneratedReports(domainId ? { domain_id: domainId } : {}),
+    enabled: !!domainId,
   });
 
   // Delete scheduled report mutation
@@ -337,95 +358,69 @@ const Reports = () => {
             </Button>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {scheduledReports.map((report: any) => (
-              <div key={report.id} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
+              <div key={report.id} className="p-4 rounded-lg border border-border hover:border-primary transition-all duration-300">
                 <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h4 className="font-semibold">{report.name}</h4>
-                      <Badge variant={report.status === "active" ? "default" : "secondary"}>
-                        {report.status}
-                      </Badge>
-                      {report.template_name && (
-                        <Badge variant="outline" className="text-xs">
-                          {report.template_name}
-                        </Badge>
-                      )}
-                    </div>
-                    {report.description && (
-                      <p className="text-sm text-muted-foreground mb-3">{report.description}</p>
-                    )}
-                    <div className="flex flex-wrap gap-4 text-sm">
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-muted-foreground">{formatSchedule(report)}</span>
-                      </div>
-                      {report.last_generated_at && (
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-muted-foreground">
-                            Last: {formatRelativeTime(report.last_generated_at)}
-                          </span>
-                        </div>
-                      )}
-                      {report.next_run_at && (
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-muted-foreground">
-                            Next: {new Date(report.next_run_at).toLocaleDateString()}
-                          </span>
-                        </div>
-                      )}
-                    </div>
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <Clock className="h-5 w-5 text-primary" />
                   </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => handlePreview(report)}>
-                      <Eye className="h-3 w-3 mr-1" />
-                      Preview
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => handleEdit(report)}>
-                      Edit
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => handleRunNow(report)}
-                      disabled={report.status === 'paused'}
-                    >
-                      Run Now
-                    </Button>
-                  </div>
+                  <Badge variant={report.status === "active" ? "default" : "secondary"} className="text-xs">
+                    {report.status}
+                  </Badge>
                 </div>
-                <div className="flex items-center gap-4 pt-3 border-t border-border">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Formats:</span>
-                    {report.formats && report.formats.map((fmt: string) => (
-                      <Badge key={fmt} variant="outline" className="text-xs">
-                        {fmt}
-                      </Badge>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      Recipients: {report.recipients?.length || 0}
-                    </span>
-                  </div>
-                  <div className="ml-auto flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleToggleStatus(report)}
-                    >
-                      {report.status === 'active' ? 'Pause' : 'Resume'}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleDeleteReport(report.id)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
+                <h4 className="font-medium text-sm mb-2 line-clamp-2">{report.name}</h4>
+                {report.template_name && (
+                  <Badge variant="outline" className="text-xs mb-2">
+                    {report.template_name}
+                  </Badge>
+                )}
+                <div className="space-y-1 text-xs text-muted-foreground mb-3">
+                  <p>{formatSchedule(report)}</p>
+                  {report.next_run_at && (
+                    <p>Next: {new Date(report.next_run_at).toLocaleDateString()}</p>
+                  )}
+                  {report.formats && (
+                    <p>Formats: {report.formats.join(', ')}</p>
+                  )}
+                </div>
+                <div className="flex gap-2 mb-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => handlePreview(report)}
+                  >
+                    <Eye className="h-3 w-3 mr-1" />
+                    View
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => handleRunNow(report)}
+                    disabled={report.status === 'paused'}
+                  >
+                    Run Now
+                  </Button>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="flex-1 text-xs"
+                    onClick={() => handleEdit(report)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="flex-1 text-xs"
+                    onClick={() => handleToggleStatus(report)}
+                  >
+                    {report.status === 'active' ? 'Pause' : 'Resume'}
+                  </Button>
                 </div>
               </div>
             ))}
@@ -451,7 +446,7 @@ const Reports = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {generatedReports.slice(0, 8).map((report: any) => (
-              <div key={report.id} className="p-4 rounded-lg border border-border hover:shadow-md transition-shadow">
+              <div key={report.id} className="p-4 rounded-lg border border-border hover:border-primary transition-all duration-300">
                 <div className="flex items-start justify-between mb-3">
                   <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                     <FileText className="h-5 w-5 text-primary" />
@@ -498,7 +493,7 @@ const Reports = () => {
         <h3 className="text-lg font-semibold mb-6">Report Templates</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {templates.map((template: any) => (
-            <div key={template.id} className="p-4 rounded-lg border border-border hover:shadow-md transition-shadow">
+            <div key={template.id} className="p-4 rounded-lg border border-border hover:border-primary transition-all duration-300">
               <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-primary/10 to-secondary/10 mb-4 flex items-center justify-center">
                 <FileText className="h-12 w-12 text-muted-foreground" />
               </div>
@@ -585,6 +580,12 @@ const Reports = () => {
         open={scheduleDialogOpen}
         onOpenChange={setScheduleDialogOpen}
         onSchedule={handleAddScheduledReport}
+      />
+      <PDFViewerDialog
+        open={pdfViewerOpen}
+        onOpenChange={setPdfViewerOpen}
+        reportId={viewingReportId}
+        reportName={selectedReport?.name || "Report"}
       />
     </div>
   );

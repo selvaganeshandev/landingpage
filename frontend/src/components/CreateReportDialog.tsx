@@ -45,7 +45,8 @@ const reportSections = [
 export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogProps) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const activeDomainId = useDomainStore((state) => state.activeDomainId);
+  const { selectedDomain } = useDomainStore();
+  const activeDomainId = selectedDomain?.id;
 
   const [reportName, setReportName] = useState("");
   const [description, setDescription] = useState("");
@@ -62,17 +63,35 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
   // Fetch report templates to get template IDs
   const { data: templates = [] } = useQuery({
     queryKey: ['reportTemplates'],
-    queryFn: () => apiClient.getReportTemplates(),
+    queryFn: async () => {
+      const result = await apiClient.getReportTemplates();
+      return result as any[];
+    },
   });
 
-  // Create scheduled report mutation
+  // Create report mutation (handles both one-time and scheduled reports)
   const createMutation = useMutation({
-    mutationFn: (data: any) => apiClient.createScheduledReport(data),
+    mutationFn: (data: any) => {
+      // For one-time reports, use the generate_now endpoint
+      if (data.frequency === 'once') {
+        return apiClient.generateReport({
+          domain_id: data.domain,
+          template_id: data.template,
+          sections: data.sections,
+          format: data.formats[0], // Use first format for one-time generation
+          data_period_days: 30, // Default to 30 days
+        });
+      }
+      // For scheduled reports, use the scheduled endpoint
+      return apiClient.createScheduledReport(data);
+    },
     onSuccess: () => {
+      // Invalidate both queries to refresh the lists
       queryClient.invalidateQueries({ queryKey: ['scheduledReports'] });
+      queryClient.invalidateQueries({ queryKey: ['generatedReports'] });
       toast({
-        title: "Report Scheduled",
-        description: `"${reportName}" has been ${schedule === 'once' ? 'created' : 'scheduled'} successfully.`,
+        title: schedule === 'once' ? "Report Generated" : "Report Scheduled",
+        description: `"${reportName}" has been ${schedule === 'once' ? 'generated' : 'scheduled'} successfully.`,
       });
       resetForm();
       onOpenChange(false);
@@ -80,7 +99,7 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
     onError: (error: any) => {
       toast({
         title: "Error",
-        description: error.message || "Failed to create scheduled report",
+        description: error.message || `Failed to ${schedule === 'once' ? 'generate' : 'schedule'} report`,
         variant: "destructive",
       });
     },
@@ -336,7 +355,10 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
             Cancel
           </Button>
           <Button onClick={handleGenerate} className="gradient-primary" disabled={createMutation.isPending}>
-            {createMutation.isPending ? "Creating..." : (schedule === "once" ? "Generate Report" : "Create & Schedule")}
+            {createMutation.isPending
+              ? (schedule === "once" ? "Generating..." : "Creating...")
+              : (schedule === "once" ? "Generate Report" : "Create & Schedule")
+            }
           </Button>
         </DialogFooter>
       </DialogContent>

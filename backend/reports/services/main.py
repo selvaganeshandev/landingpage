@@ -30,15 +30,19 @@ def generate_report(report_id):
         # Get the domain
         domain = report.domain
 
-        # Get date range
-        end_date = report.data_period_end
-        start_date = report.data_period_start
+        # Get date range and convert to timezone-aware datetimes
+        from datetime import datetime, time
+
+        # Convert date to datetime at start of day (00:00:00)
+        start_datetime = timezone.make_aware(datetime.combine(report.data_period_start, time.min))
+        # Convert date to datetime at end of day (23:59:59)
+        end_datetime = timezone.make_aware(datetime.combine(report.data_period_end, time.max))
 
         # Initialize data service
         data_service = ReportDataService(
             domain=domain,
-            start_date=start_date,
-            end_date=end_date,
+            start_date=start_datetime,
+            end_date=end_datetime,
             organisation=report.organisation
         )
 
@@ -94,7 +98,7 @@ def generate_report(report_id):
             'generated_at': timezone.now().isoformat(),
             'data_summary': {
                 'total_records': get_total_records(data),
-                'date_range': f"{start_date} to {end_date}",
+                'date_range': f"{start_datetime.date()} to {end_datetime.date()}",
             }
         }
 
