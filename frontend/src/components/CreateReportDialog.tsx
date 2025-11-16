@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -20,6 +21,8 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/services/api";
+import { useDomainStore } from "@/stores/domainStore";
 import { FileText, Calendar, Mail } from "lucide-react";
 
 interface CreateReportDialogProps {
@@ -41,15 +44,47 @@ const reportSections = [
 
 export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogProps) => {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const activeDomainId = useDomainStore((state) => state.activeDomainId);
+
   const [reportName, setReportName] = useState("");
   const [description, setDescription] = useState("");
-  const [template, setTemplate] = useState("custom");
+  const [template, setTemplate] = useState("1"); // Default to first template
   const [format, setFormat] = useState("pdf");
   const [schedule, setSchedule] = useState("once");
+  const [scheduleTime, setScheduleTime] = useState("09:00");
+  const [scheduleDay, setScheduleDay] = useState("1"); // Monday for weekly, 1st for monthly
   const [recipients, setRecipients] = useState("");
   const [selectedSections, setSelectedSections] = useState<Set<string>>(
     new Set(reportSections.filter(s => s.default).map(s => s.id))
   );
+
+  // Fetch report templates to get template IDs
+  const { data: templates = [] } = useQuery({
+    queryKey: ['reportTemplates'],
+    queryFn: () => apiClient.getReportTemplates(),
+  });
+
+  // Create scheduled report mutation
+  const createMutation = useMutation({
+    mutationFn: (data: any) => apiClient.createScheduledReport(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['scheduledReports'] });
+      toast({
+        title: "Report Scheduled",
+        description: `"${reportName}" has been ${schedule === 'once' ? 'created' : 'scheduled'} successfully.`,
+      });
+      resetForm();
+      onOpenChange(false);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create scheduled report",
+        variant: "destructive",
+      });
+    },
+  });
 
   const toggleSection = (id: string) => {
     const newSelected = new Set(selectedSections);
@@ -61,7 +96,28 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
     setSelectedSections(newSelected);
   };
 
+  const resetForm = () => {
+    setReportName("");
+    setDescription("");
+    setTemplate("1");
+    setFormat("pdf");
+    setSchedule("once");
+    setScheduleTime("09:00");
+    setScheduleDay("1");
+    setRecipients("");
+    setSelectedSections(new Set(reportSections.filter(s => s.default).map(s => s.id)));
+  };
+
   const handleGenerate = () => {
+    if (!activeDomainId) {
+      toast({
+        title: "No Domain Selected",
+        description: "Please select a domain first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!reportName.trim()) {
       toast({
         title: "Missing Report Name",
@@ -80,17 +136,22 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
       return;
     }
 
-    toast({
-      title: "Generating Report",
-      description: `"${reportName}" is being created with ${selectedSections.size} sections.`,
-    });
+    // Prepare the data for API
+    const [hours, minutes] = scheduleTime.split(':');
+    const reportData = {
+      domain: activeDomainId,
+      name: reportName,
+      description: description || "",
+      template: parseInt(template),
+      frequency: schedule,
+      schedule_time: `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:00`,
+      schedule_day: schedule === 'weekly' || schedule === 'monthly' ? parseInt(scheduleDay) : null,
+      sections: Array.from(selectedSections),
+      formats: [format.toUpperCase()],
+      recipients: recipients ? recipients.split(',').map(email => email.trim()).filter(Boolean) : [],
+    };
 
-    // Reset form
-    setReportName("");
-    setDescription("");
-    setTemplate("custom");
-    setSelectedSections(new Set(reportSections.filter(s => s.default).map(s => s.id)));
-    onOpenChange(false);
+    createMutation.mutate(reportData);
   };
 
   return (
@@ -121,17 +182,17 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
 
           {/* Template */}
           <div className="space-y-2">
-            <Label>Start From Template</Label>
+            <Label>Report Template*</Label>
             <Select value={template} onValueChange={setTemplate}>
               <SelectTrigger className="border border-border">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="custom">Custom Report</SelectItem>
-                <SelectItem value="executive">Executive Dashboard</SelectItem>
-                <SelectItem value="detailed">Detailed Analytics</SelectItem>
-                <SelectItem value="competitor">Competitor Focus</SelectItem>
-                <SelectItem value="content">Content Strategy</SelectItem>
+                {templates.map((tmpl: any) => (
+                  <SelectItem key={tmpl.id} value={String(tmpl.id)}>
+                    {tmpl.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -173,7 +234,7 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
           {/* Format & Schedule */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Format</Label>
+              <Label>Format*</Label>
               <Select value={format} onValueChange={setFormat}>
                 <SelectTrigger className="border border-border">
                   <SelectValue />
@@ -182,13 +243,12 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
                   <SelectItem value="pdf">PDF</SelectItem>
                   <SelectItem value="excel">Excel</SelectItem>
                   <SelectItem value="powerpoint">PowerPoint</SelectItem>
-                  <SelectItem value="csv">CSV Data</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label>Schedule</Label>
+              <Label>Schedule*</Label>
               <Select value={schedule} onValueChange={setSchedule}>
                 <SelectTrigger className="border border-border">
                   <SelectValue />
@@ -203,6 +263,54 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
               </Select>
             </div>
           </div>
+
+          {/* Schedule Time (for all except 'once') */}
+          {schedule !== "once" && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="scheduleTime">Time</Label>
+                <Input
+                  id="scheduleTime"
+                  type="time"
+                  value={scheduleTime}
+                  onChange={(e) => setScheduleTime(e.target.value)}
+                  className="border border-border"
+                />
+              </div>
+
+              {(schedule === "weekly" || schedule === "monthly") && (
+                <div className="space-y-2">
+                  <Label htmlFor="scheduleDay">
+                    {schedule === "weekly" ? "Day of Week" : "Day of Month"}
+                  </Label>
+                  <Select value={scheduleDay} onValueChange={setScheduleDay}>
+                    <SelectTrigger className="border border-border">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {schedule === "weekly" ? (
+                        <>
+                          <SelectItem value="0">Monday</SelectItem>
+                          <SelectItem value="1">Tuesday</SelectItem>
+                          <SelectItem value="2">Wednesday</SelectItem>
+                          <SelectItem value="3">Thursday</SelectItem>
+                          <SelectItem value="4">Friday</SelectItem>
+                          <SelectItem value="5">Saturday</SelectItem>
+                          <SelectItem value="6">Sunday</SelectItem>
+                        </>
+                      ) : (
+                        Array.from({ length: 28 }, (_, i) => (
+                          <SelectItem key={i + 1} value={String(i + 1)}>
+                            {i + 1}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Recipients */}
           {schedule !== "once" && (
@@ -224,11 +332,11 @@ export const CreateReportDialog = ({ open, onOpenChange }: CreateReportDialogPro
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={createMutation.isPending}>
             Cancel
           </Button>
-          <Button onClick={handleGenerate} className="gradient-primary">
-            {schedule === "once" ? "Generate Report" : "Create & Schedule"}
+          <Button onClick={handleGenerate} className="gradient-primary" disabled={createMutation.isPending}>
+            {createMutation.isPending ? "Creating..." : (schedule === "once" ? "Generate Report" : "Create & Schedule")}
           </Button>
         </DialogFooter>
       </DialogContent>
