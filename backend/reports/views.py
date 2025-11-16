@@ -1,8 +1,8 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from django.utils import timezone
 from datetime import datetime, timedelta
 from .models import ReportTemplate, ScheduledReport, GeneratedReport
@@ -14,6 +14,10 @@ from .serializers import (
     GeneratedReportSerializer,
     GenerateReportRequestSerializer
 )
+from .services.html_to_pdf import convert_html_to_pdf
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ReportTemplateViewSet(viewsets.ReadOnlyModelViewSet):
@@ -309,3 +313,42 @@ class ReportGenerationViewSet(viewsets.ViewSet):
             'status': 'SUCCESS',
             'result': {'message': 'Report generation will be implemented in Phase 2'}
         })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def convert_report_html_to_pdf(request):
+    """
+    Convert HTML content to PDF
+    Accepts HTML from frontend report template and converts to PDF
+    """
+    html_content = request.data.get('html_content')
+    css_content = request.data.get('css_content', '')
+    filename = request.data.get('filename', 'report.pdf')
+
+    if not html_content:
+        logger.error("HTML content missing in request")
+        return Response(
+            {'error': 'HTML content is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        logger.info(f"Converting HTML to PDF for filename: {filename}")
+
+        # Convert HTML to PDF
+        pdf_buffer = convert_html_to_pdf(html_content, css_content)
+
+        # Create HTTP response with PDF
+        response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        logger.info(f"Successfully generated PDF: {filename}")
+        return response
+
+    except Exception as e:
+        logger.error(f"Error converting HTML to PDF: {str(e)}")
+        return Response(
+            {'error': f'PDF conversion failed: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

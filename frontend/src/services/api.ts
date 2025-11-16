@@ -581,7 +581,7 @@ export const apiClient = {
 
   getShareOfVoiceLatestEngine: (params: { domain_id: string }) => {
     const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiClient.getEngine(`/api/share-of-voice/${queryParams}`);
+    return apiRequest(`/analytics/share-of-voice/${queryParams}`);
   },
 
   // ===== Engine (port 8001) helpers for competitor sentiment (optional for Sentiment page)
@@ -607,7 +607,7 @@ export const apiClient = {
 
   getCompetitorPromptAnalyticsEngine: (params: { domain_id: string }) => {
     const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiClient.getEngine(`/api/competitor-prompt-analytics/${queryParams}`);
+    return apiRequest(`/competitors/competitor-prompt-analytics/${queryParams}`);
   },
 
   getCompetitorGapsEngine: (params: { domain_id: string; competitor_id?: string }) => {
@@ -620,11 +620,11 @@ export const apiClient = {
 
   getEngineCompetitors: (params: { domain_id: string }) => {
     const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiClient.getEngine(`/api/competitors/${queryParams}`);
+    return apiRequest(`/competitors/competitors/${queryParams}`);
   },
 
-  getEngineCompetitorDetail: (id: number) => apiClient.getEngine(`/api/competitors/${id}/`),
-  getEngineCompetitorAnalytics: (id: number) => apiClient.getEngine(`/api/competitors/${id}/analytics/`),
+  getEngineCompetitorDetail: (id: number) => apiRequest(`/competitors/competitors/${id}/`),
+  getEngineCompetitorAnalytics: (id: number) => apiRequest(`/competitors/competitor-analytics/?competitor_id=${id}`),
 
   // Competitor Analysis APIs
   getCompetitiveStrengthAnalysis: (params: { domain_id: string }) => {

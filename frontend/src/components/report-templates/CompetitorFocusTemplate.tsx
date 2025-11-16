@@ -31,9 +31,10 @@ interface CompetitorFocusTemplateProps {
 
 export const CompetitorFocusTemplate = ({ data }: CompetitorFocusTemplateProps) => {
   return (
-    <div className="w-full bg-background space-y-8">
+    <div className="w-full min-h-screen bg-white dark:bg-gray-950 space-y-8">
+      <div className="max-w-[1200px] mx-auto px-8 py-8">
       {/* Header Section */}
-      <div className="border-b pb-6">
+      <div className="border-b pb-6 break-inside-avoid">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold mb-2">Competitor Focus Report</h1>
@@ -819,6 +820,7 @@ export const CompetitorFocusTemplate = ({ data }: CompetitorFocusTemplateProps) 
           <p>Competitor Focus Report - AI Visibility Monitor</p>
           <p>Confidential - Strategic Planning Use Only</p>
         </div>
+      </div>
       </div>
     </div>
   );

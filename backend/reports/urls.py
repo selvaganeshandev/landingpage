@@ -4,7 +4,8 @@ from .views import (
     ReportTemplateViewSet,
     ScheduledReportViewSet,
     GeneratedReportViewSet,
-    ReportGenerationViewSet
+    ReportGenerationViewSet,
+    convert_report_html_to_pdf
 )
 
 router = DefaultRouter()
@@ -15,4 +16,5 @@ router.register(r'generation', ReportGenerationViewSet, basename='report-generat
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('convert-to-pdf/', convert_report_html_to_pdf, name='convert-report-to-pdf'),
 ]

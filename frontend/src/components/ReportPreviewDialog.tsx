@@ -8,7 +8,9 @@ import { ExecutiveDashboardTemplate } from "@/components/report-templates/Execut
 import { DetailedAnalyticsTemplate } from "@/components/report-templates/DetailedAnalyticsTemplate";
 import { CompetitorFocusTemplate } from "@/components/report-templates/CompetitorFocusTemplate";
 import { ContentStrategyTemplate } from "@/components/report-templates/ContentStrategyTemplate";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
 interface ReportPreviewDialogProps {
   open: boolean;
@@ -28,15 +30,33 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
   const { toast } = useToast();
   const [reportData, setReportData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const reportContentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open && report?.domain) {
+    if (open && report) {
+      console.log('[ReportPreviewDialog] Report object:', report);
+
+      // Get domain ID - it might be in different fields
+      const domainId = report.domain || (report as any).domain_id;
+
+      console.log('[ReportPreviewDialog] Domain ID:', domainId);
+
+      if (!domainId) {
+        console.warn('[ReportPreviewDialog] No domain ID found in report');
+        setReportData(null);
+        return;
+      }
+
       // Fetch report data from the backend
       const fetchReportData = async () => {
         setLoading(true);
         try {
           const token = localStorage.getItem('access_token');
-          const response = await fetch(`http://localhost:8000/analytics/dashboard/summary/?domain_id=${report.domain}&days=30`, {
+          const url = `http://localhost:8000/analytics/dashboard/summary/?domain_id=${domainId}&days=30`;
+          console.log('[ReportPreviewDialog] Fetching from:', url);
+
+          const response = await fetch(url, {
             headers: {
               'Authorization': `Bearer ${token}`,
             },
@@ -68,11 +88,104 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
 
   if (!report) return null;
 
-  const handleDownload = (format: string) => {
-    toast({
-      title: "Downloading Report",
-      description: `Downloading ${report.name} as ${format}...`,
-    });
+  const handleDownload = async (format: string) => {
+    if (format.toLowerCase() === 'pdf') {
+      await handleDownloadPdf();
+    } else {
+      toast({
+        title: "Downloading Report",
+        description: `Downloading ${report.name} as ${format}...`,
+      });
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!reportContentRef.current) {
+      toast({
+        title: "Error",
+        description: "Report content not available",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setDownloadingPdf(true);
+    try {
+      // Get the element
+      const element = reportContentRef.current;
+
+      // Find the inner content div (the one with max-w-[1200px])
+      const innerContent = element.querySelector('[class*="max-w-"]') as HTMLElement;
+      const targetElement = innerContent || element;
+
+      // Get the dimensions
+      const elementWidth = targetElement.scrollWidth;
+      const elementHeight = targetElement.scrollHeight;
+
+      // Create canvas from HTML with high quality
+      const canvas = await html2canvas(targetElement, {
+        scale: 2, // Higher quality
+        useCORS: true,
+        logging: false,
+        width: elementWidth,
+        height: elementHeight,
+        windowWidth: elementWidth,
+        windowHeight: elementHeight,
+        backgroundColor: '#ffffff',
+      });
+
+      // Calculate PDF dimensions
+      const pageWidth = 210; // A4 width in mm
+      const pageHeight = 297; // A4 height in mm
+
+      // Calculate image dimensions maintaining aspect ratio
+      const imgWidth = 170; // Content width (leaving margins)
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      // Center the content horizontally
+      const xOffset = (pageWidth - imgWidth) / 2;
+
+      // Create PDF
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+
+      // Add image to PDF - centered
+      const imgData = canvas.toDataURL('image/png');
+
+      // If content is too tall, split into multiple pages
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'PNG', xOffset, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', xOffset, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      // Download the PDF
+      pdf.save(`${report.name}.pdf`);
+
+      toast({
+        title: "Success",
+        description: "PDF downloaded successfully",
+      });
+    } catch (error) {
+      console.error('Error downloading PDF:', error);
+      toast({
+        title: "Error",
+        description: "Failed to download PDF",
+        variant: "destructive",
+      });
+    } finally {
+      setDownloadingPdf(false);
+    }
   };
 
   const handleShare = () => {
@@ -82,7 +195,7 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
     });
   };
 
-  // Determine which template to render based on report name
+  // Determine which template to render based on report name or template name
   const renderTemplate = () => {
     if (loading) {
       return (
@@ -94,14 +207,21 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
     }
 
     const reportNameLower = report.name.toLowerCase();
+    const templateNameLower = ((report as any).template_name || '').toLowerCase();
 
-    if (reportNameLower.includes('executive')) {
+    console.log('[ReportPreviewDialog] Report name:', reportNameLower);
+    console.log('[ReportPreviewDialog] Template name:', templateNameLower);
+
+    // Check both report name and template name
+    if (reportNameLower.includes('executive') || templateNameLower.includes('executive')) {
       return <ExecutiveDashboardTemplate data={reportData} />;
-    } else if (reportNameLower.includes('detailed') || reportNameLower.includes('analytics')) {
+    } else if (reportNameLower.includes('detailed') || reportNameLower.includes('analytics') ||
+               templateNameLower.includes('detailed') || templateNameLower.includes('analytics')) {
       return <DetailedAnalyticsTemplate data={reportData} />;
-    } else if (reportNameLower.includes('competitor')) {
+    } else if (reportNameLower.includes('competitor') || templateNameLower.includes('competitor')) {
       return <CompetitorFocusTemplate data={reportData} />;
-    } else if (reportNameLower.includes('content') || reportNameLower.includes('strategy')) {
+    } else if (reportNameLower.includes('content') || reportNameLower.includes('strategy') ||
+               templateNameLower.includes('content') || templateNameLower.includes('strategy')) {
       return <ContentStrategyTemplate data={reportData} />;
     }
 
@@ -157,14 +277,33 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
             <div className="flex gap-2">
               {Array.isArray(report.format) ? (
                 report.format.map((fmt) => (
-                  <Button key={fmt} size="sm" variant="outline" onClick={() => handleDownload(fmt)}>
-                    <Download className="h-3 w-3 mr-1" />
+                  <Button
+                    key={fmt}
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDownload(fmt)}
+                    disabled={downloadingPdf}
+                  >
+                    {downloadingPdf && fmt.toLowerCase() === 'pdf' ? (
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    ) : (
+                      <Download className="h-3 w-3 mr-1" />
+                    )}
                     {fmt}
                   </Button>
                 ))
               ) : (
-                <Button size="sm" variant="outline" onClick={() => handleDownload(report.format)}>
-                  <Download className="h-3 w-3 mr-1" />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleDownload(report.format)}
+                  disabled={downloadingPdf}
+                >
+                  {downloadingPdf && report.format.toLowerCase() === 'pdf' ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <Download className="h-3 w-3 mr-1" />
+                  )}
                   {report.format}
                 </Button>
               )}
@@ -177,7 +316,7 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
         </DialogHeader>
 
         <ScrollArea className="flex-1 border rounded-lg">
-          <div className="p-8 bg-background">
+          <div ref={reportContentRef} className="bg-background">
             {renderTemplate()}
           </div>
         </ScrollArea>

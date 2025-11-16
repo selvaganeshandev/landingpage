@@ -27,6 +27,10 @@ export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateP
   const platforms = data?.platforms || [];
   const shareOfVoice = data?.share_of_voice;
 
+  // Extract domain information
+  const domainName = data?.domain_name || 'Your Brand';
+  const domainUrl = data?.domain_url || '';
+
   // Calculate metrics from data
   const totalMentions = metrics.total_mentions || 0;
   const visibilityScore = metrics.visibility_score || 0;
@@ -42,8 +46,8 @@ export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateP
   const citationsTrend = metrics.citations_change !== null && metrics.citations_change !== undefined ? metrics.citations_change : 0;
   const sentimentTrend = 0; // TODO: Calculate sentiment trend from historical data
 
-  // Calculate mention rate (percentage of citations that mention)
-  const mentionRate = totalCitations > 0 ? (totalMentions / totalCitations) * 100 : 0;
+  // Calculate citation rate (percentage of mentions that have citations)
+  const citationRate = totalMentions > 0 ? (totalCitations / totalMentions) * 100 : 0;
 
   // Share of voice and competitors
   const yourSharePercentage = shareOfVoice?.your_brand?.share_percentage || 0;
@@ -53,14 +57,15 @@ export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateP
   // Platform distribution - map to expected format
   const platformStats = platforms.map((platform: any) => ({
     model_name: platform.platform,
-    percentage: totalMentions > 0 ? ((platform.mention_count / totalMentions) * 100).toFixed(1) : 0,
+    percentage: totalMentions > 0 ? ((platform.mention_count / totalMentions) * 100).toFixed(1) : '0.0',
     mention_count: platform.mention_count
   }));
 
   return (
-    <div className="w-full bg-background space-y-8">
+    <div className="w-full min-h-screen bg-white dark:bg-gray-950 space-y-8">
+      <div className="max-w-[1200px] mx-auto px-8 py-8">
       {/* Header Section */}
-      <div className="border-b pb-6">
+      <div className="border-b pb-6 break-inside-avoid">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold mb-2">Executive Dashboard</h1>
@@ -74,9 +79,9 @@ export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateP
       </div>
 
       {/* Executive Summary - Key Metrics */}
-      <div>
-        <h2 className="text-2xl font-bold mb-6">Summary</h2>
-        <div className="grid grid-cols-4 gap-4">
+      <div className="mt-8">
+        <h2 className="text-2xl font-bold mb-6 break-after-avoid">Summary</h2>
+        <div className="grid grid-cols-4 gap-4 break-inside-avoid">
           {/* Box 1: Overall Visibility Score */}
           <Card className="p-6 border border-border">
             <div className="flex items-start justify-between mb-3">
@@ -168,9 +173,9 @@ export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateP
       </div>
 
       {/* Strategic Performance Indicators */}
-      <div>
-        <h2 className="text-2xl font-bold mb-6">Strategic Performance Indicators</h2>
-        <div className="grid grid-cols-2 gap-6">
+      <div className="mt-8">
+        <h2 className="text-2xl font-bold mb-6 break-after-avoid">Strategic Performance Indicators</h2>
+        <div className="grid grid-cols-2 gap-6 break-inside-avoid">
           <Card className="p-6 border border-border">
             <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <BarChart3 className="h-5 w-5 text-primary" />
@@ -243,201 +248,395 @@ export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateP
             <div className="space-y-4">
               <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/10 rounded-lg border border-green-200 dark:border-green-900/30">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                    <span className="text-sm font-bold text-primary-foreground">1</span>
+                  <div className="w-8 h-8 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center border-2 border-primary overflow-hidden">
+                    <img
+                      src={`https://www.google.com/s2/favicons?domain=${domainUrl}&sz=64`}
+                      alt={domainName}
+                      className="w-5 h-5"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        const parent = e.currentTarget.parentElement;
+                        if (parent) {
+                          parent.innerHTML = '<span class="text-sm font-bold text-primary">1</span>';
+                        }
+                      }}
+                    />
                   </div>
-                  <span className="font-semibold">Your Brand</span>
+                  <span className="font-semibold">{domainName}</span>
                 </div>
                 <div className="text-right">
-                  <p className="text-2xl font-bold">{visibilityScore.toFixed(1)}</p>
-                  <p className="text-xs text-muted-foreground">Visibility Score</p>
+                  <p className="text-2xl font-bold">{shareOfVoice?.your_brand?.share_percentage?.toFixed(1) || yourSharePercentage.toFixed(1)}%</p>
+                  <p className="text-xs text-muted-foreground">Share of Voice</p>
                 </div>
               </div>
-              {data?.competitors?.slice(0, 2).map((competitor: any, index: number) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                      <span className="text-sm font-bold">{index + 2}</span>
+              {shareOfVoice?.competitors && shareOfVoice.competitors.length > 0 ? (
+                shareOfVoice.competitors.slice(0, 3).map((competitor: any, index: number) => (
+                  <div key={index} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center border border-muted-foreground/20 overflow-hidden">
+                        <img
+                          src={`https://www.google.com/s2/favicons?domain=${competitor.url}&sz=64`}
+                          alt={competitor.name}
+                          className="w-5 h-5"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const parent = e.currentTarget.parentElement;
+                            if (parent) {
+                              parent.innerHTML = `<span class="text-sm font-bold">${competitor.market_position || (index + 2)}</span>`;
+                            }
+                          }}
+                        />
+                      </div>
+                      <span className="font-medium">{competitor.name}</span>
                     </div>
-                    <span className="font-medium">{competitor.name}</span>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold text-muted-foreground">{competitor.share_percentage?.toFixed(1)}%</p>
+                      <p className="text-xs text-muted-foreground">Share of Voice</p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-muted-foreground">{competitor.score.toFixed(1)}</p>
-                    <p className="text-xs text-muted-foreground">Visibility Score</p>
-                  </div>
+                ))
+              ) : (
+                <div className="text-center py-4 text-muted-foreground text-sm">
+                  No competitor data available
                 </div>
-              )) || (
-                <>
-                  <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                        <span className="text-sm font-bold">2</span>
-                      </div>
-                      <span className="font-medium">Competitor A</span>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-muted-foreground">78.2</p>
-                      <p className="text-xs text-muted-foreground">Visibility Score</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                        <span className="text-sm font-bold">3</span>
-                      </div>
-                      <span className="font-medium">Competitor B</span>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-muted-foreground">72.8</p>
-                      <p className="text-xs text-muted-foreground">Visibility Score</p>
-                    </div>
-                  </div>
-                </>
               )}
             </div>
           </Card>
         </div>
       </div>
 
-      {/* Key Insights & Opportunities */}
-      <div>
-        <h2 className="text-2xl font-bold mb-6">Key Strategic Insights</h2>
-        <div className="grid grid-cols-2 gap-4">
-          <Card className="p-5 border border-border border-l-4 border-l-green-500">
+      {/* Items Requiring Attention */}
+      <div className="mt-8">
+        <h2 className="text-2xl font-bold mb-6 break-after-avoid">Items Requiring Attention</h2>
+        {data?.alerts && data.alerts.length > 0 ? (
+          <div className="space-y-3 break-inside-avoid">
+            {data.alerts.map((alert: any, index: number) => (
+              <Card key={index} className={`p-4 border border-border ${
+                alert.severity === 'high'
+                  ? 'bg-red-50/50 dark:bg-red-900/10 border-l-4 border-l-red-500'
+                  : 'bg-amber-50/50 dark:bg-amber-900/10 border-l-4 border-l-amber-500'
+              }`}>
+                <div className="flex items-start gap-3">
+                  <AlertCircle className={`h-5 w-5 ${
+                    alert.severity === 'high'
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-amber-600 dark:text-amber-400'
+                  } flex-shrink-0 mt-0.5`} />
+                  <div className="flex-1">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h4 className="font-semibold mb-1">{alert.title}</h4>
+                        <p className="text-sm text-muted-foreground">{alert.description}</p>
+                      </div>
+                      <Badge variant={alert.severity === 'high' ? 'destructive' : 'secondary'} className={
+                        alert.severity === 'high'
+                          ? ''
+                          : 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
+                      }>
+                        {alert.severity === 'high' ? 'High Priority' : 'Medium Priority'}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <Card className="p-6 border border-border bg-green-50/50 dark:bg-green-900/10 border-l-4 border-l-green-500 break-inside-avoid">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/20 flex items-center justify-center flex-shrink-0">
-                <ArrowUpRight className="h-5 w-5 text-green-600 dark:text-green-400" />
-              </div>
+              <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
               <div>
-                <h4 className="font-semibold mb-1">Market Leadership Achieved</h4>
-                <p className="text-sm text-muted-foreground">Your brand now ranks #1 in AI visibility, surpassing all competitors by 9.3 points</p>
+                <h4 className="font-semibold mb-2">All Clear!</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed">Good news! There are no misinformation alerts or critical issues at the moment. Your brand presence is performing well across all platforms.</p>
               </div>
             </div>
           </Card>
-
-          <Card className="p-5 border border-border border-l-4 border-l-blue-500">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center flex-shrink-0">
-                <DollarSign className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div>
-                <h4 className="font-semibold mb-1">Revenue Impact Growing</h4>
-                <p className="text-sm text-muted-foreground">AI-attributed revenue up 22.5%, contributing $124K this period with strong ROI</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-5 border border-border border-l-4 border-l-purple-500">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/20 flex items-center justify-center flex-shrink-0">
-                <TrendingUp className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-              </div>
-              <div>
-                <h4 className="font-semibold mb-1">Strong Momentum Continues</h4>
-                <p className="text-sm text-muted-foreground">15.2% growth in mentions with 92% positive sentiment across all platforms</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-5 border border-border border-l-4 border-l-amber-500">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/20 flex items-center justify-center flex-shrink-0">
-                <Target className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-              </div>
-              <div>
-                <h4 className="font-semibold mb-1">Expansion Opportunity</h4>
-                <p className="text-sm text-muted-foreground">Gemini platform shows 45% month-over-month growth potential for market share</p>
-              </div>
-            </div>
-          </Card>
-        </div>
+        )}
       </div>
 
-      {/* Critical Alerts */}
-      <div>
-        <h2 className="text-2xl font-bold mb-6">Items Requiring Attention</h2>
-        <div className="space-y-3">
-          <Card className="p-4 border border-border bg-red-50/50 dark:bg-red-900/10 border-l-4 border-l-red-500">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h4 className="font-semibold mb-1">Misinformation Alert Detected</h4>
-                    <p className="text-sm text-muted-foreground">3 instances of inaccurate pricing information found on Perplexity - Immediate correction recommended</p>
-                  </div>
-                  <Badge variant="destructive">High Priority</Badge>
-                </div>
-              </div>
-            </div>
-          </Card>
+      {/* Key Insights & Opportunities */}
+      <div className="mt-8 break-inside-avoid">
+        <h2 className="text-2xl font-bold mb-6 break-after-avoid">Key Strategic Insights</h2>
+        {(() => {
+          const hasMarketLeadership = shareOfVoice?.your_brand?.market_position === 1;
+          const hasVisibilityGrowth = metrics.visibility_change && metrics.visibility_change > 0;
+          const hasMentionsMomentum = mentionsTrend > 0;
+          const hasPlatformData = platforms.length > 0;
+          const hasCitations = totalCitations > 0;
+          const hasCompetitors = competitorCount > 0;
 
-          <Card className="p-4 border border-border bg-amber-50/50 dark:bg-amber-900/10 border-l-4 border-l-amber-500">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h4 className="font-semibold mb-1">Competitor Gaining Traction</h4>
-                    <p className="text-sm text-muted-foreground">Competitor A increased visibility by 12% - Monitor their content strategy closely</p>
-                  </div>
-                  <Badge variant="secondary" className="bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">Medium Priority</Badge>
+          const hasAnyInsights = hasMarketLeadership || hasVisibilityGrowth || hasMentionsMomentum ||
+                                 hasPlatformData || hasCitations || hasCompetitors;
+
+          if (!hasAnyInsights) {
+            return (
+              <Card className="p-6 border border-border bg-muted/30 break-inside-avoid">
+                <div className="text-center py-4">
+                  <p className="text-muted-foreground">
+                    No strategic insights available yet. Start tracking prompts and competitors to generate insights.
+                  </p>
+                </div>
+              </Card>
+            );
+          }
+
+          return null;
+        })()}
+        <div className="grid grid-cols-2 gap-4">
+          {/* Market Leadership - Show if #1 in share of voice */}
+          {shareOfVoice?.your_brand?.market_position === 1 && (
+            <Card className="p-5 border border-border border-l-4 border-l-green-500 break-inside-avoid">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/20 flex items-center justify-center flex-shrink-0">
+                  <ArrowUpRight className="h-5 w-5 text-green-600 dark:text-green-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-2">Market Leadership Achieved</h4>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {domainName} ranks #1 in AI visibility with {yourSharePercentage.toFixed(1)}% share of voice
+                    {shareOfVoice?.competitors?.[0] && ` - leading by ${(yourSharePercentage - shareOfVoice.competitors[0].share_percentage).toFixed(1)} percentage points`}
+                  </p>
                 </div>
               </div>
-            </div>
-          </Card>
+            </Card>
+          )}
+
+          {/* Visibility Growth - Show if positive change */}
+          {metrics.visibility_change && metrics.visibility_change > 0 && (
+            <Card className="p-5 border border-border border-l-4 border-l-blue-500 break-inside-avoid">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center flex-shrink-0">
+                  <TrendingUp className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-2">Visibility Score Growing</h4>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    AI visibility increased by {metrics.visibility_change.toFixed(1)}% with current score of {visibilityScore.toFixed(1)}
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Positive Mentions Momentum */}
+          {mentionsTrend > 0 && (
+            <Card className="p-5 border border-border border-l-4 border-l-purple-500 break-inside-avoid">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/20 flex items-center justify-center flex-shrink-0">
+                  <Activity className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-1">Strong Mentions Momentum</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {mentionsTrend > 0 ? '+' : ''}{mentionsTrend.toFixed(1)}% growth in mentions with {sentimentScore.toFixed(0)}% positive sentiment across all platforms
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Platform Opportunity - Show best performing or fastest growing platform */}
+          {platforms.length > 0 && (
+            <Card className="p-5 border border-border border-l-4 border-l-amber-500 break-inside-avoid">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/20 flex items-center justify-center flex-shrink-0">
+                  <Target className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-1">Platform Performance Insight</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {platforms[0].platform} leads with {platforms[0].mention_count} mentions
+                    {platforms.length > 1 && ` - ${((platforms[0].mention_count / totalMentions) * 100).toFixed(0)}% of total visibility`}
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Citations Impact */}
+          {totalCitations > 0 && (
+            <Card className="p-5 border border-border border-l-4 border-l-teal-500 break-inside-avoid">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-teal-100 dark:bg-teal-900/20 flex items-center justify-center flex-shrink-0">
+                  <FileText className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-1">Strong Citation Authority</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {totalCitations} citation{totalCitations > 1 ? 's' : ''} from {totalMentions} mention{totalMentions > 1 ? 's' : ''} ({citationRate.toFixed(1)}% citation rate)
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Competitive Position */}
+          {competitorCount > 0 && (
+            <Card className="p-5 border border-border border-l-4 border-l-indigo-500 break-inside-avoid">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-900/20 flex items-center justify-center flex-shrink-0">
+                  <Users className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-1">Competitive Landscape</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Tracking {competitorCount} competitor{competitorCount > 1 ? 's' : ''} with market position #{shareOfVoice?.your_brand?.market_position || 1}
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
         </div>
       </div>
 
       {/* Executive Recommendations */}
-      <div>
-        <h2 className="text-2xl font-bold mb-6">Strategic Recommendations</h2>
-        <div className="space-y-3">
-          <div className="p-4 border-l-4 border-l-primary bg-primary/5 rounded-lg">
-            <div className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-xs font-bold text-primary-foreground flex-shrink-0 mt-0.5">
-                1
-              </div>
-              <div>
-                <h4 className="font-semibold mb-1">Accelerate Gemini Platform Investment</h4>
-                <p className="text-sm text-muted-foreground mb-2">
-                  With 45% growth potential and currently only 12% market share, prioritize content optimization for Gemini to capture this emerging opportunity.
-                </p>
-                <Badge variant="outline" className="text-xs">Expected ROI: +$35K/quarter</Badge>
-              </div>
-            </div>
-          </div>
+      <div className="mt-8 break-inside-avoid">
+        <h2 className="text-2xl font-bold mb-6 break-after-avoid">Strategic Recommendations</h2>
+        {(() => {
+          const recommendations: Array<{
+            title: string;
+            description: string;
+            badge: string;
+            priority: number;
+          }> = [];
 
-          <div className="p-4 border-l-4 border-l-primary bg-primary/5 rounded-lg">
-            <div className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-xs font-bold text-primary-foreground flex-shrink-0 mt-0.5">
-                2
-              </div>
-              <div>
-                <h4 className="font-semibold mb-1">Address Perplexity Misinformation Immediately</h4>
-                <p className="text-sm text-muted-foreground mb-2">
-                  Coordinate with marketing to correct pricing inaccuracies. Submit content corrections to Perplexity and update website FAQs.
-                </p>
-                <Badge variant="outline" className="text-xs">Timeline: 72 hours</Badge>
-              </div>
-            </div>
-          </div>
+          // Recommendation 1: Address alerts if they exist
+          if (data?.alerts && data.alerts.length > 0) {
+            const highPriorityAlerts = data.alerts.filter((a: any) => a.severity === 'high');
+            if (highPriorityAlerts.length > 0) {
+              recommendations.push({
+                title: 'Address Critical Alerts Immediately',
+                description: `${highPriorityAlerts.length} high-priority alert${highPriorityAlerts.length > 1 ? 's' : ''} require immediate attention. Review and resolve misinformation or accuracy issues to maintain brand credibility.`,
+                badge: 'Timeline: 24-48 hours',
+                priority: 1
+              });
+            }
+          }
 
-          <div className="p-4 border-l-4 border-l-primary bg-primary/5 rounded-lg">
-            <div className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-xs font-bold text-primary-foreground flex-shrink-0 mt-0.5">
-                3
-              </div>
-              <div>
-                <h4 className="font-semibold mb-1">Maintain ChatGPT Market Dominance</h4>
-                <p className="text-sm text-muted-foreground mb-2">
-                  With 42% share, continue current content strategy while monitoring competitor movements. Consider exclusive partnerships or thought leadership initiatives.
-                </p>
-                <Badge variant="outline" className="text-xs">Status: On Track</Badge>
-              </div>
+          // Recommendation 2: Improve low-performing platforms
+          if (platforms.length > 1) {
+            const lowestPlatform = platforms[platforms.length - 1];
+            const topPlatform = platforms[0];
+            const percentageGap = ((topPlatform.mention_count / totalMentions) * 100) - ((lowestPlatform.mention_count / totalMentions) * 100);
+
+            if (percentageGap > 30 && lowestPlatform.mention_count < 5) {
+              recommendations.push({
+                title: `Expand Presence on ${lowestPlatform.platform}`,
+                description: `${lowestPlatform.platform} represents an untapped opportunity with only ${lowestPlatform.mention_count} mention${lowestPlatform.mention_count > 1 ? 's' : ''}. Optimize content for this platform to diversify AI visibility.`,
+                badge: 'Opportunity: High Growth Potential',
+                priority: 2
+              });
+            }
+          }
+
+          // Recommendation 3: Maintain leadership position
+          if (shareOfVoice?.your_brand?.market_position === 1) {
+            const yourShare = yourSharePercentage;
+            const secondPlace = shareOfVoice?.competitors?.[0];
+            const gap = secondPlace ? (yourShare - secondPlace.share_percentage).toFixed(1) : yourShare.toFixed(1);
+
+            recommendations.push({
+              title: 'Maintain Market Leadership',
+              description: `Currently leading with ${yourShare.toFixed(1)}% share of voice${secondPlace ? `, ahead by ${gap} percentage points` : ''}. Continue current content strategy and monitor competitor activities to defend position.`,
+              badge: 'Status: On Track',
+              priority: 3
+            });
+          }
+
+          // Recommendation 4: Improve visibility if low
+          if (visibilityScore < 50 && visibilityScore > 0) {
+            recommendations.push({
+              title: 'Boost AI Visibility Score',
+              description: `Current visibility score of ${visibilityScore.toFixed(1)} is below optimal. Increase prompt coverage, improve content quality, and enhance citation opportunities to improve rankings.`,
+              badge: `Target: 75+ Score`,
+              priority: 2
+              });
+          }
+
+          // Recommendation 5: Leverage top platform
+          if (platforms.length > 0) {
+            const topPlatform = platforms[0];
+            const topPlatformShare = ((topPlatform.mention_count / totalMentions) * 100).toFixed(0);
+
+            if (topPlatform.mention_count > 5) {
+              recommendations.push({
+                title: `Maximize ${topPlatform.platform} Dominance`,
+                description: `${topPlatform.platform} is your strongest platform with ${topPlatformShare}% of mentions (${topPlatform.mention_count} total). Double down on this channel through targeted content optimization and prompt engineering.`,
+                badge: 'Priority: Leverage Strength',
+                priority: 3
+              });
+            }
+          }
+
+          // Recommendation 6: Improve sentiment if low
+          if (sentimentScore < 70 && totalMentions > 0) {
+            recommendations.push({
+              title: 'Enhance Sentiment Quality',
+              description: `${sentimentScore.toFixed(0)}% positive sentiment indicates room for improvement. Review negative mentions, update content accuracy, and strengthen value propositions in source materials.`,
+              badge: 'Target: 80%+ Positive',
+              priority: 2
+            });
+          }
+
+          // Recommendation 7: Track competitors if none
+          if (competitorCount === 0) {
+            recommendations.push({
+              title: 'Start Competitor Tracking',
+              description: 'Add competitor tracking to benchmark your performance and identify market opportunities. Understanding competitor strategies helps refine your AI visibility approach.',
+              badge: 'Action: Add Competitors',
+              priority: 3
+            });
+          }
+
+          // Recommendation 8: Compete with leaders if behind
+          if (shareOfVoice?.your_brand?.market_position && shareOfVoice.your_brand.market_position > 1) {
+            const leader = shareOfVoice.competitors.find((c: any) => c.market_position === 1);
+            const gap = leader ? (leader.share_percentage - yourSharePercentage).toFixed(1) : 'significant';
+
+            recommendations.push({
+              title: 'Close Competitive Gap',
+              description: `Currently in position #${shareOfVoice.your_brand.market_position} with ${gap !== 'significant' ? `${gap} percentage points` : 'distance'} to close. Analyze top competitor strategies and increase content optimization efforts.`,
+              badge: `Target: Position #${Math.max(1, shareOfVoice.your_brand.market_position - 1)}`,
+              priority: 1
+            });
+          }
+
+          // Sort by priority and limit to top 3
+          const topRecommendations = recommendations
+            .sort((a, b) => a.priority - b.priority)
+            .slice(0, 3);
+
+          if (topRecommendations.length === 0) {
+            return (
+              <Card className="p-6 border border-border bg-muted/30 break-inside-avoid">
+                <div className="text-center py-4">
+                  <p className="text-muted-foreground">
+                    Excellent performance! Continue monitoring metrics and maintain current strategies.
+                  </p>
+                </div>
+              </Card>
+            );
+          }
+
+          return (
+            <div className="space-y-3">
+              {topRecommendations.map((rec, index) => (
+                <div key={index} className="p-4 border-l-4 border-l-primary bg-primary/5 rounded-lg break-inside-avoid">
+                  <div className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-xs font-bold text-primary-foreground flex-shrink-0 mt-0.5">
+                      {index + 1}
+                    </div>
+                    <div>
+                      <h4 className="font-semibold mb-1">{rec.title}</h4>
+                      <p className="text-sm text-muted-foreground mb-2">{rec.description}</p>
+                      <Badge variant="outline" className="text-xs">{rec.badge}</Badge>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-        </div>
+          );
+        })()}
       </div>
 
       {/* Footer */}
@@ -446,6 +645,7 @@ export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateP
           <p>Generated by AI Visibility Monitor</p>
           <p>Confidential - Executive Use Only</p>
         </div>
+      </div>
       </div>
     </div>
   );

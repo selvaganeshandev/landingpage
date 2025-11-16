@@ -20,9 +20,10 @@ import {
   Calendar,
   Eye,
   Share2,
-  Clock,
   Settings,
-  Loader2
+  Loader2,
+  Table,
+  Presentation
 } from "lucide-react";
 
 const Reports = () => {
@@ -304,6 +305,19 @@ const Reports = () => {
     return `${diffDays} days ago`;
   };
 
+  // Helper function to get format icon
+  const getFormatIcon = (format: string) => {
+    const formatLower = format?.toLowerCase() || '';
+    if (formatLower.includes('pdf')) {
+      return <FileText className="h-5 w-5 text-primary" />;
+    } else if (formatLower.includes('excel') || formatLower.includes('xlsx') || formatLower.includes('xls')) {
+      return <Table className="h-5 w-5 text-primary" />;
+    } else if (formatLower.includes('powerpoint') || formatLower.includes('pptx') || formatLower.includes('ppt')) {
+      return <Presentation className="h-5 w-5 text-primary" />;
+    }
+    return <FileText className="h-5 w-5 text-primary" />;
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -363,7 +377,14 @@ const Reports = () => {
               <div key={report.id} className="p-4 rounded-lg border border-border hover:border-primary transition-all duration-300">
                 <div className="flex items-start justify-between mb-3">
                   <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <Clock className="h-5 w-5 text-primary" />
+                    <img
+                      src={`https://www.google.com/s2/favicons?domain=${report.domain_url || selectedDomain?.url}&sz=64`}
+                      alt="Domain favicon"
+                      className="h-6 w-6"
+                      onError={(e) => {
+                        e.currentTarget.src = '/favicon.ico';
+                      }}
+                    />
                   </div>
                   <Badge variant={report.status === "active" ? "default" : "secondary"} className="text-xs">
                     {report.status}
@@ -449,7 +470,7 @@ const Reports = () => {
               <div key={report.id} className="p-4 rounded-lg border border-border hover:border-primary transition-all duration-300">
                 <div className="flex items-start justify-between mb-3">
                   <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <FileText className="h-5 w-5 text-primary" />
+                    {getFormatIcon(report.format)}
                   </div>
                   <Badge variant="secondary" className="text-xs">{report.format}</Badge>
                 </div>

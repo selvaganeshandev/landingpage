@@ -586,6 +586,8 @@ def dashboard_summary(request):
     
     return Response({
         'period_days': days,
+        'domain_name': domain.name,
+        'domain_url': domain.url,
         'metrics': metrics,
         'brand': brand,
         'platforms': platforms,
