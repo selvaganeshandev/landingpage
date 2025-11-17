@@ -618,46 +618,58 @@ export const apiClient = {
     return apiClient.getEngine(`/api/competitor-prompt-analytics/gaps/${queryParams}`);
   },
 
-  getCompetitorHeatmap: (params: { domain_id: string; days?: number }) => {
+  getCompetitorHeatmap: (params: { domain_id: string; days?: number; platform?: string }) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
+      ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
     return apiRequest(`/competitors/heatmap/${queryParams}`);
   },
 
-  getCompetitorMetricSnapshots: (params: { domain_id: string; days?: number; competitor_id?: string }) => {
+  getCompetitorMetricSnapshots: (params: { domain_id: string; days?: number; competitor_id?: string; platform?: string }) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
+      ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
     return apiRequest(`/competitors/competitor-metric-snapshots/${queryParams}`);
   },
 
-  getEngineCompetitors: (params: { domain_id: string }) => {
-    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiRequest(`/competitors/competitors/${queryParams}`);
+  getEngineCompetitors: (params: { domain_id: string; platform?: string }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/competitors/by_domain/${queryParams}`);
   },
 
   getEngineCompetitorDetail: (id: number) => apiRequest(`/competitors/competitors/${id}/`),
   getEngineCompetitorAnalytics: (id: number) => apiRequest(`/competitors/competitor-analytics/?competitor_id=${id}`),
 
   // Competitor Analysis APIs
-  getCompetitiveStrengthAnalysis: (params: { domain_id: string }) => {
-    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
+  getCompetitiveStrengthAnalysis: (params: { domain_id: string; platform?: string }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
     return apiRequest(`/competitors/competitive-strength-analysis${queryParams}`);
   },
 
-  getCompetitiveInsights: (params: { domain_id: string }) => {
-    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
+  getCompetitiveInsights: (params: { domain_id: string; platform?: string }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
     return apiRequest(`/competitors/competitive-insights${queryParams}`);
   },
 
-  getAnswerGapAnalysis: (params: { domain_id: string; competitor_id?: string }) => {
+  getAnswerGapAnalysis: (params: { domain_id: string; competitor_id?: string; platform?: string }) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
+      ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
     return apiRequest(`/competitors/answer-gap-analysis${queryParams}`);
   },

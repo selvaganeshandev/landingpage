@@ -38,14 +38,82 @@ class CompetitorViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'])
     def by_domain(self, request):
-        """Get competitors for a specific domain."""
+        """Get competitors for a specific domain with optional platform filtering."""
         domain_id = request.query_params.get('domain_id')
+        platform = request.query_params.get('platform')  # NEW: Platform filter
+
         if not domain_id:
             return Response(
                 {'error': 'domain_id is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        competitors = self.get_queryset().filter(domain_id=domain_id)
+
+        # If platform filter is specified and not 'all', calculate metrics from analytics
+        if platform and platform.lower() != 'all':
+            result = []
+            for comp in competitors:
+                # Filter analytics by platform
+                analytics_filter = Q(competitor=comp, platform__iexact=platform)
+                comp_analytics = CompetitorPromptAnalytics.objects.filter(analytics_filter)
+
+                # Calculate platform-specific metrics
+                total_mentions = comp_analytics.filter(is_mentioned=True).aggregate(
+                    total=Sum('mention_count')
+                )['total'] or 0
+
+                total_citations = 0
+                for ca in comp_analytics.filter(is_mentioned=True):
+                    if ca.citation_list and isinstance(ca.citation_list, list):
+                        total_citations += len(ca.citation_list)
+
+                avg_position = comp_analytics.filter(is_mentioned=True, position__isnull=False).aggregate(
+                    avg=Avg('position')
+                )['avg'] or 0
+
+                avg_sentiment = comp_analytics.filter(is_mentioned=True, sentiment_score__isnull=False).aggregate(
+                    avg=Avg('sentiment_score')
+                )['avg'] or 0
+
+                # Calculate visibility score (100 - position * 20, capped at 0-100)
+                visibility = 100.0 - (float(avg_position) * 20.0) if avg_position > 0 else 0.0
+                visibility = max(0.0, min(100.0, visibility))
+
+                # Get share of voice for this platform
+                from analytics.models import ShareOfVoiceAnalytics
+                sov = ShareOfVoiceAnalytics.objects.filter(
+                    competitor=comp,
+                    platform__iexact=platform
+                ).order_by('-timestamp').first()
+                share_of_voice = float(sov.share_percentage) if sov else 0.0
+
+                # Build response matching serializer format
+                result.append({
+                    'id': comp.id,
+                    'domain': comp.domain_id,
+                    'domain_name': comp.domain.name,
+                    'name': comp.name,
+                    'url': comp.url,
+                    'track_status': comp.track_status,
+                    'track_message': comp.track_message,
+                    'tracked_at': comp.tracked_at,
+                    'total_mentions': int(total_mentions),
+                    'total_citations': total_citations,
+                    'visibility_score': round(visibility, 2),
+                    'sentiment_score': round(float(avg_sentiment), 2),
+                    'average_position': round(float(avg_position), 2),
+                    'share_of_voice_percentage': round(share_of_voice, 2),
+                    'trend_percentage': 0.0,  # Trend not calculated for platform filter
+                    'created_by': comp.created_by_id,
+                    'created_by_email': comp.created_by.email if comp.created_by else None,
+                    'created_at': comp.created_at,
+                    'modified_at': comp.modified_at,
+                })
+
+            return Response(result)
+
+        # No platform filter - return aggregated data
         queryset = self.get_queryset().filter(domain_id=domain_id)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
@@ -212,6 +280,7 @@ class CompetitorMetricSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = self.get_queryset()
         domain_id = request.query_params.get('domain_id')
         competitor_id = request.query_params.get('competitor_id')
+        platform = request.query_params.get('platform')  # NEW: Platform filter
         days = int(request.query_params.get('days', 90))
 
         if domain_id:
@@ -220,6 +289,20 @@ class CompetitorMetricSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(competitor_id=competitor_id)
         if days:
             queryset = queryset.filter(timestamp__gte=timezone.now() - timedelta(days=days))
+
+        # NEW: Filter by platform if provided (and not 'all')
+        if platform and platform.lower() != 'all':
+            # Filter snapshots that have platform_metrics matching the specified platform
+            from django.db.models import JSONField
+            import json
+            filtered_ids = []
+            for snap in queryset:
+                if snap.platform_metrics:
+                    for metric in snap.platform_metrics:
+                        if metric.get('platform', '').lower() == platform.lower():
+                            filtered_ids.append(snap.id)
+                            break
+            queryset = queryset.filter(id__in=filtered_ids) if filtered_ids else queryset.none()
 
         queryset = queryset.order_by('timestamp')
         serializer = self.get_serializer(queryset, many=True)
@@ -235,9 +318,10 @@ def competitive_strength_analysis(request):
     """
     try:
         domain_id = request.GET.get('domain_id')
+        platform = request.GET.get('platform')  # NEW: Platform filter
         if not domain_id:
             return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Get top 3 competitors (by share of voice) plus your brand
         competitors = Competitor.objects.filter(domain_id=domain_id).order_by('-share_of_voice_percentage')[:3]
         
@@ -249,10 +333,11 @@ def competitive_strength_analysis(request):
             return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
         
         # Get your brand's prompt analytics
-        your_prompts = PromptAnalytics.objects.filter(
-            prompt__group__domain_id=domain_id,
-            is_mention=True
-        )
+        your_prompts_filter = Q(prompt__group__domain_id=domain_id, is_mention=True)
+        # NEW: Filter by platform if specified
+        if platform and platform.lower() != 'all':
+            your_prompts_filter &= Q(platform__iexact=platform)
+        your_prompts = PromptAnalytics.objects.filter(your_prompts_filter)
         
         your_mentions = your_prompts.count()
         your_avg_position = float(your_prompts.aggregate(avg=Avg('position'))['avg'] or 0)
@@ -318,10 +403,11 @@ def competitive_strength_analysis(request):
         # For competitors, calculate coverage from CompetitorPromptAnalytics
         for idx, comp in enumerate(competitors):
             comp_name = normalize_brand_name(comp.name)
-            comp_analytics = CompetitorPromptAnalytics.objects.filter(
-                competitor=comp,
-                is_mentioned=True
-            )
+            comp_analytics_filter = Q(competitor=comp, is_mentioned=True)
+            # NEW: Filter by platform if specified
+            if platform and platform.lower() != 'all':
+                comp_analytics_filter &= Q(platform__iexact=platform)
+            comp_analytics = CompetitorPromptAnalytics.objects.filter(comp_analytics_filter)
             comp_total_prompts = comp_analytics.values('prompt').distinct().count()
             comp_mentioned = comp_analytics.count()
             comp_coverage = (comp_mentioned / comp_total_prompts * 100) if comp_total_prompts > 0 else 0
@@ -334,7 +420,11 @@ def competitive_strength_analysis(request):
         # For competitors, calculate growth from CompetitorAnalytics
         for idx, comp in enumerate(competitors):
             comp_name = normalize_brand_name(comp.name)
-            comp_analytics = CompetitorAnalytics.objects.filter(competitor=comp)
+            comp_analytics_filter = Q(competitor=comp)
+            # NEW: Filter by platform if specified
+            if platform and platform.lower() != 'all':
+                comp_analytics_filter &= Q(platform__iexact=platform)
+            comp_analytics = CompetitorAnalytics.objects.filter(comp_analytics_filter)
             last_30 = comp_analytics.filter(timestamp__gte=today - timedelta(days=30))
             prev_30 = comp_analytics.filter(
                 timestamp__gte=today - timedelta(days=60),
@@ -368,6 +458,7 @@ def competitive_insights(request):
     """
     try:
         domain_id = request.GET.get('domain_id')
+        platform = request.GET.get('platform')  # NEW: Platform filter
         if not domain_id:
             return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         
@@ -391,15 +482,18 @@ def competitive_insights(request):
             return Response(insights)
         
         # Get your brand's metrics
-        your_prompts = PromptAnalytics.objects.filter(
-            prompt__group__domain_id=domain_id,
-            is_mention=True
-        )
+        your_prompts_filter = Q(prompt__group__domain_id=domain_id, is_mention=True)
+        # NEW: Filter by platform if specified
+        if platform and platform.lower() != 'all':
+            your_prompts_filter &= Q(platform__iexact=platform)
+        your_prompts = PromptAnalytics.objects.filter(your_prompts_filter)
         your_mentions = your_prompts.count()
-        your_sov = ShareOfVoiceAnalytics.objects.filter(
-            domain_id=domain_id,
-            competitor__isnull=True
-        ).order_by('-timestamp').first()
+
+        your_sov_filter = Q(domain_id=domain_id, competitor__isnull=True)
+        # NEW: Filter by platform if specified
+        if platform and platform.lower() != 'all':
+            your_sov_filter &= Q(platform__iexact=platform)
+        your_sov = ShareOfVoiceAnalytics.objects.filter(your_sov_filter).order_by('-timestamp').first()
         your_sov_pct = float(your_sov.share_percentage) if your_sov else 0
         
         # Get top competitor
@@ -443,7 +537,11 @@ def competitive_insights(request):
         from datetime import date
         today = date.today()
         for comp in competitors[:2]:
-            comp_analytics = CompetitorAnalytics.objects.filter(competitor=comp)
+            comp_analytics_filter = Q(competitor=comp)
+            # NEW: Filter by platform if specified
+            if platform and platform.lower() != 'all':
+                comp_analytics_filter &= Q(platform__iexact=platform)
+            comp_analytics = CompetitorAnalytics.objects.filter(comp_analytics_filter)
             last_30 = comp_analytics.filter(timestamp__gte=today - timedelta(days=30))
             prev_30 = comp_analytics.filter(
                 timestamp__gte=today - timedelta(days=60),
@@ -464,12 +562,12 @@ def competitive_insights(request):
         
         # Insight 4: Opportunity Gaps
         # Find prompts where competitors are mentioned but you're not
-        comp_mentioned_prompts = CompetitorPromptAnalytics.objects.filter(
-            competitor__domain_id=domain_id,
-            is_mentioned=True,
-            position__lte=5
-        ).values_list('prompt_id', flat=True).distinct()
-        
+        comp_gap_filter = Q(competitor__domain_id=domain_id, is_mentioned=True, position__lte=5)
+        # NEW: Filter by platform if specified
+        if platform and platform.lower() != 'all':
+            comp_gap_filter &= Q(platform__iexact=platform)
+        comp_mentioned_prompts = CompetitorPromptAnalytics.objects.filter(comp_gap_filter).values_list('prompt_id', flat=True).distinct()
+
         your_mentioned_prompts = your_prompts.values_list('prompt_id', flat=True).distinct()
         gap_prompts = set(comp_mentioned_prompts) - set(your_mentioned_prompts)
         
@@ -507,20 +605,25 @@ def answer_gap_analysis(request):
     try:
         domain_id = request.GET.get('domain_id')
         competitor_id = request.GET.get('competitor_id')
-        
+        platform = request.GET.get('platform')  # NEW: Platform filter
+
         if not domain_id:
             return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Get your brand's mentioned prompts
-        your_mentioned_prompts = PromptAnalytics.objects.filter(
-            prompt__group__domain_id=domain_id,
-            is_mention=True
-        ).values_list('prompt_id', flat=True).distinct()
-        
+        your_prompts_filter = Q(prompt__group__domain_id=domain_id, is_mention=True)
+        # NEW: Filter by platform if specified
+        if platform and platform.lower() != 'all':
+            your_prompts_filter &= Q(platform__iexact=platform)
+        your_mentioned_prompts = PromptAnalytics.objects.filter(your_prompts_filter).values_list('prompt_id', flat=True).distinct()
+
         # Get competitor mentioned prompts
         comp_filter = Q(competitor__domain_id=domain_id, is_mentioned=True, position__lte=10)
         if competitor_id:
             comp_filter &= Q(competitor_id=competitor_id)
+        # NEW: Filter by platform if specified
+        if platform and platform.lower() != 'all':
+            comp_filter &= Q(platform__iexact=platform)
         
         comp_analytics = CompetitorPromptAnalytics.objects.filter(comp_filter).select_related(
             'competitor', 'prompt'
@@ -538,18 +641,18 @@ def answer_gap_analysis(request):
             processed_prompts.add(prompt_id)
             
             # Get all competitor mentions for this prompt
-            all_comp_mentions = CompetitorPromptAnalytics.objects.filter(
-                prompt_id=prompt_id,
-                competitor__domain_id=domain_id,
-                is_mentioned=True
-            )
-            
+            all_comp_filter = Q(prompt_id=prompt_id, competitor__domain_id=domain_id, is_mentioned=True)
+            # NEW: Filter by platform if specified
+            if platform and platform.lower() != 'all':
+                all_comp_filter &= Q(platform__iexact=platform)
+            all_comp_mentions = CompetitorPromptAnalytics.objects.filter(all_comp_filter)
+
             # Get your mentions for this prompt
-            your_mentions_count = PromptAnalytics.objects.filter(
-                prompt_id=prompt_id,
-                prompt__group__domain_id=domain_id,
-                is_mention=True
-            ).count()
+            your_count_filter = Q(prompt_id=prompt_id, prompt__group__domain_id=domain_id, is_mention=True)
+            # NEW: Filter by platform if specified
+            if platform and platform.lower() != 'all':
+                your_count_filter &= Q(platform__iexact=platform)
+            your_mentions_count = PromptAnalytics.objects.filter(your_count_filter).count()
             
             # Find which competitor has most mentions
             comp_mentions_by_comp = {}
@@ -605,6 +708,7 @@ def answer_gap_analysis(request):
 def competitor_heatmap(request):
     try:
         domain_id = request.GET.get('domain_id')
+        platform = request.GET.get('platform')  # NEW: Platform filter
         if not domain_id:
             return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         days = int(request.GET.get('days', 90))
@@ -634,6 +738,10 @@ def competitor_heatmap(request):
             platform_mentions = {}
             for metric in metrics:
                 platform_name = metric.get('platform') or 'Overall'
+                # NEW: Filter by platform if specified
+                if platform and platform.lower() != 'all':
+                    if platform_name.lower() != platform.lower():
+                        continue
                 mentions = float(metric.get('mentions') or 0)
                 if mentions <= 0:
                     continue
@@ -652,18 +760,18 @@ def competitor_heatmap(request):
 
         if not any(row['isYou'] for row in rows):
             your_platforms = defaultdict(float)
-            sov_records = ShareOfVoiceAnalytics.objects.filter(
-                domain_id=domain_id,
-                competitor__isnull=True,
-                timestamp__gte=since
-            )
+            sov_filter = Q(domain_id=domain_id, competitor__isnull=True, timestamp__gte=since)
+            # NEW: Filter by platform if specified
+            if platform and platform.lower() != 'all':
+                sov_filter &= Q(platform__iexact=platform)
+            sov_records = ShareOfVoiceAnalytics.objects.filter(sov_filter)
             for record in sov_records:
-                platform = record.platform or 'Overall'
+                plat_name = record.platform or 'Overall'
                 mentions = float(record.mention_count or 0)
                 if mentions <= 0:
                     continue
-                your_platforms[platform] += mentions
-                platform_totals[platform] += mentions
+                your_platforms[plat_name] += mentions
+                platform_totals[plat_name] += mentions
             if your_platforms:
                 rows.append({
                     'name': 'Your Brand',

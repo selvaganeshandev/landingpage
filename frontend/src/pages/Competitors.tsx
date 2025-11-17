@@ -132,8 +132,9 @@ const VisibilityTooltip = ({ active, label, payload, disabledBrands }: Visibilit
 
 const Competitors = () => {
   const navigate = useNavigate();
-  const [timePeriod, setTimePeriod] = useState("90");
+  const [timePeriod, setTimePeriod] = useState("7");
   const [selectedTab, setSelectedTab] = useState("overview");
+  const [selectedLLM, setSelectedLLM] = useState("all");
   const { toast } = useToast();
   const { navigateToContentGeneration } = useContentGeneration();
   const [addCompetitorDialogOpen, setAddCompetitorDialogOpen] = useState(false);
@@ -225,13 +226,14 @@ const Competitors = () => {
       setIsPageLoading(true);
       try {
         // Load main competitor data first
+        const platformParam = selectedLLM !== 'all' ? selectedLLM : undefined;
         const [list, latest, byDomain, compPromptAnalytics, snapshotHistory, heatmapResponse] = await Promise.all([
-          apiClient.getEngineCompetitors({ domain_id: domainId }),
+          apiClient.getEngineCompetitors({ domain_id: domainId, platform: platformParam }),
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }),
           apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }),
           apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId }),
-          apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod) }),
-          apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod) }),
+          apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }),
+          apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }),
         ] as any);
 
         // Load competitive analysis APIs separately with better error handling
@@ -241,10 +243,13 @@ const Competitors = () => {
         let gaps: any = undefined;
 
         try {
-          console.log('🔵 API CALL: Loading competitive strength analysis for domain:', domainId);
-          const url = `/competitors/competitive-strength-analysis?domain_id=${domainId}`;
+          console.log('🔵 API CALL: Loading competitive strength analysis for domain:', domainId, 'platform:', selectedLLM);
+          const url = `/competitors/competitive-strength-analysis?domain_id=${domainId}${selectedLLM !== 'all' ? `&platform=${selectedLLM}` : ''}`;
           console.log('🔵 API URL:', url);
-          strengthAnalysis = await apiClient.getCompetitiveStrengthAnalysis({ domain_id: domainId });
+          strengthAnalysis = await apiClient.getCompetitiveStrengthAnalysis({
+            domain_id: domainId,
+            platform: selectedLLM !== 'all' ? selectedLLM : undefined
+          });
           console.log('✅ Competitive strength analysis response:', strengthAnalysis);
           console.log('✅ Response type:', typeof strengthAnalysis, 'Is array:', Array.isArray(strengthAnalysis));
           // If API returns empty array, that's valid - we'll show empty state
@@ -260,10 +265,13 @@ const Competitors = () => {
         }
 
         try {
-          console.log('🔵 API CALL: Loading competitive insights for domain:', domainId);
-          const url = `/competitors/competitive-insights?domain_id=${domainId}`;
+          console.log('🔵 API CALL: Loading competitive insights for domain:', domainId, 'platform:', selectedLLM);
+          const url = `/competitors/competitive-insights?domain_id=${domainId}${selectedLLM !== 'all' ? `&platform=${selectedLLM}` : ''}`;
           console.log('🔵 API URL:', url);
-          insights = await apiClient.getCompetitiveInsights({ domain_id: domainId });
+          insights = await apiClient.getCompetitiveInsights({
+            domain_id: domainId,
+            platform: selectedLLM !== 'all' ? selectedLLM : undefined
+          });
           console.log('✅ Competitive insights response:', insights);
           console.log('✅ Response type:', typeof insights, 'Is array:', Array.isArray(insights));
           // If API returns empty array, that's valid - we'll show empty state
@@ -279,10 +287,13 @@ const Competitors = () => {
         }
 
         try {
-          console.log('🔵 API CALL: Loading answer gap analysis for domain:', domainId);
-          const url = `/competitors/answer-gap-analysis?domain_id=${domainId}`;
+          console.log('🔵 API CALL: Loading answer gap analysis for domain:', domainId, 'platform:', selectedLLM);
+          const url = `/competitors/answer-gap-analysis?domain_id=${domainId}${selectedLLM !== 'all' ? `&platform=${selectedLLM}` : ''}`;
           console.log('🔵 API URL:', url);
-          gaps = await apiClient.getAnswerGapAnalysis({ domain_id: domainId });
+          gaps = await apiClient.getAnswerGapAnalysis({
+            domain_id: domainId,
+            platform: selectedLLM !== 'all' ? selectedLLM : undefined
+          });
           console.log('✅ Answer gap analysis response:', gaps);
           console.log('✅ Response type:', typeof gaps, 'Is array:', Array.isArray(gaps));
           // If API returns empty array, that's valid - we'll show empty state
@@ -304,8 +315,15 @@ const Competitors = () => {
         const mapped = (Array.isArray(list) ? list : list?.results || []).map((c: any, idx: number) => {
           // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
           // Formula: (sentiment + 1) * 50 to normalize -1..1 to 0..100
+          // Special case: -1 (no data) or 0 with no mentions should show 0%
           const rawSentiment = Number(c.sentiment_score || 0);
-          const sentimentPercent = Math.round((rawSentiment + 1) * 50);
+          const totalMentions = Number(c.total_mentions || 0);
+          let sentimentPercent = 0;
+          if (rawSentiment === -1 || (rawSentiment === 0 && totalMentions === 0)) {
+            sentimentPercent = 0; // No data or unmentioned
+          } else {
+            sentimentPercent = Math.round((rawSentiment + 1) * 50);
+          }
           
           return {
             id: c.id,
@@ -547,7 +565,7 @@ const Competitors = () => {
       }
     };
     void load();
-  }, [domainId, timePeriod]); // Removed selectedDomain?.url and selectedDomain?.name to prevent infinite loop
+  }, [domainId, timePeriod, selectedLLM]); // Removed selectedDomain?.url and selectedDomain?.name to prevent infinite loop
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
@@ -591,8 +609,15 @@ const Competitors = () => {
         if (list && Array.isArray(list)) {
           const mapped = list.map((c: any) => {
             // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
+            // Special case: -1 (no data) or 0 with no mentions should show 0%
             const rawSentiment = Number(c.sentiment_score || 0);
-            const sentimentPercent = Math.round((rawSentiment + 1) * 50);
+            const totalMentions = Number(c.total_mentions || 0);
+            let sentimentPercent = 0;
+            if (rawSentiment === -1 || (rawSentiment === 0 && totalMentions === 0)) {
+              sentimentPercent = 0; // No data or unmentioned
+            } else {
+              sentimentPercent = Math.round((rawSentiment + 1) * 50);
+            }
             
             return {
               id: c.id,
@@ -643,6 +668,63 @@ const Competitors = () => {
     return <PageLoader sidebarOpen />;
   }
 
+  // Check if all competitor details are showing zero values
+  const allCompetitorsHaveZeroData = competitors.length > 0 && competitors.every(c => 
+    c.mentions === 0 && 
+    c.citations === 0 && 
+    c.visibility === 0 && 
+    c.shareOfVoice === 0 && 
+    c.sentiment === 0
+  );
+
+  // Check if filtering by platform returns no data or only zero values
+  // Also check if all competitors have zero data (even without filter)
+  const hasNoDataForPlatform = (selectedLLM !== 'all' && (
+    (competitors.length === 0 || competitors.every(c => c.mentions === 0 && c.citations === 0)) &&
+    competitiveMetrics.length === 0 &&
+    heatmap.length === 0 &&
+    answerGapData.length === 0
+  )) || allCompetitorsHaveZeroData;
+
+  // Show empty state when filtering by platform returns no data or all competitors have zero data
+  if (hasNoDataForPlatform) {
+    return (
+      <div className="p-8 space-y-6 bg-background animate-fade-in">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-foreground tracking-tight">Competitors</h1>
+            <p className="text-muted-foreground mt-1">
+              Track and analyze competitor performance across AI platforms
+            </p>
+          </div>
+        </div>
+
+        {/* Empty state for filtered platform with no data */}
+        <div className="flex flex-col items-center justify-center py-32 space-y-6">
+          <div className="w-24 h-24 rounded-full bg-muted/30 flex items-center justify-center mb-4">
+            <Search className="h-12 w-12 text-muted-foreground" />
+          </div>
+          <h3 className="text-2xl font-semibold text-foreground">No Data for {selectedLLM !== 'all' ? selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1) : 'Competitors'}</h3>
+          <p className="text-sm text-muted-foreground max-w-md text-center">
+            {selectedLLM !== 'all'
+              ? "There is no competitor data available for the selected LLM platform. This could mean competitors haven't been analyzed on this platform yet, or no mentions were found."
+              : "All competitor details are showing zero values. This could mean competitors haven't been analyzed yet, or no mentions were found."
+            }
+          </p>
+          <div className="flex gap-3 mt-6">
+            <Button
+              onClick={() => setSelectedLLM('all')}
+              className="gradient-primary"
+              size="lg"
+            >
+              Clear Filter & View All LLMs
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
       {/* Header */}
@@ -677,17 +759,17 @@ const Competitors = () => {
 
               <div className="flex items-center gap-3">
                 <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
-                <Select defaultValue="all">
+                <Select value={selectedLLM} onValueChange={setSelectedLLM}>
                   <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="All Competitors" />
+                    <SelectValue placeholder="All LLMs" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Competitors</SelectItem>
-                    {competitors.map((comp) => (
-                      <SelectItem key={comp.id} value={String(comp.id)}>
-                        {comp.name}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="all">All LLMs</SelectItem>
+                    <SelectItem value="chatgpt">ChatGPT</SelectItem>
+                    <SelectItem value="claude">Claude</SelectItem>
+                    <SelectItem value="gemini">Gemini</SelectItem>
+                    <SelectItem value="perplexity">Perplexity</SelectItem>
+                    <SelectItem value="grok">Grok</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -705,10 +787,9 @@ const Competitors = () => {
                   key={competitor.id}
                   className={`p-6 transition-all duration-300 backdrop-blur-sm bg-card/80 ${
                     competitor.isYou
-                      ? 'border-2 border-primary cursor-default'
-                      : 'cursor-pointer border border-border hover:border-primary'
+                      ? 'border-2 border-primary'
+                      : 'border border-border hover:border-primary'
                   }`}
-                  onClick={() => !competitor.isYou && navigate(`/competitors/${competitor.url.replace('.com', '')}`)}
                 >
                   <div className="space-y-4">
                     <div className="flex items-start justify-between">
@@ -770,7 +851,12 @@ const Competitors = () => {
                         </div>
                       </div>
                       {!competitor.isYou && (
-                        <Button variant="ghost" size="sm" className="text-primary">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-primary"
+                          onClick={() => navigate(`/competitors/${competitor.url.replace('.com', '')}`)}
+                        >
                           View Details →
                         </Button>
                       )}
@@ -1043,50 +1129,6 @@ const Competitors = () => {
                   )}
                 </div>
               </Card>
-            </div>
-
-            {/* Platform Breakdown + Top Brands */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80 h-full">
-                <h3 className="text-lg font-semibold mb-6 font-inter">Platform-Specific Competition</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {Object.keys(platformMap).length > 0 ? (
-                    Object.entries(platformMap).map(([platform, data]) => (
-                      <div key={platform} className="space-y-4">
-                        <h4 className="font-medium text-center">{platform}</h4>
-                        <ResponsiveContainer width="100%" height={200}>
-                          <BarChart data={data}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                            <XAxis 
-                              dataKey="brand" 
-                              stroke="hsl(var(--muted-foreground))" 
-                              fontSize={10}
-                              angle={-45}
-                              textAnchor="end"
-                              height={80}
-                            />
-                            <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} />
-                            <Tooltip />
-                            <Bar dataKey="mentions" radius={[8, 8, 0, 0]}>
-                              <Cell fill="hsl(var(--primary))" />
-                              <Cell fill="hsl(var(--chart-2))" />
-                              <Cell fill="hsl(var(--chart-3))" />
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="col-span-full flex items-center justify-center py-8">
-                      <p className="text-sm text-muted-foreground">No platform data available yet.</p>
-                    </div>
-                  )}
-                </div>
-              </Card>
-              <TopBrandsList
-                brands={topBrands}
-                totalMentions={topBrands.length ? topBrands.reduce((s, b) => s + b.mentions, 0) : 0}
-              />
             </div>
               </>
             )}
