@@ -81,7 +81,13 @@ class CompetitorPromptAnalyticsSerializer(serializers.ModelSerializer):
 
 
 class CompetitorMetricSnapshotSerializer(serializers.ModelSerializer):
-    competitor_name = serializers.CharField(source='competitor.name', read_only=True)
+    competitor_name = serializers.SerializerMethodField()
+    
+    def get_competitor_name(self, obj):
+        """Return competitor name, or 'Your Brand' if competitor is None (domain snapshot)"""
+        if obj.competitor is None:
+            return 'Your Brand'
+        return obj.competitor.name if obj.competitor else 'Unknown'
 
     class Meta:
         model = CompetitorMetricSnapshot
