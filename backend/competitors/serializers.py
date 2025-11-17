@@ -4,7 +4,8 @@ from .models import (
     CompetitorAnalytics,
     CompetitorPrompt,
     CompetitorPromptAnalytics,
-    CompetitorMetricSnapshot
+    CompetitorMetricSnapshot,
+    CompetitiveInsight,
 )
 
 
@@ -99,6 +100,27 @@ class CompetitorMetricSnapshotSerializer(serializers.ModelSerializer):
             'trend_percentage',
             'track_status',
             'created_at',
+        ]
+        read_only_fields = fields
+
+
+class CompetitiveInsightSerializer(serializers.ModelSerializer):
+    type = serializers.CharField(source='insight_type', read_only=True)
+
+    class Meta:
+        model = CompetitiveInsight
+        fields = [
+            'id',
+            'domain',
+            'title',
+            'description',
+            'type',
+            'category',
+            'impact',
+            'snapshot_version',
+            'insight_data',
+            'model_name',
+            'generated_at',
         ]
         read_only_fields = fields
 

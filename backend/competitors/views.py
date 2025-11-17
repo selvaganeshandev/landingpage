@@ -7,13 +7,14 @@ from django.shortcuts import get_object_or_404
 from collections import defaultdict
 from datetime import timedelta
 from django.utils import timezone
-from .models import Competitor, CompetitorAnalytics, CompetitorPrompt, CompetitorPromptAnalytics, CompetitorMetricSnapshot
+from .models import Competitor, CompetitorAnalytics, CompetitorPrompt, CompetitorPromptAnalytics, CompetitorMetricSnapshot, CompetitiveInsight
 from domains.models import Domain
 from prompts.models import PromptAnalytics
 from analytics.models import ShareOfVoiceAnalytics
 from .serializers import (
     CompetitorSerializer, CompetitorAnalyticsSerializer, CompetitorPromptSerializer,
-    CompetitorPromptAnalyticsSerializer, CompetitorMetricSnapshotSerializer
+    CompetitorPromptAnalyticsSerializer, CompetitorMetricSnapshotSerializer,
+    CompetitiveInsightSerializer
 )
 
 
@@ -376,6 +377,11 @@ def competitive_insights(request):
         except Domain.DoesNotExist:
             return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
         
+        stored_insights_qs = CompetitiveInsight.objects.filter(domain=domain).order_by('-generated_at')
+        if stored_insights_qs.exists():
+            serializer = CompetitiveInsightSerializer(stored_insights_qs[:2], many=True)
+            return Response(serializer.data)
+        
         insights = []
         
         # Get competitors ordered by share of voice
@@ -479,7 +485,7 @@ def competitive_insights(request):
                     'impact': 'high'
                 })
         
-        return Response(insights[:4])  # Return top 4 insights
+        return Response(insights[:2])  # Return top 2 insights
         
     except Exception as e:
         import traceback

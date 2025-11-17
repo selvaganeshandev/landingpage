@@ -188,3 +188,39 @@ class CompetitorMetricSnapshot(models.Model):
         label = self.competitor.name if self.competitor else self.domain.name
         return f"{label} snapshot @ {self.timestamp}"
 
+
+class CompetitiveInsight(models.Model):
+    """
+    Stores AI-generated competitive insights persisted per domain and snapshot version.
+    """
+    IMPACT_CHOICES = [
+        ('high', 'High'),
+        ('medium', 'Medium'),
+        ('low', 'Low'),
+    ]
+
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='competitive_insights')
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    insight_type = models.CharField(max_length=100, blank=True, null=True)
+    category = models.CharField(max_length=100, blank=True, null=True)
+    impact = models.CharField(max_length=20, choices=IMPACT_CHOICES, default='medium')
+    snapshot_version = models.CharField(max_length=255)
+    insight_data = models.JSONField(default=dict, blank=True)
+    model_name = models.CharField(max_length=100, blank=True, null=True)
+    generated_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'competitive_insights'
+        ordering = ['-generated_at']
+        indexes = [
+            models.Index(fields=['domain', '-generated_at']),
+            models.Index(fields=['domain', 'snapshot_version']),
+            models.Index(fields=['impact']),
+        ]
+        unique_together = [('domain', 'snapshot_version', 'title')]
+
+    def __str__(self):
+        return f"{self.domain.name} insight: {self.title}"
+

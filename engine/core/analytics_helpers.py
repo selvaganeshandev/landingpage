@@ -24,10 +24,26 @@ def process_prompt_with_perplexity(prompt_text: str, user_domain: str, client: A
     return process_prompt_with_perplexity_wrapper(prompt_text, user_domain, client, group)
 
 def get_openai_client():
-	"""Return OpenAI client if configured in Django settings; else raise."""
+	"""
+	Initialize and return OpenAI client using settings from database or .env.
+	Uses the same method as ChatGPTClient for consistency - reads from settings.OPENAI_API_KEY
+	which comes from engine/.env via python-decouple.
+	"""
+	# First try database Settings model (if available)
+	try:
+		from serp.models import Settings
+		settings_obj = Settings.objects.first()
+		if settings_obj and settings_obj.chatgpt_enabled and settings_obj.chatgpt_api_key:
+			from openai import OpenAI
+			return OpenAI(api_key=settings_obj.chatgpt_api_key, timeout=60)
+	except (ImportError, Exception):
+		pass  # Fall through to .env method
+	
+	# Fallback to .env file (same as ChatGPTClient)
 	api_key = getattr(settings, "OPENAI_API_KEY", None)
 	if not api_key:
-		raise Exception("OpenAI API key not configured")
+		raise Exception("OpenAI API key not configured. Set OPENAI_API_KEY in engine/.env file")
+	
 	try:
 		from openai import OpenAI  # lazy import
 		return OpenAI(api_key=api_key, timeout=60)

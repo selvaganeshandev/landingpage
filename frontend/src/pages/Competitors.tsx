@@ -155,6 +155,7 @@ const Competitors = () => {
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [hasLoadedData, setHasLoadedData] = useState(false);
   const [disabledBrands, setDisabledBrands] = useState<string[]>([]);
+  const [strengthDisabledBrands, setStrengthDisabledBrands] = useState<string[]>([]);
 
   const sortHeatmapRows = (rows: any[], platformKeys: string[]) => {
     if (!Array.isArray(rows) || rows.length === 0) return rows;
@@ -844,16 +845,23 @@ const Competitors = () => {
 
             {/* Competitive Analysis */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold">Competitive Strength Analysis</h3>
-                  {isLoadingAnalysis && (
-                    <span className="text-xs text-muted-foreground">Loading...</span>
-                  )}
+              <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80 flex flex-col">
+                <div className="space-y-1 mb-6">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold font-inter">Competitive Strength Analysis</h3>
+                    {isLoadingAnalysis && (
+                      <span className="text-xs text-muted-foreground">Loading...</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Radar view of how each brand scores across visibility, sentiment, position, coverage, and growth.
+                  </p>
                 </div>
                 {competitiveMetrics && competitiveMetrics.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={450}>
-                    <RadarChart data={competitiveMetrics} margin={{ top: 60, right: 80, bottom: 60, left: 80 }}>
+                  <div className="flex-1 min-h-[360px] flex items-center justify-center">
+                    <div className="w-full max-w-[520px] translate-y-[-20px]">
+                      <ResponsiveContainer width="100%" height={420}>
+                        <RadarChart data={competitiveMetrics} margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
                       <PolarGrid stroke="hsl(var(--border))" />
                       <PolarAngleAxis
                         dataKey="metric"
@@ -873,7 +881,21 @@ const Competitors = () => {
                           borderRadius: "var(--radius)",
                         }}
                       />
-                      <Legend />
+                      <Legend
+                        content={(props: LegendProps) => (
+                          <VisibilityLegend
+                            {...props}
+                            disabledBrands={strengthDisabledBrands}
+                            onToggle={(brand) => {
+                              setStrengthDisabledBrands((prev) =>
+                                prev.includes(brand)
+                                  ? prev.filter((b) => b !== brand)
+                                  : [...prev, brand]
+                              );
+                            }}
+                          />
+                        )}
+                      />
                       {competitiveMetrics[0] && Object.keys(competitiveMetrics[0]).filter(k => k !== 'metric').map((brandKey, idx) => {
                         const colors = [
                           { stroke: "hsl(var(--primary))", fill: "hsl(var(--primary))", opacity: 0.3 },
@@ -883,6 +905,7 @@ const Competitors = () => {
                         const color = colors[idx] || colors[0];
                         // Format brand name for display
                         const displayName = brandKey.charAt(0).toUpperCase() + brandKey.slice(1).replace(/([A-Z])/g, ' $1');
+                        const disabled = strengthDisabledBrands.includes(displayName);
                         return (
                           <Radar
                             key={brandKey}
@@ -890,13 +913,17 @@ const Competitors = () => {
                             dataKey={brandKey}
                             stroke={color.stroke}
                             fill={color.fill}
-                            fillOpacity={color.opacity}
+                            fillOpacity={disabled ? 0.05 : color.opacity}
                             strokeWidth={idx === 0 ? 2 : 1.5}
+                            strokeOpacity={disabled ? 0.25 : 1}
+                            strokeDasharray={disabled ? "6 6" : undefined}
                           />
                         );
                       })}
-                    </RadarChart>
-                  </ResponsiveContainer>
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-64 space-y-2">
                     <p className="text-sm text-muted-foreground">No competitive strength data available yet.</p>
@@ -906,36 +933,61 @@ const Competitors = () => {
               </Card>
 
               <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold font-inter">Competitive Intelligence</h3>
-                  {isLoadingAnalysis && (
-                    <span className="text-xs text-muted-foreground">Loading...</span>
-                  )}
+                <div className="space-y-1 mb-6">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold font-inter">Competitive Intelligence</h3>
+                    {isLoadingAnalysis && (
+                      <span className="text-xs text-muted-foreground">Loading...</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    AI-generated callouts that summarize notable wins, risks, and opportunities for your domain.
+                  </p>
                 </div>
                 <div className="space-y-3">
                   {competitiveInsights && competitiveInsights.length > 0 ? (
-                    competitiveInsights.map((insight: any, idx: number) => (
-                      <div key={idx} className="p-5 rounded-xl transition-all duration-300 border border-border hover:border-primary bg-card/50">
-                        <div className="flex items-start gap-3">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md ${
-                            insight.type === 'success' ? 'bg-success/10 text-success' :
-                            insight.type === 'warning' ? 'bg-warning/10 text-warning' :
-                            'gradient-primary text-white'
-                          }`}>
-                            <Target className="h-5 w-5" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <h4 className="font-semibold text-sm font-inter">{insight.title}</h4>
-                              <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
-                                {insight.impact}
-                              </Badge>
+                    <>
+                      {competitiveInsights.slice(0, 2).map((insight: any, idx: number) => (
+                        <div key={idx} className="p-5 rounded-xl transition-all duration-300 border border-border hover:border-primary bg-card/50">
+                          <div className="flex items-start gap-3">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md ${
+                              insight.type === 'success' ? 'bg-success/10 text-success' :
+                              insight.type === 'warning' ? 'bg-warning/10 text-warning' :
+                              'gradient-primary text-white'
+                            }`}>
+                              <Target className="h-5 w-5" />
                             </div>
-                            <p className="text-sm text-muted-foreground leading-relaxed">{insight.description}</p>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <h4 className="font-semibold text-sm font-inter">{insight.title}</h4>
+                                <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
+                                  {insight.impact}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground leading-relaxed">{insight.description}</p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))
+                      ))}
+                      {competitiveInsights.length > 2 && (
+                        <div className="flex justify-end pt-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-primary hover:text-primary/80"
+                            onClick={() => {
+                              // TODO: Implement view all insights modal or navigate to insights page
+                              toast({
+                                title: "View All Insights",
+                                description: `Showing ${competitiveInsights.length} total insights`,
+                              });
+                            }}
+                          >
+                            View All ({competitiveInsights.length})
+                          </Button>
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-8 space-y-2">
                       <p className="text-sm text-muted-foreground">No competitive insights available yet.</p>

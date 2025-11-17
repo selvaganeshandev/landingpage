@@ -10,8 +10,15 @@ from shared_models.models import Domain, Keyword, PromptGroup, Prompt, PromptAna
 from .rest_client import DataForSEOClient
 from .chatgpt_client import ChatGPTClient
 import numpy as np
-from sentence_transformers import SentenceTransformer
-from sklearn.cluster import KMeans
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:  # pragma: no cover
+    SentenceTransformer = None
+
+try:
+    from sklearn.cluster import KMeans
+except ImportError:  # pragma: no cover
+    KMeans = None
 from datetime import date
 
 
@@ -479,6 +486,8 @@ class DomainProcessor:
         if not prompts:
             return []
 
+        if SentenceTransformer is None:
+            raise RuntimeError("sentence_transformers is required but not installed.")
         model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
         texts = [p.get('prompt_text') or p.get('prompt') for p in prompts]
         embeddings = model.encode(texts, convert_to_numpy=True)
@@ -489,6 +498,8 @@ class DomainProcessor:
             k = max(1, min(10, n // 5))
         else:
             k = max(1, min(2, n))
+        if KMeans is None:
+            raise RuntimeError("scikit-learn is required but not installed.")
         kmeans = KMeans(n_clusters=k, n_init=10, random_state=42)
         labels = kmeans.fit_predict(embeddings)
 
