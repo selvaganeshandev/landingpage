@@ -27,6 +27,7 @@ class Competitor(models.Model):
     track_message = models.TextField(blank=True, null=True)
     tracked_at = models.DateTimeField(null=True, blank=True)
     total_mentions = models.IntegerField(default=0)
+    total_citations = models.IntegerField(default=0)
     visibility_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     sentiment_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     average_position = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)

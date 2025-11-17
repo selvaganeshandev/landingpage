@@ -536,6 +536,7 @@ class CompetitorProcessor:
             with transaction.atomic():
                 comp = Competitor.objects.select_for_update().get(id=competitor.id)
                 comp.total_mentions = totals['total_mentions'] or 0
+                comp.total_citations = total_citations
                 comp.average_position = totals['avg_position'] or 0.0
                 comp.sentiment_score = totals['avg_sentiment'] or 0.0
                 comp.visibility_score = self._calculate_visibility_score(
@@ -544,7 +545,7 @@ class CompetitorProcessor:
                     avg_position=totals['avg_position']
                 )
                 comp.save(update_fields=[
-                    'total_mentions', 'average_position', 'sentiment_score', 
+                    'total_mentions', 'total_citations', 'average_position', 'sentiment_score',
                     'visibility_score', 'modified_at'
                 ])
             

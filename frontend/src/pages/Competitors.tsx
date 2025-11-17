@@ -140,6 +140,7 @@ const Competitors = () => {
   const { user } = useAuth();
   const { selectedDomain } = useDomainStore();
   const [domainId, setDomainId] = useState<string | null>(null);
+  const [loadedDomainId, setLoadedDomainId] = useState<string | null>(null);
   const [competitors, setCompetitors] = useState<any[]>([]);
   const [sovLatest, setSovLatest] = useState<any>(null);
   const [sovSeries, setSovSeries] = useState<any[]>([]);
@@ -178,11 +179,27 @@ const Competitors = () => {
   // Sync domainId from selectedDomain (Zustand store) or server when domain changes
   useEffect(() => {
     if (!user) return;
-    
+
     // Priority 1: Use selectedDomain from Zustand store (most up-to-date when user changes domain)
     if (selectedDomain?.id) {
       const newDomainId = String(selectedDomain.id);
       if (newDomainId !== domainId) {
+        // Clear all state when domain changes to prevent flash of old data
+        setCompetitors([]);
+        setSovLatest(null);
+        setSovSeries([]);
+        setPlatformMap({});
+        setHeatmap([]);
+        setHeatmapPlatforms([]);
+        setTopBrands([]);
+        setPromptCards([]);
+        setCompetitiveMetrics([]);
+        setCompetitiveInsights([]);
+        setAnswerGapData([]);
+        setHasLoadedData(false);
+        setIsPageLoading(true);
+        setLoadedDomainId(null); // Clear loaded domain ID to indicate we haven't loaded this domain yet
+
         setDomainId(newDomainId);
         return;
       }
@@ -282,6 +299,7 @@ const Competitors = () => {
         
         setIsLoadingAnalysis(false);
         setHasLoadedData(true);
+        setLoadedDomainId(domainId); // Mark this domain as loaded
         // Normalize competitor list
         const mapped = (Array.isArray(list) ? list : list?.results || []).map((c: any, idx: number) => {
           // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
@@ -294,9 +312,10 @@ const Competitors = () => {
             name: c.name,
             url: c.url || (c.domain_name || '').toLowerCase(),
             mentions: c.total_mentions || 0,
+            citations: c.total_citations || 0,
             visibility: Math.round(Number(c.visibility_score || 0)),
             sentiment: sentimentPercent,
-            avgPosition: Number(c.average_position || 0).toFixed ? Number(c.average_position).toFixed(1) : (c.average_position || 0),
+            averagePosition: Number(c.average_position || 0),
             shareOfVoice: Math.round(Number(c.share_of_voice_percentage || 0)),
             trend: Number(c.trend_percentage || 0),
             color: idx === 0 ? 'hsl(var(--primary))' : idx === 1 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-3))',
@@ -522,12 +541,13 @@ const Competitors = () => {
       } catch (e: any) {
         toast({ title: 'Failed to load competitors', description: String(e.message || e), variant: 'destructive' });
         setHasLoadedData(true);
+        setLoadedDomainId(domainId); // Mark as loaded even on error to stop infinite loading
       } finally {
         setIsPageLoading(false);
       }
     };
     void load();
-  }, [domainId, timePeriod, selectedDomain?.url, selectedDomain?.name]);
+  }, [domainId, timePeriod]); // Removed selectedDomain?.url and selectedDomain?.name to prevent infinite loop
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
@@ -617,7 +637,9 @@ const Competitors = () => {
 
   const heatmapData = heatmap;
 
-  if (isPageLoading || !hasLoadedData) {
+  // Show loading during initial load or when switching domains
+  // Keep showing loader until we've loaded data for the current domain
+  if (isPageLoading || !hasLoadedData || loadedDomainId !== domainId) {
     return <PageLoader sidebarOpen />;
   }
 
@@ -645,31 +667,32 @@ const Competitors = () => {
         </div>
 
         <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
-          <div className="flex items-center justify-between gap-4 mb-6">
-            <TabsList className="bg-muted/50 p-1 border border-border">
-              <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Overview</TabsTrigger>
-              <TabsTrigger value="prompts" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Prompts</TabsTrigger>
-              <TabsTrigger value="competitors" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Competitors</TabsTrigger>
-              <TabsTrigger value="answer-gap" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Answer Gap</TabsTrigger>
-            </TabsList>
+          {competitors.length > 0 && (
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <TabsList className="bg-muted/50 p-1 border border-border">
+                <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Overview</TabsTrigger>
+                <TabsTrigger value="prompts" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Prompts</TabsTrigger>
+                <TabsTrigger value="answer-gap" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Answer Gap</TabsTrigger>
+              </TabsList>
 
-            <div className="flex items-center gap-3">
-              <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
-              <Select defaultValue="all">
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue placeholder="All Competitors" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Competitors</SelectItem>
-                  {competitors.length > 0 && competitors.map((comp) => (
-                    <SelectItem key={comp.id} value={String(comp.id)}>
-                      {comp.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-3">
+                <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
+                <Select defaultValue="all">
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="All Competitors" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Competitors</SelectItem>
+                    {competitors.map((comp) => (
+                      <SelectItem key={comp.id} value={String(comp.id)}>
+                        {comp.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6 mt-0">
@@ -703,24 +726,32 @@ const Competitors = () => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-3 gap-3">
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Mentions</p>
-                        <p className="text-2xl font-bold font-inter">{competitor.mentions}</p>
+                        <p className="text-xl font-bold font-inter">{competitor.mentions}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border">
+                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Citations</p>
+                        <p className="text-xl font-bold font-inter">{competitor.citations || 0}</p>
                       </div>
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Share</p>
-                        <p className="text-2xl font-bold font-inter">{competitor.shareOfVoice}%</p>
+                        <p className="text-xl font-bold font-inter">{competitor.shareOfVoice}%</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border">
+                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Avg Position</p>
+                        <p className="text-lg font-bold font-inter">{competitor.averagePosition?.toFixed(1) || '0.0'}</p>
                       </div>
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Visibility</p>
                         <p className="text-lg font-bold font-inter">{competitor.visibility}%</p>
-                        <Progress value={competitor.visibility} className="h-1.5 mt-2" />
+                        <Progress value={competitor.visibility} className="h-1.5 mt-1" />
                       </div>
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Sentiment</p>
                         <p className="text-lg font-bold font-inter">{competitor.sentiment}%</p>
-                        <Progress value={competitor.sentiment} className="h-1.5 mt-2" />
+                        <Progress value={competitor.sentiment} className="h-1.5 mt-1" />
                       </div>
                     </div>
 
@@ -748,13 +779,29 @@ const Competitors = () => {
                 </Card>
                 ))
               ) : (
-                <div className="col-span-full flex flex-col items-center justify-center py-12 space-y-2">
-                  <p className="text-sm text-muted-foreground">No competitors data available yet.</p>
-                  <p className="text-xs text-muted-foreground">Check console for API response details.</p>
+                <div className="col-span-full flex flex-col items-center justify-center py-32 space-y-4">
+                  <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                    <Target className="h-10 w-10 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-foreground">No Competitors Added Yet</h3>
+                  <p className="text-sm text-muted-foreground max-w-md text-center">
+                    Track your competitors to see how your brand performs against them in AI search results.
+                  </p>
+                  <Button
+                    onClick={() => setAddCompetitorDialogOpen(true)}
+                    className="mt-4 gradient-primary"
+                    size="lg"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Your Competitor
+                  </Button>
                 </div>
               )}
             </div>
 
+            {/* Show rest of content only if there are competitors */}
+            {competitors.length > 0 && (
+              <>
             {/* Brand Visibility Over Time */}
             <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
               <div className="space-y-6">
@@ -1041,6 +1088,8 @@ const Competitors = () => {
                 totalMentions={topBrands.length ? topBrands.reduce((s, b) => s + b.mentions, 0) : 0}
               />
             </div>
+              </>
+            )}
           </TabsContent>
 
           {/* Prompts Tab */}
@@ -1106,71 +1155,6 @@ const Competitors = () => {
                 </div>
               </div>
             </Card>
-          </TabsContent>
-
-          {/* Competitors Tab */}
-          <TabsContent value="competitors" className="space-y-6 mt-6">
-            <div className="grid grid-cols-1 gap-6">
-              {competitors.length > 0 ? (
-                competitors.map((competitor) => (
-                <Card key={competitor.id} className="p-6">
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className="w-16 h-16 rounded-2xl gradient-primary shadow-glow flex items-center justify-center">
-                          <span className="text-2xl font-bold text-white font-inter">
-                            {competitor.name.substring(0, 1)}
-                          </span>
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-2xl font-bold font-inter">{competitor.name}</h3>
-                            {competitor.isYou && (
-                              <Badge className="gradient-primary border-0">You</Badge>
-                            )}
-                          </div>
-                          <p className="text-muted-foreground">{competitor.url}</p>
-                        </div>
-                      </div>
-                      {!competitor.isYou && (
-                        <Button onClick={() => navigate(`/competitors/${competitor.url.replace('.com', '')}`)}>
-                          View Full Analysis
-                        </Button>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Mentions</p>
-                        <p className="text-3xl font-bold font-inter">{competitor.mentions}</p>
-                      </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Visibility</p>
-                        <p className="text-3xl font-bold font-inter">{competitor.visibility}%</p>
-                      </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Sentiment</p>
-                        <p className="text-3xl font-bold font-inter">{competitor.sentiment}%</p>
-                      </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Position</p>
-                        <p className="text-3xl font-bold font-inter">{competitor.avgPosition}</p>
-                      </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Share</p>
-                        <p className="text-3xl font-bold font-inter">{competitor.shareOfVoice}%</p>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-                ))
-              ) : (
-                <div className="flex flex-col items-center justify-center py-12 space-y-2">
-                  <p className="text-sm text-muted-foreground">No competitors data available yet.</p>
-                  <p className="text-xs text-muted-foreground">Check console for API response details.</p>
-                </div>
-              )}
-            </div>
           </TabsContent>
 
           {/* Answer Gap Tab */}

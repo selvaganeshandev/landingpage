@@ -16,15 +16,15 @@ class CompetitorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Competitor
         fields = [
-            'id', 'domain', 'domain_name', 'name', 'url', 
+            'id', 'domain', 'domain_name', 'name', 'url',
             'track_status', 'track_message', 'tracked_at',
-            'total_mentions', 'visibility_score', 'sentiment_score', 'average_position',
-            'share_of_voice_percentage', 'trend_percentage', 
+            'total_mentions', 'total_citations', 'visibility_score', 'sentiment_score', 'average_position',
+            'share_of_voice_percentage', 'trend_percentage',
             'created_by', 'created_by_email', 'created_at', 'modified_at'
         ]
         read_only_fields = [
             'id', 'track_status', 'track_message', 'tracked_at',
-            'total_mentions', 'visibility_score', 'sentiment_score', 'average_position',
+            'total_mentions', 'total_citations', 'visibility_score', 'sentiment_score', 'average_position',
             'share_of_voice_percentage', 'trend_percentage',
             'created_at', 'modified_at'
         ]

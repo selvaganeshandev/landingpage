@@ -482,9 +482,10 @@ class Competitor(models.Model):
     track_message = models.TextField(blank=True, null=True, help_text="Status message or error details")
     tracked_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when last tracked")
     total_mentions = models.IntegerField(default=0, help_text="Total number of mentions")
+    total_citations = models.IntegerField(default=0, help_text="Total number of citations")
     visibility_score = models.DecimalField(
-        max_digits=5, 
-        decimal_places=2, 
+        max_digits=5,
+        decimal_places=2,
         default=0.0,
         help_text="Visibility score"
     )
