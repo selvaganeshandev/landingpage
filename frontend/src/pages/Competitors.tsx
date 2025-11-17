@@ -11,6 +11,7 @@ import { CompetitorHeatmap } from "@/components/CompetitorHeatmap";
 import { useToast } from "@/hooks/use-toast";
 import { useContentGeneration } from "@/hooks/useContentGeneration";
 import { AddCompetitorDialog } from "@/components/AddCompetitorDialog";
+import { PageLoader } from "@/components/PageLoader";
 import {
   Select,
   SelectContent,
@@ -76,6 +77,8 @@ const Competitors = () => {
   const [competitiveInsights, setCompetitiveInsights] = useState<any[]>([]);
   const [answerGapData, setAnswerGapData] = useState<any[]>([]);
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [hasLoadedData, setHasLoadedData] = useState(false);
 
   const handleExportReport = () => {
     toast({
@@ -108,7 +111,13 @@ const Competitors = () => {
 
   useEffect(() => {
     const load = async () => {
-      if (!domainId) return;
+      if (!domainId) {
+        setHasLoadedData(false);
+        setIsPageLoading(true);
+        return;
+      }
+      setHasLoadedData(false);
+      setIsPageLoading(true);
       try {
         // Load main competitor data first
         const [list, latest, byDomain, compPromptAnalytics] = await Promise.all([
@@ -182,7 +191,7 @@ const Competitors = () => {
         }
         
         setIsLoadingAnalysis(false);
-
+        setHasLoadedData(true);
         // Normalize competitor list
         const mapped = (Array.isArray(list) ? list : list?.results || []).map((c: any, idx: number) => {
           // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
@@ -356,6 +365,9 @@ const Competitors = () => {
         }
       } catch (e: any) {
         toast({ title: 'Failed to load competitors', description: String(e.message || e), variant: 'destructive' });
+        setHasLoadedData(true);
+      } finally {
+        setIsPageLoading(false);
       }
     };
     void load();
@@ -449,6 +461,10 @@ const Competitors = () => {
 
   const heatmapData = heatmap;
 
+  if (isPageLoading || !hasLoadedData) {
+    return <PageLoader sidebarOpen />;
+  }
+
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
       {/* Header */}
@@ -473,16 +489,15 @@ const Competitors = () => {
         </div>
 
         <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
-          <TabsList className="bg-muted/50 p-1 border border-border">
-            <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Overview</TabsTrigger>
-            <TabsTrigger value="prompts" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Prompts</TabsTrigger>
-            <TabsTrigger value="competitors" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Competitors</TabsTrigger>
-            <TabsTrigger value="answer-gap" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Answer Gap</TabsTrigger>
-          </TabsList>
+          <div className="flex items-center justify-between gap-4 mb-6">
+            <TabsList className="bg-muted/50 p-1 border border-border">
+              <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Overview</TabsTrigger>
+              <TabsTrigger value="prompts" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Prompts</TabsTrigger>
+              <TabsTrigger value="competitors" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Competitors</TabsTrigger>
+              <TabsTrigger value="answer-gap" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Answer Gap</TabsTrigger>
+            </TabsList>
 
-          {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-6 mt-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
               <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
               <Select defaultValue="all">
                 <SelectTrigger className="w-[200px]">
@@ -498,6 +513,10 @@ const Competitors = () => {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          {/* Overview Tab */}
+          <TabsContent value="overview" className="space-y-6 mt-0">
 
             {/* Competitor Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -584,8 +603,7 @@ const Competitors = () => {
             <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
               <div className="space-y-6">
                 <div className="pb-4 border-b border-border">
-                  <h3 className="text-lg font-semibold flex items-center gap-2 font-inter">
-                    <TrendingUp className="h-5 w-5 text-primary" />
+                  <h3 className="text-lg font-semibold font-inter">
                     Brand Visibility Over Time
                   </h3>
                   <p className="text-sm text-muted-foreground mt-1">
@@ -658,16 +676,21 @@ const Competitors = () => {
                   )}
                 </div>
                 {competitiveMetrics && competitiveMetrics.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={350}>
-                    <RadarChart data={competitiveMetrics}>
+                  <ResponsiveContainer width="100%" height={450}>
+                    <RadarChart data={competitiveMetrics} margin={{ top: 60, right: 80, bottom: 60, left: 80 }}>
                       <PolarGrid stroke="hsl(var(--border))" />
-                      <PolarAngleAxis 
-                        dataKey="metric" 
+                      <PolarAngleAxis
+                        dataKey="metric"
                         stroke="hsl(var(--muted-foreground))"
                         fontSize={12}
                       />
-                      <PolarRadiusAxis angle={90} domain={[0, 100]} stroke="hsl(var(--muted-foreground))" />
-                      <Tooltip 
+                      <PolarRadiusAxis
+                        angle={90}
+                        domain={[0, 100]}
+                        stroke="hsl(var(--muted-foreground))"
+                        tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }}
+                      />
+                      <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
@@ -685,7 +708,7 @@ const Competitors = () => {
                         // Format brand name for display
                         const displayName = brandKey.charAt(0).toUpperCase() + brandKey.slice(1).replace(/([A-Z])/g, ' $1');
                         return (
-                          <Radar 
+                          <Radar
                             key={brandKey}
                             name={displayName}
                             dataKey={brandKey}
@@ -708,7 +731,7 @@ const Competitors = () => {
 
               <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
                 <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold font-outfit">Competitive Intelligence</h3>
+                  <h3 className="text-lg font-semibold font-inter">Competitive Intelligence</h3>
                   {isLoadingAnalysis && (
                     <span className="text-xs text-muted-foreground">Loading...</span>
                   )}
@@ -727,7 +750,7 @@ const Competitors = () => {
                           </div>
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
-                              <h4 className="font-semibold text-sm font-outfit">{insight.title}</h4>
+                              <h4 className="font-semibold text-sm font-inter">{insight.title}</h4>
                               <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
                                 {insight.impact}
                               </Badge>
