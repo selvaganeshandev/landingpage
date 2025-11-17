@@ -41,6 +41,16 @@ export const DetailedAnalyticsTemplate = ({ data }: DetailedAnalyticsTemplatePro
   const domainName = data?.domain_name || 'Your Brand';
   const domainUrl = data?.domain_url || '';
 
+  // Helper function to get favicon URL
+  const getFaviconUrl = (url: string) => {
+    try {
+      const domain = new URL(url.startsWith('http') ? url : `https://${url}`).hostname;
+      return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+    } catch {
+      return `https://ui-avatars.com/api/?name=${encodeURIComponent(url)}&background=random`;
+    }
+  };
+
   // Calculate metrics from data
   const totalMentions = metrics.total_mentions || 0;
   const visibilityScore = metrics.visibility_score || 0;
@@ -249,42 +259,101 @@ export const DetailedAnalyticsTemplate = ({ data }: DetailedAnalyticsTemplatePro
               </div>
             </Card>
 
-            <Card className="p-6 border border-border break-inside-avoid">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">Sentiment Trends</h3>
-                <TrendingUp className="h-5 w-5 text-green-600" />
+            <Card className="p-6 border border-border break-inside-avoid bg-gradient-to-br from-white to-gray-50/50 dark:from-gray-900 dark:to-gray-900/50">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold">Key Insights & Performance</h3>
+                <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/20">
+                  <Activity className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
               </div>
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {sentimentScore > 0 && (
-                  <div className="p-3 rounded bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30">
-                    <div className="flex items-center gap-2 mb-1">
-                      <ArrowUpRight className="h-4 w-4 text-green-600" />
-                      <span className="text-sm font-semibold">Positive Sentiment</span>
+                  <div className="relative overflow-hidden rounded-lg bg-gradient-to-r from-green-50 to-green-100/50 dark:from-green-900/20 dark:to-green-900/10 border border-green-200 dark:border-green-900/30 p-4 transition-all hover:shadow-md">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-green-500/5 rounded-full -mr-12 -mt-12"></div>
+                    <div className="relative">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 rounded-md bg-green-500/10">
+                            <ArrowUpRight className="h-4 w-4 text-green-600 dark:text-green-500" />
+                          </div>
+                          <span className="text-sm font-semibold text-green-900 dark:text-green-100">Positive Sentiment</span>
+                        </div>
+                        <Badge className="bg-green-600 text-white hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600">
+                          {sentimentScore.toFixed(0)}%
+                        </Badge>
+                      </div>
+                      <div className="ml-8 space-y-1">
+                        <p className="text-sm font-medium text-green-800 dark:text-green-200">
+                          {positiveMentions.toLocaleString()} positive mentions
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1.5 bg-green-200 dark:bg-green-900/30 rounded-full overflow-hidden">
+                            <div className="h-full bg-green-500 rounded-full" style={{ width: `${sentimentScore}%` }}></div>
+                          </div>
+                          <span className="text-xs text-green-700 dark:text-green-300 font-medium">Strong</span>
+                        </div>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">{sentimentScore.toFixed(0)}% positive responses</p>
-                    <p className="text-xs text-muted-foreground">{positiveMentions.toLocaleString()} positive mentions</p>
                   </div>
                 )}
                 {totalCitations > 0 && (
-                  <div className="p-3 rounded bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-900/30">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Award className="h-4 w-4 text-blue-600" />
-                      <span className="text-sm font-semibold">Citation Authority</span>
+                  <div className="relative overflow-hidden rounded-lg bg-gradient-to-r from-blue-50 to-blue-100/50 dark:from-blue-900/20 dark:to-blue-900/10 border border-blue-200 dark:border-blue-900/30 p-4 transition-all hover:shadow-md">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full -mr-12 -mt-12"></div>
+                    <div className="relative">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 rounded-md bg-blue-500/10">
+                            <Award className="h-4 w-4 text-blue-600 dark:text-blue-500" />
+                          </div>
+                          <span className="text-sm font-semibold text-blue-900 dark:text-blue-100">Citation Authority</span>
+                        </div>
+                        <Badge className="bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600">
+                          {((totalCitations / totalMentions) * 100).toFixed(1)}%
+                        </Badge>
+                      </div>
+                      <div className="ml-8 space-y-1">
+                        <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                          {totalCitations} total citations
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1.5 bg-blue-200 dark:bg-blue-900/30 rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-500 rounded-full" style={{ width: `${((totalCitations / totalMentions) * 100)}%` }}></div>
+                          </div>
+                          <span className="text-xs text-blue-700 dark:text-blue-300 font-medium">
+                            {totalCitations}/{totalMentions}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">{totalCitations} total citations</p>
-                    <p className="text-xs text-muted-foreground">
-                      {((totalCitations / totalMentions) * 100).toFixed(1)}% citation rate
-                    </p>
                   </div>
                 )}
                 {negativeMentions > 0 && (
-                  <div className="p-3 rounded bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30">
-                    <div className="flex items-center gap-2 mb-1">
-                      <AlertTriangle className="h-4 w-4 text-amber-600" />
-                      <span className="text-sm font-semibold">Watch Area</span>
+                  <div className="relative overflow-hidden rounded-lg bg-gradient-to-r from-amber-50 to-amber-100/50 dark:from-amber-900/20 dark:to-amber-900/10 border border-amber-200 dark:border-amber-900/30 p-4 transition-all hover:shadow-md">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full -mr-12 -mt-12"></div>
+                    <div className="relative">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 rounded-md bg-amber-500/10">
+                            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-500" />
+                          </div>
+                          <span className="text-sm font-semibold text-amber-900 dark:text-amber-100">Watch Area</span>
+                        </div>
+                        <Badge className="bg-amber-600 text-white hover:bg-amber-700 dark:bg-amber-500 dark:hover:bg-amber-600">
+                          {negativeSentiment.toFixed(1)}%
+                        </Badge>
+                      </div>
+                      <div className="ml-8 space-y-1">
+                        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                          {negativeMentions} negative mentions
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1.5 bg-amber-200 dark:bg-amber-900/30 rounded-full overflow-hidden">
+                            <div className="h-full bg-amber-500 rounded-full" style={{ width: `${negativeSentiment}%` }}></div>
+                          </div>
+                          <span className="text-xs text-amber-700 dark:text-amber-300 font-medium">Monitor</span>
+                        </div>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">{negativeMentions} negative mentions</p>
-                    <p className="text-xs text-muted-foreground">{negativeSentiment.toFixed(1)}% of total</p>
                   </div>
                 )}
               </div>
@@ -417,8 +486,15 @@ export const DetailedAnalyticsTemplate = ({ data }: DetailedAnalyticsTemplatePro
               <div className="space-y-3">
                 <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/10 rounded-lg border border-green-200 dark:border-green-900/30">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center border-2 border-primary">
-                      <span className="text-sm font-bold">1</span>
+                    <div className="w-10 h-10 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center border-2 border-primary shadow-sm overflow-hidden">
+                      <img
+                        src={getFaviconUrl(domainUrl || domainName)}
+                        alt={domainName}
+                        className="w-6 h-6 object-contain"
+                        onError={(e) => {
+                          e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(domainName)}&background=0EA5E9&color=fff`;
+                        }}
+                      />
                     </div>
                     <div>
                       <span className="font-semibold">{domainName}</span>
@@ -433,8 +509,15 @@ export const DetailedAnalyticsTemplate = ({ data }: DetailedAnalyticsTemplatePro
                 {shareOfVoice.competitors.slice(0, 5).map((competitor: any, index: number) => (
                   <div key={index} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center border border-muted-foreground/20">
-                        <span className="text-sm font-bold">{index + 2}</span>
+                      <div className="w-10 h-10 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center border border-muted-foreground/20 shadow-sm overflow-hidden">
+                        <img
+                          src={getFaviconUrl(competitor.url || competitor.name)}
+                          alt={competitor.name}
+                          className="w-6 h-6 object-contain"
+                          onError={(e) => {
+                            e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(competitor.name)}&background=random`;
+                          }}
+                        />
                       </div>
                       <div>
                         <span className="font-medium">{competitor.name}</span>

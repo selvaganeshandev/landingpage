@@ -32,6 +32,17 @@ interface ContentStrategyTemplateProps {
 }
 
 export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) => {
+  // Extract data from API response
+  const overview = data?.overview || {};
+  const contentGaps = data?.content_gaps || [];
+  const topicPerformance = data?.topic_performance || [];
+  const untappedKeywords = data?.untapped_keywords || [];
+  const trendingKeywords = data?.trending_keywords || [];
+  const competitors = data?.competitor_comparison || [];
+  const recommendations = data?.recommendations || [];
+  const domainName = data?.domain_name || 'Your Brand';
+  const period = data?.period || {};
+
   return (
     <div className="w-full min-h-screen bg-white dark:bg-gray-950 space-y-8">
       <div className="max-w-[1200px] mx-auto px-8 py-8">
@@ -44,7 +55,12 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
           </div>
           <div className="text-right">
             <p className="text-sm text-muted-foreground">Report Period</p>
-            <p className="font-semibold">{new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+            <p className="font-semibold">
+              {period.start && period.end
+                ? `${new Date(period.start).toLocaleDateString()} - ${new Date(period.end).toLocaleDateString()}`
+                : new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+              }
+            </p>
           </div>
         </div>
       </div>
@@ -58,25 +74,29 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
               <FileText className="h-6 w-6 text-blue-600 dark:text-blue-400" />
               <Badge variant="outline">
                 <Trophy className="h-3 w-3 mr-1" />
-                A+
+                {overview.content_quality_score >= 90 ? 'A+' : overview.content_quality_score >= 80 ? 'A' : overview.content_quality_score >= 70 ? 'B' : 'C'}
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mb-1">Content Quality Score</p>
-            <p className="text-3xl font-bold">92/100</p>
-            <p className="text-xs text-muted-foreground mt-2">Excellent performance</p>
+            <p className="text-3xl font-bold">{overview.content_quality_score || 0}/100</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              {overview.content_quality_score >= 90 ? 'Excellent performance' : overview.content_quality_score >= 70 ? 'Good performance' : 'Needs improvement'}
+            </p>
           </Card>
 
           <Card className="p-5 border border-border">
             <div className="flex items-center justify-between mb-3">
               <Target className="h-6 w-6 text-green-600 dark:text-green-400" />
-              <Badge variant="outline" className="bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400">
-                <TrendingUp className="h-3 w-3 mr-1" />
-                +24%
+              <Badge variant="outline" className={overview.topics_growth > 0 ? "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400" : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"}>
+                {overview.topics_growth > 0 ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
+                {overview.topics_growth > 0 ? '+' : ''}{overview.topics_growth || 0}%
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mb-1">Topics Covered</p>
-            <p className="text-3xl font-bold">247</p>
-            <p className="text-xs text-muted-foreground mt-2">vs. 199 last period</p>
+            <p className="text-3xl font-bold">{overview.topics_covered || 0}</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              {overview.topics_growth > 0 ? `Growing steadily` : 'Monitor performance'}
+            </p>
           </Card>
 
           <Card className="p-5 border border-border">
@@ -84,25 +104,29 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
               <Sparkles className="h-6 w-6 text-purple-600 dark:text-purple-400" />
               <Badge variant="outline">
                 <Flame className="h-3 w-3 mr-1" />
-                Hot
+                {overview.content_gaps_found > 10 ? 'Hot' : 'Warm'}
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mb-1">Content Gaps Found</p>
-            <p className="text-3xl font-bold">18</p>
-            <p className="text-xs text-muted-foreground mt-2">High opportunity areas</p>
+            <p className="text-3xl font-bold">{overview.content_gaps_found || 0}</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              {overview.content_gaps_found > 10 ? 'High opportunity areas' : 'Moderate opportunities'}
+            </p>
           </Card>
 
           <Card className="p-5 border border-border">
             <div className="flex items-center justify-between mb-3">
               <Award className="h-6 w-6 text-amber-600 dark:text-amber-400" />
-              <Badge variant="outline" className="bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400">
-                <TrendingUp className="h-3 w-3 mr-1" />
-                +18%
+              <Badge variant="outline" className={overview.engagement_growth > 0 ? "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400" : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"}>
+                {overview.engagement_growth > 0 ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
+                {overview.engagement_growth > 0 ? '+' : ''}{overview.engagement_growth || 0}%
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mb-1">Engagement Rate</p>
-            <p className="text-3xl font-bold">87%</p>
-            <p className="text-xs text-muted-foreground mt-2">Above industry avg</p>
+            <p className="text-3xl font-bold">{overview.engagement_rate || 0}%</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              {overview.engagement_rate >= 80 ? 'Above industry avg' : 'Room for growth'}
+            </p>
           </Card>
         </div>
       </div>
@@ -111,143 +135,68 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
       <div>
         <h2 className="text-2xl font-bold mb-6">Content Gap Analysis</h2>
         <Card className="p-6 border border-border">
+          {contentGaps.length > 0 ? (
           <div className="space-y-4">
-            {/* High Priority Gap */}
-            <div className="p-5 rounded-lg bg-red-50 dark:bg-red-900/10 border-2 border-red-500">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center">
-                    <AlertTriangle className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-lg font-bold">Climate-Conscious Nutrition</h3>
-                      <Badge variant="destructive">Critical Gap</Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">High search volume, zero current coverage</p>
-                  </div>
-                </div>
-                <Badge className="bg-red-600 text-white">Priority 1</Badge>
-              </div>
-              <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-red-200 dark:border-red-900/30">
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Search Volume</p>
-                  <p className="text-lg font-bold">12,400/mo</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Competitor Coverage</p>
-                  <p className="text-lg font-bold">3/5</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Opportunity Score</p>
-                  <p className="text-lg font-bold text-red-600">95/100</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Est. Traffic Gain</p>
-                  <p className="text-lg font-bold">+1,240/mo</p>
-                </div>
-              </div>
-              <div className="mt-4 p-3 bg-white dark:bg-background rounded border border-red-200 dark:border-red-900/30">
-                <p className="text-sm font-semibold mb-2">Recommended Topics:</p>
-                <div className="flex gap-2 flex-wrap">
-                  <Badge variant="outline" className="text-xs">carbon footprint tracking</Badge>
-                  <Badge variant="outline" className="text-xs">sustainable protein sources</Badge>
-                  <Badge variant="outline" className="text-xs">eco-friendly packaging</Badge>
-                  <Badge variant="outline" className="text-xs">climate impact comparison</Badge>
-                </div>
-              </div>
-            </div>
+            {/* Render actual content gaps from data */}
+            {contentGaps.map((gap: any, index: number) => {
+              const priority = gap.priority || 'Medium';
+              const borderColor = priority === 'Critical' ? 'border-red-500' : priority === 'High' ? 'border-amber-500' : 'border-blue-500';
+              const bgColor = priority === 'Critical' ? 'bg-red-50 dark:bg-red-900/10' : priority === 'High' ? 'bg-amber-50 dark:bg-amber-900/10' : 'bg-blue-50 dark:bg-blue-900/10';
+              const iconBg = priority === 'Critical' ? 'bg-red-600' : priority === 'High' ? 'bg-amber-600' : 'bg-blue-600';
+              const IconComponent = priority === 'Critical' ? AlertTriangle : priority === 'High' ? Lightbulb : Telescope;
 
-            {/* Medium Priority Gap */}
-            <div className="p-5 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-500">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-amber-600 flex items-center justify-center">
-                    <Lightbulb className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-lg font-bold">AI-Powered Meal Planning</h3>
-                      <Badge variant="secondary" className="bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">High Opportunity</Badge>
+              return (
+                <div key={index} className={`p-5 rounded-lg ${bgColor} ${index === 0 ? 'border-2' : 'border'} ${borderColor}`}>
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-full ${iconBg} flex items-center justify-center`}>
+                        <IconComponent className="h-5 w-5 text-white" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="text-lg font-bold">{gap.keyword}</h3>
+                          <Badge variant={priority === 'Critical' ? 'destructive' : 'secondary'} className={priority === 'High' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400' : ''}>
+                            {priority === 'Critical' ? 'Critical Gap' : priority === 'High' ? 'High Opportunity' : 'Moderate Opportunity'}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {gap.competitor_coverage === 0 ? 'High search volume, zero current coverage' : 'Growing trend, limited current content'}
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-sm text-muted-foreground">Growing trend, limited current content</p>
+                    <Badge className={iconBg + ' text-white'}>Priority {index + 1}</Badge>
                   </div>
-                </div>
-                <Badge className="bg-amber-600 text-white">Priority 2</Badge>
-              </div>
-              <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-amber-200 dark:border-amber-900/30">
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Search Volume</p>
-                  <p className="text-lg font-bold">8,900/mo</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Competitor Coverage</p>
-                  <p className="text-lg font-bold">2/5</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Opportunity Score</p>
-                  <p className="text-lg font-bold text-amber-600">88/100</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Est. Traffic Gain</p>
-                  <p className="text-lg font-bold">+890/mo</p>
-                </div>
-              </div>
-              <div className="mt-4 p-3 bg-white dark:bg-background rounded border border-amber-200 dark:border-amber-900/30">
-                <p className="text-sm font-semibold mb-2">Recommended Topics:</p>
-                <div className="flex gap-2 flex-wrap">
-                  <Badge variant="outline" className="text-xs">personalized nutrition AI</Badge>
-                  <Badge variant="outline" className="text-xs">smart meal recommendations</Badge>
-                  <Badge variant="outline" className="text-xs">AI fitness coaching</Badge>
-                </div>
-              </div>
-            </div>
-
-            {/* Good Coverage Gap */}
-            <div className="p-5 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-500">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center">
-                    <Telescope className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-lg font-bold">Gut Health Optimization</h3>
-                      <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400">Moderate Opportunity</Badge>
+                  <div className={`grid grid-cols-4 gap-4 mt-4 pt-4 border-t ${priority === 'Critical' ? 'border-red-200 dark:border-red-900/30' : priority === 'High' ? 'border-amber-200 dark:border-amber-900/30' : 'border-blue-200 dark:border-blue-900/30'}`}>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Search Volume</p>
+                      <p className="text-lg font-bold">{gap.search_volume?.toLocaleString() || 0}/mo</p>
                     </div>
-                    <p className="text-sm text-muted-foreground">Some coverage, room for expansion</p>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Competitor Coverage</p>
+                      <p className="text-lg font-bold">{gap.competitor_coverage || 0}/5</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Opportunity Score</p>
+                      <p className={`text-lg font-bold ${priority === 'Critical' ? 'text-red-600' : priority === 'High' ? 'text-amber-600' : 'text-blue-600'}`}>
+                        {gap.opportunity_score || 0}/100
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Est. Traffic Gain</p>
+                      <p className="text-lg font-bold">+{gap.estimated_traffic?.toLocaleString() || 0}/mo</p>
+                    </div>
                   </div>
                 </div>
-                <Badge className="bg-blue-600 text-white">Priority 3</Badge>
-              </div>
-              <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-blue-200 dark:border-blue-900/30">
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Search Volume</p>
-                  <p className="text-lg font-bold">6,200/mo</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Competitor Coverage</p>
-                  <p className="text-lg font-bold">4/5</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Opportunity Score</p>
-                  <p className="text-lg font-bold text-blue-600">72/100</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Est. Traffic Gain</p>
-                  <p className="text-lg font-bold">+620/mo</p>
-                </div>
-              </div>
-              <div className="mt-4 p-3 bg-white dark:bg-background rounded border border-blue-200 dark:border-blue-900/30">
-                <p className="text-sm font-semibold mb-2">Recommended Topics:</p>
-                <div className="flex gap-2 flex-wrap">
-                  <Badge variant="outline" className="text-xs">microbiome health</Badge>
-                  <Badge variant="outline" className="text-xs">probiotic supplements</Badge>
-                  <Badge variant="outline" className="text-xs">digestive wellness</Badge>
-                </div>
-              </div>
-            </div>
+              );
+            })}
           </div>
+          ) : (
+            <div className="text-center py-12">
+              <CheckCircle2 className="h-12 w-12 text-green-600 mx-auto mb-3" />
+              <h3 className="text-lg font-semibold mb-2">Excellent Content Coverage!</h3>
+              <p className="text-muted-foreground">No critical content gaps detected. Your content strategy is performing well.</p>
+            </div>
+          )}
         </Card>
       </div>
 

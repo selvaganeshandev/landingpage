@@ -179,62 +179,184 @@ class ReportDataService:
 
     def get_content_strategy_data(self):
         """Fetch data for Content Strategy report"""
-        from prompts.models import Prompt, PromptAnalytics
-        from topics.models import Topic
+        from prompts.models import Prompt, PromptAnalytics, PromptGroup
+        from topics.models import Topic, TopicPrompt
+        from keywords.models import Keyword
+        from competitors.models import Competitor
+        from django.db.models import Count, Avg, Sum, Q
 
-        # Get all prompts
+        # Get all prompts and analytics
         all_prompts = Prompt.objects.filter(group__domain=self.domain)
+        analytics = PromptAnalytics.objects.filter(
+            prompt__group__domain=self.domain,
+            created_at__gte=self.start_date,
+            created_at__lte=self.end_date
+        )
 
-        # Get prompts with no mentions (content gaps)
-        gap_prompts = []
-        for prompt in all_prompts:
-            mentions = PromptAnalytics.objects.filter(
-                prompt=prompt,
-                is_mention=True,
-                created_at__gte=self.start_date,
-                created_at__lte=self.end_date
+        # Calculate overview metrics
+        total_prompts = all_prompts.count()
+        total_mentions = analytics.filter(is_mention=True).count()
+        total_citations = analytics.aggregate(Sum('total_citations'))['total_citations__sum'] or 0
+        avg_sentiment = analytics.aggregate(Avg('sentiment_score'))['sentiment_score__avg'] or 0
+        avg_engagement = analytics.aggregate(Avg('engagement_score'))['engagement_score__avg'] or 0
+
+        # Previous period for comparison
+        period_length = (self.end_date - self.start_date).days
+        prev_start = self.start_date - timedelta(days=period_length)
+        prev_end = self.start_date
+
+        prev_analytics = PromptAnalytics.objects.filter(
+            prompt__group__domain=self.domain,
+            created_at__gte=prev_start,
+            created_at__lte=prev_end
+        )
+        prev_mentions = prev_analytics.filter(is_mention=True).count()
+        mentions_growth = ((total_mentions - prev_mentions) / prev_mentions * 100) if prev_mentions > 0 else 0
+
+        # Get topics with analytics
+        topics = Topic.objects.filter(domain=self.domain).order_by('-total_mentions')
+        topic_performance = []
+        for topic in topics[:10]:
+            topic_analytics = TopicPrompt.objects.filter(topic=topic)
+            coverage_score = min(topic.total_mentions / 10, 100) if topic.total_mentions > 0 else 0
+
+            topic_performance.append({
+                'name': topic.name,
+                'keywords': topic.keyword_list[:5] if topic.keyword_list else [],
+                'coverage_score': round(coverage_score, 0),
+                'mentions': topic.total_mentions,
+                'engagement': round(avg_engagement, 0),
+                'growth': round(topic.trend_percentage, 0),
+                'sentiment': round(topic.sentiment_score, 2),
+            })
+
+        # Identify content gaps (keywords/topics with no or low coverage)
+        all_keywords = Keyword.objects.filter(domain=self.domain)
+        content_gaps = []
+        for keyword in all_keywords:
+            # Find prompts related to this keyword
+            related_prompts = all_prompts.filter(prompt__icontains=keyword.keyword)
+            mention_count = analytics.filter(
+                prompt__in=related_prompts,
+                is_mention=True
             ).count()
 
-            if mentions == 0:
-                gap_prompts.append({
-                    'text': prompt.prompt[:100],
-                    'type': prompt.type,
+            if mention_count == 0:
+                # Estimate search volume and opportunity (mock data for now)
+                content_gaps.append({
+                    'keyword': keyword.keyword,
+                    'search_volume': keyword.priority * 1000,  # Mock calculation
+                    'competitor_coverage': 0,  # Can be enhanced with competitor data
+                    'opportunity_score': keyword.priority * 10,
+                    'estimated_traffic': keyword.priority * 100,
+                    'priority': 'Critical' if keyword.priority >= 8 else ('High' if keyword.priority >= 5 else 'Medium'),
                 })
 
-        # Get topics
-        topics = Topic.objects.filter(domain=self.domain)
-        topic_data = [
-            {
-                'name': topic.name,
-                'description': topic.description or '',
-            }
-            for topic in topics[:10]
-        ]
+        # Sort gaps by opportunity score
+        content_gaps = sorted(content_gaps, key=lambda x: x['opportunity_score'], reverse=True)[:20]
 
-        # Get optimization opportunities (low-performing prompts)
-        low_performers = []
-        for prompt in all_prompts:
-            analytics = PromptAnalytics.objects.filter(
-                prompt=prompt,
-                created_at__gte=self.start_date,
-                created_at__lte=self.end_date
-            )
+        # Get untapped keywords (keywords with zero mentions)
+        untapped_keywords = []
+        for keyword in all_keywords[:20]:
+            related_analytics = analytics.filter(prompt__prompt__icontains=keyword.keyword)
+            if not related_analytics.filter(is_mention=True).exists():
+                untapped_keywords.append({
+                    'keyword': keyword.keyword,
+                    'mentions': 0,
+                    'priority': 'High' if keyword.priority >= 5 else 'Medium',
+                    'search_volume': keyword.priority * 1000,
+                })
 
-            if analytics.exists():
-                mention_rate = analytics.filter(is_mention=True).count() / analytics.count()
-                if mention_rate < 0.3:  # Less than 30% mention rate
-                    low_performers.append({
-                        'text': prompt.prompt[:100],
-                        'mention_rate': round(mention_rate * 100, 1),
-                    })
+        # Get trending keywords (with growing mentions)
+        trending_keywords = []
+        for keyword in all_keywords[:20]:
+            related_analytics = analytics.filter(prompt__prompt__icontains=keyword.keyword)
+            current_mentions = related_analytics.filter(is_mention=True).count()
+
+            prev_related = prev_analytics.filter(prompt__prompt__icontains=keyword.keyword)
+            prev_keyword_mentions = prev_related.filter(is_mention=True).count()
+
+            if prev_keyword_mentions > 0 and current_mentions > prev_keyword_mentions:
+                growth = ((current_mentions - prev_keyword_mentions) / prev_keyword_mentions) * 100
+                trending_keywords.append({
+                    'keyword': keyword.keyword,
+                    'mentions': current_mentions,
+                    'growth': round(growth, 0),
+                    'search_volume': keyword.priority * 1000,
+                })
+
+        trending_keywords = sorted(trending_keywords, key=lambda x: x['growth'], reverse=True)[:10]
+
+        # Get competitor comparison data
+        competitors = Competitor.objects.filter(domain=self.domain)[:5]
+        competitor_comparison = []
+        for comp in competitors:
+            competitor_comparison.append({
+                'name': comp.name,
+                'url': comp.url,
+            })
 
         return {
             'period': {
-                'start': self.start_date,
-                'end': self.end_date,
+                'start': self.start_date.strftime('%Y-%m-%d'),
+                'end': self.end_date.strftime('%Y-%m-%d'),
             },
             'domain_name': self.domain.name,
-            'content_gaps': gap_prompts[:20],  # Top 20 gaps
-            'topics': topic_data,
-            'optimization_opportunities': low_performers[:15],  # Top 15
+            'domain_url': self.domain.url,
+            'overview': {
+                'content_quality_score': round(avg_sentiment * 50 + 50, 0),  # Convert -1 to 1 range to 0-100
+                'topics_covered': topics.count(),
+                'topics_growth': round(mentions_growth / 4, 0),  # Approximate topic growth
+                'content_gaps_found': len(content_gaps),
+                'engagement_rate': round(avg_engagement, 0),
+                'engagement_growth': round(mentions_growth / 2, 0),  # Approximate
+            },
+            'content_gaps': content_gaps[:5],  # Top 5 critical gaps
+            'topic_performance': topic_performance,
+            'untapped_keywords': untapped_keywords[:10],
+            'trending_keywords': trending_keywords[:5],
+            'competitor_comparison': competitor_comparison,
+            'recommendations': self._generate_recommendations(content_gaps, topic_performance, trending_keywords),
         }
+
+    def _generate_recommendations(self, content_gaps, topic_performance, trending_keywords):
+        """Generate strategic recommendations based on data"""
+        recommendations = []
+
+        # Recommendation 1: Address top content gap
+        if content_gaps:
+            top_gap = content_gaps[0]
+            recommendations.append({
+                'priority': 1,
+                'title': f'Address {top_gap["keyword"]} Content Gap',
+                'description': f'This is a critical gap with opportunity score {top_gap["opportunity_score"]}/100. Create comprehensive content to capture {top_gap["estimated_traffic"]} monthly traffic.',
+                'timeline': '7 days',
+                'content_pieces': '5-7 articles',
+                'expected_traffic': f'+{top_gap["estimated_traffic"]}/mo',
+            })
+
+        # Recommendation 2: Focus on low-performing topics
+        low_performers = [t for t in topic_performance if t['coverage_score'] < 60]
+        if low_performers:
+            recommendations.append({
+                'priority': 2,
+                'title': f'Improve {low_performers[0]["name"]} Coverage',
+                'description': f'Current coverage is {low_performers[0]["coverage_score"]}%. Expand content to improve visibility and capture emerging audience.',
+                'timeline': '14 days',
+                'content_pieces': '4-6 articles',
+                'expected_traffic': '+500/mo',
+            })
+
+        # Recommendation 3: Amplify top performers
+        top_performers = [t for t in topic_performance if t['coverage_score'] >= 80]
+        if top_performers:
+            recommendations.append({
+                'priority': 3,
+                'title': f'Maintain {top_performers[0]["name"]} Excellence',
+                'description': f'Strongest category ({top_performers[0]["coverage_score"]}% coverage, {top_performers[0]["mentions"]} mentions). Maintain dominance by refreshing content quarterly.',
+                'timeline': 'Ongoing',
+                'content_pieces': 'Quarterly refresh',
+                'expected_traffic': 'Market Leader',
+            })
+
+        return recommendations
