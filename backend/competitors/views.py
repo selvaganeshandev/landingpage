@@ -6,24 +6,29 @@ from django.db.models import Sum, Avg, Count, Q, F, Max, Min
 from django.shortcuts import get_object_or_404
 from datetime import timedelta
 from django.utils import timezone
-from .models import Competitor, CompetitorAnalytics, CompetitorPrompt, CompetitorPromptAnalytics
+from .models import Competitor, CompetitorAnalytics, CompetitorPrompt, CompetitorPromptAnalytics, CompetitorMetricSnapshot
 from prompts.models import PromptAnalytics
 from analytics.models import ShareOfVoiceAnalytics
 from .serializers import (
     CompetitorSerializer, CompetitorAnalyticsSerializer, CompetitorPromptSerializer,
-    CompetitorPromptAnalyticsSerializer
+    CompetitorPromptAnalyticsSerializer, CompetitorMetricSnapshotSerializer
 )
 
 
 class CompetitorViewSet(viewsets.ModelViewSet):
     serializer_class = CompetitorSerializer
     permission_classes = [IsAuthenticated]
-    
+
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'super_admin':
-            return Competitor.objects.all()
-        return Competitor.objects.filter(domain__organisation=user.organisation)
+        queryset = Competitor.objects.all() if user.role == 'super_admin' else Competitor.objects.filter(domain__organisation=user.organisation)
+
+        # Filter by domain_id if provided in query params
+        domain_id = self.request.query_params.get('domain_id')
+        if domain_id:
+            queryset = queryset.filter(domain_id=domain_id)
+
+        return queryset
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -185,6 +190,35 @@ class CompetitorPromptViewSet(viewsets.ModelViewSet):
             your_mentions__lt=5  # Less than 5 of your mentions
         ).order_by('-mentions')
         
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+class CompetitorMetricSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = CompetitorMetricSnapshotSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = CompetitorMetricSnapshot.objects.all()
+        if user.role != 'super_admin':
+            queryset = queryset.filter(domain__organisation=user.organisation)
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        domain_id = request.query_params.get('domain_id')
+        competitor_id = request.query_params.get('competitor_id')
+        days = int(request.query_params.get('days', 90))
+
+        if domain_id:
+            queryset = queryset.filter(domain_id=domain_id)
+        if competitor_id:
+            queryset = queryset.filter(competitor_id=competitor_id)
+        if days:
+            queryset = queryset.filter(timestamp__gte=timezone.now() - timedelta(days=days))
+
+        queryset = queryset.order_by('timestamp')
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 

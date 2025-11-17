@@ -47,14 +47,88 @@ import {
   Tooltip, 
   ResponsiveContainer,
   Legend,
-  Cell
+  Cell,
+  TooltipProps,
 } from "recharts";
+import type { LegendProps } from "recharts";
+import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
 import { useDomainStore } from "@/stores/domainStore";
 
 // Static data constants removed - all data now comes from APIs
+
+type VisibilityLegendProps = LegendProps & {
+  disabledBrands: string[];
+  onToggle: (brand: string) => void;
+};
+
+const VisibilityLegend = ({ payload, disabledBrands, onToggle }: VisibilityLegendProps) => {
+  if (!payload || !payload.length) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-3 mt-4 px-4">
+      {payload.map((entry) => {
+        const brand = String(entry.value);
+        const active = !disabledBrands.includes(brand);
+        return (
+          <button
+            key={brand}
+            type="button"
+            onClick={() => onToggle(brand)}
+            className={`flex items-center gap-2 rounded-full px-3 py-1 transition border text-xs ${
+              active ? 'border-primary/60 bg-primary/5 text-foreground' : 'border-border text-muted-foreground'
+            }`}
+          >
+            <span
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: entry.color, opacity: active ? 1 : 0.35 }}
+            />
+            <span className="font-medium">{brand}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
+type VisibilityTooltipProps = TooltipProps<ValueType, NameType> & {
+  disabledBrands: string[];
+};
+
+const VisibilityTooltip = ({ active, label, payload, disabledBrands }: VisibilityTooltipProps) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const filtered = payload.filter((entry) => !disabledBrands.includes(String(entry.name)));
+  if (!filtered.length) return null;
+  const yourBrandEntry = filtered.find((entry) => String(entry.name).toLowerCase() === 'your brand');
+  const competitorEntries = filtered.filter((entry) => entry !== yourBrandEntry);
+  return (
+    <div className="rounded-xl border border-border bg-card px-3 py-2 shadow-lg">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">{label}</p>
+      <div className="space-y-1.5">
+        {yourBrandEntry && (
+          <div className="pb-2 border-b border-border/50">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: yourBrandEntry.color }} />
+              <span className="font-semibold">{yourBrandEntry.name}</span>
+              <span className="text-muted-foreground">{yourBrandEntry.value} mentions</span>
+            </div>
+          </div>
+        )}
+        {competitorEntries.map((entry) => (
+          <div key={`${entry.name}-${entry.color}`} className="flex items-center gap-2 text-sm">
+            <span
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: entry.color }}
+            />
+            <span className="font-medium">{entry.name}</span>
+            <span className="text-muted-foreground">{entry.value} mentions</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 const Competitors = () => {
   const navigate = useNavigate();
@@ -79,6 +153,7 @@ const Competitors = () => {
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [hasLoadedData, setHasLoadedData] = useState(false);
+  const [disabledBrands, setDisabledBrands] = useState<string[]>([]);
 
   const handleExportReport = () => {
     toast({
@@ -120,11 +195,12 @@ const Competitors = () => {
       setIsPageLoading(true);
       try {
         // Load main competitor data first
-        const [list, latest, byDomain, compPromptAnalytics] = await Promise.all([
+        const [list, latest, byDomain, compPromptAnalytics, snapshotHistory] = await Promise.all([
           apiClient.getEngineCompetitors({ domain_id: domainId }),
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }),
           apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }),
           apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId }),
+          apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod) }),
         ] as any);
 
         // Load competitive analysis APIs separately with better error handling
@@ -217,29 +293,64 @@ const Competitors = () => {
 
         setSovLatest(latest);
 
-        // Build mention history series from SoV by_domain (use mention_count)
+        // Prepare Share of Voice rows for fallback/platform data
         const rows = Array.isArray(byDomain) ? byDomain : byDomain?.results || [];
-        const grouped: Record<string, Record<string, number>> = {};
+        const groupedRows: Record<string, Record<string, number>> = {};
         rows.forEach((r: any) => {
           const month = r.timestamp || r.date || '';
-          if (!grouped[month]) grouped[month] = {};
+          if (!groupedRows[month]) groupedRows[month] = {};
           const brand = r.competitor?.name || 'Your Brand';
-          grouped[month][brand] = (grouped[month][brand] || 0) + (Number(r.mention_count || 0));
+          groupedRows[month][brand] = (groupedRows[month][brand] || 0) + (Number(r.mention_count || 0));
         });
-        const months = Object.keys(grouped).sort();
-        const brands = new Set<string>();
-        Object.values(grouped).forEach(m => Object.keys(m).forEach(b => brands.add(b)));
-        const brandArray = Array.from(brands);
-        
-        // Build series dynamically based on actual brands
-        const series = months.map(m => {
-          const entry: any = { month: m };
-          brandArray.forEach(brand => {
-            entry[brand] = grouped[m][brand] || 0;
+        const months = Object.keys(groupedRows).sort();
+        const fallbackBrandSet = new Set<string>();
+        Object.values(groupedRows).forEach(m => Object.keys(m).forEach(b => fallbackBrandSet.add(b)));
+        const fallbackBrands = Array.from(fallbackBrandSet);
+
+        // Build mention history series from snapshots if available
+        const snapshotRows = Array.isArray(snapshotHistory) ? snapshotHistory : snapshotHistory?.results || [];
+        const yourBrandLabel = 'Your Brand';
+        if (snapshotRows.length > 0) {
+          const groupedSnapshots: Record<string, Record<string, number>> = {};
+          const brandNames = new Set<string>();
+          snapshotRows.forEach((snap: any) => {
+            const timestamp = snap.timestamp || snap.created_at || '';
+            const label = timestamp ? new Date(timestamp).toISOString().split('T')[0] : `Snapshot ${snap.id}`;
+            const brand = snap.competitor_name || snap.competitor?.name || 'Unknown';
+            brandNames.add(brand);
+            if (!groupedSnapshots[label]) groupedSnapshots[label] = {};
+            groupedSnapshots[label][brand] = Number(snap.total_mentions || 0);
           });
-          return entry;
-        });
-        setSovSeries(series);
+          const sortedLabels = Object.keys(groupedSnapshots).sort();
+          const brands = Array.from(brandNames);
+          let series = sortedLabels.map((label) => {
+            const entry: Record<string, number | string> = { month: label };
+            brands.forEach((brand) => {
+              entry[brand] = groupedSnapshots[label]?.[brand] || 0;
+            });
+            return entry;
+          });
+          let effectiveBrands = [...brands];
+          if (!brands.includes(yourBrandLabel) && fallbackBrands.includes(yourBrandLabel)) {
+            series = series.map((entry) => ({
+              ...entry,
+              [yourBrandLabel]: groupedRows[String(entry.month)]?.[yourBrandLabel] || 0,
+            }));
+            effectiveBrands.push(yourBrandLabel);
+          }
+          setSovSeries(series);
+          setDisabledBrands((prev) => prev.filter((brand) => effectiveBrands.includes(brand)));
+        } else {
+          const fallbackSeries = months.map(m => {
+            const entry: any = { month: m };
+            fallbackBrands.forEach(brand => {
+              entry[brand] = groupedRows[m]?.[brand] || 0;
+            });
+            return entry;
+          });
+          setSovSeries(fallbackSeries);
+          setDisabledBrands((prev) => prev.filter((brand) => fallbackBrands.includes(brand)));
+        }
 
         // Platform-specific share for latest month using byDomain rows
         const lastDate = months[months.length - 1];
@@ -612,37 +723,65 @@ const Competitors = () => {
                 </div>
                 {sovSeries.length > 0 ? (
                   <ResponsiveContainer width="100%" height={350}>
-                    <LineChart data={sovSeries}>
+                        <LineChart data={sovSeries}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                       <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                      <Tooltip 
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "var(--radius)",
-                        }}
-                      />
-                      <Legend />
-                      {Object.keys(sovSeries[0] || {}).filter(k => k !== 'month').map((brandKey, idx) => {
-                        const colors = [
-                          { stroke: "hsl(var(--primary))", fill: "hsl(var(--primary))", width: 3, r: 4 },
-                          { stroke: "hsl(var(--chart-2))", fill: "hsl(var(--chart-2))", width: 2, r: 3 },
-                          { stroke: "hsl(var(--chart-3))", fill: "hsl(var(--chart-3))", width: 2, r: 3 },
-                        ];
-                        const color = colors[idx] || colors[0];
-                        return (
-                          <Line 
-                            key={brandKey}
-                            type="monotone" 
-                            dataKey={brandKey}
-                            name={brandKey}
-                            stroke={color.stroke}
-                            strokeWidth={color.width}
-                            dot={{ fill: color.fill, r: color.r }}
+                          <Tooltip 
+                            content={(props) => (
+                              <VisibilityTooltip {...props} disabledBrands={disabledBrands} />
+                            )}
                           />
-                        );
-                      })}
+                          <Legend content={(props) => (
+                            <VisibilityLegend
+                              {...props}
+                              disabledBrands={disabledBrands}
+                              onToggle={(brand) => {
+                                setDisabledBrands((prev) =>
+                                  prev.includes(brand)
+                                    ? prev.filter((b) => b !== brand)
+                                    : [...prev, brand]
+                                );
+                              }}
+                            />
+                          )} />
+                          {Object.keys(sovSeries[0] || {})
+                            .filter(k => k !== 'month')
+                            .map((brandKey, idx) => {
+                              const disabled = disabledBrands.includes(brandKey);
+                              const colors = [
+                                "hsl(var(--primary))",
+                                "hsl(var(--chart-2))",
+                                "hsl(var(--chart-3))",
+                                "hsl(var(--chart-4))",
+                                "hsl(var(--chart-5))",
+                                "#FF6B6B",
+                                "#4ECDC4",
+                              ];
+                              const color = colors[idx % colors.length];
+                              return (
+                                <Line 
+                                  key={brandKey}
+                                  type="monotone" 
+                                  dataKey={brandKey}
+                                  name={brandKey}
+                                  stroke={color}
+                                  strokeWidth={2.5}
+                                  strokeOpacity={disabled ? 0.25 : 1}
+                                  strokeDasharray={disabled ? "6 6" : undefined}
+                                  dot={
+                                    disabled
+                                      ? { r: 0 }
+                                      : { fill: "hsl(var(--background))", stroke: color, strokeWidth: 2, r: 4 }
+                                  }
+                                  activeDot={
+                                    disabled
+                                      ? false
+                                      : { r: 6, strokeWidth: 3, stroke: color, fill: "hsl(var(--background))" }
+                                  }
+                                />
+                              );
+                            })}
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (

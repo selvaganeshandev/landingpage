@@ -5,6 +5,7 @@ from .views import (
     CompetitorAnalyticsViewSet, 
     CompetitorPromptViewSet,
     CompetitorPromptAnalyticsViewSet,
+    CompetitorMetricSnapshotViewSet,
     competitive_strength_analysis,
     competitive_insights,
     answer_gap_analysis
@@ -15,6 +16,7 @@ router.register(r'competitors', CompetitorViewSet, basename='competitor')
 router.register(r'competitor-analytics', CompetitorAnalyticsViewSet, basename='competitor-analytics')
 router.register(r'competitor-prompts', CompetitorPromptViewSet, basename='competitor-prompt')
 router.register(r'competitor-prompt-analytics', CompetitorPromptAnalyticsViewSet, basename='competitor-prompt-analytics')
+router.register(r'competitor-metric-snapshots', CompetitorMetricSnapshotViewSet, basename='competitor-metric-snapshots')
 
 from .views import process_competitor, process_competitor_single
 

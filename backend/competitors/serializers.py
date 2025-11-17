@@ -1,5 +1,11 @@
 from rest_framework import serializers
-from .models import Competitor, CompetitorAnalytics, CompetitorPrompt, CompetitorPromptAnalytics
+from .models import (
+    Competitor,
+    CompetitorAnalytics,
+    CompetitorPrompt,
+    CompetitorPromptAnalytics,
+    CompetitorMetricSnapshot
+)
 
 
 class CompetitorSerializer(serializers.ModelSerializer):
@@ -71,4 +77,28 @@ class CompetitorPromptAnalyticsSerializer(serializers.ModelSerializer):
             'platform', 'response_text', 'citation_list',
             'created_at', 'modified_at'
         ]
+
+
+class CompetitorMetricSnapshotSerializer(serializers.ModelSerializer):
+    competitor_name = serializers.CharField(source='competitor.name', read_only=True)
+
+    class Meta:
+        model = CompetitorMetricSnapshot
+        fields = [
+            'id',
+            'competitor',
+            'competitor_name',
+            'domain',
+            'timestamp',
+            'total_mentions',
+            'total_citations',
+            'visibility_score',
+            'sentiment_score',
+            'average_position',
+            'share_of_voice_percentage',
+            'trend_percentage',
+            'track_status',
+            'created_at',
+        ]
+        read_only_fields = fields
 

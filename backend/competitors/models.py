@@ -157,3 +157,32 @@ class CompetitorPromptAnalytics(models.Model):
     def __str__(self):
         return f"{self.competitor.name} - {self.prompt.prompt[:50]}... [{self.track_status}]"
 
+
+class CompetitorMetricSnapshot(models.Model):
+    """
+    Periodic snapshot of competitor metrics captured after each processing run.
+    """
+    competitor = models.ForeignKey(Competitor, on_delete=models.CASCADE, related_name='metric_snapshots')
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='competitor_metric_snapshots')
+    timestamp = models.DateTimeField(auto_now_add=True)
+    total_mentions = models.IntegerField(default=0)
+    total_citations = models.IntegerField(default=0)
+    visibility_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    sentiment_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    average_position = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    share_of_voice_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    trend_percentage = models.DecimalField(max_digits=6, decimal_places=2, default=0.0)
+    track_status = models.CharField(max_length=4, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'competitor_metric_snapshots'
+        indexes = [
+            models.Index(fields=['competitor', '-timestamp']),
+            models.Index(fields=['domain', '-timestamp']),
+        ]
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.competitor.name} snapshot @ {self.timestamp}"
+

@@ -26,6 +26,7 @@ from shared_models.models import (
     Competitor,
     CompetitorPromptAnalytics,
     CompetitorAnalytics,
+    CompetitorMetricSnapshot,
     ShareOfVoiceAnalytics,
     Domain,
     Prompt,
@@ -520,6 +521,11 @@ class CompetitorProcessor:
                 avg_sentiment=Avg('sentiment_score'),
                 mentioned_count=Count('id', filter=Q(is_mentioned=True))
             )
+
+            total_citations = 0
+            for citation_list in analytics_qs.values_list('citation_list', flat=True):
+                if citation_list and isinstance(citation_list, list):
+                    total_citations += len(citation_list)
             
             # Update Competitor aggregate fields
             with transaction.atomic():
@@ -549,6 +555,12 @@ class CompetitorProcessor:
             
             # Update ShareOfVoice
             self._update_share_of_voice(competitor)
+            competitor.refresh_from_db()
+            self._create_metric_snapshot(
+                competitor=competitor,
+                totals=totals,
+                total_citations=total_citations
+            )
             
             logger.info(f"Successfully aggregated analytics for competitor {competitor.id}")
         
@@ -700,4 +712,36 @@ class CompetitorProcessor:
         except Exception as e:
             logger.error(f"Error calculating market positions: {str(e)}")
             raise
+
+    def _create_metric_snapshot(self, competitor: Competitor, totals: Dict[str, Any], total_citations: int) -> None:
+        """
+        Persist a snapshot of competitor metrics after each processing run.
+        """
+        try:
+            current_share = Decimal(str(competitor.share_of_voice_percentage or 0))
+            last_snapshot = CompetitorMetricSnapshot.objects.filter(
+                competitor=competitor
+            ).order_by('-timestamp').first()
+
+            trend_percentage = Decimal('0.0')
+            if last_snapshot and last_snapshot.share_of_voice_percentage and last_snapshot.share_of_voice_percentage != 0:
+                prev_share = Decimal(str(last_snapshot.share_of_voice_percentage))
+                if prev_share != 0:
+                    change = ((current_share - prev_share) / prev_share) * 100
+                    trend_percentage = Decimal(str(round(change, 2)))
+
+            CompetitorMetricSnapshot.objects.create(
+                competitor=competitor,
+                domain=competitor.domain,
+                total_mentions=totals.get('total_mentions') or 0,
+                total_citations=total_citations,
+                visibility_score=competitor.visibility_score or 0,
+                sentiment_score=competitor.sentiment_score or 0,
+                average_position=competitor.average_position or 0,
+                share_of_voice_percentage=current_share,
+                trend_percentage=trend_percentage,
+                track_status=competitor.track_status,
+            )
+        except Exception as e:
+            logger.error(f"Error creating metric snapshot for competitor {competitor.id}: {str(e)}", exc_info=True)
 
