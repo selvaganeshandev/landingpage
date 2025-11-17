@@ -145,6 +145,7 @@ const Competitors = () => {
   const [sovSeries, setSovSeries] = useState<any[]>([]);
   const [platformMap, setPlatformMap] = useState<Record<string, Array<{ brand: string; mentions: number }>>>({});
   const [heatmap, setHeatmap] = useState<any[]>([]);
+  const [heatmapPlatforms, setHeatmapPlatforms] = useState<string[]>([]);
   const [topBrands, setTopBrands] = useState<any[]>([]);
   const [promptCards, setPromptCards] = useState<any[]>([]);
   const [competitiveMetrics, setCompetitiveMetrics] = useState<any[]>([]);
@@ -154,6 +155,17 @@ const Competitors = () => {
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [hasLoadedData, setHasLoadedData] = useState(false);
   const [disabledBrands, setDisabledBrands] = useState<string[]>([]);
+
+  const sortHeatmapRows = (rows: any[], platformKeys: string[]) => {
+    if (!Array.isArray(rows) || rows.length === 0) return rows;
+    return [...rows].sort((a, b) => {
+      if (a.isYou && !b.isYou) return -1;
+      if (!a.isYou && b.isYou) return 1;
+      const sumPlatforms = (row: any) =>
+        platformKeys.reduce((acc, plat) => acc + Number(row.platforms?.[plat] ?? 0), 0);
+      return sumPlatforms(b) - sumPlatforms(a);
+    });
+  };
 
   const handleExportReport = () => {
     toast({
@@ -195,12 +207,13 @@ const Competitors = () => {
       setIsPageLoading(true);
       try {
         // Load main competitor data first
-        const [list, latest, byDomain, compPromptAnalytics, snapshotHistory] = await Promise.all([
+        const [list, latest, byDomain, compPromptAnalytics, snapshotHistory, heatmapResponse] = await Promise.all([
           apiClient.getEngineCompetitors({ domain_id: domainId }),
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }),
           apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }),
           apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId }),
           apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod) }),
+          apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod) }),
         ] as any);
 
         // Load competitive analysis APIs separately with better error handling
@@ -309,6 +322,8 @@ const Competitors = () => {
 
         // Build mention history series from snapshots if available
         const snapshotRows = Array.isArray(snapshotHistory) ? snapshotHistory : snapshotHistory?.results || [];
+        const apiHeatmapRows = Array.isArray(heatmapResponse?.rows) ? heatmapResponse.rows : [];
+        const apiHeatmapPlatforms = Array.isArray(heatmapResponse?.platforms) ? heatmapResponse.platforms : [];
         const yourBrandLabel = 'Your Brand';
         if (snapshotRows.length > 0) {
           const groupedSnapshots: Record<string, Record<string, number>> = {};
@@ -371,22 +386,51 @@ const Competitors = () => {
         });
         setPlatformMap(platOut);
 
+        // Map brand names to URLs for favicon usage
+        const competitorUrlMap: Record<string, string> = {};
+        mapped.forEach((comp: any) => {
+          if (comp.name && comp.url) {
+            competitorUrlMap[comp.name] = comp.url;
+          }
+        });
+        if (selectedDomain?.name && selectedDomain?.url) {
+          competitorUrlMap[selectedDomain.name] = selectedDomain.url;
+        }
+        competitorUrlMap[yourBrandLabel] = selectedDomain?.url || competitorUrlMap[yourBrandLabel] || '';
+
         // Heatmap: competitor (row) vs platform percentage
-        const platforms = Object.keys(platOut);
+        const fallbackPlatforms = Object.keys(platOut);
         const brandsSet = new Set<string>();
         Object.values(platOut).forEach(arr => arr.forEach(e => brandsSet.add(e.brand)));
-        const brandsArr = Array.from(brandsSet);
-        const heatArr = brandsArr.map(brand => ({
+        const brands = Array.from(brandsSet);
+        const fallbackHeatmap = brands.map((brand) => ({
           competitor: brand,
-          platforms: platforms.reduce((acc: any, p) => {
+          platforms: fallbackPlatforms.reduce((acc: any, p) => {
             const total = (platOut[p] || []).reduce((s, e) => s + e.mentions, 0) || 1;
-            const item = (platOut[p] || []).find(e => e.brand === brand);
+            const item = (platOut[p] || []).find((entry) => entry.brand === brand);
             acc[p] = item ? Number(((item.mentions / total) * 100).toFixed(1)) : 0;
             return acc;
           }, {}),
-          isYou: brand.toLowerCase().includes('your')
+          isYou: brand.toLowerCase().includes('your'),
+          url: competitorUrlMap[brand] || '',
         }));
-        setHeatmap(heatArr);
+
+        if (apiHeatmapRows.length && apiHeatmapPlatforms.length) {
+          const formattedHeatmap = apiHeatmapRows.map((row: any) => ({
+            competitor: row.name,
+            platforms: apiHeatmapPlatforms.reduce((acc: any, platform: string) => {
+              acc[platform] = Number(row.platforms?.[platform] ?? 0);
+              return acc;
+            }, {}),
+            isYou: Boolean(row.isYou),
+            url: row.url || competitorUrlMap[row.name] || (row.isYou ? competitorUrlMap[yourBrandLabel] : ''),
+          }));
+          setHeatmap(sortHeatmapRows(formattedHeatmap, apiHeatmapPlatforms));
+          setHeatmapPlatforms(apiHeatmapPlatforms);
+        } else {
+          setHeatmap(sortHeatmapRows(fallbackHeatmap, fallbackPlatforms));
+          setHeatmapPlatforms(fallbackPlatforms);
+        }
 
         // Top brands list from latest snapshot
         const tb = (latest?.players || []).map((p: any) => ({
@@ -482,7 +526,7 @@ const Competitors = () => {
       }
     };
     void load();
-  }, [domainId, timePeriod]);
+  }, [domainId, timePeriod, selectedDomain?.url, selectedDomain?.name]);
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
@@ -732,7 +776,7 @@ const Competitors = () => {
                               <VisibilityTooltip {...props} disabledBrands={disabledBrands} />
                             )}
                           />
-                          <Legend content={(props) => (
+                          <Legend content={(props: LegendProps) => (
                             <VisibilityLegend
                               {...props}
                               disabledBrands={disabledBrands}
@@ -792,18 +836,11 @@ const Competitors = () => {
               </div>
             </Card>
 
-            {/* Heatmap and Top Brands */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <CompetitorHeatmap 
-                  data={heatmapData} 
-                  platforms={Object.keys(platformMap).length > 0 ? Object.keys(platformMap) : []} 
-                />
-              </div>
-              <div>
-                <TopBrandsList brands={topBrands} totalMentions={topBrands.length ? topBrands.reduce((s,b)=>s+b.mentions,0) : 0} />
-              </div>
-            </div>
+            {/* Heatmap full width */}
+            <CompetitorHeatmap 
+              data={heatmapData} 
+              platforms={heatmapPlatforms.length ? heatmapPlatforms : Object.keys(platformMap)} 
+            />
 
             {/* Competitive Analysis */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -909,43 +946,49 @@ const Competitors = () => {
               </Card>
             </div>
 
-            {/* Platform Breakdown */}
-            <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-              <h3 className="text-lg font-semibold mb-6 font-inter">Platform-Specific Competition</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {Object.keys(platformMap).length > 0 ? (
-                  Object.entries(platformMap).map(([platform, data]) => (
-                    <div key={platform} className="space-y-4">
-                      <h4 className="font-medium text-center">{platform}</h4>
-                      <ResponsiveContainer width="100%" height={200}>
-                        <BarChart data={data}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                          <XAxis 
-                            dataKey="brand" 
-                            stroke="hsl(var(--muted-foreground))" 
-                            fontSize={10}
-                            angle={-45}
-                            textAnchor="end"
-                            height={80}
-                          />
-                          <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} />
-                          <Tooltip />
-                          <Bar dataKey="mentions" radius={[8, 8, 0, 0]}>
-                            <Cell fill="hsl(var(--primary))" />
-                            <Cell fill="hsl(var(--chart-2))" />
-                            <Cell fill="hsl(var(--chart-3))" />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
+            {/* Platform Breakdown + Top Brands */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80 h-full">
+                <h3 className="text-lg font-semibold mb-6 font-inter">Platform-Specific Competition</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {Object.keys(platformMap).length > 0 ? (
+                    Object.entries(platformMap).map(([platform, data]) => (
+                      <div key={platform} className="space-y-4">
+                        <h4 className="font-medium text-center">{platform}</h4>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <BarChart data={data}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                            <XAxis 
+                              dataKey="brand" 
+                              stroke="hsl(var(--muted-foreground))" 
+                              fontSize={10}
+                              angle={-45}
+                              textAnchor="end"
+                              height={80}
+                            />
+                            <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} />
+                            <Tooltip />
+                            <Bar dataKey="mentions" radius={[8, 8, 0, 0]}>
+                              <Cell fill="hsl(var(--primary))" />
+                              <Cell fill="hsl(var(--chart-2))" />
+                              <Cell fill="hsl(var(--chart-3))" />
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="col-span-full flex items-center justify-center py-8">
+                      <p className="text-sm text-muted-foreground">No platform data available yet.</p>
                     </div>
-                  ))
-                ) : (
-                  <div className="col-span-full flex items-center justify-center py-8">
-                    <p className="text-sm text-muted-foreground">No platform data available yet.</p>
-                  </div>
-                )}
-              </div>
-            </Card>
+                  )}
+                </div>
+              </Card>
+              <TopBrandsList
+                brands={topBrands}
+                totalMentions={topBrands.length ? topBrands.reduce((s, b) => s + b.mentions, 0) : 0}
+              />
+            </div>
           </TabsContent>
 
           {/* Prompts Tab */}

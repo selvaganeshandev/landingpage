@@ -162,7 +162,7 @@ class CompetitorMetricSnapshot(models.Model):
     """
     Periodic snapshot of competitor metrics captured after each processing run.
     """
-    competitor = models.ForeignKey(Competitor, on_delete=models.CASCADE, related_name='metric_snapshots')
+    competitor = models.ForeignKey(Competitor, on_delete=models.CASCADE, related_name='metric_snapshots', null=True, blank=True)
     domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='competitor_metric_snapshots')
     timestamp = models.DateTimeField(auto_now_add=True)
     total_mentions = models.IntegerField(default=0)
@@ -173,6 +173,7 @@ class CompetitorMetricSnapshot(models.Model):
     share_of_voice_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     trend_percentage = models.DecimalField(max_digits=6, decimal_places=2, default=0.0)
     track_status = models.CharField(max_length=4, blank=True, null=True)
+    platform_metrics = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -184,5 +185,6 @@ class CompetitorMetricSnapshot(models.Model):
         ordering = ['-timestamp']
 
     def __str__(self):
-        return f"{self.competitor.name} snapshot @ {self.timestamp}"
+        label = self.competitor.name if self.competitor else self.domain.name
+        return f"{label} snapshot @ {self.timestamp}"
 

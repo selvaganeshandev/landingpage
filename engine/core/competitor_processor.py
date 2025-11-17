@@ -559,7 +559,8 @@ class CompetitorProcessor:
             self._create_metric_snapshot(
                 competitor=competitor,
                 totals=totals,
-                total_citations=total_citations
+                total_citations=total_citations,
+                analytics_qs=analytics_qs
             )
             
             logger.info(f"Successfully aggregated analytics for competitor {competitor.id}")
@@ -713,7 +714,7 @@ class CompetitorProcessor:
             logger.error(f"Error calculating market positions: {str(e)}")
             raise
 
-    def _create_metric_snapshot(self, competitor: Competitor, totals: Dict[str, Any], total_citations: int) -> None:
+    def _create_metric_snapshot(self, competitor: Competitor, totals: Dict[str, Any], total_citations: int, analytics_qs) -> None:
         """
         Persist a snapshot of competitor metrics after each processing run.
         """
@@ -730,6 +731,27 @@ class CompetitorProcessor:
                     change = ((current_share - prev_share) / prev_share) * 100
                     trend_percentage = Decimal(str(round(change, 2)))
 
+            platform_metrics = []
+            platform_stats = analytics_qs.values('platform').annotate(
+                platform_mentions=Sum('mention_count'),
+                avg_sentiment=Avg('sentiment_score')
+            )
+            total_mentions = totals.get('total_mentions') or 0
+            for stat in platform_stats:
+                platform_name = stat['platform'] or 'Unknown'
+                mentions = stat['platform_mentions'] or 0
+                if not mentions:
+                    continue
+                share = 0
+                if total_mentions:
+                    share = round((Decimal(str(mentions)) / Decimal(str(total_mentions))) * 100, 2)
+                platform_metrics.append({
+                    'platform': platform_name,
+                    'mentions': float(mentions),
+                    'share_percentage': float(share),
+                    'sentiment_score': float(stat['avg_sentiment'] or 0),
+                })
+
             CompetitorMetricSnapshot.objects.create(
                 competitor=competitor,
                 domain=competitor.domain,
@@ -741,6 +763,7 @@ class CompetitorProcessor:
                 share_of_voice_percentage=current_share,
                 trend_percentage=trend_percentage,
                 track_status=competitor.track_status,
+                platform_metrics=platform_metrics,
             )
         except Exception as e:
             logger.error(f"Error creating metric snapshot for competitor {competitor.id}: {str(e)}", exc_info=True)

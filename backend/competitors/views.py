@@ -4,9 +4,11 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.db.models import Sum, Avg, Count, Q, F, Max, Min
 from django.shortcuts import get_object_or_404
+from collections import defaultdict
 from datetime import timedelta
 from django.utils import timezone
 from .models import Competitor, CompetitorAnalytics, CompetitorPrompt, CompetitorPromptAnalytics, CompetitorMetricSnapshot
+from domains.models import Domain
 from prompts.models import PromptAnalytics
 from analytics.models import ShareOfVoiceAnalytics
 from .serializers import (
@@ -590,6 +592,98 @@ def answer_gap_analysis(request):
             {'error': f'Failed to retrieve answer gap analysis: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def competitor_heatmap(request):
+    try:
+        domain_id = request.GET.get('domain_id')
+        if not domain_id:
+            return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        days = int(request.GET.get('days', 90))
+        since = timezone.now() - timedelta(days=days)
+
+        snapshots = CompetitorMetricSnapshot.objects.filter(
+            domain_id=domain_id,
+            timestamp__gte=since
+        ).select_related('competitor', 'domain').order_by('-timestamp')
+
+        domain = Domain.objects.filter(id=domain_id).only('id', 'name', 'url').first()
+
+        latest_snapshots = []
+        seen = set()
+        for snap in snapshots:
+            key = snap.competitor_id or f"domain-{snap.domain_id}"
+            if key in seen:
+                continue
+            latest_snapshots.append(snap)
+            seen.add(key)
+
+        rows = []
+        platform_totals = defaultdict(float)
+
+        for snap in latest_snapshots:
+            metrics = snap.platform_metrics or []
+            platform_mentions = {}
+            for metric in metrics:
+                platform_name = metric.get('platform') or 'Overall'
+                mentions = float(metric.get('mentions') or 0)
+                if mentions <= 0:
+                    continue
+                platform_mentions[platform_name] = mentions
+                platform_totals[platform_name] += mentions
+
+            if not platform_mentions:
+                continue
+
+            rows.append({
+                'name': snap.competitor.name if snap.competitor else snap.domain.name,
+                'isYou': snap.competitor is None,
+                'platform_mentions': platform_mentions,
+                'url': (snap.competitor.url if snap.competitor else snap.domain.url) if snap.competitor or snap.domain else None,
+            })
+
+        if not any(row['isYou'] for row in rows):
+            your_platforms = defaultdict(float)
+            sov_records = ShareOfVoiceAnalytics.objects.filter(
+                domain_id=domain_id,
+                competitor__isnull=True,
+                timestamp__gte=since
+            )
+            for record in sov_records:
+                platform = record.platform or 'Overall'
+                mentions = float(record.mention_count or 0)
+                if mentions <= 0:
+                    continue
+                your_platforms[platform] += mentions
+                platform_totals[platform] += mentions
+            if your_platforms:
+                rows.append({
+                    'name': 'Your Brand',
+                    'isYou': True,
+                    'platform_mentions': dict(your_platforms),
+                    'url': domain.url if domain else None,
+                })
+
+        platforms = sorted(platform_totals.keys())
+        formatted_rows = []
+        for row in rows:
+            percentages = {}
+            for platform in platforms:
+                mentions = row['platform_mentions'].get(platform, 0)
+                total = platform_totals.get(platform) or 1
+                percentages[platform] = round((mentions / total) * 100, 2)
+            formatted_rows.append({
+                'name': row['name'],
+                'isYou': row['isYou'],
+                'platforms': percentages,
+                'url': row.get('url') or (domain.url if row['isYou'] and domain else None),
+            })
+
+        return Response({'platforms': platforms, 'rows': formatted_rows})
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])

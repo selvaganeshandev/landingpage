@@ -111,15 +111,88 @@ def extract_position_from_response(response: str, user_domain: str, citation_url
 	return None
 
 
+def _extract_competitor_mentions(text: str, user_domain: str, all_urls: List[str] = None) -> List[str]:
+	"""
+	Extract competitor brand/company names from LLM response text.
+	Uses multiple strategies: URL analysis, company name patterns, and keyword extraction.
+
+	Args:
+		text: The LLM response text
+		user_domain: The user's domain (to exclude from competitors)
+		all_urls: List of all URLs found in the text
+
+	Returns:
+		List of competitor names found in the text
+	"""
+	if not text:
+		return []
+
+	competitors = set()
+	user_domain_clean = _get_domain_from_url(user_domain).lower()
+	user_sld = user_domain_clean.split('.')[0] if user_domain_clean else ""
+
+	# Strategy 1: Extract company names from URLs
+	if all_urls:
+		for url in all_urls:
+			domain = _get_domain_from_url(url)
+			if not domain or domain == user_domain_clean:
+				continue
+
+			# Extract SLD (second-level domain) as potential competitor name
+			sld = domain.split('.')[0] if domain else ""
+			if sld and len(sld) >= 3 and sld != user_sld:
+				# Title case the SLD for cleaner names
+				competitors.add(sld.title())
+
+	# Strategy 2: Extract company names using common patterns
+	# Pattern: "Company Name Inc/LLC/Ltd/Corp"
+	company_patterns = [
+		r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:Inc\.?|LLC|Ltd\.?|Corporation|Corp\.?|Company|Co\.?)\b',
+		# Pattern: "Brand.com" or "Brand.io" mentioned in text
+		r'\b([A-Z][a-z]+(?:[A-Z][a-z]+)*)\.(com|io|net|org)\b',
+		# Pattern: Capitalized names followed by context words (insurance, software, platform, etc.)
+		r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:insurance|software|platform|service|app|tool|website|marketplace)\b',
+	]
+
+	for pattern in company_patterns:
+		matches = re.findall(pattern, text, flags=re.IGNORECASE)
+		for match in matches:
+			# match can be a tuple if pattern has multiple groups
+			name = match[0] if isinstance(match, tuple) else match
+			name = name.strip()
+			if name and len(name) >= 3 and name.lower() != user_sld.lower():
+				competitors.add(name.title())
+
+	# Strategy 3: Extract mentions of brands in numbered lists or bullets
+	# Pattern: "1. BrandName - description" or "• BrandName:"
+	list_patterns = [
+		r'[\d\.\*\-•]\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[\:\-]',
+		r'\*\*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\*\*',  # **BrandName** in markdown
+	]
+
+	for pattern in list_patterns:
+		matches = re.findall(pattern, text)
+		for name in matches:
+			name = name.strip()
+			if name and len(name) >= 3 and name.lower() != user_sld.lower():
+				# Filter out common words that might match
+				if name.lower() not in ['here', 'there', 'this', 'that', 'these', 'those', 'with', 'from', 'about', 'what', 'when', 'where', 'which', 'while', 'their', 'other']:
+					competitors.add(name.title())
+
+	# Convert to list and return (limit to top 20 to avoid noise)
+	competitor_list = sorted(list(competitors))[:20]
+	return competitor_list
+
+
 def _count_mentions_with_word_boundaries(text: str, mention_patterns: List[str]) -> int:
 	"""
 	Count mentions using regex with word boundaries to avoid overlaps.
 	Deduplicates by matched span ranges to prevent double-counting.
-	
+
 	Args:
 		text: Text to search in
 		mention_patterns: List of patterns to search for
-	
+
 	Returns:
 		Count of unique mentions (non-overlapping matches)
 	"""
@@ -206,6 +279,10 @@ def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
 			sentiment = "positive"
 		elif polarity < -0.1:
 			sentiment = "negative"
+
+	# Extract competitor mentions from the response text
+	competitor_mentions = _extract_competitor_mentions(text, user_domain, all_urls)
+
 	return {
 		"is_mention": has_mention or has_citation,
 		"mention_count": mention_count,
@@ -216,6 +293,7 @@ def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
 		"citation_count": citation_count,  # Now uses only domain URLs
 		"has_citation": has_citation,
 		"all_urls": all_urls,  # Kept for reference but not used for citation_count
+		"competitor_mention_list": competitor_mentions,  # NEW: List of competitor names
 	}
 
 
@@ -290,6 +368,9 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
             elif polarity < -0.1:
                 sentiment = "negative"
 
+        # Extract competitor mentions from the response text
+        competitor_mentions = _extract_competitor_mentions(text, user_domain, all_urls)
+
         print({
             "response_text": text,
             "is_mention": (mention_count > 0) or has_citation,
@@ -301,8 +382,9 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
             "citation_count": citation_count,
             "has_citation": has_citation,
             "all_urls": all_urls,
+            "competitor_mention_list": competitor_mentions,
         })
-        
+
         return {
             "response_text": text,
             "is_mention": (mention_count > 0) or has_citation,
@@ -314,6 +396,7 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
             "citation_count": citation_count,
             "has_citation": has_citation,
             "all_urls": all_urls,
+            "competitor_mention_list": competitor_mentions,  # NEW: List of competitor names
         }
         
         

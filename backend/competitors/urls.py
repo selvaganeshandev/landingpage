@@ -8,7 +8,8 @@ from .views import (
     CompetitorMetricSnapshotViewSet,
     competitive_strength_analysis,
     competitive_insights,
-    answer_gap_analysis
+    answer_gap_analysis,
+    competitor_heatmap
 )
 
 router = DefaultRouter()
@@ -28,6 +29,7 @@ urlpatterns = [
     path('competitive-strength-analysis/', competitive_strength_analysis, name='competitive_strength_analysis'),
     path('competitive-insights/', competitive_insights, name='competitive_insights'),
     path('answer-gap-analysis/', answer_gap_analysis, name='answer_gap_analysis'),
+    path('heatmap/', competitor_heatmap, name='competitor_heatmap'),
     # Router routes last
     path('', include(router.urls)),
 ]

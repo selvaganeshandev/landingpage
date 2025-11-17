@@ -618,6 +618,14 @@ export const apiClient = {
     return apiClient.getEngine(`/api/competitor-prompt-analytics/gaps/${queryParams}`);
   },
 
+  getCompetitorHeatmap: (params: { domain_id: string; days?: number }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.days ? { days: String(params.days) } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/heatmap/${queryParams}`);
+  },
+
   getCompetitorMetricSnapshots: (params: { domain_id: string; days?: number; competitor_id?: string }) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
