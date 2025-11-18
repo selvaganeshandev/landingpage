@@ -64,7 +64,7 @@ import {
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
 
-const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void; navigate: any }) => {
+const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDomainProcessing }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void; navigate: any; isDomainProcessing?: boolean }) => {
   const [submenuOpen, setSubmenuOpen] = useState(false);
   const [recentsVisible, setRecentsVisible] = useState(true);
 
@@ -131,7 +131,23 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate }: { g
       ? (location.pathname === '/' || location.pathname === '/chat')
       : location.pathname === item.path;
 
-    const linkContent = (
+    // Disable navigation when domain is processing (except for settings and chat)
+    const isDisabled = isDomainProcessing && !['/chat', '/', '/organization-settings'].includes(item.path);
+
+    const linkContent = isDisabled ? (
+      <div
+        className={cn(
+          "flex items-center opacity-50 cursor-not-allowed",
+          "text-muted-foreground",
+          isSidebarOpen
+            ? "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+            : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
+        )}
+      >
+        <Icon className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+        {isSidebarOpen && <span>{item.name}</span>}
+      </div>
+    ) : (
       <Link
         to={item.path}
         onClick={onItemClick}
@@ -261,7 +277,6 @@ export const Sidebar = () => {
     checkPermission = auth.checkPermission;
   } catch (error) {
     // Auth context not available yet - return null or loading state
-    console.warn('Sidebar: Auth context not available:', error);
     return null;
   }
   const { toast } = useToast();
@@ -269,6 +284,10 @@ export const Sidebar = () => {
   const { isOpen, toggleSidebar } = useSidebar();
   const { selectedDomain, domains, setSelectedDomain } = useDomainStore();
   const [domainPopoverOpen, setDomainPopoverOpen] = useState(false);
+
+  // Check if domain is currently processing
+  const domainProcessingStatus = selectedDomain?.processing_status || null;
+  const isDomainProcessing = Boolean(selectedDomain && domainProcessingStatus && ['INIT', 'SCHD', 'PROC'].includes(domainProcessingStatus));
 
   // Helper function to get favicon URL
   const getFaviconUrl = (url: string) => {
@@ -436,6 +455,7 @@ export const Sidebar = () => {
                 isSidebarOpen={isOpen}
                 onItemClick={handleItemClick}
                 navigate={navigate}
+                isDomainProcessing={isDomainProcessing}
               />
             </div>
           ))}

@@ -164,6 +164,17 @@ const Competitors = () => {
   const domainProcessingStatus = selectedDomain?.processing_status || null;
   const isDomainProcessing = Boolean(selectedDomain && domainProcessingStatus && domainProcessingStatus !== 'COMP');
 
+  // Poll for status updates every 10 seconds when domain is processing
+  useEffect(() => {
+    if (!isDomainProcessing) return;
+
+    const interval = setInterval(() => {
+      loadDomains(); // Refresh domain status from server
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [isDomainProcessing, loadDomains]);
+
   const promptCards = useMemo(() => {
     if (!promptRows.length) return [];
 

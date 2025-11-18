@@ -64,14 +64,13 @@ export const useDomainStore = create<DomainState>()(
                   if (userId) {
                     const { saveActiveDomain } = await import('@/utils/activeDomain');
                     saveActiveDomain(userId, domain.id);
-                    console.log(`[domainStore] Synced active_domain_id:${userId} with domain ${domain.id}`);
                   }
                 } catch (e) {
                   // Ignore token parsing errors
                 }
               }
             } catch (error) {
-              console.warn('[domainStore] Failed to sync with active_domain_id:', error);
+              // Silently ignore sync errors
             }
           })();
         }
@@ -84,27 +83,25 @@ export const useDomainStore = create<DomainState>()(
       loadDomains: async () => {
         try {
           set({ isLoading: true, error: null });
-          
+
           // Import apiClient dynamically to avoid circular dependencies
           const { apiClient } = await import('@/services/api');
           const response = await apiClient.getDomains();
-          
-          set({ 
+
+          set({
             domains: response.domains,
             selectedDomain: null, // Clear selected domain when loading fresh data
-            isLoading: false 
+            isLoading: false
           });
-          
-          // If no domain is selected and we have domains, select the first one
-          const { selectedDomain } = get();
-          if (!selectedDomain && response.domains.length > 0) {
-            set({ selectedDomain: response.domains[0] });
-          }
-          
+
+          // NOTE: Don't auto-select first domain here
+          // Let DomainSelector's restoration logic handle domain selection
+          // This prevents showing wrong domain briefly before server sync completes
+
         } catch (error: any) {
-          set({ 
+          set({
             error: error.message || 'Failed to load domains',
-            isLoading: false 
+            isLoading: false
           });
         }
       },

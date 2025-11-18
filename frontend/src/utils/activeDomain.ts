@@ -55,7 +55,6 @@ export function saveActiveDomain(userId: string | number, domainId: string | num
       // Also remove legacy key if it exists (cleanup)
       const legacyKey = getLegacyKey(userIdStr);
       localStorage.removeItem(legacyKey);
-      console.log(`[activeDomain] Cleared active domain for user ${userIdStr}`);
     } else {
       const idStr = String(domainId);
       localStorage.setItem(activeKey, idStr);
@@ -64,10 +63,9 @@ export function saveActiveDomain(userId: string | number, domainId: string | num
         localStorage.setItem(timestampKey, String(timestamp));
         lastUpdateTimestamp[userIdStr] = timestamp;
       }
-      console.log(`[activeDomain] Saved active domain ${idStr} for user ${userIdStr} to localStorage`);
     }
   } catch (error) {
-    console.error('[activeDomain] Error saving to localStorage:', error);
+    // Silently ignore localStorage errors
   }
 }
 
@@ -78,12 +76,9 @@ export function saveActiveDomain(userId: string | number, domainId: string | num
 export async function syncActiveDomainToServer(domainId: number | null): Promise<boolean> {
   try {
     const { apiClient } = await import('@/services/api');
-    console.log(`[activeDomain] Syncing domainId ${domainId} (type: ${typeof domainId}) to server`);
-    const response = await apiClient.updateActiveDomain(domainId);
-    console.log(`[activeDomain] Server response:`, response);
+    await apiClient.updateActiveDomain(domainId);
     return true;
   } catch (error) {
-    console.error('[activeDomain] Failed to sync active domain to server:', error);
     return false;
   }
 }
@@ -103,32 +98,26 @@ export async function loadActiveDomainFromServer(userId: string | number): Promi
     if (lastTimestamp) {
       const timeSinceUpdate = Date.now() - parseInt(lastTimestamp, 10);
       if (timeSinceUpdate < 2000) {
-        console.log(`[activeDomain] Skipping server load - recent update ${timeSinceUpdate}ms ago`);
         return loadActiveDomain(userId);
       }
     }
 
     const { apiClient } = await import('@/services/api');
     const profile: any = await apiClient.getProfile();
-    console.log(`[activeDomain] Profile response:`, profile);
     const activeDomainId = profile?.user?.active_domain_id;
-    console.log(`[activeDomain] Extracted active_domain_id: ${activeDomainId} (type: ${typeof activeDomainId}) from profile for user ${userId}`);
 
     // Explicitly check for null, undefined, or falsy values
     if (activeDomainId !== null && activeDomainId !== undefined && activeDomainId !== '') {
       const idStr = String(activeDomainId);
       // Save but skip timestamp update (this is from server, not user action)
       saveActiveDomain(userId, idStr, true);
-      console.log(`[activeDomain] Loaded active domain ${idStr} from server for user ${userId}`);
       return idStr;
     } else {
       // Clear cache if server has no active domain (null or undefined)
       saveActiveDomain(userId, null, true);
-      console.log(`[activeDomain] No active domain found on server for user ${userId} (active_domain_id: ${activeDomainId})`);
       return null;
     }
   } catch (error) {
-    console.error('[activeDomain] Failed to load active domain from server:', error);
     // Fallback to localStorage cache
     return loadActiveDomain(userId);
   }
@@ -140,49 +129,38 @@ export async function loadActiveDomainFromServer(userId: string | number): Promi
  * Also syncs with Zustand domain store
  */
 export async function updateActiveDomain(
-  userId: string | number, 
+  userId: string | number,
   domainId: number | null,
   domain?: any // Optional domain object to sync with Zustand store
 ): Promise<boolean> {
   try {
     const userIdStr = String(userId);
-    console.log(`[activeDomain] Updating active domain for user ${userIdStr} to ${domainId}`);
-    
+
     // Update localStorage immediately (optimistic update)
     saveActiveDomain(userIdStr, domainId);
-    
-    // Verify it was saved
-    const saved = loadActiveDomain(userIdStr);
-    if (saved !== String(domainId || '')) {
-      console.warn(`[activeDomain] localStorage save verification failed. Expected: ${domainId}, Got: ${saved}`);
-    }
-    
+
     // Sync with Zustand domain store if domain object is provided
     if (domain) {
       try {
         const { useDomainStore } = await import('@/stores/domainStore');
         const store = useDomainStore.getState();
         store.setSelectedDomain(domain);
-        console.log(`[activeDomain] Synced domain-store with domain ${domainId}`);
       } catch (storeError) {
-        console.warn(`[activeDomain] Failed to sync with domain-store:`, storeError);
+        // Silently ignore store sync errors
       }
     }
-    
+
     // Sync to server
     const success = await syncActiveDomainToServer(domainId);
-    
+
     if (!success) {
-      console.warn(`[activeDomain] Server sync failed, reverting to server value`);
       // If server sync fails, revert to server value
       await loadActiveDomainFromServer(userIdStr);
       return false;
     }
-    
-    console.log(`[activeDomain] Successfully updated active domain for user ${userIdStr}`);
+
     return true;
   } catch (error) {
-    console.error('[activeDomain] Error updating active domain:', error);
     return false;
   }
 }
@@ -200,12 +178,11 @@ export function clearAllActiveDomainStorage(userId: string | number): void {
     const userIdStr = String(userId);
     const activeKey = getActiveDomainKey(userIdStr);
     const legacyKey = getLegacyKey(userIdStr);
-    
+
     localStorage.removeItem(activeKey);
     localStorage.removeItem(legacyKey);
-    console.log(`[activeDomain] Cleared all active domain storage for user ${userIdStr}`);
   } catch (error) {
-    console.error('[activeDomain] Error clearing active domain storage:', error);
+    // Silently ignore errors
   }
 }
 
@@ -221,7 +198,7 @@ export function clearAllActiveDomainStorage(userId: string | number): void {
 export function getActiveDomainId(user: any = null): string | null {
   try {
     let userId: string | number | null = null;
-    
+
     // Try to get from user object (from AuthContext)
     if (user?.id) {
       userId = user.id;
@@ -237,14 +214,13 @@ export function getActiveDomainId(user: any = null): string | null {
         // ignore
       }
     }
-    
+
     if (!userId) {
       return null;
     }
-    
+
     return loadActiveDomain(userId);
   } catch (error) {
-    console.error('[activeDomain] Error getting active domain ID:', error);
     return null;
   }
 }
