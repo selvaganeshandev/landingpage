@@ -11,6 +11,7 @@ from .serializers import (
 )
 from authentication.serializers import AccountSerializer
 from authentication.models import Account
+from .services import schedule_domain_processing
 
 
 @api_view(['GET', 'POST'])
@@ -72,10 +73,12 @@ def domain_list(request):
         
         serializer = DomainSerializer(data=data)
         if serializer.is_valid():
-            serializer.save()
+            domain = serializer.save()
+            processing_triggered = schedule_domain_processing(domain)
             return Response({
                 'message': 'Domain added successfully',
-                'domain': serializer.data
+                'domain': DomainSerializer(domain).data,
+                'processing_triggered': processing_triggered
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

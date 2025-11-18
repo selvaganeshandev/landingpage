@@ -198,6 +198,9 @@ EMAIL_USE_TLS = True
 EMAIL_USE_SSL = False
 EMAIL_HOST_USER = "appkodes@gmail.com"
 EMAIL_HOST_PASSWORD = "chykvzrenfscmseb"
+
+# Engine (processing) service configuration
+ENGINE_API_URL = config('ENGINE_API_URL', default='http://localhost:8001')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # OpenAI API Configuration

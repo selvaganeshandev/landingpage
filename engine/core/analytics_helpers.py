@@ -147,8 +147,17 @@ def _extract_competitor_mentions(text: str, user_domain: str, all_urls: List[str
 	user_domain_clean = _get_domain_from_url(user_domain).lower()
 	user_sld = user_domain_clean.split('.')[0] if user_domain_clean else ""
 
-	# Strategy 1: Extract company names from URLs
+	# Strategy 1: Extract company names from URLs (MOST RELIABLE)
+	# This is the most accurate source - if they have a URL, they're a real company
 	if all_urls:
+		# Common domains to exclude (not competitors)
+		excluded_domains = {
+			'google', 'facebook', 'twitter', 'linkedin', 'instagram', 'youtube',
+			'github', 'stackoverflow', 'wikipedia', 'medium', 'amazon', 'aws',
+			'microsoft', 'apple', 'w3', 'mozilla', 'chrome', 'example', 'test',
+			'localhost', 'schema', 'json', 'xml'
+		}
+
 		for url in all_urls:
 			domain = _get_domain_from_url(url)
 			if not domain or domain == user_domain_clean:
@@ -156,47 +165,82 @@ def _extract_competitor_mentions(text: str, user_domain: str, all_urls: List[str
 
 			# Extract SLD (second-level domain) as potential competitor name
 			sld = domain.split('.')[0] if domain else ""
-			if sld and len(sld) >= 3 and sld != user_sld:
+
+			# Skip if it's an excluded common domain or matches user's domain
+			if sld.lower() in excluded_domains or sld.lower() == user_sld.lower():
+				continue
+
+			if sld and len(sld) >= 3:
 				# Title case the SLD for cleaner names
 				competitors.add(sld.title())
 
-	# Strategy 2: Extract company names using common patterns
-	# Pattern: "Company Name Inc/LLC/Ltd/Corp"
-	company_patterns = [
-		r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:Inc\.?|LLC|Ltd\.?|Corporation|Corp\.?|Company|Co\.?)\b',
-		# Pattern: "Brand.com" or "Brand.io" mentioned in text
-		r'\b([A-Z][a-z]+(?:[A-Z][a-z]+)*)\.(com|io|net|org)\b',
-		# Pattern: Capitalized names followed by context words (insurance, software, platform, etc.)
-		r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:insurance|software|platform|service|app|tool|website|marketplace)\b',
-	]
+	# Strategy 2: DISABLED - Too unreliable, creates false positives
+	# Only use URL-based and domain mention extraction
 
-	for pattern in company_patterns:
-		matches = re.findall(pattern, text, flags=re.IGNORECASE)
-		for match in matches:
-			# match can be a tuple if pattern has multiple groups
-			name = match[0] if isinstance(match, tuple) else match
-			name = name.strip()
-			if name and len(name) >= 3 and name.lower() != user_sld.lower():
-				competitors.add(name.title())
+	# Strategy 3: Extract brand names from text - VERY STRICT RULES
+	# Only accept brands that appear with .com/.io/.net/.org in text OR
+	# are single compound words with clear mixed case (e.g., FlyNax, OxyClassifieds)
 
-	# Strategy 3: Extract mentions of brands in numbered lists or bullets
-	# Pattern: "1. BrandName - description" or "• BrandName:"
-	list_patterns = [
-		r'[\d\.\*\-•]\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[\:\-]',
-		r'\*\*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\*\*',  # **BrandName** in markdown
-	]
+	# Pattern 1: Brand names with domain extensions mentioned in text
+	# E.g., "FlyNax.com" or "visit OxyClassifieds.io"
+	domain_mention_pattern = r'([A-Z][a-zA-Z]+)\.(com|io|net|org|co)\b'
+	domain_matches = re.findall(domain_mention_pattern, text, re.IGNORECASE)
 
-	for pattern in list_patterns:
-		matches = re.findall(pattern, text)
-		for name in matches:
-			name = name.strip()
-			if name and len(name) >= 3 and name.lower() != user_sld.lower():
-				# Filter out common words that might match
-				if name.lower() not in ['here', 'there', 'this', 'that', 'these', 'those', 'with', 'from', 'about', 'what', 'when', 'where', 'which', 'while', 'their', 'other']:
-					competitors.add(name.title())
+	for match in domain_matches:
+		brand_name = match[0].strip()
+		if brand_name and len(brand_name) >= 3 and brand_name.lower() != user_sld.lower():
+			competitors.add(brand_name)
+
+	# Pattern 2: Single-word compound brands in numbered lists
+	# Must be CamelCase or mixed case (e.g., FlyNax, OxyClassifieds, ClassiPress)
+	# Pattern: "1. **BrandName**:" where BrandName is a single compound word
+	single_brand_pattern = r'[\d\.\*\-•]\s+\*\*([A-Z][a-z]*[A-Z][a-zA-Z]+)\*\*\s*:'
+	single_brand_matches = re.findall(single_brand_pattern, text)
+
+	# Very strict filtering for single brands
+	excluded_generic = {
+		'creating', 'monetization', 'engagement', 'management', 'integration',
+		'features', 'benefits', 'overview', 'pricing', 'examples', 'solutions',
+		'marketplace', 'classified', 'wordpress', 'plugins', 'ecommerce'
+	}
+
+	for name in single_brand_matches:
+		name = name.strip()
+		if not name or len(name) < 3:
+			continue
+
+		# Skip if matches user's domain
+		if name.lower() == user_sld.lower():
+			continue
+
+		# Must be a single word (no spaces)
+		if ' ' in name:
+			continue
+
+		# Skip generic terms
+		if name.lower() in excluded_generic:
+			continue
+
+		# Must have at least 2 capital letters (indicates compound brand name)
+		capital_count = sum(1 for c in name if c.isupper())
+		if capital_count >= 2:
+			competitors.add(name)
+
+	# Deduplicate by lowercase (keep the version with most capitals for brand consistency)
+	# E.g., keep "FlyNax" instead of "flynax"
+	deduplicated = {}
+	for comp in competitors:
+		comp_lower = comp.lower()
+		if comp_lower not in deduplicated:
+			deduplicated[comp_lower] = comp
+		else:
+			# Keep the version with more capital letters (more likely the official brand name)
+			existing = deduplicated[comp_lower]
+			if sum(1 for c in comp if c.isupper()) > sum(1 for c in existing if c.isupper()):
+				deduplicated[comp_lower] = comp
 
 	# Convert to list and return (limit to top 20 to avoid noise)
-	competitor_list = sorted(list(competitors))[:20]
+	competitor_list = sorted(list(deduplicated.values()))[:20]
 	return competitor_list
 
 

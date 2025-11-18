@@ -328,6 +328,7 @@ class PromptAnalyticsProcessor:
                         'sentiment_score': float(result.get('sentiment_score', 0.0) or 0.0),
                         'context_summary': result.get('context_summary') or result.get('response_text') or '',
                         'citation_list': result.get('citations') or [],
+                        'competitor_mention_list': result.get('competitor_mention_list') or [],  # Save extracted competitors
                         'track_status': 'COMP',  # Mark as completed
                         'tracked_at': timezone.now(),
                         'is_published': True,  # Mark as published when completed
@@ -485,7 +486,19 @@ class PromptAnalyticsProcessor:
                     logger.error(f"Error creating prompt metric snapshots: {str(prompt_snapshot_error)}", exc_info=True)
 
             logger.info(f"Successfully aggregated group {group.id} and domain {domain.id}")
-            
+
+            # Extract top competitors after domain analytics are complete
+            try:
+                from .competitor_extractor import extract_competitors_for_domain
+                created_count, competitor_names = extract_competitors_for_domain(domain.id)
+                if created_count > 0:
+                    logger.info(f"Auto-extracted {created_count} competitors for domain {domain.id}: {', '.join(competitor_names)}")
+                else:
+                    logger.info(f"No new competitors extracted for domain {domain.id} (insufficient data or already exists)")
+            except Exception as comp_error:
+                logger.error(f"Error extracting competitors for domain {domain.id}: {str(comp_error)}")
+                # Don't fail the entire aggregation if competitor extraction fails
+
         except Exception as e:
             logger.error(f"Error aggregating group {group.id}: {str(e)}")
 
@@ -1156,8 +1169,14 @@ class PromptAnalyticsProcessor:
     def _get_fallback_analytics(self, prompt_text: str, user_domain: str, platform: str) -> Dict[str, Any]:
         """Generate fallback analytics when AI platforms are unavailable"""
         return {
-            'citations': 0,
+            'citations': [],
             'mention_count': 0,
+            'sentiment': 'neutral',
             'sentiment_score': 0.0,
-            'context_summary': f"Fallback processing for {platform} - AI service unavailable"
+            'context_summary': f"Fallback processing for {platform} - AI service unavailable",
+            'citation_count': 0,
+            'has_citation': False,
+            'all_urls': [],
+            'competitor_mention_list': [],  # Include empty list for consistency
+            'is_mention': False
         }

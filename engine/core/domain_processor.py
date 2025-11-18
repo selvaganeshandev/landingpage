@@ -237,18 +237,9 @@ class DomainProcessor:
                 except Exception as update_error:
                     print(f"Error updating keyword usage status: {str(update_error)}")
             
-            # Step 9: Extract top competitors automatically
-            print(f"Extracting competitors for {domain.name}")
-            try:
-                from .competitor_extractor import extract_competitors_for_domain
-                created_count, competitor_names = extract_competitors_for_domain(domain.id)
-                if created_count > 0:
-                    print(f"Auto-extracted {created_count} competitors: {', '.join(competitor_names)}")
-                else:
-                    print("No competitors extracted (insufficient data or already exists)")
-            except Exception as e:
-                print(f"Error extracting competitors: {str(e)}")
-                # Don't fail the entire domain processing if competitor extraction fails
+            # Step 9: Competitor extraction happens AFTER prompt analytics are completed
+            # (moved to prompt_analytics_processor.py _check_and_aggregate_group method)
+            # This ensures competitor_mention_list has been populated before extraction
 
             # Step 10: Update domain status to completed
             domain.processing_status = 'COMP'

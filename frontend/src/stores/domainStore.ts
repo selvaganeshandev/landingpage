@@ -13,6 +13,9 @@ export interface Domain {
   active_alerts: number;
   sentiment: string;
   sentiment_score: string;
+  processing_status?: 'INIT' | 'SCHD' | 'PROC' | 'COMP' | 'FAIL';
+  track_message?: string | null;
+  tracked_at?: string | null;
   created_at: string;
   modified_at: string;
 }
