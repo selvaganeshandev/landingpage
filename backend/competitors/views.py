@@ -332,7 +332,7 @@ class CompetitorMetricSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
                             break
             queryset = queryset.filter(id__in=filtered_ids) if filtered_ids else queryset.none()
 
-        queryset = queryset.order_by('timestamp')
+        queryset = queryset.order_by('-timestamp')
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 

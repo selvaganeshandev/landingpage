@@ -105,6 +105,7 @@ class CompetitorMetricSnapshotSerializer(serializers.ModelSerializer):
             'share_of_voice_percentage',
             'trend_percentage',
             'track_status',
+            'platform_metrics',
             'created_at',
         ]
         read_only_fields = fields

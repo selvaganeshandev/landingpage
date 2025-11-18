@@ -57,6 +57,7 @@ const CompetitorDetail = () => {
   const [marketRank, setMarketRank] = useState<number | null>(null);
   const [viewMentionsDialogOpen, setViewMentionsDialogOpen] = useState(false);
   const [compareMetricsDialogOpen, setCompareMetricsDialogOpen] = useState(false);
+  const [platformBreakdown, setPlatformBreakdown] = useState<any[]>([]);
 
   // Sync domainId from selectedDomain or localStorage
   useEffect(() => {
@@ -157,6 +158,43 @@ const CompetitorDetail = () => {
           setMentionTrend([]);
         }
 
+        // Calculate platform breakdown from the latest snapshot
+        if (snapshots.length > 0) {
+          // Sort snapshots by timestamp (most recent first) to ensure we get the latest
+          const sortedSnapshots = [...snapshots].sort((a: any, b: any) => {
+            const dateA = new Date(a.timestamp || a.created_at || 0).getTime();
+            const dateB = new Date(b.timestamp || b.created_at || 0).getTime();
+            return dateB - dateA; // Descending order (newest first)
+          });
+          const latestSnapshot = sortedSnapshots[0]; // Most recent snapshot
+          const platformMetrics = latestSnapshot.platform_metrics || [];
+
+          if (Array.isArray(platformMetrics) && platformMetrics.length > 0) {
+            // Calculate total mentions across all platforms
+            const totalPlatformMentions = platformMetrics.reduce((sum: number, pm: any) => {
+              return sum + (Number(pm.mentions) || 0);
+            }, 0);
+
+            // Build platform breakdown with percentages
+            const breakdown = platformMetrics
+              .filter((pm: any) => (Number(pm.mentions) || 0) > 0) // Only platforms with mentions
+              .map((pm: any) => ({
+                platform: pm.platform || 'Unknown',
+                mentions: Number(pm.mentions) || 0,
+                percentage: totalPlatformMentions > 0
+                  ? Number(((Number(pm.mentions) / totalPlatformMentions) * 100).toFixed(1))
+                  : 0
+              }))
+              .sort((a, b) => b.mentions - a.mentions); // Sort by mentions desc
+
+            setPlatformBreakdown(breakdown);
+          } else {
+            setPlatformBreakdown([]);
+          }
+        } else {
+          setPlatformBreakdown([]);
+        }
+
         // Calculate market rank based on share of voice
         const competitors = Array.isArray(allCompetitors) ? allCompetitors : allCompetitors?.results || [];
         if (competitors.length > 0) {
@@ -195,13 +233,6 @@ const CompetitorDetail = () => {
 
     fetchCompetitor();
   }, [id, domainId, timePeriod, toast]);
-
-  const platformBreakdown = [
-    { platform: "ChatGPT", mentions: 72, percentage: 38.5 },
-    { platform: "Claude", mentions: 58, percentage: 31.0 },
-    { platform: "Perplexity", mentions: 35, percentage: 18.7 },
-    { platform: "Gemini", mentions: 22, percentage: 11.8 },
-  ];
 
   const sentimentData = [
     { name: "Positive", value: 68, color: "hsl(var(--success))" },
@@ -433,41 +464,50 @@ const CompetitorDetail = () => {
                   Mention breakdown across AI platforms
                 </p>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <ResponsiveContainer width="100%" height={250}>
-                  <PieChart>
-                    <Pie
-                      data={platformBreakdown}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ platform, percentage }) => `${platform} ${percentage}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="mentions"
-                    >
-                      {platformBreakdown.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={`hsl(var(--chart-${index + 1}))`} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="space-y-3">
-                  {platformBreakdown.map((platform, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-muted/30 border border-border">
-                      <div className="flex items-center gap-3">
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: `hsl(var(--chart-${idx + 1}))` }} />
-                        <span className="font-medium">{platform.platform}</span>
+              {platformBreakdown.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie
+                        data={platformBreakdown}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ platform, percentage }) => `${platform} ${percentage}%`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="mentions"
+                      >
+                        {platformBreakdown.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={`hsl(var(--chart-${index + 1}))`} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="space-y-3">
+                    {platformBreakdown.map((platform, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-muted/30 border border-border">
+                        <div className="flex items-center gap-3">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: `hsl(var(--chart-${idx + 1}))` }} />
+                          <span className="font-medium">{platform.platform}</span>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold font-inter">{platform.mentions}</p>
+                          <p className="text-xs text-muted-foreground">{platform.percentage}%</p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="font-bold font-inter">{platform.mentions}</p>
-                        <p className="text-xs text-muted-foreground">{platform.percentage}%</p>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="flex items-center justify-center h-[250px]">
+                  <div className="text-center space-y-2">
+                    <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground/30" />
+                    <p className="text-sm text-muted-foreground">No platform data available</p>
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
 
