@@ -158,67 +158,10 @@ const Dashboard = () => {
   // Show loading state whenever we're fetching data
   if (loading || !summary) {
     return (
-      <div className="p-8 space-y-8 bg-background">
-        <div className="space-y-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="text-4xl font-bold tracking-tight">Insights</h1>
-              <p className="text-muted-foreground mt-2">
-                Overview of your domain's AI search visibility performance
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <Select value={selectedLLM} onValueChange={setSelectedLLM} disabled>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Select LLM" />
-                </SelectTrigger>
-              </Select>
-              <TimeFilter selected={timePeriod} onSelect={setTimePeriod} disabled />
-              <Button variant="outline" disabled>Export Report</Button>
-              <Button disabled className="gradient-primary">
-                Refresh Data
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Loading Skeletons */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="border border-border bg-card rounded-lg p-6 animate-pulse">
-              <div className="h-4 bg-muted rounded w-24 mb-4"></div>
-              <div className="h-8 bg-muted rounded w-16 mb-2"></div>
-              <div className="h-3 bg-muted rounded w-20"></div>
-            </div>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
-            <div className="border border-border bg-card rounded-lg p-6 h-96 animate-pulse">
-              <div className="h-6 bg-muted rounded w-32 mb-4"></div>
-              <div className="h-full bg-muted/50 rounded"></div>
-            </div>
-            <div className="border border-border bg-card rounded-lg p-6 h-96 animate-pulse">
-              <div className="h-6 bg-muted rounded w-32 mb-4"></div>
-              <div className="h-full bg-muted/50 rounded"></div>
-            </div>
-          </div>
-          <div className="border border-border bg-card rounded-lg p-6 h-full animate-pulse">
-            <div className="h-6 bg-muted rounded w-40 mb-4"></div>
-            <div className="space-y-4">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="h-16 bg-muted/50 rounded"></div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center space-y-3">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-            <p className="text-muted-foreground">Loading dashboard data...</p>
-          </div>
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-primary mx-auto"></div>
+          <p className="text-lg text-muted-foreground">Loading dashboard data...</p>
         </div>
       </div>
     );
