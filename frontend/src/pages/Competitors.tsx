@@ -777,7 +777,8 @@ const Competitors = () => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* First Row */}
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Mentions</p>
                         <p className="text-xl font-bold font-inter">{competitor.mentions}</p>
@@ -786,23 +787,14 @@ const Competitors = () => {
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Citations</p>
                         <p className="text-xl font-bold font-inter">{competitor.citations || 0}</p>
                       </div>
+                      {/* Second Row */}
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Share</p>
-                        <p className="text-xl font-bold font-inter">{competitor.shareOfVoice}%</p>
+                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Avg Visibility</p>
+                        <p className="text-xl font-bold font-inter">{competitor.visibility}%</p>
                       </div>
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Avg Position</p>
-                        <p className="text-lg font-bold font-inter">{competitor.averagePosition?.toFixed(1) || '0.0'}</p>
-                      </div>
-                      <div className="p-3 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Visibility</p>
-                        <p className="text-lg font-bold font-inter">{competitor.visibility}%</p>
-                        <Progress value={competitor.visibility} className="h-1.5 mt-1" />
-                      </div>
-                      <div className="p-3 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Sentiment</p>
-                        <p className="text-lg font-bold font-inter">{competitor.sentiment}%</p>
-                        <Progress value={competitor.sentiment} className="h-1.5 mt-1" />
+                        <p className="text-xl font-bold font-inter">{competitor.averagePosition?.toFixed(1) || '0.0'}</p>
                       </div>
                     </div>
 

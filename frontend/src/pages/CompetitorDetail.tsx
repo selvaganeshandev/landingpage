@@ -19,7 +19,9 @@ import {
   FileText,
   Target,
   MessageSquare,
-  ArrowLeftRight
+  ArrowLeftRight,
+  Lightbulb,
+  AlertTriangle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
@@ -58,6 +60,23 @@ const CompetitorDetail = () => {
   const [viewMentionsDialogOpen, setViewMentionsDialogOpen] = useState(false);
   const [compareMetricsDialogOpen, setCompareMetricsDialogOpen] = useState(false);
   const [platformBreakdown, setPlatformBreakdown] = useState<any[]>([]);
+  const [sentimentData, setSentimentData] = useState([
+    { name: "Positive", value: 0, color: "hsl(var(--success))" },
+    { name: "Neutral", value: 0, color: "hsl(var(--warning))" },
+    { name: "Negative", value: 0, color: "hsl(var(--destructive))" },
+  ]);
+  const [topMentions, setTopMentions] = useState<any[]>([]);
+  const [swotInsights, setSwotInsights] = useState<{
+    strengths: string[];
+    weaknesses: string[];
+    opportunities: string[];
+    threats: string[];
+  }>({
+    strengths: [],
+    weaknesses: [],
+    opportunities: [],
+    threats: [],
+  });
 
   // Sync domainId from selectedDomain or localStorage
   useEffect(() => {
@@ -87,15 +106,21 @@ const CompetitorDetail = () => {
 
       setIsLoading(true);
       try {
-        // Fetch competitor details, trend data, and all competitors in parallel
-        const [data, snapshotData, allCompetitors] = await Promise.all([
+        // Fetch competitor details, trend data, all competitors, and prompt analytics in parallel
+        const [data, snapshotData, allCompetitors, promptAnalytics] = await Promise.all([
           apiClient.getEngineCompetitorDetail(Number(id)),
           apiClient.getCompetitorMetricSnapshots({
             domain_id: domainId,
             competitor_id: id,
             days: Number(timePeriod)
           }),
-          apiClient.getEngineCompetitors({ domain_id: domainId })
+          apiClient.getEngineCompetitors({ domain_id: domainId }),
+          apiClient.getCompetitorPromptAnalyticsEngine({
+            domain_id: domainId,
+            competitor_id: id,
+            is_mentioned: 'true',
+            page_size: '1000' // Get enough data to calculate accurate sentiment breakdown
+          })
         ]);
 
         // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
@@ -123,6 +148,7 @@ const CompetitorDetail = () => {
           description: data.description || `${data.name} - Competitor analysis and performance tracking.`,
         });
 
+        let computedMentionTrend: any[] = [];
         // Process snapshot data for the trend chart
         const snapshots = Array.isArray(snapshotData) ? snapshotData : snapshotData?.results || [];
         if (snapshots.length > 0) {
@@ -153,12 +179,15 @@ const CompetitorDetail = () => {
             }, [])
             .map(({ date, ...rest }) => rest); // Remove date field before setting
 
+          computedMentionTrend = sortedTrend;
           setMentionTrend(sortedTrend);
         } else {
+          computedMentionTrend = [];
           setMentionTrend([]);
         }
 
         // Calculate platform breakdown from the latest snapshot
+        let computedPlatformBreakdown: any[] = [];
         if (snapshots.length > 0) {
           // Sort snapshots by timestamp (most recent first) to ensure we get the latest
           const sortedSnapshots = [...snapshots].sort((a: any, b: any) => {
@@ -187,11 +216,14 @@ const CompetitorDetail = () => {
               }))
               .sort((a, b) => b.mentions - a.mentions); // Sort by mentions desc
 
+            computedPlatformBreakdown = breakdown;
             setPlatformBreakdown(breakdown);
           } else {
+            computedPlatformBreakdown = [];
             setPlatformBreakdown([]);
           }
         } else {
+          computedPlatformBreakdown = [];
           setPlatformBreakdown([]);
         }
 
@@ -219,6 +251,178 @@ const CompetitorDetail = () => {
         } else {
           setMarketRank(null);
         }
+
+        // Calculate top prompts for competitor across all LLMs
+        const compAnalytics = Array.isArray(promptAnalytics) ? promptAnalytics : promptAnalytics?.results || [];
+        
+        // Aggregate prompts by prompt_id to combine data across all LLMs
+        const promptMap = new Map();
+        compAnalytics.forEach((item: any) => {
+          // Only process items where competitor is mentioned
+          if (!item.is_mentioned) {
+            return;
+          }
+          
+          // According to CompetitorPromptAnalyticsSerializer:
+          // - prompt: the prompt ID (number)
+          // - prompt_text: the prompt text (string)
+          const promptId = item.prompt; // This is the ID according to serializer
+          const promptText = item.prompt_text || '';
+          
+          // Skip if we don't have both promptId and promptText
+          if (!promptId || !promptText) {
+            return;
+          }
+
+          const existing = promptMap.get(promptId) || {
+            prompt: promptText,
+            promptId: promptId,
+            totalMentions: 0,
+            totalCitations: 0,
+            bestPosition: Infinity,
+            platforms: new Set(),
+            sentiments: new Set()
+          };
+
+          // Try multiple possible field names for mention_count
+          const mentionCount = Number(item.mention_count || item.total_mentions || item.mentions || 0);
+          existing.totalMentions += mentionCount;
+          
+          // Try multiple possible field names for citations
+          let citations = 0;
+          if (item.citation_list) {
+            citations = Array.isArray(item.citation_list) ? item.citation_list.length : 0;
+          } else if (item.total_citations) {
+            citations = Number(item.total_citations);
+          } else if (item.citations) {
+            citations = Number(item.citations);
+          }
+          existing.totalCitations += citations;
+          
+          // Try multiple possible field names for position
+          const position = item.position ? Number(item.position) : null;
+          if (position && position > 0 && position < existing.bestPosition) {
+            existing.bestPosition = position;
+          }
+          
+          if (item.platform) {
+            existing.platforms.add(item.platform);
+          }
+          
+          if (item.sentiment_category || item.sentiment) {
+            existing.sentiments.add(item.sentiment_category || item.sentiment);
+          }
+
+          promptMap.set(promptId, existing);
+        });
+
+        // Convert to array and calculate performance score
+        const topPrompts = Array.from(promptMap.values())
+          .filter(p => p.totalMentions > 0)
+          .map(p => ({
+            prompt: p.prompt,
+            position: p.bestPosition !== Infinity ? p.bestPosition : null,
+            platforms: Array.from(p.platforms),
+            sentiment: Array.from(p.sentiments)[0] || 'neutral', // Use first sentiment or default
+            mentions: p.totalMentions,
+            citations: p.totalCitations,
+            performanceScore: (p.totalMentions * 2) + p.totalCitations + (p.bestPosition !== Infinity ? (100 - p.bestPosition * 10) : 0)
+          }));
+
+        // Sort by performance score and take top 5
+        topPrompts.sort((a, b) => b.performanceScore - a.performanceScore);
+        const topPromptSlice = topPrompts.slice(0, 5);
+        setTopMentions(topPromptSlice);
+
+        // Build SWOT insights
+        const competitorSummary = {
+          id: data.id,
+          visibility: Math.round(Number(data.visibility_score || 0)),
+          sentiment: Math.round((Number(data.sentiment_score || 0) + 1) * 50),
+          avgPosition: Number(data.average_position || 0),
+          citations: data.total_citations || 0,
+          shareOfVoice: Math.round(Number(data.share_of_voice_percentage || 0)),
+          trend: Number(data.trend_percentage || 0),
+          totalMentions: data.total_mentions || 0,
+        };
+        const computedSwot = buildSwotInsights({
+          competitorData: competitorSummary,
+          platformBreakdown: computedPlatformBreakdown,
+          mentionTrend: computedMentionTrend,
+          topPrompts,
+          competitorsList: Array.isArray(allCompetitors) ? allCompetitors : allCompetitors?.results || [],
+        });
+        setSwotInsights(computedSwot);
+
+        // Calculate sentiment breakdown from prompt analytics
+        const analytics = compAnalytics;
+        if (analytics.length > 0) {
+          // Count mentions by sentiment category
+          let positiveCount = 0;
+          let neutralCount = 0;
+          let negativeCount = 0;
+
+          analytics.forEach((item: any) => {
+            const mentionCount = Number(item.mention_count || 0);
+            const sentimentCategory = (item.sentiment_category || '').toLowerCase();
+            
+            if (sentimentCategory === 'positive') {
+              positiveCount += mentionCount;
+            } else if (sentimentCategory === 'neutral') {
+              neutralCount += mentionCount;
+            } else if (sentimentCategory === 'negative') {
+              negativeCount += mentionCount;
+            }
+          });
+
+          // Calculate percentages
+          const totalMentions = positiveCount + neutralCount + negativeCount;
+          if (totalMentions > 0) {
+            // Calculate raw percentages
+            const positivePctRaw = (positiveCount / totalMentions) * 100;
+            const neutralPctRaw = (neutralCount / totalMentions) * 100;
+            const negativePctRaw = (negativeCount / totalMentions) * 100;
+            
+            // Round to ensure they sum to 100%
+            let positivePct = Math.round(positivePctRaw);
+            let neutralPct = Math.round(neutralPctRaw);
+            let negativePct = Math.round(negativePctRaw);
+            
+            // Adjust to ensure sum equals 100%
+            const sum = positivePct + neutralPct + negativePct;
+            if (sum !== 100) {
+              // Adjust the largest value to make sum = 100
+              const diff = 100 - sum;
+              if (positivePct >= neutralPct && positivePct >= negativePct) {
+                positivePct += diff;
+              } else if (neutralPct >= negativePct) {
+                neutralPct += diff;
+              } else {
+                negativePct += diff;
+              }
+            }
+
+            setSentimentData([
+              { name: "Positive", value: positivePct, color: "hsl(var(--success))" },
+              { name: "Neutral", value: neutralPct, color: "hsl(var(--warning))" },
+              { name: "Negative", value: negativePct, color: "hsl(var(--destructive))" },
+            ]);
+          } else {
+            // No mentions, set to zero
+            setSentimentData([
+              { name: "Positive", value: 0, color: "hsl(var(--success))" },
+              { name: "Neutral", value: 0, color: "hsl(var(--warning))" },
+              { name: "Negative", value: 0, color: "hsl(var(--destructive))" },
+            ]);
+          }
+        } else {
+          // No analytics data, set to zero
+          setSentimentData([
+            { name: "Positive", value: 0, color: "hsl(var(--success))" },
+            { name: "Neutral", value: 0, color: "hsl(var(--warning))" },
+            { name: "Negative", value: 0, color: "hsl(var(--destructive))" },
+          ]);
+        }
       } catch (error: any) {
         console.error('Failed to load competitor details:', error);
         toast({
@@ -234,33 +438,6 @@ const CompetitorDetail = () => {
     fetchCompetitor();
   }, [id, domainId, timePeriod, toast]);
 
-  const sentimentData = [
-    { name: "Positive", value: 68, color: "hsl(var(--success))" },
-    { name: "Neutral", value: 24, color: "hsl(var(--warning))" },
-    { name: "Negative", value: 8, color: "hsl(var(--destructive))" },
-  ];
-
-  const topMentions = [
-    { prompt: "best budget protein powder", position: 1, platform: "ChatGPT", sentiment: "positive" },
-    { prompt: "affordable sports supplements", position: 2, platform: "Claude", sentiment: "positive" },
-    { prompt: "protein powder comparison", position: 3, platform: "Perplexity", sentiment: "neutral" },
-  ];
-
-  const strengthsWeaknesses = {
-    strengths: [
-      "Competitive pricing and frequent promotions",
-      "Wide product range across categories",
-      "Strong brand recognition in fitness community",
-      "Effective e-commerce and subscription model"
-    ],
-    weaknesses: [
-      "Lower mention of ingredient quality vs premium brands",
-      "Mixed reviews on taste and mixability",
-      "Less emphasis on sustainability and clean labels",
-      "Positioned more as budget option than premium"
-    ]
-  };
-
   const handleShare = () => {
     toast({
       title: "Share Link Generated",
@@ -273,6 +450,23 @@ const CompetitorDetail = () => {
       title: "Exporting Report",
       description: "Comprehensive competitor report is being generated...",
     });
+  };
+
+  const renderSwotList = (items: string[], emptyText: string) => {
+    if (!items || items.length === 0) {
+      return <p className="text-sm text-muted-foreground">{emptyText}</p>;
+    }
+
+    return (
+      <ul className="space-y-2">
+        {items.map((item, idx) => (
+          <li key={idx} className="text-sm flex items-start gap-2">
+            <span className="mt-1 text-foreground">•</span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    );
   };
 
   // Helper function to format URL with protocol
@@ -326,22 +520,11 @@ const CompetitorDetail = () => {
               </div>
             </div>
           </div>
-          <div className="flex gap-3">
-            <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
-            <Button variant="outline" onClick={handleShare}>
-              <Share2 className="h-4 w-4 mr-2" />
-              Share
-            </Button>
-            <Button variant="outline" onClick={handleExport}>
-              <FileText className="h-4 w-4 mr-2" />
-              Export
-            </Button>
-          </div>
         </div>
       </div>
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Mentions</p>
@@ -388,14 +571,6 @@ const CompetitorDetail = () => {
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Visibility</p>
             <p className="text-4xl font-bold font-inter">{competitor.visibility}%</p>
             <Progress value={competitor.visibility} className="h-2" />
-          </div>
-        </Card>
-
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground uppercase tracking-wider">Sentiment</p>
-            <p className="text-4xl font-bold font-inter">{competitor.sentiment}%</p>
-            <Progress value={competitor.sentiment} className="h-2" />
           </div>
         </Card>
       </div>
@@ -545,28 +720,45 @@ const CompetitorDetail = () => {
                 </div>
               </TabsContent>
 
-              <TabsContent value="mentions" className="space-y-3">
-                {topMentions.map((mention, idx) => (
-                  <div key={idx} className="p-4 rounded-xl border border-border hover:shadow-md transition-all bg-card/50">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl gradient-primary shadow-md flex items-center justify-center font-bold text-white font-inter">
-                          #{mention.position}
-                        </div>
+              <TabsContent value="mentions" className="space-y-2">
+                {topMentions.length > 0 ? (
+                  topMentions.map((mention, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3 rounded-xl border border-border/80 bg-card/70 hover:border-primary transition-all"
+                    >
+                      <div className="space-y-2">
                         <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <Badge variant="outline">{mention.platform}</Badge>
-                            <Badge variant="secondary">{mention.sentiment}</Badge>
+                          <div className="flex items-center gap-1.5 mb-1 flex-wrap text-xs">
+                            {mention.platforms.map((platform: string, pIdx: number) => (
+                              <Badge key={pIdx} variant="outline" className="px-2 py-0.5 text-[11px]">
+                                {platform}
+                              </Badge>
+                            ))}
+                            <Badge variant="secondary" className="capitalize px-2 py-0.5 text-[11px]">
+                              {mention.sentiment}
+                            </Badge>
                           </div>
-                          <p className="text-sm font-mono text-muted-foreground">{mention.prompt}</p>
+                          <p className="text-sm font-medium text-foreground line-clamp-2">{mention.prompt}</p>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/60">
+                          <span className="flex items-center gap-2 font-medium text-foreground">
+                            <span>{mention.mentions} mentions</span>
+                            <span className="text-border">|</span>
+                            <span>{mention.citations} citations</span>
+                          </span>
                         </div>
                       </div>
-                      <Button variant="ghost" size="sm">
-                        <ExternalLink className="h-4 w-4" />
-                      </Button>
                     </div>
+                  ))
+                ) : (
+                  <div className="p-6 text-center border border-border rounded-xl bg-muted/30">
+                    <MessageSquare className="h-10 w-10 mx-auto text-muted-foreground/30 mb-2" />
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      No prompts found for {competitor.name}.
+                    </p>
                   </div>
-                ))}
+                )}
               </TabsContent>
 
               <TabsContent value="swot" className="space-y-4">
@@ -576,28 +768,30 @@ const CompetitorDetail = () => {
                       <TrendingUp className="h-4 w-4" />
                       Strengths
                     </h4>
-                    <ul className="space-y-2">
-                      {strengthsWeaknesses.strengths.map((item, idx) => (
-                        <li key={idx} className="text-sm flex items-start gap-2">
-                          <span className="text-success mt-1">•</span>
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    {renderSwotList(swotInsights.strengths, "Not enough data to detect strengths yet.")}
                   </div>
                   <div className="p-5 rounded-xl border border-warning/20 bg-warning/5">
                     <h4 className="font-semibold mb-3 font-inter text-warning flex items-center gap-2">
                       <Target className="h-4 w-4" />
                       Weaknesses
                     </h4>
-                    <ul className="space-y-2">
-                      {strengthsWeaknesses.weaknesses.map((item, idx) => (
-                        <li key={idx} className="text-sm flex items-start gap-2">
-                          <span className="text-warning mt-1">•</span>
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    {renderSwotList(swotInsights.weaknesses, "No clear weaknesses identified so far.")}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-5 rounded-xl border border-primary/20 bg-primary/5">
+                    <h4 className="font-semibold mb-3 font-inter text-primary flex items-center gap-2">
+                      <Lightbulb className="h-4 w-4" />
+                      Opportunities
+                    </h4>
+                    {renderSwotList(swotInsights.opportunities, "No immediate opportunities detected.")}
+                  </div>
+                  <div className="p-5 rounded-xl border border-destructive/20 bg-destructive/5">
+                    <h4 className="font-semibold mb-3 font-inter text-destructive flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4" />
+                      Threats
+                    </h4>
+                    {renderSwotList(swotInsights.threats, "No major threats at the moment.")}
                   </div>
                 </div>
               </TabsContent>
@@ -697,3 +891,141 @@ const CompetitorDetail = () => {
 };
 
 export default CompetitorDetail;
+
+type SwotBuilderInput = {
+  competitorData: {
+    id: number;
+    visibility: number;
+    sentiment: number;
+    avgPosition: number;
+    citations: number;
+    shareOfVoice: number;
+    trend: number;
+    totalMentions: number;
+  };
+  platformBreakdown: Array<{ platform: string; mentions: number; percentage: number }>;
+  mentionTrend: Array<{ month: string; mentions: number }>;
+  topPrompts: Array<{ prompt: string; mentions: number; citations: number }>;
+  competitorsList: any[];
+};
+
+const buildSwotInsights = ({
+  competitorData,
+  platformBreakdown,
+  mentionTrend,
+  topPrompts,
+  competitorsList,
+}: SwotBuilderInput) => {
+  const strengths: string[] = [];
+  const weaknesses: string[] = [];
+  const opportunities: string[] = [];
+  const threats: string[] = [];
+
+  const addItem = (list: string[], text?: string) => {
+    if (text && !list.includes(text)) {
+      list.push(text);
+    }
+  };
+
+  // Strengths
+  if (competitorData.visibility >= 70) {
+    addItem(strengths, `High visibility score (${competitorData.visibility}%) across AI platforms.`);
+  }
+  if (competitorData.sentiment >= 60) {
+    addItem(strengths, `Positive brand sentiment at ${competitorData.sentiment}%.`);
+  }
+  if (platformBreakdown.length > 0) {
+    const topPlatform = platformBreakdown[0];
+    addItem(strengths, `Dominates on ${topPlatform.platform} with ${topPlatform.percentage}% of mentions.`);
+  }
+  const mentionTrendGrowth =
+    mentionTrend.length >= 2
+      ? mentionTrend[mentionTrend.length - 1].mentions - mentionTrend[mentionTrend.length - 2].mentions
+      : 0;
+  if (mentionTrendGrowth > 0) {
+    addItem(strengths, `Mention volume is rising (+${mentionTrendGrowth} vs previous period).`);
+  }
+
+  // Weaknesses
+  if (competitorData.citations < 5) {
+    addItem(weaknesses, `Citation footprint is limited (${competitorData.citations} references).`);
+  }
+  if (competitorData.sentiment < 50) {
+    addItem(weaknesses, `Sentiment trends toward neutral/negative (${competitorData.sentiment}%).`);
+  }
+  if (competitorData.avgPosition > 5) {
+    addItem(weaknesses, `Average ranking position ${competitorData.avgPosition.toFixed(1)} trails top results.`);
+  }
+  const lowPlatform = platformBreakdown.find((p) => p.percentage > 0 && p.percentage < 10);
+  if (lowPlatform) {
+    addItem(weaknesses, `Low visibility on ${lowPlatform.platform} (only ${lowPlatform.percentage}% share).`);
+  }
+
+  // Opportunities
+  const citationGapPrompt = topPrompts.find((p) => p.citations === 0 && p.mentions >= 5);
+  if (citationGapPrompt) {
+    addItem(
+      opportunities,
+      `Add supporting citations for "${citationGapPrompt.prompt}" to capture more authority.`
+    );
+  }
+  if (platformBreakdown.length > 1) {
+    const trailingPlatform = platformBreakdown[platformBreakdown.length - 1];
+    if (trailingPlatform.percentage <= 5) {
+      addItem(
+        opportunities,
+        `Expand presence on ${trailingPlatform.platform}, currently only ${trailingPlatform.percentage}% of mentions.`
+      );
+    }
+  }
+  if (competitorData.shareOfVoice < 20) {
+    addItem(
+      opportunities,
+      `Share of voice is ${competitorData.shareOfVoice}% — campaigns here could quickly grow mindshare.`
+    );
+  }
+  if (mentionTrendGrowth <= 0 && mentionTrend.length > 1) {
+    addItem(opportunities, "Recent mention volume plateaued — a fresh push could restart growth.");
+  }
+
+  // Threats
+  const sortedCompetitors = [...competitorsList]
+    .map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      shareOfVoice: Number(c.share_of_voice_percentage || 0),
+      sentiment: c.sentiment_score ? Math.round((Number(c.sentiment_score) + 1) * 50) : 0,
+    }))
+    .sort((a, b) => b.shareOfVoice - a.shareOfVoice);
+
+  const marketLeader = sortedCompetitors.find((c) => c.id !== competitorData.id);
+  if (marketLeader && marketLeader.shareOfVoice > competitorData.shareOfVoice + 5) {
+    addItem(
+      threats,
+      `${marketLeader.name} leads share of voice by ${(
+        marketLeader.shareOfVoice - competitorData.shareOfVoice
+      ).toFixed(1)} points.`
+    );
+  }
+  if (competitorData.trend < 0) {
+    addItem(threats, `Mention growth down ${Math.abs(competitorData.trend)}% this period.`);
+  }
+  const sentimentLeader = sortedCompetitors.find(
+    (c) => c.id !== competitorData.id && c.sentiment > competitorData.sentiment + 5
+  );
+  if (sentimentLeader) {
+    addItem(
+      threats,
+      `${sentimentLeader.name} enjoys stronger sentiment (${sentimentLeader.sentiment}%) with audiences.`
+    );
+  }
+
+  const limitList = (list: string[]) => list.slice(0, 4);
+
+  return {
+    strengths: limitList(strengths),
+    weaknesses: limitList(weaknesses),
+    opportunities: limitList(opportunities),
+    threats: limitList(threats),
+  };
+};
