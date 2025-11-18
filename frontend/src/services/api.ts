@@ -571,13 +571,13 @@ export const apiClient = {
   // Share of Voice helpers for ShareOfVoice page
   
 
-  getShareOfVoiceByDomain: (params: { domain_id: string; days?: number; platform?: string }) => {
+  getShareOfVoiceByDomain: (params: { domain_id: string; days?: number; platform?: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/analytics/share-of-voice/by_domain/${queryParams}`);
+    return apiRequest(`/analytics/share-of-voice/by_domain/${queryParams}`, options);
   },
 
   getShareOfVoiceComparison: (params: { domain_id: string; date?: string; platform?: string }) => {
@@ -589,9 +589,9 @@ export const apiClient = {
     return apiRequest(`/analytics/share-of-voice/comparison/${queryParams}`);
   },
 
-  getShareOfVoiceLatestEngine: (params: { domain_id: string }) => {
+  getShareOfVoiceLatestEngine: (params: { domain_id: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiRequest(`/analytics/share-of-voice/${queryParams}`);
+    return apiRequest(`/analytics/share-of-voice/${queryParams}`, options);
   },
 
   // ===== Engine (port 8001) helpers for competitor sentiment (optional for Sentiment page)
@@ -615,14 +615,14 @@ export const apiClient = {
     });
   },
 
-  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string; competitor_id?: string; page_size?: string; is_mentioned?: string }) => {
+  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string; competitor_id?: string; page_size?: string; is_mentioned?: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
       ...(params.page_size ? { page_size: params.page_size } : {}),
       ...(params.is_mentioned ? { is_mentioned: params.is_mentioned } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/competitor-prompt-analytics/${queryParams}`);
+    return apiRequest(`/competitors/competitor-prompt-analytics/${queryParams}`, options);
   },
 
   getCompetitorGapsEngine: (params: { domain_id: string; competitor_id?: string }) => {
@@ -633,60 +633,60 @@ export const apiClient = {
     return apiClient.getEngine(`/api/competitor-prompt-analytics/gaps/${queryParams}`);
   },
 
-  getCompetitorHeatmap: (params: { domain_id: string; days?: number; platform?: string }) => {
+  getCompetitorHeatmap: (params: { domain_id: string; days?: number; platform?: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/heatmap/${queryParams}`);
+    return apiRequest(`/competitors/heatmap/${queryParams}`, options);
   },
 
-  getCompetitorMetricSnapshots: (params: { domain_id: string; days?: number; competitor_id?: string; platform?: string }) => {
+  getCompetitorMetricSnapshots: (params: { domain_id: string; days?: number; competitor_id?: string; platform?: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/competitor-metric-snapshots/${queryParams}`);
+    return apiRequest(`/competitors/competitor-metric-snapshots/${queryParams}`, options);
   },
 
-  getEngineCompetitors: (params: { domain_id: string; platform?: string }) => {
+  getEngineCompetitors: (params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/competitors/by_domain/${queryParams}`);
+    return apiRequest(`/competitors/competitors/by_domain/${queryParams}`, options);
   },
 
   getEngineCompetitorDetail: (id: number) => apiRequest(`/competitors/competitors/${id}/`),
   getEngineCompetitorAnalytics: (id: number) => apiRequest(`/competitors/competitor-analytics/?competitor_id=${id}`),
 
   // Competitor Analysis APIs
-  getCompetitiveStrengthAnalysis: (params: { domain_id: string; platform?: string }) => {
+  getCompetitiveStrengthAnalysis: (params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/competitive-strength-analysis${queryParams}`);
+    return apiRequest(`/competitors/competitive-strength-analysis${queryParams}`, options);
   },
 
-  getCompetitiveInsights: (params: { domain_id: string; platform?: string }) => {
+  getCompetitiveInsights: (params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/competitive-insights${queryParams}`);
+    return apiRequest(`/competitors/competitive-insights${queryParams}`, options);
   },
 
-  getAnswerGapAnalysis: (params: { domain_id: string; competitor_id?: string; platform?: string }) => {
+  getAnswerGapAnalysis: (params: { domain_id: string; competitor_id?: string; platform?: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/answer-gap-analysis${queryParams}`);
+    return apiRequest(`/competitors/answer-gap-analysis${queryParams}`, options);
   },
 
   // ===== Dashboard =====
