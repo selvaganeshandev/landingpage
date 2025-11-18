@@ -152,6 +152,8 @@ class CompetitorPromptAnalytics(models.Model):
             models.Index(fields=['competitor', 'is_mentioned']),
             models.Index(fields=['competitor', '-position']),
             models.Index(fields=['competitor', 'platform', 'tracked_at']),
+            # CRITICAL: Optimized index for ViewMentionsDialog query (competitor_id + is_mentioned filter)
+            models.Index(fields=['competitor', 'is_mentioned', '-mention_count']),
         ]
         ordering = ['competitor', 'position']
     

@@ -261,6 +261,8 @@ export const apiClient = {
     return apiRequest(`/domains/${queryParams}`);
   },
 
+  getDomain: (id: number) => apiRequest(`/domains/${id}/`),
+
   createDomain: (data: any) => apiRequest('/domains/', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -389,6 +391,10 @@ export const apiClient = {
 
   getPromptAnalytics: (id: number) => apiRequest(`/prompts/prompts/${id}/analytics/`),
 
+  getPromptAnalyticsByDomain: (domainId: number) => {
+    return apiRequest(`/prompts/mentions/analytics/?domain_id=${domainId}`);
+  },
+
   // ===== Alerts =====
   getAlerts: (params?: any) => {
     const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
@@ -481,6 +487,10 @@ export const apiClient = {
   }),
 
   getCompetitorDetail: (id: number) => apiRequest(`/competitors/competitors/${id}/`),
+
+  getCompetitorsByDomain: (domainId: number) => {
+    return apiRequest(`/competitors/competitors/?domain_id=${domainId}`);
+  },
 
   updateCompetitor: (id: number, data: any) => apiRequest(`/competitors/competitors/${id}/`, {
     method: 'PUT',
@@ -605,11 +615,12 @@ export const apiClient = {
     });
   },
 
-  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string; competitor_id?: string; page_size?: string }) => {
+  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string; competitor_id?: string; page_size?: string; is_mentioned?: string }) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
       ...(params.page_size ? { page_size: params.page_size } : {}),
+      ...(params.is_mentioned ? { is_mentioned: params.is_mentioned } : {}),
     }).toString()}`;
     return apiRequest(`/competitors/competitor-prompt-analytics/${queryParams}`);
   },

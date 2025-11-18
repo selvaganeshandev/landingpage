@@ -39,21 +39,35 @@ export const ViewMentionsDialog = ({
       if (!open || !domainId) return;
 
       setIsLoading(true);
+      const startTime = performance.now();
+      console.log('⏱️ ViewMentionsDialog - Starting to fetch mentions for competitor:', competitorId);
+
       try {
         // Fetch with competitor_id filter and large page size
-        // Backend now supports page_size parameter (max 1000)
+        // Backend now supports page_size parameter (max 1000) and is_mentioned filter
+        const apiStartTime = performance.now();
         const data = await apiClient.getCompetitorPromptAnalyticsEngine({
           domain_id: domainId,
           competitor_id: String(competitorId),
+          is_mentioned: 'true', // Filter at backend for performance (only mentioned rows)
           page_size: '1000', // Request all results in one call
         });
 
+        const apiTime = ((performance.now() - apiStartTime) / 1000).toFixed(2);
         const allRows = data?.results || [];
-        console.log('✅ ViewMentionsDialog - Fetched', allRows.length, 'of', data?.count, 'total results in single request');
+        console.log(`⏱️ API call took ${apiTime}s - Fetched ${allRows.length} relevant rows (backend filtered by is_mentioned=true)`);
+
+        // Backend now filters by is_mentioned=true, so all rows are relevant
+        // Just verify data structure and log for debugging
+        if (allRows.length > 0) {
+          console.log('🔍 Sample rows:', allRows.slice(0, 3));
+        }
+
+        const relevantRows = allRows; // All rows from backend are already relevant
 
         // Group by prompt and sum mention counts across all platforms
         const promptMap = new Map();
-        allRows.forEach((mention: any) => {
+        relevantRows.forEach((mention: any) => {
           const promptId = mention?.prompt;
           const promptText = mention?.prompt_text || `Prompt #${promptId}`;
           const count = Number(mention?.mention_count || 0);
@@ -62,7 +76,7 @@ export const ViewMentionsDialog = ({
             promptMap.set(promptId, {
               id: promptId,
               prompt: promptText,
-              mentionCount: count,  // Use the actual mention_count from API
+              mentionCount: count,
             });
           } else {
             // If same prompt appears on multiple platforms, sum the counts
@@ -75,8 +89,12 @@ export const ViewMentionsDialog = ({
           .filter(m => m.mentionCount > 0)  // Only show prompts where competitor is mentioned
           .sort((a, b) => b.mentionCount - a.mentionCount);
 
+        const processingTime = ((performance.now() - startTime) / 1000 - parseFloat(apiTime)).toFixed(2);
+        console.log(`⏱️ Processing took ${processingTime}s`);
         console.log('✅ ViewMentionsDialog - Final formatted mentions:', formattedMentions.length, 'unique prompts');
-        console.log('📊 Mention counts:', formattedMentions.map(m => `${m.prompt.substring(0, 50)}...: ${m.mentionCount}`));
+        if (formattedMentions.length > 0) {
+          console.log('📊 Top mentions:', formattedMentions.slice(0, 5).map(m => `${m.prompt.substring(0, 60)}: ${m.mentionCount}`));
+        }
 
         setMentions(formattedMentions);
       } catch (error: any) {
@@ -87,6 +105,8 @@ export const ViewMentionsDialog = ({
           variant: 'destructive',
         });
       } finally {
+        const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+        console.log(`✅ ViewMentionsDialog - Total time: ${totalTime}s`);
         setIsLoading(false);
       }
     };

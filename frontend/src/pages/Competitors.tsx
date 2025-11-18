@@ -224,8 +224,13 @@ const Competitors = () => {
       }
       setHasLoadedData(false);
       setIsPageLoading(true);
+
+      const startTime = performance.now();
+      console.log('⏱️ Starting Competitors page load...');
+
       try {
-        // Load main competitor data first
+        // Load main competitor data first (in parallel)
+        const batchStartTime = performance.now();
         const platformParam = selectedLLM !== 'all' ? selectedLLM : undefined;
         const [list, latest, byDomain, compPromptAnalytics, snapshotHistory, heatmapResponse] = await Promise.all([
           apiClient.getEngineCompetitors({ domain_id: domainId, platform: platformParam }),
@@ -235,79 +240,42 @@ const Competitors = () => {
           apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }),
           apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }),
         ] as any);
+        console.log(`⏱️ Main data loaded in ${((performance.now() - batchStartTime) / 1000).toFixed(2)}s`);
 
-        // Load competitive analysis APIs separately with better error handling
+        // Load competitive analysis APIs IN PARALLEL with better error handling
         setIsLoadingAnalysis(true);
-        let strengthAnalysis: any = undefined;
-        let insights: any = undefined;
-        let gaps: any = undefined;
+        const analysisStartTime = performance.now();
 
-        try {
-          console.log('🔵 API CALL: Loading competitive strength analysis for domain:', domainId, 'platform:', selectedLLM);
-          const url = `/competitors/competitive-strength-analysis?domain_id=${domainId}${selectedLLM !== 'all' ? `&platform=${selectedLLM}` : ''}`;
-          console.log('🔵 API URL:', url);
-          strengthAnalysis = await apiClient.getCompetitiveStrengthAnalysis({
+        const [strengthAnalysis, insights, gaps] = await Promise.all([
+          // Competitive Strength Analysis
+          apiClient.getCompetitiveStrengthAnalysis({
             domain_id: domainId,
             platform: selectedLLM !== 'all' ? selectedLLM : undefined
-          });
-          console.log('✅ Competitive strength analysis response:', strengthAnalysis);
-          console.log('✅ Response type:', typeof strengthAnalysis, 'Is array:', Array.isArray(strengthAnalysis));
-          // If API returns empty array, that's valid - we'll show empty state
-          if (Array.isArray(strengthAnalysis) && strengthAnalysis.length === 0) {
-            console.log('ℹ️ API returned empty array - will show empty state');
-          }
-        } catch (e: any) {
-          console.error('❌ Failed to load competitive strength analysis:', e);
-          console.error('❌ Error message:', e?.message);
-          console.error('❌ Error stack:', e?.stack);
-          // Don't set to empty array - leave as undefined to indicate API call failed
-          strengthAnalysis = undefined;
-        }
+          }).catch((e: any) => {
+            console.error('❌ Failed to load competitive strength analysis:', e?.message);
+            return undefined;
+          }),
 
-        try {
-          console.log('🔵 API CALL: Loading competitive insights for domain:', domainId, 'platform:', selectedLLM);
-          const url = `/competitors/competitive-insights?domain_id=${domainId}${selectedLLM !== 'all' ? `&platform=${selectedLLM}` : ''}`;
-          console.log('🔵 API URL:', url);
-          insights = await apiClient.getCompetitiveInsights({
+          // Competitive Insights
+          apiClient.getCompetitiveInsights({
             domain_id: domainId,
             platform: selectedLLM !== 'all' ? selectedLLM : undefined
-          });
-          console.log('✅ Competitive insights response:', insights);
-          console.log('✅ Response type:', typeof insights, 'Is array:', Array.isArray(insights));
-          // If API returns empty array, that's valid - we'll show empty state
-          if (Array.isArray(insights) && insights.length === 0) {
-            console.log('ℹ️ API returned empty array - will show empty state');
-          }
-        } catch (e: any) {
-          console.error('❌ Failed to load competitive insights:', e);
-          console.error('❌ Error message:', e?.message);
-          console.error('❌ Error stack:', e?.stack);
-          // Don't set to empty array - leave as undefined to indicate API call failed
-          insights = undefined;
-        }
+          }).catch((e: any) => {
+            console.error('❌ Failed to load competitive insights:', e?.message);
+            return undefined;
+          }),
 
-        try {
-          console.log('🔵 API CALL: Loading answer gap analysis for domain:', domainId, 'platform:', selectedLLM);
-          const url = `/competitors/answer-gap-analysis?domain_id=${domainId}${selectedLLM !== 'all' ? `&platform=${selectedLLM}` : ''}`;
-          console.log('🔵 API URL:', url);
-          gaps = await apiClient.getAnswerGapAnalysis({
+          // Answer Gap Analysis
+          apiClient.getAnswerGapAnalysis({
             domain_id: domainId,
             platform: selectedLLM !== 'all' ? selectedLLM : undefined
-          });
-          console.log('✅ Answer gap analysis response:', gaps);
-          console.log('✅ Response type:', typeof gaps, 'Is array:', Array.isArray(gaps));
-          // If API returns empty array, that's valid - we'll show empty state
-          if (Array.isArray(gaps) && gaps.length === 0) {
-            console.log('ℹ️ API returned empty array - will show empty state');
-          }
-        } catch (e: any) {
-          console.error('❌ Failed to load answer gap analysis:', e);
-          console.error('❌ Error message:', e?.message);
-          console.error('❌ Error stack:', e?.stack);
-          // Don't set to empty array - leave as undefined to indicate API call failed
-          gaps = undefined;
-        }
-        
+          }).catch((e: any) => {
+            console.error('❌ Failed to load answer gap analysis:', e?.message);
+            return undefined;
+          })
+        ]);
+
+        console.log(`⏱️ AI analysis loaded in ${((performance.now() - analysisStartTime) / 1000).toFixed(2)}s (parallel)`);
         setIsLoadingAnalysis(false);
         setHasLoadedData(true);
         setLoadedDomainId(domainId); // Mark this domain as loaded
@@ -561,6 +529,8 @@ const Competitors = () => {
         setHasLoadedData(true);
         setLoadedDomainId(domainId); // Mark as loaded even on error to stop infinite loading
       } finally {
+        const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+        console.log(`✅ Competitors page fully loaded in ${totalTime}s`);
         setIsPageLoading(false);
       }
     };

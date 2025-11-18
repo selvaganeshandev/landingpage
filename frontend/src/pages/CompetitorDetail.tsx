@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TimeFilter } from "@/components/TimeFilter";
 import { PageLoader } from "@/components/PageLoader";
 import { ViewMentionsDialog } from "@/components/ViewMentionsDialog";
+import { CompareMetricsDialog } from "@/components/CompareMetricsDialog";
 import {
   ArrowLeft,
   TrendingUp,
@@ -17,7 +18,8 @@ import {
   Share2,
   FileText,
   Target,
-  MessageSquare
+  MessageSquare,
+  ArrowLeftRight
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
@@ -54,6 +56,7 @@ const CompetitorDetail = () => {
   const [mentionTrend, setMentionTrend] = useState<any[]>([]);
   const [marketRank, setMarketRank] = useState<number | null>(null);
   const [viewMentionsDialogOpen, setViewMentionsDialogOpen] = useState(false);
+  const [compareMetricsDialogOpen, setCompareMetricsDialogOpen] = useState(false);
 
   // Sync domainId from selectedDomain or localStorage
   useEffect(() => {
@@ -622,11 +625,9 @@ const CompetitorDetail = () => {
               <Button
                 variant="outline"
                 className="w-full justify-start border border-border"
-                onClick={() => {
-                  navigate('/competitors', { state: { compareWith: competitor.id } });
-                }}
+                onClick={() => setCompareMetricsDialogOpen(true)}
               >
-                <Target className="h-4 w-4 mr-2" />
+                <ArrowLeftRight className="h-4 w-4 mr-2" />
                 Compare Metrics
               </Button>
             </div>
@@ -641,6 +642,15 @@ const CompetitorDetail = () => {
         competitorId={Number(id)}
         competitorName={competitor.name}
         domainId={domainId || ''}
+      />
+
+      {/* Compare Metrics Dialog */}
+      <CompareMetricsDialog
+        open={compareMetricsDialogOpen}
+        onOpenChange={setCompareMetricsDialogOpen}
+        competitorId={Number(id)}
+        competitorName={competitor.name}
+        competitorUrl={competitor.url}
       />
     </div>
   );
