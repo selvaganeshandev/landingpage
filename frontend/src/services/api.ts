@@ -605,8 +605,12 @@ export const apiClient = {
     });
   },
 
-  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string }) => {
-    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
+  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string; competitor_id?: string; page_size?: string }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
+      ...(params.page_size ? { page_size: params.page_size } : {}),
+    }).toString()}`;
     return apiRequest(`/competitors/competitor-prompt-analytics/${queryParams}`);
   },
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,8 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TimeFilter } from "@/components/TimeFilter";
-import { 
-  ArrowLeft, 
+import { PageLoader } from "@/components/PageLoader";
+import { ViewMentionsDialog } from "@/components/ViewMentionsDialog";
+import {
+  ArrowLeft,
   TrendingUp,
   TrendingDown,
   Building2,
@@ -18,6 +20,10 @@ import {
   MessageSquare
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/services/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { getActiveDomainId } from "@/utils/activeDomain";
+import { useDomainStore } from "@/stores/domainStore";
 import {
   LineChart,
   Line,
@@ -38,36 +44,154 @@ const CompetitorDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const { selectedDomain } = useDomainStore();
   const [timePeriod, setTimePeriod] = useState("30");
   const [activeTab, setActiveTab] = useState("overview");
+  const [isLoading, setIsLoading] = useState(true);
+  const [competitor, setCompetitor] = useState<any>(null);
+  const [domainId, setDomainId] = useState<string | null>(null);
+  const [mentionTrend, setMentionTrend] = useState<any[]>([]);
+  const [marketRank, setMarketRank] = useState<number | null>(null);
+  const [viewMentionsDialogOpen, setViewMentionsDialogOpen] = useState(false);
 
-  // Mock data
-  const competitor = {
-    id: id || "myprotein",
-    name: "MyProtein",
-    url: "myprotein.com",
-    logo: "🏋️",
-    mentions: 187,
-    visibility: 85,
-    sentiment: 68,
-    avgPosition: 2.1,
-    shareOfVoice: 35,
-    trend: 8,
-    description: "Leading sports nutrition brand offering protein supplements, vitamins, and fitness accessories."
-  };
+  // Sync domainId from selectedDomain or localStorage
+  useEffect(() => {
+    if (!user) return;
 
-  const mentionTrend = [
-    { month: "Jul", mentions: 178, position: 2.3 },
-    { month: "Aug", mentions: 182, position: 2.2 },
-    { month: "Sep", mentions: 185, position: 2.2 },
-    { month: "Oct", mentions: 188, position: 2.1 },
-    { month: "Nov", mentions: 190, position: 2.1 },
-    { month: "Dec", mentions: 191, position: 2.1 },
-    { month: "Jan", mentions: 189, position: 2.1 },
-    { month: "Feb", mentions: 188, position: 2.1 },
-    { month: "Mar", mentions: 186, position: 2.1 },
-    { month: "Apr", mentions: 187, position: 2.1 },
-  ];
+    if (selectedDomain?.id) {
+      const newDomainId = String(selectedDomain.id);
+      if (newDomainId !== domainId) {
+        setDomainId(newDomainId);
+      }
+    } else {
+      const serverActiveDomain = getActiveDomainId(user);
+      const serverDomainId = serverActiveDomain || '';
+      if (serverDomainId !== domainId) {
+        setDomainId(serverDomainId);
+      }
+    }
+  }, [user, selectedDomain?.id, domainId]);
+
+  // Fetch competitor data
+  useEffect(() => {
+    const fetchCompetitor = async () => {
+      if (!id || !domainId) {
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        // Fetch competitor details, trend data, and all competitors in parallel
+        const [data, snapshotData, allCompetitors] = await Promise.all([
+          apiClient.getEngineCompetitorDetail(Number(id)),
+          apiClient.getCompetitorMetricSnapshots({
+            domain_id: domainId,
+            competitor_id: id,
+            days: Number(timePeriod)
+          }),
+          apiClient.getEngineCompetitors({ domain_id: domainId })
+        ]);
+
+        // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
+        const rawSentiment = Number(data.sentiment_score || 0);
+        const totalMentions = Number(data.total_mentions || 0);
+        let sentimentPercent = 0;
+        if (rawSentiment === -1 || (rawSentiment === 0 && totalMentions === 0)) {
+          sentimentPercent = 0; // No data or unmentioned
+        } else {
+          sentimentPercent = Math.round((rawSentiment + 1) * 50);
+        }
+
+        setCompetitor({
+          id: data.id,
+          name: data.name || 'Unknown',
+          url: data.url || data.domain_name || '',
+          logo: data.name ? data.name.charAt(0).toUpperCase() : '?',
+          mentions: data.total_mentions || 0,
+          citations: data.total_citations || 0,
+          visibility: Math.round(Number(data.visibility_score || 0)),
+          sentiment: sentimentPercent,
+          avgPosition: Number(data.average_position || 0),
+          shareOfVoice: Math.round(Number(data.share_of_voice_percentage || 0)),
+          trend: Number(data.trend_percentage || 0),
+          description: data.description || `${data.name} - Competitor analysis and performance tracking.`,
+        });
+
+        // Process snapshot data for the trend chart
+        const snapshots = Array.isArray(snapshotData) ? snapshotData : snapshotData?.results || [];
+        if (snapshots.length > 0) {
+          const trendData = snapshots.map((snap: any) => {
+            const date = new Date(snap.timestamp || snap.created_at);
+            const monthLabel = date.toLocaleDateString('en-US', { month: 'short' });
+
+            return {
+              month: monthLabel,
+              mentions: Number(snap.total_mentions || 0),
+              position: Number(snap.average_position || 0),
+              date: date.getTime() // for sorting
+            };
+          });
+
+          // Sort by date and remove duplicates (keep latest for each month)
+          const sortedTrend = trendData
+            .sort((a, b) => a.date - b.date)
+            .reduce((acc: any[], curr) => {
+              const existingIndex = acc.findIndex(item => item.month === curr.month);
+              if (existingIndex >= 0) {
+                // Replace with newer data for same month
+                acc[existingIndex] = curr;
+              } else {
+                acc.push(curr);
+              }
+              return acc;
+            }, [])
+            .map(({ date, ...rest }) => rest); // Remove date field before setting
+
+          setMentionTrend(sortedTrend);
+        } else {
+          setMentionTrend([]);
+        }
+
+        // Calculate market rank based on share of voice
+        const competitors = Array.isArray(allCompetitors) ? allCompetitors : allCompetitors?.results || [];
+        if (competitors.length > 0) {
+          // Sort competitors by share of voice (descending) or mentions if share of voice is not available
+          const sortedCompetitors = competitors
+            .map((c: any) => ({
+              id: c.id,
+              shareOfVoice: Number(c.share_of_voice_percentage || 0),
+              mentions: Number(c.total_mentions || 0)
+            }))
+            .sort((a, b) => {
+              // Primary sort by share of voice, fallback to mentions
+              if (b.shareOfVoice !== a.shareOfVoice) {
+                return b.shareOfVoice - a.shareOfVoice;
+              }
+              return b.mentions - a.mentions;
+            });
+
+          // Find the rank (1-indexed)
+          const rank = sortedCompetitors.findIndex(c => c.id === Number(id)) + 1;
+          setMarketRank(rank > 0 ? rank : null);
+        } else {
+          setMarketRank(null);
+        }
+      } catch (error: any) {
+        console.error('Failed to load competitor details:', error);
+        toast({
+          title: 'Failed to Load Competitor',
+          description: error?.message || 'Could not fetch competitor details.',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchCompetitor();
+  }, [id, domainId, timePeriod, toast]);
 
   const platformBreakdown = [
     { platform: "ChatGPT", mentions: 72, percentage: 38.5 },
@@ -117,6 +241,22 @@ const CompetitorDetail = () => {
     });
   };
 
+  // Helper function to format URL with protocol
+  const formatUrl = (url: string) => {
+    if (!url) return '#';
+    // Check if URL already has a protocol
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    // Add https:// if no protocol exists
+    return `https://${url}`;
+  };
+
+  // Show loading state
+  if (isLoading || !competitor) {
+    return <PageLoader sidebarOpen />;
+  }
+
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
       {/* Header */}
@@ -131,8 +271,20 @@ const CompetitorDetail = () => {
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-2xl gradient-primary shadow-glow flex items-center justify-center text-3xl">
-                {competitor.logo}
+              <div className="w-16 h-16 rounded-2xl border-2 border-border shadow-lg flex items-center justify-center bg-card overflow-hidden">
+                {competitor.url ? (
+                  <img
+                    src={`https://www.google.com/s2/favicons?domain=${competitor.url}&sz=64`}
+                    alt={`${competitor.name} favicon`}
+                    className="w-10 h-10 object-contain"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      e.currentTarget.parentElement!.innerHTML = `<span class="text-3xl font-bold text-primary">${competitor.logo}</span>`;
+                    }}
+                  />
+                ) : (
+                  <span className="text-3xl font-bold text-primary">{competitor.logo}</span>
+                )}
               </div>
               <div>
                 <h1 className="text-4xl font-bold tracking-tight">{competitor.name}</h1>
@@ -155,10 +307,10 @@ const CompetitorDetail = () => {
       </div>
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Mentions</p>
+            <p className="text-sm text-muted-foreground uppercase tracking-wider">Mentions</p>
             <p className="text-4xl font-bold font-inter">{competitor.mentions}</p>
             <div className="flex items-center gap-2">
               {competitor.trend > 0 ? (
@@ -175,17 +327,9 @@ const CompetitorDetail = () => {
 
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground uppercase tracking-wider">Visibility Score</p>
-            <p className="text-4xl font-bold font-inter">{competitor.visibility}%</p>
-            <Progress value={competitor.visibility} className="h-2" />
-          </div>
-        </Card>
-
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground uppercase tracking-wider">Avg Position</p>
-            <p className="text-4xl font-bold font-inter">{competitor.avgPosition}</p>
-            <p className="text-sm text-muted-foreground">Across all platforms</p>
+            <p className="text-sm text-muted-foreground uppercase tracking-wider">Citations</p>
+            <p className="text-4xl font-bold font-inter">{competitor.citations || 0}</p>
+            <p className="text-sm text-muted-foreground">Source references</p>
           </div>
         </Card>
 
@@ -194,6 +338,30 @@ const CompetitorDetail = () => {
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Share of Voice</p>
             <p className="text-4xl font-bold font-inter">{competitor.shareOfVoice}%</p>
             <p className="text-sm text-muted-foreground">Market share</p>
+          </div>
+        </Card>
+
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground uppercase tracking-wider">Avg Position</p>
+            <p className="text-4xl font-bold font-inter">{competitor.avgPosition?.toFixed(1) || '0.0'}</p>
+            <p className="text-sm text-muted-foreground">Across all platforms</p>
+          </div>
+        </Card>
+
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground uppercase tracking-wider">Visibility</p>
+            <p className="text-4xl font-bold font-inter">{competitor.visibility}%</p>
+            <Progress value={competitor.visibility} className="h-2" />
+          </div>
+        </Card>
+
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground uppercase tracking-wider">Sentiment</p>
+            <p className="text-4xl font-bold font-inter">{competitor.sentiment}%</p>
+            <Progress value={competitor.sentiment} className="h-2" />
           </div>
         </Card>
       </div>
@@ -210,40 +378,46 @@ const CompetitorDetail = () => {
                   Track mention frequency and average position over time
                 </p>
               </div>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={mentionTrend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis yAxisId="left" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis yAxisId="right" orientation="right" stroke="hsl(var(--muted-foreground))" fontSize={12} reversed />
-                  <Tooltip 
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "var(--radius)",
-                    }}
-                  />
-                  <Legend />
-                  <Line 
-                    yAxisId="left"
-                    type="monotone" 
-                    dataKey="mentions" 
-                    name="Mentions"
-                    stroke="hsl(var(--primary))" 
-                    strokeWidth={3}
-                    dot={{ fill: "hsl(var(--primary))", r: 4 }}
-                  />
-                  <Line 
-                    yAxisId="right"
-                    type="monotone" 
-                    dataKey="position" 
-                    name="Avg Position"
-                    stroke="hsl(var(--chart-2))" 
-                    strokeWidth={2}
-                    dot={{ fill: "hsl(var(--chart-2))", r: 3 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              {mentionTrend.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={mentionTrend}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <YAxis yAxisId="left" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <YAxis yAxisId="right" orientation="right" stroke="hsl(var(--muted-foreground))" fontSize={12} reversed />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "var(--radius)",
+                      }}
+                    />
+                    <Legend />
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="mentions"
+                      name="Mentions"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={3}
+                      dot={{ fill: "hsl(var(--primary))", r: 4 }}
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="position"
+                      name="Avg Position"
+                      stroke="hsl(var(--chart-2))"
+                      strokeWidth={2}
+                      dot={{ fill: "hsl(var(--chart-2))", r: 3 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-[300px]">
+                  <p className="text-sm text-muted-foreground">No trend data available for the selected period.</p>
+                </div>
+              )}
             </div>
           </Card>
 
@@ -395,16 +569,34 @@ const CompetitorDetail = () => {
             <h3 className="text-lg font-semibold mb-4 font-inter">Quick Stats</h3>
             <div className="space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-border">
-                <span className="text-sm text-muted-foreground">Positive Sentiment</span>
-                <span className="text-lg font-bold font-inter text-success">{competitor.sentiment}%</span>
+                <span className="text-sm text-muted-foreground">Sentiment Score</span>
+                <span className={`text-lg font-bold font-inter ${
+                  competitor.sentiment >= 60 ? 'text-success' :
+                  competitor.sentiment >= 40 ? 'text-warning' :
+                  'text-destructive'
+                }`}>
+                  {competitor.sentiment}%
+                </span>
               </div>
               <div className="flex items-center justify-between pb-3 border-b border-border">
                 <span className="text-sm text-muted-foreground">Market Rank</span>
-                <span className="text-lg font-bold font-inter">#2</span>
+                <span className="text-lg font-bold font-inter">
+                  {marketRank ? `#${marketRank}` : 'N/A'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between pb-3 border-b border-border">
+                <span className="text-sm text-muted-foreground">Total Citations</span>
+                <span className="text-lg font-bold font-inter">{competitor.citations || 0}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Growth Rate</span>
-                <span className="text-lg font-bold font-inter text-success">+{competitor.trend}%</span>
+                <span className="text-sm text-muted-foreground">Growth Trend</span>
+                <span className={`text-lg font-bold font-inter ${
+                  competitor.trend > 0 ? 'text-success' :
+                  competitor.trend < 0 ? 'text-destructive' :
+                  'text-muted-foreground'
+                }`}>
+                  {competitor.trend > 0 ? '+' : ''}{competitor.trend}%
+                </span>
               </div>
             </div>
           </Card>
@@ -414,16 +606,26 @@ const CompetitorDetail = () => {
             <h3 className="text-lg font-semibold mb-4 font-inter">Quick Actions</h3>
             <div className="space-y-2">
               <Button variant="outline" className="w-full justify-start border border-border" asChild>
-                <a href={`https://${competitor.url}`} target="_blank" rel="noopener noreferrer">
+                <a href={formatUrl(competitor.url)} target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="h-4 w-4 mr-2" />
                   Visit Website
                 </a>
               </Button>
-              <Button variant="outline" className="w-full justify-start border border-border">
+              <Button
+                variant="outline"
+                className="w-full justify-start border border-border"
+                onClick={() => setViewMentionsDialogOpen(true)}
+              >
                 <MessageSquare className="h-4 w-4 mr-2" />
                 View All Mentions
               </Button>
-              <Button variant="outline" className="w-full justify-start border border-border">
+              <Button
+                variant="outline"
+                className="w-full justify-start border border-border"
+                onClick={() => {
+                  navigate('/competitors', { state: { compareWith: competitor.id } });
+                }}
+              >
                 <Target className="h-4 w-4 mr-2" />
                 Compare Metrics
               </Button>
@@ -431,6 +633,15 @@ const CompetitorDetail = () => {
           </Card>
         </div>
       </div>
+
+      {/* View Mentions Dialog */}
+      <ViewMentionsDialog
+        open={viewMentionsDialogOpen}
+        onOpenChange={setViewMentionsDialogOpen}
+        competitorId={Number(id)}
+        competitorName={competitor.name}
+        domainId={domainId || ''}
+      />
     </div>
   );
 };

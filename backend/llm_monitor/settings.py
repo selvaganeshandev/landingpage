@@ -159,8 +159,8 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
     ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 20
+    'DEFAULT_PAGINATION_CLASS': 'llm_monitor.pagination.CustomPageNumberPagination',
+    'PAGE_SIZE': 20  # Default page size (can be overridden with ?page_size= up to 1000)
 }
 
 # CORS settings

@@ -855,7 +855,7 @@ const Competitors = () => {
                           variant="ghost"
                           size="sm"
                           className="text-primary"
-                          onClick={() => navigate(`/competitors/${competitor.url.replace('.com', '')}`)}
+                          onClick={() => navigate(`/competitors/${competitor.id}`)}
                         >
                           View Details →
                         </Button>
