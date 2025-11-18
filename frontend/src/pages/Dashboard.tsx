@@ -6,6 +6,7 @@ import { CompetitorComparison } from "@/components/CompetitorComparison";
 import { MentionTable } from "@/components/MentionTable";
 import { TrendChart } from "@/components/TrendChart";
 import { TimeFilter } from "@/components/TimeFilter";
+import { PageLoader } from "@/components/PageLoader";
 import { Eye, TrendingUp, Target, Bell, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -157,14 +158,7 @@ const Dashboard = () => {
 
   // Show loading state whenever we're fetching data
   if (loading || !summary) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-background">
-        <div className="text-center space-y-4">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-primary mx-auto"></div>
-          <p className="text-lg text-muted-foreground">Loading dashboard data...</p>
-        </div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   return (
