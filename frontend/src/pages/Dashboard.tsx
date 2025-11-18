@@ -149,12 +149,14 @@ const Dashboard = () => {
   }
 
   useEffect(() => {
+    // Clear summary when domain/filters change to show loading state
+    setSummary(null);
     void fetchSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, domainId, timePeriod, selectedLLM, selectedDomain?.id]);
 
-  // Show loading state until data is fetched
-  if (loading && !summary) {
+  // Show loading state whenever we're fetching data
+  if (loading || !summary) {
     return (
       <div className="p-8 space-y-8 bg-background">
         <div className="space-y-4">
