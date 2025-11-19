@@ -87,12 +87,12 @@ class PromptAnalyticsProcessor:
             if PromptGroup.objects.filter(track_status='SCHD').exists():
                 return {'scheduled': False, 'reason': 'group_in_progress'}
 
-            # Select one INIT group - only process if domain is fully complete
-            # This prevents processing incomplete groups while domain is still creating prompts
+            # Select one INIT group - process when domain has finished prompt generation
+            # Domain must be in PROC (prompts ready) or COMP status
             group = (
                 PromptGroup.objects.filter(
                     track_status='INIT',
-                    domain__processing_status='COMP'  # Wait until domain finishes
+                    domain__processing_status__in=['PROC', 'COMP']  # PROC = prompts ready, waiting for analytics
                 )
                 .select_related('domain')
                 .order_by('modified_at')
@@ -499,8 +499,47 @@ class PromptAnalyticsProcessor:
                 logger.error(f"Error extracting competitors for domain {domain.id}: {str(comp_error)}")
                 # Don't fail the entire aggregation if competitor extraction fails
 
+            # Check if ALL groups for this domain are now complete
+            # If so, mark the domain as COMP
+            self._check_and_complete_domain(domain)
+
         except Exception as e:
             logger.error(f"Error aggregating group {group.id}: {str(e)}")
+
+    def _check_and_complete_domain(self, domain: Domain) -> None:
+        """
+        Check if all prompt groups for this domain are complete.
+        If so, mark the domain as COMP (completed).
+        """
+        try:
+            # Count total groups and completed groups
+            total_groups = PromptGroup.objects.filter(domain=domain).count()
+            completed_groups = PromptGroup.objects.filter(domain=domain, track_status='COMP').count()
+
+            logger.info(f"Domain {domain.id} ({domain.name}): {completed_groups}/{total_groups} groups completed")
+
+            # If all groups are completed, mark domain as COMP
+            if total_groups > 0 and completed_groups == total_groups:
+                with transaction.atomic():
+                    domain_fresh = Domain.objects.select_for_update().get(id=domain.id)
+
+                    # Only update if still in PROC status
+                    if domain_fresh.processing_status == 'PROC':
+                        domain_fresh.processing_status = 'COMP'
+                        domain_fresh.track_message = f'Successfully completed all analytics for {total_groups} prompt groups'
+                        domain_fresh.tracked_at = timezone.now()
+                        domain_fresh.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
+
+                        logger.info(f"✅ Domain {domain.id} ({domain.name}) marked as COMP - all {total_groups} groups completed")
+                    else:
+                        logger.info(f"Domain {domain.id} already in status {domain_fresh.processing_status}, skipping")
+            else:
+                # Still have pending groups
+                pending_groups = total_groups - completed_groups
+                logger.info(f"Domain {domain.id} still processing: {pending_groups} groups remaining")
+
+        except Exception as e:
+            logger.error(f"Error checking domain completion for domain {domain.id}: {str(e)}")
 
     def _update_sentiment_analytics_for_theme(self, group: PromptGroup, analytics) -> None:
         """

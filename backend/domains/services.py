@@ -22,7 +22,7 @@ def schedule_domain_processing(domain: Domain) -> bool:
 
     payload = {
         'domain_id': domain.id,
-        'sync': False,
+        'sync': False,  # Process async - will be picked up by start_processor daemon
     }
 
     # Optimistically mark as scheduled before making remote call

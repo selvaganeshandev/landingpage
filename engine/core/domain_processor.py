@@ -97,6 +97,7 @@ class DomainProcessor:
             domain.track_message = 'Starting domain processing...'
             domain.tracked_at = timezone.now()
             domain.save()
+            print(f"🔵 LOG: Domain {domain.id} ({domain.name}) - Status set to PROC, starting processing...")
             
             # Step 1: Check if domain has any keywords at all
             all_keywords_exist = Keyword.objects.filter(domain=domain).exists()
@@ -104,6 +105,10 @@ class DomainProcessor:
             if not all_keywords_exist:
                 # First time: Fetch keywords from DataForSEO (only once per domain)
                 print(f"Initial keyword fetch for {domain.name} from DataForSEO")
+                domain.track_message = 'Scraping keywords from search data...'
+                domain.tracked_at = timezone.now()
+                domain.save(update_fields=['track_message', 'tracked_at', 'modified_at'])
+
                 kw_limit = getattr(settings, 'KEYWORD_EXTRACT_LIMIT', 50)
                 keywords_from_api = self.dataforseo_client.scrape_target_domain(domain.name, limit=kw_limit)
                 
@@ -180,6 +185,10 @@ class DomainProcessor:
             
             # Step 5: Generate prompts using ChatGPT
             print(f"Generating prompts for {domain.name}")
+            domain.track_message = f'Generating AI prompts from {len(keywords)} keywords...'
+            domain.tracked_at = timezone.now()
+            domain.save(update_fields=['track_message', 'tracked_at', 'modified_at'])
+
             prompts = self.chatgpt_client.generate_prompts_from_keywords(keywords, domain.name)
 
             # Ensure distinct prompts and ensure we have PROMPT_MIN_COUNT prompts per keyword
@@ -211,6 +220,10 @@ class DomainProcessor:
             
             # Step 6: Group prompts using SentenceTransformer-based NLP
             print(f"Grouping prompts for {domain.name}")
+            domain.track_message = f'Grouping {len(prompts)} prompts using NLP clustering...'
+            domain.tracked_at = timezone.now()
+            domain.save(update_fields=['track_message', 'tracked_at', 'modified_at'])
+
             grouped_prompts = self._group_prompts_with_sentence_transformers(prompts)
             
             if not grouped_prompts:
@@ -241,13 +254,14 @@ class DomainProcessor:
             # (moved to prompt_analytics_processor.py _check_and_aggregate_group method)
             # This ensures competitor_mention_list has been populated before extraction
 
-            # Step 10: Update domain status to completed
-            domain.processing_status = 'COMP'
-            domain.track_message = f'Successfully processed {len(keywords)} keywords and {len(grouped_prompts)} prompt groups'
+            # Step 10: Keep domain in PROC status - analytics processor will set to COMP when done
+            # Do NOT set to COMP here - we need to wait for LLM queries and analytics
+            domain.processing_status = 'PROC'
+            domain.track_message = f'Prompts ready: {len(keywords)} keywords and {len(grouped_prompts)} groups. Queuing for LLM analysis...'
             domain.tracked_at = timezone.now()
             domain.save()
 
-            print(f"Successfully processed domain: {domain.name}")
+            print(f"Domain keyword/prompt processing complete: {domain.name}. Waiting for analytics processing...")
             
         except Exception as e:
             print(f"Error processing domain {domain_id}: {str(e)}")
@@ -479,7 +493,11 @@ class DomainProcessor:
 
         if SentenceTransformer is None:
             raise RuntimeError("sentence_transformers is required but not installed.")
-        model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+
+        # Force CPU usage to avoid MPS crashes on macOS
+        import os
+        os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+        model = SentenceTransformer('paraphrase-MiniLM-L6-v2', device='cpu')
         texts = [p.get('prompt_text') or p.get('prompt') for p in prompts]
         embeddings = model.encode(texts, convert_to_numpy=True)
 

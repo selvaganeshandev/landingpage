@@ -91,16 +91,16 @@ def start_processing(request):
             try:
                 # Execute synchronously
                 domain_processor._process_single_domain(domain.id)
-                # Success
-                domain.processing_status = 'COMP'
-                domain.track_message = 'Completed inline processing'
-                domain.tracked_at = timezone.now()
-                domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
+                # DO NOT set status to COMP here - the processor handles status updates
+                # The domain will be in PROC status until analytics processing completes
+                domain.refresh_from_db()  # Get latest status from processor
                 return Response({
                     'success': True,
-                    'message': f'Completed inline processing for domain: {domain.name}',
+                    'message': f'Domain processing started for: {domain.name}',
                     'domain_id': domain_id,
-                    'mode': 'sync'
+                    'mode': 'sync',
+                    'current_status': domain.processing_status,
+                    'current_message': domain.track_message
                 })
             except Exception as inline_err:
                 domain.processing_status = 'FAIL'

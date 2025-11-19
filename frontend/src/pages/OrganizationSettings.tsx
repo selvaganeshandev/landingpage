@@ -57,6 +57,8 @@ export default function OrganizationSettings() {
     sentiment_score: string;
     created_at: string;
     modified_at: string;
+    processing_status?: string;
+    track_message?: string;
   }>>([]);
 
   const [newDomain, setNewDomain] = useState("");
@@ -136,6 +138,21 @@ export default function OrganizationSettings() {
     loadData();
   }, []);
 
+  // Poll for domain updates when there are processing domains
+  useEffect(() => {
+    const hasProcessingDomains = domains.some(d =>
+      d.processing_status && ['INIT', 'SCHD', 'PROC'].includes(d.processing_status)
+    );
+
+    if (!hasProcessingDomains) return;
+
+    const interval = setInterval(() => {
+      loadDomains();
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [domains]);
+
   const loadData = async () => {
     try {
       setIsLoading(true);
@@ -205,14 +222,20 @@ export default function OrganizationSettings() {
         url: domainUrl,
       });
 
-      // Reload domains to get the updated list
-      await loadDomains();
+      // Reload domains to get the updated list (both local state and global store)
+      await loadDomains(); // Update local state for this page
+
+      // Also update the global domain store so DomainSelector refreshes
+      const { useDomainStore } = await import('@/stores/domainStore');
+      await useDomainStore.getState().loadDomains();
+
       setNewDomain("");
       setAddDomainDialogOpen(false);
 
       toast({
-        title: "Domain added",
-        description: `${domainName} has been added to your organization.`,
+        title: "Brand added successfully!",
+        description: `${domainName} is now being processed. We'll notify you when it's ready.`,
+        duration: 5000,
       });
     } catch (error: any) {
       toast({
@@ -491,28 +514,64 @@ export default function OrganizationSettings() {
                 <p>No domains added yet</p>
               </div>
             ) : (
-              domains.map((domain) => (
-                <div
-                  key={domain.id}
-                  className="flex items-center justify-between p-3 border rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <Globe className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <p className="font-medium capitalize">{domain.name}</p>
-                      <p className="text-sm text-muted-foreground">{domain.url}</p>
+              domains.map((domain) => {
+                const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
+                const isFailed = domain.processing_status === 'FAIL';
+                const isCompleted = !domain.processing_status || domain.processing_status === 'COMP';
 
+                const getStatusLabel = () => {
+                  if (domain.processing_status === 'INIT') return 'Initializing';
+                  if (domain.processing_status === 'SCHD') return 'Scheduled';
+                  if (domain.processing_status === 'PROC') return 'Processing';
+                  if (domain.processing_status === 'FAIL') return 'Failed';
+                  return 'Ready';
+                };
+
+                return (
+                  <div
+                    key={domain.id}
+                    className="flex items-center justify-between p-3 border rounded-lg"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="font-medium capitalize">{domain.name}</p>
+                        <p className="text-sm text-muted-foreground">{domain.url}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {/* Status Badge */}
+                      {isProcessing && (
+                        <Badge variant="outline" className="gap-1 border-orange-500 text-orange-600 bg-orange-50">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          {getStatusLabel()}
+                        </Badge>
+                      )}
+                      {isFailed && (
+                        <Badge variant="outline" className="gap-1 border-red-500 text-red-600 bg-red-50">
+                          <AlertCircle className="h-3 w-3" />
+                          Failed
+                        </Badge>
+                      )}
+                      {isCompleted && (
+                        <Badge variant="outline" className="gap-1 border-green-500 text-green-600 bg-green-50">
+                          <CheckCircle2 className="h-3 w-3" />
+                          Ready
+                        </Badge>
+                      )}
+
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setConfirmDomainId(domain.id)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setConfirmDomainId(domain.id)}
-                  >
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </CardContent>

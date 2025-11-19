@@ -66,6 +66,30 @@ export const DomainSelector = () => {
     return () => clearInterval(interval);
   }, [domains, loadDomains]);
 
+  // If currently selected domain is processing, switch to first completed domain
+  useEffect(() => {
+    if (!selectedDomain || !user) return;
+
+    const isCurrentDomainProcessing = selectedDomain.processing_status &&
+      ['INIT', 'SCHD', 'PROC'].includes(selectedDomain.processing_status);
+
+    if (isCurrentDomainProcessing) {
+      // Find first completed domain
+      const firstCompletedDomain = domains.find(d =>
+        d.id !== selectedDomain.id && (!d.processing_status || d.processing_status === 'COMP')
+      );
+
+      if (firstCompletedDomain) {
+        // Switch to completed domain
+        (async () => {
+          const { updateActiveDomain } = await import('@/utils/activeDomain');
+          await updateActiveDomain(user.id, firstCompletedDomain.id, firstCompletedDomain);
+          setSelectedDomain(firstCompletedDomain);
+        })();
+      }
+    }
+  }, [selectedDomain, domains, user, setSelectedDomain]);
+
   // After domains load, restore last selected domain from server
   useEffect(() => {
     if (!user) return;
@@ -91,21 +115,27 @@ export const DomainSelector = () => {
         }
       }
       
-      // If server has no active domain or domain doesn't exist, use first domain
+      // If server has no active domain or domain doesn't exist, use first COMPLETED domain
       if (!serverActiveDomainId || serverActiveDomainId === null || serverActiveDomainId === '') {
-        const firstDomain = domains[0];
-        if (firstDomain) {
+        // Find first completed domain (skip processing domains)
+        const firstCompletedDomain = domains.find(d =>
+          !d.processing_status || d.processing_status === 'COMP'
+        );
+        if (firstCompletedDomain) {
           // Update both systems: Zustand store and server
-          setSelectedDomain(firstDomain);
-          await updateActiveDomain(user.id, firstDomain.id, firstDomain);
+          setSelectedDomain(firstCompletedDomain);
+          await updateActiveDomain(user.id, firstCompletedDomain.id, firstCompletedDomain);
         }
       } else if (!selectedDomain || !domains.find(d => d.id === selectedDomain.id)) {
         // Server has active domain but it doesn't exist in current domain list
-        const firstDomain = domains[0];
-        if (firstDomain) {
-          setSelectedDomain(firstDomain);
+        // Find first completed domain (skip processing domains)
+        const firstCompletedDomain = domains.find(d =>
+          !d.processing_status || d.processing_status === 'COMP'
+        );
+        if (firstCompletedDomain) {
+          setSelectedDomain(firstCompletedDomain);
           // Update server with first domain
-          await updateActiveDomain(user.id, firstDomain.id, firstDomain);
+          await updateActiveDomain(user.id, firstCompletedDomain.id, firstCompletedDomain);
         }
       }
     };
@@ -127,12 +157,16 @@ export const DomainSelector = () => {
   const handleDomainSelect = async (domainId: number) => {
     const domain = domains.find(d => d.id === domainId);
     if (domain) {
-      // Check if domain is still processing - don't allow selection
-      if (domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status)) {
+      // Check if domain is still processing or failed - don't allow selection
+      if (domain.processing_status && ['INIT', 'SCHD', 'PROC', 'FAIL'].includes(domain.processing_status)) {
+
+        const isFailed = domain.processing_status === 'FAIL';
         toast({
-          title: "Domain Processing",
-          description: "This domain is still being processed. Please wait until processing completes.",
-          variant: "default",
+          title: isFailed ? "Domain Processing Failed" : "Domain Processing",
+          description: isFailed
+            ? `Processing failed: ${domain.track_message || 'Unknown error'}. Please try re-adding this domain.`
+            : "This domain is still being processed. Please wait until processing completes.",
+          variant: isFailed ? "destructive" : "default",
         });
         return;
       }
@@ -230,6 +264,8 @@ export const DomainSelector = () => {
               {domains.map((domain) => {
                 const faviconUrl = getFaviconUrl(domain.url);
                 const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
+                const isFailed = domain.processing_status === 'FAIL';
+                const isDisabled = isProcessing || isFailed;
                 const processingLabel = domain.processing_status === 'INIT' ? 'Initializing...' :
                                        domain.processing_status === 'SCHD' ? 'Scheduled...' :
                                        domain.processing_status === 'PROC' ? 'Processing...' : 'Processing...';
@@ -241,9 +277,9 @@ export const DomainSelector = () => {
                     onSelect={() => handleDomainSelect(domain.id)}
                     className={cn(
                       "flex items-center justify-between gap-2",
-                      isProcessing && "opacity-60 cursor-not-allowed"
+                      isDisabled && "opacity-60 cursor-not-allowed"
                     )}
-                    disabled={isProcessing}
+                    disabled={isDisabled}
                   >
                     <div className="flex items-center gap-2 flex-1 min-w-0">
                       {faviconUrl ? (
@@ -265,6 +301,11 @@ export const DomainSelector = () => {
                             <Loader2 className="h-3 w-3 animate-spin" />
                             {processingLabel}
                           </span>
+                        ) : isFailed ? (
+                          <span className="text-xs text-red-500 flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" />
+                            Failed
+                          </span>
                         ) : (
                           <span className="text-xs text-muted-foreground">
                             {domain.total_mentions} mentions
@@ -274,6 +315,8 @@ export const DomainSelector = () => {
                     </div>
                     {isProcessing ? (
                       <AlertCircle className="h-4 w-4 flex-shrink-0 text-orange-500" />
+                    ) : isFailed ? (
+                      <AlertCircle className="h-4 w-4 flex-shrink-0 text-red-500" />
                     ) : (
                       <Check
                         className={cn(
