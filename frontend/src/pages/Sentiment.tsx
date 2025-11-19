@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TimeFilter } from "@/components/TimeFilter";
+import { PageLoader } from "@/components/PageLoader";
 import { useToast } from "@/hooks/use-toast";
 import { 
   TrendingUp, 
@@ -104,7 +105,14 @@ const Sentiment = () => {
         // Optional: competitor sentiment (engine)
         try {
           const cp = await apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId });
-          setCompetitorRows(Array.isArray(cp) ? cp : cp || []);
+          // Ensure we always set an array
+          if (Array.isArray(cp)) {
+            setCompetitorRows(cp);
+          } else if (cp && typeof cp === 'object' && Array.isArray(cp.results)) {
+            setCompetitorRows(cp.results);
+          } else {
+            setCompetitorRows([]);
+          }
         } catch {
           setCompetitorRows([]);
         }
@@ -211,7 +219,7 @@ const Sentiment = () => {
 
   // Competitor sentiment from engine competitor prompt analytics (average sentiment_score -> categories pct approx)
   const competitorSentiment = useMemo(() => {
-    if (!competitorRows || competitorRows.length === 0) return [] as any[];
+    if (!competitorRows || !Array.isArray(competitorRows) || competitorRows.length === 0) return [] as any[];
     const map: Record<string, { name: string; pos: number; neu: number; neg: number; count: number }> = {};
     competitorRows.forEach((r:any) => {
       const key = r.competitor?.name || `Competitor ${r.competitor_id || ''}`;
@@ -250,6 +258,10 @@ const Sentiment = () => {
     }
   };
 
+  if (loading) {
+    return <PageLoader />;
+  }
+
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
       <div className="flex items-center justify-between">
@@ -261,8 +273,8 @@ const Sentiment = () => {
         </div>
         <div className="flex items-center gap-4">
           <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
-          <Button 
-            onClick={handleRefresh} 
+          <Button
+            onClick={handleRefresh}
             variant="outline"
             disabled={loading}
             className="border-border"
@@ -277,15 +289,7 @@ const Sentiment = () => {
         </div>
       </div>
 
-      {loading && (
-        <div className="flex items-center justify-center py-12">
-          <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-          <span className="ml-3 text-muted-foreground">Loading sentiment data...</span>
-        </div>
-      )}
 
-      {!loading && (
-        <>
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
@@ -567,8 +571,6 @@ const Sentiment = () => {
           </Card>
         </TabsContent>
       </Tabs>
-        </>
-      )}
     </div>
   );
 };
