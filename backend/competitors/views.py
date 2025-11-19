@@ -1005,6 +1005,76 @@ def process_competitor_single(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+def start_competitor_analysis(request):
+    """
+    Extract competitors from prompt analytics data and start processing them.
+    This endpoint:
+    1. Extracts top 5 competitors from existing prompt analytics
+    2. Creates Competitor records
+    3. Queues them for processing
+
+    Request body:
+    {
+        "domain_id": 123
+    }
+    """
+    import logging
+    from .services import CompetitorExtractionService
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        domain_id = request.data.get('domain_id')
+        if not domain_id:
+            return Response(
+                {'error': 'domain_id is required in request body'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get domain
+        domain = get_object_or_404(Domain, id=domain_id)
+
+        # Check if user has access to this domain
+        user = request.user
+        if user.role != 'super_admin' and domain.organisation != user.organisation:
+            return Response(
+                {'error': 'You do not have permission to analyze competitors for this domain'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Extract competitors for THIS domain only
+        logger.info(f"Starting competitor extraction for domain {domain.id}: {domain.name}")
+        service = CompetitorExtractionService(domain)
+        created_count, competitor_names = service.extract_and_create_competitors()
+
+        # Get all competitors for THIS domain only (including newly created)
+        competitors = Competitor.objects.filter(domain_id=domain_id)
+        logger.info(f"Found {competitors.count()} total competitors for domain {domain.id}")
+
+        return Response({
+            'success': True,
+            'message': f'Successfully extracted {created_count} competitors',
+            'created_count': created_count,
+            'competitor_names': competitor_names,
+            'total_competitors': competitors.count(),
+            'competitors': CompetitorSerializer(competitors, many=True).data
+        }, status=status.HTTP_200_OK)
+
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': f'Domain with id {domain_id} not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logger.error(f"Error starting competitor analysis for domain {domain_id}: {str(e)}")
+        return Response(
+            {'error': f'Failed to start competitor analysis: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def process_competitor(request, competitor_id):
     """
     Process a competitor by triggering the engine processor.

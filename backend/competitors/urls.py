@@ -19,11 +19,12 @@ router.register(r'competitor-prompts', CompetitorPromptViewSet, basename='compet
 router.register(r'competitor-prompt-analytics', CompetitorPromptAnalyticsViewSet, basename='competitor-prompt-analytics')
 router.register(r'competitor-metric-snapshots', CompetitorMetricSnapshotViewSet, basename='competitor-metric-snapshots')
 
-from .views import process_competitor, process_competitor_single
+from .views import process_competitor, process_competitor_single, start_competitor_analysis
 
 urlpatterns = [
     # Custom routes first (more specific) to avoid router conflicts
     # Note: 'competitors/' prefix is already included in main urls.py
+    path('start-analysis/', start_competitor_analysis, name='start_competitor_analysis'),
     path('process-single/', process_competitor_single, name='process_competitor_single'),
     path('<int:competitor_id>/process/', process_competitor, name='process_competitor'),
     path('competitive-strength-analysis/', competitive_strength_analysis, name='competitive_strength_analysis'),
