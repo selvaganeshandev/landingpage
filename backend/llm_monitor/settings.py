@@ -210,8 +210,10 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    # Increased from 60 minutes to 8 hours to reduce frequent session timeouts
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),
+    # Increased from 7 days to 30 days for better user experience
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,

@@ -16,15 +16,76 @@ function getAuthToken(): string | null {
   return localStorage.getItem('access_token');
 }
 
+// Flag to prevent multiple simultaneous refresh attempts
+let isRefreshing = false;
+let refreshSubscribers: ((token: string) => void)[] = [];
+
+/**
+ * Subscribe to token refresh completion
+ */
+function subscribeTokenRefresh(callback: (token: string) => void) {
+  refreshSubscribers.push(callback);
+}
+
+/**
+ * Notify all subscribers when token is refreshed
+ */
+function onTokenRefreshed(token: string) {
+  refreshSubscribers.forEach(callback => callback(token));
+  refreshSubscribers = [];
+}
+
+/**
+ * Refresh the access token using the refresh token
+ */
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = localStorage.getItem('refresh_token');
+
+  if (!refreshToken) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/token/refresh/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh: refreshToken }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Token refresh failed');
+    }
+
+    const data = await response.json();
+    const newAccessToken = data.access;
+    const newRefreshToken = data.refresh;  // Backend rotates refresh tokens
+
+    // Store new tokens
+    localStorage.setItem('access_token', newAccessToken);
+    if (newRefreshToken) {
+      localStorage.setItem('refresh_token', newRefreshToken);
+    }
+
+    return newAccessToken;
+  } catch (error) {
+    // Refresh failed, clear tokens and redirect to login
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    return null;
+  }
+}
+
 /**
  * Generic API request handler with auth and error handling
  */
 async function apiRequest<T>(
-  endpoint: string, 
+  endpoint: string,
   options: RequestOptions = {}
 ): Promise<T> {
   const { skipAuth, ...fetchOptions } = options;
-  
+
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...fetchOptions.headers,
@@ -38,21 +99,88 @@ async function apiRequest<T>(
     }
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  let response = await fetch(`${API_BASE_URL}${endpoint}`, {
     ...fetchOptions,
     headers,
   });
 
-  // Handle unauthorized (token expired) - but don't redirect for login endpoint
-  if (response.status === 401) {
-    // Only redirect if not on login endpoint (to avoid redirecting during login attempts)
-    if (!endpoint.includes('/auth/login/')) {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      window.location.href = '/signin';
+  // Handle unauthorized (token expired) - try to refresh token first
+  if (response.status === 401 && !skipAuth) {
+    // Don't try to refresh for login, logout, or refresh endpoints
+    const skipRefreshEndpoints = ['/auth/login/', '/auth/logout/', '/auth/token/refresh/'];
+    const shouldSkipRefresh = skipRefreshEndpoints.some(ep => endpoint.includes(ep));
+
+    if (!shouldSkipRefresh) {
+      // If already refreshing, wait for it to complete
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          subscribeTokenRefresh(async (newToken: string) => {
+            // Retry the original request with new token
+            const newHeaders = {
+              ...headers,
+              'Authorization': `Bearer ${newToken}`,
+            };
+
+            try {
+              const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
+                ...fetchOptions,
+                headers: newHeaders,
+              });
+
+              if (!retryResponse.ok) {
+                const error = await retryResponse.json().catch(() => ({ detail: 'An error occurred' }));
+                const errorMessage = error.detail || error.error || error.message || `HTTP ${retryResponse.status}: ${retryResponse.statusText}`;
+                reject(new Error(errorMessage));
+                return;
+              }
+
+              if (retryResponse.status === 204) {
+                resolve({} as T);
+                return;
+              }
+
+              const data = await retryResponse.json();
+              resolve(data);
+            } catch (error) {
+              reject(error);
+            }
+          });
+        });
+      }
+
+      // Try to refresh the token
+      isRefreshing = true;
+      const newToken = await refreshAccessToken();
+      isRefreshing = false;
+
+      if (newToken) {
+        // Notify all waiting requests
+        onTokenRefreshed(newToken);
+
+        // Retry the original request with new token
+        const newHeaders = {
+          ...headers,
+          'Authorization': `Bearer ${newToken}`,
+        };
+
+        response = await fetch(`${API_BASE_URL}${endpoint}`, {
+          ...fetchOptions,
+          headers: newHeaders,
+        });
+      } else {
+        // Refresh failed, redirect to login
+        window.location.href = '/signin';
+        throw new Error('Session expired. Please login again.');
+      }
+    } else {
+      // For login/logout endpoints, don't try to refresh
+      if (!endpoint.includes('/auth/login/')) {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        window.location.href = '/signin';
+      }
       throw new Error('Unauthorized');
     }
-    // For login endpoint, let it fall through to error handling below
   }
 
   // Handle other errors
@@ -499,6 +627,11 @@ export const apiClient = {
 
   deleteCompetitor: (id: number) => apiRequest(`/competitors/competitors/${id}/`, {
     method: 'DELETE',
+  }),
+
+  startCompetitorAnalysis: (domainId: number) => apiRequest('/competitors/start-analysis/', {
+    method: 'POST',
+    body: JSON.stringify({ domain_id: domainId }),
   }),
 
   getCompetitorAnalytics: (params?: any) => {

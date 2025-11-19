@@ -524,19 +524,19 @@ class DomainProcessor:
                 }
             groups[label]['indices'].append(idx)
 
-        # compute titles per cluster using centroid closest prompt text
+        # compute titles per cluster using smart NLP-based extraction
         for label, info in groups.items():
             inds = info['indices']
             centroid = kmeans.cluster_centers_[label]
             cluster_vecs = embeddings[inds]
             dists = np.linalg.norm(cluster_vecs - centroid, axis=1)
-            rep_idx_within = int(np.argmin(dists))
-            rep_idx = inds[rep_idx_within]
-            representative_text = texts[rep_idx]
-            # Title as a concise theme: first 6-10 words of representative prompt
-            cleaned = self._sanitize_prompt_text(representative_text)
-            title = " ".join(cleaned.split()[:8]).strip()
-            info['title'] = title or f"Cluster {label+1}"
+
+            # Get all prompts in this cluster for smart title extraction
+            cluster_prompts = [texts[i] for i in inds]
+
+            # Use smart NLP-based title extraction
+            smart_title = self._extract_smart_title_from_prompts(cluster_prompts)
+            info['title'] = smart_title or f"Cluster {label+1}"
 
             # Primary = top 1-3 closest; Secondary = rest
             sorted_within = [inds[i] for i in np.argsort(dists)]
@@ -560,6 +560,141 @@ class DomainProcessor:
             })
         return result
 
+    def _extract_smart_title_from_prompts(self, prompts_texts: List[str]) -> str:
+        """
+        Extract a smart, concise title from a list of prompts using NLP techniques.
+        Uses noun phrase extraction, frequency analysis, and stop word filtering.
+
+        Args:
+            prompts_texts: List of prompt text strings from a cluster
+
+        Returns:
+            A clean, professional 2-4 word title
+        """
+        from collections import Counter
+        import re
+
+        # Comprehensive stop words and question words to filter out
+        stop_words = {
+            'what', 'how', 'why', 'when', 'where', 'who', 'which', 'whose', 'whom',
+            'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+            'a', 'an', 'and', 'or', 'but', 'if', 'for', 'to', 'of', 'in', 'on', 'at',
+            'from', 'with', 'by', 'as', 'that', 'this', 'these', 'those',
+            'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
+            'my', 'your', 'his', 'her', 'its', 'our', 'their',
+            'do', 'does', 'did', 'have', 'has', 'had', 'can', 'could', 'will', 'would',
+            'should', 'may', 'might', 'must', 'shall',
+            'some', 'any', 'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other',
+            'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
+            'get', 'make', 'find', 'use', 'help', 'know', 'need', 'want', 'tell', 'show'
+        }
+
+        # Extract all words and bigrams/trigrams from prompts
+        all_words = []
+        all_phrases = []
+
+        for prompt in prompts_texts:
+            # Clean and normalize text - preserve word boundaries
+            # Remove punctuation but keep spacing
+            cleaned = re.sub(r'[^\w\s]', ' ', prompt.lower())
+            # Remove extra whitespace
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+            words = cleaned.split()
+
+            # Extract individual meaningful words
+            for word in words:
+                # Filter: length > 2, not a stop word, not a digit, not just punctuation remnants
+                if (len(word) > 2 and
+                    word not in stop_words and
+                    not word.isdigit() and
+                    word.isalpha()):  # Only keep alphabetic words
+                    all_words.append(word)
+
+            # Extract 2-word and 3-word phrases (noun phrases heuristic)
+            for i in range(len(words) - 1):
+                # Bigrams: only if both words are valid (alphabetic, length > 2)
+                if (len(words[i]) > 2 and len(words[i+1]) > 2 and
+                    words[i].isalpha() and words[i+1].isalpha()):
+                    # Skip if first word is a stop word (unless second word is content-rich)
+                    if words[i] not in stop_words or words[i+1] not in stop_words:
+                        bigram = f"{words[i]} {words[i+1]}"
+                        # Only keep if at least one word is not a stop word
+                        if words[i] not in stop_words or words[i+1] not in stop_words:
+                            all_phrases.append(bigram)
+
+                # Trigrams: only if all words are valid
+                if i < len(words) - 2:
+                    if (len(words[i]) > 2 and len(words[i+1]) > 2 and len(words[i+2]) > 2 and
+                        words[i].isalpha() and words[i+1].isalpha() and words[i+2].isalpha()):
+                        # Keep if it has meaningful content (at least 2 non-stop words)
+                        meaningful_count = sum(1 for w in [words[i], words[i+1], words[i+2]]
+                                             if w not in stop_words and len(w) > 2)
+                        if meaningful_count >= 2:
+                            trigram = f"{words[i]} {words[i+1]} {words[i+2]}"
+                            all_phrases.append(trigram)
+
+        # Count frequencies
+        word_freq = Counter(all_words)
+        phrase_freq = Counter(all_phrases)
+
+        # Prefer multi-word phrases if they appear frequently
+        if phrase_freq:
+            # Get most common phrases
+            most_common_phrases = phrase_freq.most_common(10)
+
+            # Clean all phrases and score them
+            scored_phrases = []
+            for phrase, count in most_common_phrases:
+                # Accept phrases if: count >= 2, OR small cluster (<=3 prompts)
+                if count >= 2 or len(prompts_texts) <= 3:
+                    # Clean up the phrase
+                    phrase_words = phrase.split()
+                    # Filter out remaining stop words at boundaries
+                    while phrase_words and phrase_words[0] in stop_words:
+                        phrase_words.pop(0)
+                    while phrase_words and phrase_words[-1] in stop_words:
+                        phrase_words.pop()
+
+                    if len(phrase_words) >= 2:  # Only keep multi-word phrases
+                        # Score: prioritize longer phrases and higher counts
+                        # Score = count * 10 + word_count * 2
+                        score = count * 10 + len(phrase_words) * 2
+                        scored_phrases.append((score, phrase_words, count))
+
+            # Sort by score (highest first)
+            scored_phrases.sort(reverse=True, key=lambda x: x[0])
+
+            # Take the best scored phrase
+            if scored_phrases:
+                _, title_words, _ = scored_phrases[0]
+                title_words = title_words[:4]  # Limit to 4 words
+                title = ' '.join(title_words).title()
+
+                # Additional cleanup: remove trailing prepositions
+                trailing_preps = {'Of', 'In', 'On', 'At', 'To', 'For', 'With', 'By'}
+                if title.split()[-1] in trailing_preps and len(title.split()) > 1:
+                    title = ' '.join(title.split()[:-1])
+
+                return title
+
+        # Fallback: use most common individual words to construct title
+        if word_freq:
+            top_words = [word for word, _ in word_freq.most_common(4)]
+            # Limit to 3 words for individual word titles
+            title_words = top_words[:3]
+            title = ' '.join(title_words).title()
+            return title
+
+        # Last resort: use first few words from first prompt (filtered)
+        if prompts_texts:
+            first_prompt = prompts_texts[0]
+            words = first_prompt.lower().split()
+            meaningful = [w for w in words if w not in stop_words and len(w) > 2][:3]
+            if meaningful:
+                return ' '.join(meaningful).title()
+
+        return "General Topics"
+
     def _extract_theme_from_group(self, group_data: Dict[str, Any]) -> str:
         """
         Extract a concise theme from the prompt group using NLP
@@ -567,7 +702,7 @@ class DomainProcessor:
         """
         title = group_data.get('title', '').strip()
         primary_prompts = group_data.get('primary_prompts', [])
-        
+
         # Use the title as base (it's already derived from representative prompt)
         if title and title != 'Untitled':
             # Extract key noun phrases (simple approach: first 2-4 meaningful words)
@@ -575,7 +710,7 @@ class DomainProcessor:
             # Filter out common stop words
             stop_words = {'what', 'how', 'why', 'when', 'where', 'who', 'the', 'is', 'are', 'a', 'an', 'for', 'to', 'of', 'in', 'on', 'at'}
             meaningful_words = [w for w in words if w.lower() not in stop_words]
-            
+
             # Take first 2-4 meaningful words as theme
             theme_words = meaningful_words[:min(4, len(meaningful_words))]
             if theme_words:
@@ -584,7 +719,7 @@ class DomainProcessor:
                 if len(theme) > 50:
                     theme = theme[:50].rsplit(' ', 1)[0]
                 return theme
-        
+
         # Fallback: if no meaningful theme, use "General" with number
         return "General Topics"
     
