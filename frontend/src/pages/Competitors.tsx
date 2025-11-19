@@ -159,6 +159,7 @@ const Competitors = () => {
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [hasLoadedData, setHasLoadedData] = useState(false);
   const [disabledBrands, setDisabledBrands] = useState<string[]>([]);
+  const [isStartingAnalysis, setIsStartingAnalysis] = useState(false);
   const [strengthDisabledBrands, setStrengthDisabledBrands] = useState<string[]>([]);
   const loadAbortRef = useRef<AbortController | null>(null);
   const domainProcessingStatus = selectedDomain?.processing_status || null;
@@ -279,13 +280,76 @@ const Competitors = () => {
     });
   };
 
+  const handleStartAnalysis = async () => {
+    if (!domainId) {
+      toast({
+        title: "Error",
+        description: "No domain selected. Please select a domain first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsStartingAnalysis(true);
+
+    try {
+      const response = await apiClient.startCompetitorAnalysis(parseInt(domainId, 10));
+
+      if (response.success) {
+        toast({
+          title: "Competitor Analysis Started",
+          description: `Successfully extracted ${response.created_count} competitors. Analytics will begin shortly.`,
+        });
+
+        // Update competitors list from response
+        if (response.competitors && Array.isArray(response.competitors)) {
+          const mapped = response.competitors.map((c: any) => {
+            const rawSentiment = Number(c.sentiment_score || 0);
+            const totalMentions = Number(c.total_mentions || 0);
+            let sentimentPercent = 0;
+            if (rawSentiment === -1 || (rawSentiment === 0 && totalMentions === 0)) {
+              sentimentPercent = 0;
+            } else {
+              sentimentPercent = Math.round((rawSentiment + 1) * 50);
+            }
+
+            return {
+              id: c.id,
+              name: c.name || 'Unknown',
+              url: c.url || '',
+              mentions: c.total_mentions || 0,
+              visibility: Number(c.visibility_score || 0),
+              sentiment: sentimentPercent,
+              avgPosition: Number(c.average_position || 0),
+              shareOfVoice: Number(c.share_of_voice_percentage || 0),
+              trend: Number(c.trend_percentage || 0),
+              isYou: false,
+            };
+          });
+          setCompetitors(mapped);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to start competitor analysis');
+      }
+    } catch (error: any) {
+      console.error('Failed to start competitor analysis:', error);
+      toast({
+        title: "Failed to Start Analysis",
+        description: error?.message || "An error occurred while starting competitor analysis. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsStartingAnalysis(false);
+    }
+  };
+
   const handleExportReport = () => {
     toast({
       title: "Exporting Report",
       description: "Your competitor analysis report is being generated...",
     });
   };
-  
+
   // Sync domainId from selectedDomain (Zustand store) or server when domain changes
   useEffect(() => {
     if (!user) return;
@@ -818,6 +882,69 @@ const Competitors = () => {
                 </Button>
               </div>
             </div>
+          </div>
+        </Card>
+
+        <AddCompetitorDialog
+          open={addCompetitorDialogOpen}
+          onOpenChange={setAddCompetitorDialogOpen}
+          onAdd={handleAddCompetitorSubmit}
+        />
+      </div>
+    );
+  }
+
+  // Show "Start Analysing" state when there are no competitors
+  if (competitors.length === 0 && !isPageLoading && hasLoadedData) {
+    return (
+      <div className="p-8 space-y-6 bg-background animate-fade-in">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold tracking-tight">Competitor Analysis</h1>
+              <p className="text-muted-foreground mt-2">
+                Compare your brand's AI visibility against competitors
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <Card className="p-12 border-0 bg-transparent shadow-none">
+          <div className="flex flex-col items-center text-center space-y-6 max-w-2xl mx-auto">
+            <div className="p-4 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 text-primary">
+              <Target className="h-12 w-12" />
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold">Start analysing your competitors</h2>
+              <p className="text-muted-foreground text-base">
+                Our app can do the complete top 5 competitor analysis
+              </p>
+            </div>
+
+            <p className="text-sm text-muted-foreground max-w-md">
+              We'll automatically discover your top competitors from existing prompt analytics data,
+              extract their mentions across AI platforms, and provide comprehensive competitive insights.
+            </p>
+
+            <Button
+              onClick={handleStartAnalysis}
+              disabled={isStartingAnalysis}
+              size="lg"
+              className="gradient-primary shadow-lg shadow-primary/20 mt-4"
+            >
+              {isStartingAnalysis ? (
+                <>
+                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                  Analysing...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-5 w-5 mr-2" />
+                  Start Analysing
+                </>
+              )}
+            </Button>
           </div>
         </Card>
 

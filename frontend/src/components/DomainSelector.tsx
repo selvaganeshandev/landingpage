@@ -39,17 +39,15 @@ export const DomainSelector = () => {
     isLoading,
     error,
     loadDomains,
-    setSelectedDomain,
-    selectDefaultDomain,
-    clearDomainStore
+    setSelectedDomain
   } = useDomainStore();
   const { user } = useAuth();
 
   // Load domains on component mount
   useEffect(() => {
-    clearDomainStore();
+    // Don't clear the store - preserve the selected domain to prevent flash
     loadDomains();
-  }, [loadDomains, clearDomainStore]);
+  }, [loadDomains]);
 
   // Poll for domain status updates every 10 seconds if there are processing domains
   useEffect(() => {
@@ -90,58 +88,23 @@ export const DomainSelector = () => {
     }
   }, [selectedDomain, domains, user, setSelectedDomain]);
 
-  // After domains load, restore last selected domain from server
+  // Sync selected domain to server after domains load (only if not already synced)
   useEffect(() => {
-    if (!user) return;
-    if (domains.length === 0) return;
-    
-    const restoreDomain = async () => {
-      // Load from server (primary source of truth)
+    if (!user || !selectedDomain || domains.length === 0) return;
+
+    const syncToServer = async () => {
+      // Load from server to check if it's in sync
       const { loadActiveDomainFromServer, updateActiveDomain } = await import('@/utils/activeDomain');
       const serverActiveDomainId = await loadActiveDomainFromServer(user.id);
-      
-      if (serverActiveDomainId) {
-        const domainId = parseInt(serverActiveDomainId, 10);
-        const exists = domains.find(d => d.id === domainId);
-        if (exists) {
-          // Sync both systems: set Zustand store and verify active_domain_id matches
-          setSelectedDomain(exists);
-          // Verify active_domain_id is in sync
-          const currentActiveId = localStorage.getItem(`active_domain_id:${user.id}`);
-          if (currentActiveId !== String(domainId)) {
-            await updateActiveDomain(user.id, domainId, exists);
-          }
-          return;
-        }
-      }
-      
-      // If server has no active domain or domain doesn't exist, use first COMPLETED domain
-      if (!serverActiveDomainId || serverActiveDomainId === null || serverActiveDomainId === '') {
-        // Find first completed domain (skip processing domains)
-        const firstCompletedDomain = domains.find(d =>
-          !d.processing_status || d.processing_status === 'COMP'
-        );
-        if (firstCompletedDomain) {
-          // Update both systems: Zustand store and server
-          setSelectedDomain(firstCompletedDomain);
-          await updateActiveDomain(user.id, firstCompletedDomain.id, firstCompletedDomain);
-        }
-      } else if (!selectedDomain || !domains.find(d => d.id === selectedDomain.id)) {
-        // Server has active domain but it doesn't exist in current domain list
-        // Find first completed domain (skip processing domains)
-        const firstCompletedDomain = domains.find(d =>
-          !d.processing_status || d.processing_status === 'COMP'
-        );
-        if (firstCompletedDomain) {
-          setSelectedDomain(firstCompletedDomain);
-          // Update server with first domain
-          await updateActiveDomain(user.id, firstCompletedDomain.id, firstCompletedDomain);
-        }
+
+      // If server value doesn't match current selection, update server
+      if (serverActiveDomainId !== String(selectedDomain.id)) {
+        await updateActiveDomain(user.id, selectedDomain.id, selectedDomain);
       }
     };
-    
-    void restoreDomain();
-  }, [domains, user, setSelectedDomain, selectedDomain]);
+
+    void syncToServer();
+  }, [domains, user, selectedDomain]);
 
   // Show error if domain loading failed
   useEffect(() => {
@@ -228,6 +191,15 @@ export const DomainSelector = () => {
 
   const selectedFaviconUrl = selectedDomain ? getFaviconUrl(selectedDomain.url) : null;
 
+  // Sort domains to put the selected domain first
+  const sortedDomains = [...domains].sort((a, b) => {
+    // Selected domain always comes first
+    if (selectedDomain?.id === a.id) return -1;
+    if (selectedDomain?.id === b.id) return 1;
+    // Then sort by name
+    return a.name.localeCompare(b.name);
+  });
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -261,7 +233,7 @@ export const DomainSelector = () => {
           <CommandList>
             <CommandEmpty>No domains found.</CommandEmpty>
             <CommandGroup heading="Your Domains">
-              {domains.map((domain) => {
+              {sortedDomains.map((domain) => {
                 const faviconUrl = getFaviconUrl(domain.url);
                 const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
                 const isFailed = domain.processing_status === 'FAIL';

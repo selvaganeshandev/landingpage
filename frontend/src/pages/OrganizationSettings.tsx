@@ -252,8 +252,12 @@ export default function OrganizationSettings() {
     try {
       await apiClient.deleteDomain(id);
 
-      // Reload domains to get the updated list
-      await loadDomains();
+      // Reload domains to get the updated list (both local state and global store)
+      await loadDomains(); // Update local state for this page
+
+      // Also update the global domain store so DomainSelector refreshes
+      const { useDomainStore } = await import('@/stores/domainStore');
+      await useDomainStore.getState().loadDomains();
 
       toast({
         title: "Domain removed",

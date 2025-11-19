@@ -88,15 +88,42 @@ export const useDomainStore = create<DomainState>()(
           const { apiClient } = await import('@/services/api');
           const response = await apiClient.getDomains();
 
+          // Get user ID to restore active domain
+          let activeDomainId: string | null = null;
+          try {
+            const token = localStorage.getItem('access_token') || '';
+            if (token) {
+              const payload = JSON.parse(atob(token.split('.')[1] || '""'));
+              const userId = payload?.user_id || payload?.id;
+              if (userId) {
+                // Import activeDomain utilities
+                const { loadActiveDomain } = await import('@/utils/activeDomain');
+                activeDomainId = loadActiveDomain(userId);
+              }
+            }
+          } catch (e) {
+            // Ignore token parsing errors
+          }
+
+          // Find the selected domain from cache
+          let selectedDomain = null;
+          if (activeDomainId) {
+            const domainId = parseInt(activeDomainId, 10);
+            selectedDomain = response.domains.find((d: any) => d.id === domainId) || null;
+          }
+
+          // If no cached domain or cached domain doesn't exist, select first completed domain
+          if (!selectedDomain && response.domains.length > 0) {
+            selectedDomain = response.domains.find((d: any) =>
+              !d.processing_status || d.processing_status === 'COMP'
+            ) || response.domains[0];
+          }
+
           set({
             domains: response.domains,
-            selectedDomain: null, // Clear selected domain when loading fresh data
+            selectedDomain: selectedDomain,
             isLoading: false
           });
-
-          // NOTE: Don't auto-select first domain here
-          // Let DomainSelector's restoration logic handle domain selection
-          // This prevents showing wrong domain briefly before server sync completes
 
         } catch (error: any) {
           set({

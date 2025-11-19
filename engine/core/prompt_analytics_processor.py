@@ -487,17 +487,18 @@ class PromptAnalyticsProcessor:
 
             logger.info(f"Successfully aggregated group {group.id} and domain {domain.id}")
 
+            # DISABLED: Competitor extraction is now manual via "Start Analysing" button
             # Extract top competitors after domain analytics are complete
-            try:
-                from .competitor_extractor import extract_competitors_for_domain
-                created_count, competitor_names = extract_competitors_for_domain(domain.id)
-                if created_count > 0:
-                    logger.info(f"Auto-extracted {created_count} competitors for domain {domain.id}: {', '.join(competitor_names)}")
-                else:
-                    logger.info(f"No new competitors extracted for domain {domain.id} (insufficient data or already exists)")
-            except Exception as comp_error:
-                logger.error(f"Error extracting competitors for domain {domain.id}: {str(comp_error)}")
-                # Don't fail the entire aggregation if competitor extraction fails
+            # try:
+            #     from .competitor_extractor import extract_competitors_for_domain
+            #     created_count, competitor_names = extract_competitors_for_domain(domain.id)
+            #     if created_count > 0:
+            #         logger.info(f"Auto-extracted {created_count} competitors for domain {domain.id}: {', '.join(competitor_names)}")
+            #     else:
+            #         logger.info(f"No new competitors extracted for domain {domain.id} (insufficient data or already exists)")
+            # except Exception as comp_error:
+            #     logger.error(f"Error extracting competitors for domain {domain.id}: {str(comp_error)}")
+            #     # Don't fail the entire aggregation if competitor extraction fails
 
             # Check if ALL groups for this domain are now complete
             # If so, mark the domain as COMP
