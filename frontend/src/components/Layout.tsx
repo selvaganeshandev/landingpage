@@ -11,7 +11,7 @@ export const Layout = () => {
   const [isLoading, setIsLoading] = useState(false);
   const location = useLocation();
   const { isOpen: sidebarOpen } = useSidebar();
-  const { selectedDomain } = useDomainStore();
+  const { selectedDomain, isDomainSwitching } = useDomainStore();
 
   // List of pages that should show processing state when domain is processing
   const dataRequiredPages = [
@@ -31,10 +31,21 @@ export const Layout = () => {
     '/multilingual',
   ];
 
+  // Pages that don't require domain data (have their own loading states)
+  const noDomainDataPages = [
+    '/organization-settings',
+    '/profile',
+  ];
+
   const shouldShowProcessingState =
     selectedDomain &&
     isDomainProcessing(selectedDomain) &&
     dataRequiredPages.some(page => location.pathname.startsWith(page));
+
+  // Don't show domain switching loader on pages that don't require domain data
+  const shouldShowDomainSwitchingLoader =
+    isDomainSwitching &&
+    !noDomainDataPages.some(page => location.pathname.startsWith(page));
 
   useEffect(() => {
     // Show loader when route changes
@@ -50,7 +61,7 @@ export const Layout = () => {
 
   return (
     <div className="flex min-h-screen gradient-subtle">
-      {isLoading && <PageLoader sidebarOpen={sidebarOpen} />}
+      {(isLoading || shouldShowDomainSwitchingLoader) && <PageLoader sidebarOpen={sidebarOpen} />}
       <Sidebar />
       <main className="flex-1 overflow-auto">
         {shouldShowProcessingState ? (

@@ -39,7 +39,8 @@ export const DomainSelector = () => {
     isLoading,
     error,
     loadDomains,
-    setSelectedDomain
+    setSelectedDomain,
+    setDomainSwitching
   } = useDomainStore();
   const { user } = useAuth();
 
@@ -134,7 +135,10 @@ export const DomainSelector = () => {
         return;
       }
 
+      // Start domain switching - show page loader
+      setDomainSwitching(true);
       setOpen(false);
+
       if (user) {
         // Update both Zustand store and server/localStorage in one call
         // This ensures both systems stay in sync
@@ -160,6 +164,11 @@ export const DomainSelector = () => {
         // If no user, just update Zustand store (shouldn't happen in normal flow)
         setSelectedDomain(domain);
       }
+
+      // Hide page loader after data has had time to load (1 second)
+      setTimeout(() => {
+        setDomainSwitching(false);
+      }, 1000);
     }
   };
 

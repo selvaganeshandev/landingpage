@@ -282,7 +282,7 @@ export const Sidebar = () => {
   const { toast } = useToast();
   const { filteredNavGroups, filterByPermissions } = useNavigationStore();
   const { isOpen, toggleSidebar } = useSidebar();
-  const { selectedDomain, domains, setSelectedDomain } = useDomainStore();
+  const { selectedDomain, domains, setSelectedDomain, setDomainSwitching } = useDomainStore();
   const [domainPopoverOpen, setDomainPopoverOpen] = useState(false);
 
   // Check if domain is currently processing
@@ -390,6 +390,7 @@ export const Sidebar = () => {
                                 key={domain.id}
                                 value={domain.name}
                                 onSelect={async () => {
+                                  setDomainSwitching(true);
                                   setSelectedDomain(domain);
                                   setDomainPopoverOpen(false);
                                   if (user) {
@@ -397,6 +398,10 @@ export const Sidebar = () => {
                                     const { updateActiveDomain } = await import('@/utils/activeDomain');
                                     await updateActiveDomain(user.id, domain.id, domain);
                                   }
+                                  // Hide page loader after data has had time to load
+                                  setTimeout(() => {
+                                    setDomainSwitching(false);
+                                  }, 1000);
                                 }}
                                 className="flex items-center justify-between gap-2"
                               >

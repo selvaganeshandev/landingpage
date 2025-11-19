@@ -24,12 +24,14 @@ interface DomainState {
   domains: Domain[];
   selectedDomain: Domain | null;
   isLoading: boolean;
+  isDomainSwitching: boolean;
   error: string | null;
-  
+
   // Actions
   setDomains: (domains: Domain[]) => void;
   setSelectedDomain: (domain: Domain | null) => void;
   setLoading: (loading: boolean) => void;
+  setDomainSwitching: (switching: boolean) => void;
   setError: (error: string | null) => void;
   loadDomains: () => Promise<void>;
   selectDomainById: (id: number) => void;
@@ -43,10 +45,11 @@ export const useDomainStore = create<DomainState>()(
       domains: [],
       selectedDomain: null,
       isLoading: false,
+      isDomainSwitching: false,
       error: null,
 
       setDomains: (domains) => set({ domains }),
-      
+
       setSelectedDomain: (domain) => {
         set({ selectedDomain: domain });
         // Sync with active_domain_id localStorage when domain is set
@@ -77,7 +80,9 @@ export const useDomainStore = create<DomainState>()(
       },
       
       setLoading: (loading) => set({ isLoading: loading }),
-      
+
+      setDomainSwitching: (switching) => set({ isDomainSwitching: switching }),
+
       setError: (error) => set({ error }),
       
       loadDomains: async () => {
