@@ -10,8 +10,15 @@ from shared_models.models import Domain, Keyword, PromptGroup, Prompt, PromptAna
 from .rest_client import DataForSEOClient
 from .chatgpt_client import ChatGPTClient
 import numpy as np
-from sentence_transformers import SentenceTransformer
-from sklearn.cluster import KMeans
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:  # pragma: no cover
+    SentenceTransformer = None
+
+try:
+    from sklearn.cluster import KMeans
+except ImportError:  # pragma: no cover
+    KMeans = None
 from datetime import date
 
 
@@ -90,6 +97,7 @@ class DomainProcessor:
             domain.track_message = 'Starting domain processing...'
             domain.tracked_at = timezone.now()
             domain.save()
+            print(f"🔵 LOG: Domain {domain.id} ({domain.name}) - Status set to PROC, starting processing...")
             
             # Step 1: Check if domain has any keywords at all
             all_keywords_exist = Keyword.objects.filter(domain=domain).exists()
@@ -97,6 +105,10 @@ class DomainProcessor:
             if not all_keywords_exist:
                 # First time: Fetch keywords from DataForSEO (only once per domain)
                 print(f"Initial keyword fetch for {domain.name} from DataForSEO")
+                domain.track_message = 'Scraping keywords from search data...'
+                domain.tracked_at = timezone.now()
+                domain.save(update_fields=['track_message', 'tracked_at', 'modified_at'])
+
                 kw_limit = getattr(settings, 'KEYWORD_EXTRACT_LIMIT', 50)
                 keywords_from_api = self.dataforseo_client.scrape_target_domain(domain.name, limit=kw_limit)
                 
@@ -173,6 +185,10 @@ class DomainProcessor:
             
             # Step 5: Generate prompts using ChatGPT
             print(f"Generating prompts for {domain.name}")
+            domain.track_message = f'Generating AI prompts from {len(keywords)} keywords...'
+            domain.tracked_at = timezone.now()
+            domain.save(update_fields=['track_message', 'tracked_at', 'modified_at'])
+
             prompts = self.chatgpt_client.generate_prompts_from_keywords(keywords, domain.name)
 
             # Ensure distinct prompts and ensure we have PROMPT_MIN_COUNT prompts per keyword
@@ -204,6 +220,10 @@ class DomainProcessor:
             
             # Step 6: Group prompts using SentenceTransformer-based NLP
             print(f"Grouping prompts for {domain.name}")
+            domain.track_message = f'Grouping {len(prompts)} prompts using NLP clustering...'
+            domain.tracked_at = timezone.now()
+            domain.save(update_fields=['track_message', 'tracked_at', 'modified_at'])
+
             grouped_prompts = self._group_prompts_with_sentence_transformers(prompts)
             
             if not grouped_prompts:
@@ -230,13 +250,18 @@ class DomainProcessor:
                 except Exception as update_error:
                     print(f"Error updating keyword usage status: {str(update_error)}")
             
-            # Step 9: Update domain status to completed
-            domain.processing_status = 'COMP'
-            domain.track_message = f'Successfully processed {len(keywords)} keywords and {len(grouped_prompts)} prompt groups'
+            # Step 9: Competitor extraction happens AFTER prompt analytics are completed
+            # (moved to prompt_analytics_processor.py _check_and_aggregate_group method)
+            # This ensures competitor_mention_list has been populated before extraction
+
+            # Step 10: Keep domain in PROC status - analytics processor will set to COMP when done
+            # Do NOT set to COMP here - we need to wait for LLM queries and analytics
+            domain.processing_status = 'PROC'
+            domain.track_message = f'Prompts ready: {len(keywords)} keywords and {len(grouped_prompts)} groups. Queuing for LLM analysis...'
             domain.tracked_at = timezone.now()
             domain.save()
-            
-            print(f"Successfully processed domain: {domain.name}")
+
+            print(f"Domain keyword/prompt processing complete: {domain.name}. Waiting for analytics processing...")
             
         except Exception as e:
             print(f"Error processing domain {domain_id}: {str(e)}")
@@ -466,7 +491,13 @@ class DomainProcessor:
         if not prompts:
             return []
 
-        model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+        if SentenceTransformer is None:
+            raise RuntimeError("sentence_transformers is required but not installed.")
+
+        # Force CPU usage to avoid MPS crashes on macOS
+        import os
+        os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+        model = SentenceTransformer('paraphrase-MiniLM-L6-v2', device='cpu')
         texts = [p.get('prompt_text') or p.get('prompt') for p in prompts]
         embeddings = model.encode(texts, convert_to_numpy=True)
 
@@ -476,6 +507,8 @@ class DomainProcessor:
             k = max(1, min(10, n // 5))
         else:
             k = max(1, min(2, n))
+        if KMeans is None:
+            raise RuntimeError("scikit-learn is required but not installed.")
         kmeans = KMeans(n_clusters=k, n_init=10, random_state=42)
         labels = kmeans.fit_predict(embeddings)
 
@@ -491,19 +524,19 @@ class DomainProcessor:
                 }
             groups[label]['indices'].append(idx)
 
-        # compute titles per cluster using centroid closest prompt text
+        # compute titles per cluster using smart NLP-based extraction
         for label, info in groups.items():
             inds = info['indices']
             centroid = kmeans.cluster_centers_[label]
             cluster_vecs = embeddings[inds]
             dists = np.linalg.norm(cluster_vecs - centroid, axis=1)
-            rep_idx_within = int(np.argmin(dists))
-            rep_idx = inds[rep_idx_within]
-            representative_text = texts[rep_idx]
-            # Title as a concise theme: first 6-10 words of representative prompt
-            cleaned = self._sanitize_prompt_text(representative_text)
-            title = " ".join(cleaned.split()[:8]).strip()
-            info['title'] = title or f"Cluster {label+1}"
+
+            # Get all prompts in this cluster for smart title extraction
+            cluster_prompts = [texts[i] for i in inds]
+
+            # Use smart NLP-based title extraction
+            smart_title = self._extract_smart_title_from_prompts(cluster_prompts)
+            info['title'] = smart_title or f"Cluster {label+1}"
 
             # Primary = top 1-3 closest; Secondary = rest
             sorted_within = [inds[i] for i in np.argsort(dists)]
@@ -527,6 +560,141 @@ class DomainProcessor:
             })
         return result
 
+    def _extract_smart_title_from_prompts(self, prompts_texts: List[str]) -> str:
+        """
+        Extract a smart, concise title from a list of prompts using NLP techniques.
+        Uses noun phrase extraction, frequency analysis, and stop word filtering.
+
+        Args:
+            prompts_texts: List of prompt text strings from a cluster
+
+        Returns:
+            A clean, professional 2-4 word title
+        """
+        from collections import Counter
+        import re
+
+        # Comprehensive stop words and question words to filter out
+        stop_words = {
+            'what', 'how', 'why', 'when', 'where', 'who', 'which', 'whose', 'whom',
+            'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+            'a', 'an', 'and', 'or', 'but', 'if', 'for', 'to', 'of', 'in', 'on', 'at',
+            'from', 'with', 'by', 'as', 'that', 'this', 'these', 'those',
+            'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
+            'my', 'your', 'his', 'her', 'its', 'our', 'their',
+            'do', 'does', 'did', 'have', 'has', 'had', 'can', 'could', 'will', 'would',
+            'should', 'may', 'might', 'must', 'shall',
+            'some', 'any', 'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other',
+            'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
+            'get', 'make', 'find', 'use', 'help', 'know', 'need', 'want', 'tell', 'show'
+        }
+
+        # Extract all words and bigrams/trigrams from prompts
+        all_words = []
+        all_phrases = []
+
+        for prompt in prompts_texts:
+            # Clean and normalize text - preserve word boundaries
+            # Remove punctuation but keep spacing
+            cleaned = re.sub(r'[^\w\s]', ' ', prompt.lower())
+            # Remove extra whitespace
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+            words = cleaned.split()
+
+            # Extract individual meaningful words
+            for word in words:
+                # Filter: length > 2, not a stop word, not a digit, not just punctuation remnants
+                if (len(word) > 2 and
+                    word not in stop_words and
+                    not word.isdigit() and
+                    word.isalpha()):  # Only keep alphabetic words
+                    all_words.append(word)
+
+            # Extract 2-word and 3-word phrases (noun phrases heuristic)
+            for i in range(len(words) - 1):
+                # Bigrams: only if both words are valid (alphabetic, length > 2)
+                if (len(words[i]) > 2 and len(words[i+1]) > 2 and
+                    words[i].isalpha() and words[i+1].isalpha()):
+                    # Skip if first word is a stop word (unless second word is content-rich)
+                    if words[i] not in stop_words or words[i+1] not in stop_words:
+                        bigram = f"{words[i]} {words[i+1]}"
+                        # Only keep if at least one word is not a stop word
+                        if words[i] not in stop_words or words[i+1] not in stop_words:
+                            all_phrases.append(bigram)
+
+                # Trigrams: only if all words are valid
+                if i < len(words) - 2:
+                    if (len(words[i]) > 2 and len(words[i+1]) > 2 and len(words[i+2]) > 2 and
+                        words[i].isalpha() and words[i+1].isalpha() and words[i+2].isalpha()):
+                        # Keep if it has meaningful content (at least 2 non-stop words)
+                        meaningful_count = sum(1 for w in [words[i], words[i+1], words[i+2]]
+                                             if w not in stop_words and len(w) > 2)
+                        if meaningful_count >= 2:
+                            trigram = f"{words[i]} {words[i+1]} {words[i+2]}"
+                            all_phrases.append(trigram)
+
+        # Count frequencies
+        word_freq = Counter(all_words)
+        phrase_freq = Counter(all_phrases)
+
+        # Prefer multi-word phrases if they appear frequently
+        if phrase_freq:
+            # Get most common phrases
+            most_common_phrases = phrase_freq.most_common(10)
+
+            # Clean all phrases and score them
+            scored_phrases = []
+            for phrase, count in most_common_phrases:
+                # Accept phrases if: count >= 2, OR small cluster (<=3 prompts)
+                if count >= 2 or len(prompts_texts) <= 3:
+                    # Clean up the phrase
+                    phrase_words = phrase.split()
+                    # Filter out remaining stop words at boundaries
+                    while phrase_words and phrase_words[0] in stop_words:
+                        phrase_words.pop(0)
+                    while phrase_words and phrase_words[-1] in stop_words:
+                        phrase_words.pop()
+
+                    if len(phrase_words) >= 2:  # Only keep multi-word phrases
+                        # Score: prioritize longer phrases and higher counts
+                        # Score = count * 10 + word_count * 2
+                        score = count * 10 + len(phrase_words) * 2
+                        scored_phrases.append((score, phrase_words, count))
+
+            # Sort by score (highest first)
+            scored_phrases.sort(reverse=True, key=lambda x: x[0])
+
+            # Take the best scored phrase
+            if scored_phrases:
+                _, title_words, _ = scored_phrases[0]
+                title_words = title_words[:4]  # Limit to 4 words
+                title = ' '.join(title_words).title()
+
+                # Additional cleanup: remove trailing prepositions
+                trailing_preps = {'Of', 'In', 'On', 'At', 'To', 'For', 'With', 'By'}
+                if title.split()[-1] in trailing_preps and len(title.split()) > 1:
+                    title = ' '.join(title.split()[:-1])
+
+                return title
+
+        # Fallback: use most common individual words to construct title
+        if word_freq:
+            top_words = [word for word, _ in word_freq.most_common(4)]
+            # Limit to 3 words for individual word titles
+            title_words = top_words[:3]
+            title = ' '.join(title_words).title()
+            return title
+
+        # Last resort: use first few words from first prompt (filtered)
+        if prompts_texts:
+            first_prompt = prompts_texts[0]
+            words = first_prompt.lower().split()
+            meaningful = [w for w in words if w not in stop_words and len(w) > 2][:3]
+            if meaningful:
+                return ' '.join(meaningful).title()
+
+        return "General Topics"
+
     def _extract_theme_from_group(self, group_data: Dict[str, Any]) -> str:
         """
         Extract a concise theme from the prompt group using NLP
@@ -534,7 +702,7 @@ class DomainProcessor:
         """
         title = group_data.get('title', '').strip()
         primary_prompts = group_data.get('primary_prompts', [])
-        
+
         # Use the title as base (it's already derived from representative prompt)
         if title and title != 'Untitled':
             # Extract key noun phrases (simple approach: first 2-4 meaningful words)
@@ -542,7 +710,7 @@ class DomainProcessor:
             # Filter out common stop words
             stop_words = {'what', 'how', 'why', 'when', 'where', 'who', 'the', 'is', 'are', 'a', 'an', 'for', 'to', 'of', 'in', 'on', 'at'}
             meaningful_words = [w for w in words if w.lower() not in stop_words]
-            
+
             # Take first 2-4 meaningful words as theme
             theme_words = meaningful_words[:min(4, len(meaningful_words))]
             if theme_words:
@@ -551,7 +719,7 @@ class DomainProcessor:
                 if len(theme) > 50:
                     theme = theme[:50].rsplit(' ', 1)[0]
                 return theme
-        
+
         # Fallback: if no meaningful theme, use "General" with number
         return "General Topics"
     

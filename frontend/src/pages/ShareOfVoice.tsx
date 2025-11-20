@@ -103,7 +103,7 @@ const ShareOfVoice = () => {
   const ownBrandName = useMemo(() => (latest?.players?.find(p => !p.competitor)?.competitor?.name) || 'Your Brand', [latest]);
 
   const overallShare = useMemo(() => {
-    if (!latest) return [] as any[];
+    if (!latest || !latest.players || !Array.isArray(latest.players)) return [] as any[];
     const items = latest.players.map((p:any) => ({
       brand: p.competitor?.name || ownBrandName,
       share: Number(p.share_percentage),

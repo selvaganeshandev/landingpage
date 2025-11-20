@@ -1,5 +1,12 @@
 from rest_framework import serializers
-from .models import Competitor, CompetitorAnalytics, CompetitorPrompt, CompetitorPromptAnalytics
+from .models import (
+    Competitor,
+    CompetitorAnalytics,
+    CompetitorPrompt,
+    CompetitorPromptAnalytics,
+    CompetitorMetricSnapshot,
+    CompetitiveInsight,
+)
 
 
 class CompetitorSerializer(serializers.ModelSerializer):
@@ -9,15 +16,15 @@ class CompetitorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Competitor
         fields = [
-            'id', 'domain', 'domain_name', 'name', 'url', 
+            'id', 'domain', 'domain_name', 'name', 'url',
             'track_status', 'track_message', 'tracked_at',
-            'total_mentions', 'visibility_score', 'sentiment_score', 'average_position',
-            'share_of_voice_percentage', 'trend_percentage', 
+            'total_mentions', 'total_citations', 'visibility_score', 'sentiment_score', 'average_position',
+            'share_of_voice_percentage', 'trend_percentage',
             'created_by', 'created_by_email', 'created_at', 'modified_at'
         ]
         read_only_fields = [
             'id', 'track_status', 'track_message', 'tracked_at',
-            'total_mentions', 'visibility_score', 'sentiment_score', 'average_position',
+            'total_mentions', 'total_citations', 'visibility_score', 'sentiment_score', 'average_position',
             'share_of_voice_percentage', 'trend_percentage',
             'created_at', 'modified_at'
         ]
@@ -71,4 +78,56 @@ class CompetitorPromptAnalyticsSerializer(serializers.ModelSerializer):
             'platform', 'response_text', 'citation_list',
             'created_at', 'modified_at'
         ]
+
+
+class CompetitorMetricSnapshotSerializer(serializers.ModelSerializer):
+    competitor_name = serializers.SerializerMethodField()
+    
+    def get_competitor_name(self, obj):
+        """Return competitor name, or 'Your Brand' if competitor is None (domain snapshot)"""
+        if obj.competitor is None:
+            return 'Your Brand'
+        return obj.competitor.name if obj.competitor else 'Unknown'
+
+    class Meta:
+        model = CompetitorMetricSnapshot
+        fields = [
+            'id',
+            'competitor',
+            'competitor_name',
+            'domain',
+            'timestamp',
+            'total_mentions',
+            'total_citations',
+            'visibility_score',
+            'sentiment_score',
+            'average_position',
+            'share_of_voice_percentage',
+            'trend_percentage',
+            'track_status',
+            'platform_metrics',
+            'created_at',
+        ]
+        read_only_fields = fields
+
+
+class CompetitiveInsightSerializer(serializers.ModelSerializer):
+    type = serializers.CharField(source='insight_type', read_only=True)
+
+    class Meta:
+        model = CompetitiveInsight
+        fields = [
+            'id',
+            'domain',
+            'title',
+            'description',
+            'type',
+            'category',
+            'impact',
+            'snapshot_version',
+            'insight_data',
+            'model_name',
+            'generated_at',
+        ]
+        read_only_fields = fields
 

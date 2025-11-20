@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { AuthState, User, Permission, LoginRequest } from '@/types/auth';
 import { apiClient } from '@/services/api';
-import { 
-  loadActiveDomain, 
-  saveActiveDomain, 
+import { PageLoader } from '@/components/PageLoader';
+import {
+  loadActiveDomain,
+  saveActiveDomain,
   loadActiveDomainFromServer,
   updateActiveDomain,
   clearAllActiveDomainStorage
@@ -130,39 +131,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
           // Sync active domain from server (primary source of truth)
           const serverActiveDomain = await loadActiveDomainFromServer(profile.user.id);
-          
+
           // If server has no active domain (null or undefined), set first available domain
           if (!serverActiveDomain || serverActiveDomain === null || serverActiveDomain === '') {
-            console.log(`[AuthContext] No active domain found for user ${profile.user.id}, setting first available domain`);
             try {
               const response = await apiClient.getDomains();
               const domains = response?.domains || [];
-              console.log(`[AuthContext] Fetched ${domains?.length || 0} domains for user ${profile.user.id}`);
-              
+
               if (Array.isArray(domains) && domains.length > 0) {
                 const firstDomain = domains[0];
                 const domainId = firstDomain?.id;
-                
+
                 if (domainId && typeof domainId === 'number') {
-                  console.log(`[AuthContext] Setting first domain ${domainId} as active for user ${profile.user.id}`);
                   // Update both server and localStorage
-                  const success = await updateActiveDomain(profile.user.id, domainId, firstDomain);
-                  if (success) {
-                    console.log(`[AuthContext] Successfully set active domain ${domainId} for user ${profile.user.id}`);
-                  } else {
-                    console.warn(`[AuthContext] Failed to set active domain ${domainId} for user ${profile.user.id}`);
-                  }
-                } else {
-                  console.warn(`[AuthContext] No valid domain ID found in first domain:`, firstDomain);
+                  await updateActiveDomain(profile.user.id, domainId, firstDomain);
                 }
-              } else {
-                console.warn(`[AuthContext] No domains available for user ${profile.user.id}`);
               }
             } catch (error) {
-              console.error(`[AuthContext] Error setting first domain for user ${profile.user.id}:`, error);
+              // Silently ignore errors
             }
-          } else {
-            console.log(`[AuthContext] Active domain ${serverActiveDomain} already set for user ${profile.user.id}`);
           }
         } catch (error) {
           // Token is invalid, clear it and require re-login
@@ -195,39 +182,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       // Sync active domain from server (primary source of truth)
       const serverActiveDomain = await loadActiveDomainFromServer(response.user.id);
-      
+
       // If server has no active domain (null or undefined), set first available domain
       if (!serverActiveDomain || serverActiveDomain === null || serverActiveDomain === '') {
-        console.log(`[AuthContext] No active domain found for user ${response.user.id} after login, setting first available domain`);
         try {
           const domainsResponse = await apiClient.getDomains();
           const domains = domainsResponse?.domains || [];
-          console.log(`[AuthContext] Fetched ${domains?.length || 0} domains for user ${response.user.id}`);
-          
+
           if (Array.isArray(domains) && domains.length > 0) {
             const firstDomain = domains[0];
             const domainId = firstDomain?.id;
-            
+
             if (domainId && typeof domainId === 'number') {
-              console.log(`[AuthContext] Setting first domain ${domainId} as active for user ${response.user.id}`);
               // Update both server and localStorage
-              const success = await updateActiveDomain(response.user.id, domainId, firstDomain);
-              if (success) {
-                console.log(`[AuthContext] Successfully set active domain ${domainId} for user ${response.user.id}`);
-              } else {
-                console.warn(`[AuthContext] Failed to set active domain ${domainId} for user ${response.user.id}`);
-              }
-            } else {
-              console.warn(`[AuthContext] No valid domain ID found in first domain:`, firstDomain);
+              await updateActiveDomain(response.user.id, domainId, firstDomain);
             }
-          } else {
-            console.warn(`[AuthContext] No domains available for user ${response.user.id}`);
           }
         } catch (error) {
-          console.error(`[AuthContext] Error setting first domain for user ${response.user.id}:`, error);
+          // Silently ignore errors
         }
-      } else {
-        console.log(`[AuthContext] Active domain ${serverActiveDomain} already set for user ${response.user.id}`);
       }
     } catch (error) {
       dispatch({ type: 'LOGIN_FAILURE', payload: error instanceof Error ? error.message : 'Login failed' });
@@ -251,18 +224,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Clear domain store from localStorage
       try {
         localStorage.removeItem('domain-store');
-        console.log('[AuthContext] Cleared domain-store from localStorage');
       } catch (error) {
-        console.warn('[AuthContext] Error clearing domain-store:', error);
+        // Silently ignore errors
       }
-      
+
       // Clear auth tokens
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
-      
-      console.log('[AuthContext] Cleared all localStorage values on logout');
     } catch (error) {
-      console.warn('Logout error:', error);
+      // Silently ignore logout errors
     } finally {
       dispatch({ type: 'LOGOUT' });
     }
@@ -379,7 +349,7 @@ export function ProtectedRoute({
   const { isAuthenticated, isLoading, checkPermission } = useAuth();
 
   if (isLoading) {
-    return <div>Loading...</div>;
+    return <PageLoader />;
   }
 
   if (!isAuthenticated) {

@@ -16,15 +16,76 @@ function getAuthToken(): string | null {
   return localStorage.getItem('access_token');
 }
 
+// Flag to prevent multiple simultaneous refresh attempts
+let isRefreshing = false;
+let refreshSubscribers: ((token: string) => void)[] = [];
+
+/**
+ * Subscribe to token refresh completion
+ */
+function subscribeTokenRefresh(callback: (token: string) => void) {
+  refreshSubscribers.push(callback);
+}
+
+/**
+ * Notify all subscribers when token is refreshed
+ */
+function onTokenRefreshed(token: string) {
+  refreshSubscribers.forEach(callback => callback(token));
+  refreshSubscribers = [];
+}
+
+/**
+ * Refresh the access token using the refresh token
+ */
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = localStorage.getItem('refresh_token');
+
+  if (!refreshToken) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/token/refresh/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh: refreshToken }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Token refresh failed');
+    }
+
+    const data = await response.json();
+    const newAccessToken = data.access;
+    const newRefreshToken = data.refresh;  // Backend rotates refresh tokens
+
+    // Store new tokens
+    localStorage.setItem('access_token', newAccessToken);
+    if (newRefreshToken) {
+      localStorage.setItem('refresh_token', newRefreshToken);
+    }
+
+    return newAccessToken;
+  } catch (error) {
+    // Refresh failed, clear tokens and redirect to login
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    return null;
+  }
+}
+
 /**
  * Generic API request handler with auth and error handling
  */
 async function apiRequest<T>(
-  endpoint: string, 
+  endpoint: string,
   options: RequestOptions = {}
 ): Promise<T> {
   const { skipAuth, ...fetchOptions } = options;
-  
+
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...fetchOptions.headers,
@@ -38,21 +99,88 @@ async function apiRequest<T>(
     }
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  let response = await fetch(`${API_BASE_URL}${endpoint}`, {
     ...fetchOptions,
     headers,
   });
 
-  // Handle unauthorized (token expired) - but don't redirect for login endpoint
-  if (response.status === 401) {
-    // Only redirect if not on login endpoint (to avoid redirecting during login attempts)
-    if (!endpoint.includes('/auth/login/')) {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      window.location.href = '/signin';
+  // Handle unauthorized (token expired) - try to refresh token first
+  if (response.status === 401 && !skipAuth) {
+    // Don't try to refresh for login, logout, or refresh endpoints
+    const skipRefreshEndpoints = ['/auth/login/', '/auth/logout/', '/auth/token/refresh/'];
+    const shouldSkipRefresh = skipRefreshEndpoints.some(ep => endpoint.includes(ep));
+
+    if (!shouldSkipRefresh) {
+      // If already refreshing, wait for it to complete
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          subscribeTokenRefresh(async (newToken: string) => {
+            // Retry the original request with new token
+            const newHeaders = {
+              ...headers,
+              'Authorization': `Bearer ${newToken}`,
+            };
+
+            try {
+              const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
+                ...fetchOptions,
+                headers: newHeaders,
+              });
+
+              if (!retryResponse.ok) {
+                const error = await retryResponse.json().catch(() => ({ detail: 'An error occurred' }));
+                const errorMessage = error.detail || error.error || error.message || `HTTP ${retryResponse.status}: ${retryResponse.statusText}`;
+                reject(new Error(errorMessage));
+                return;
+              }
+
+              if (retryResponse.status === 204) {
+                resolve({} as T);
+                return;
+              }
+
+              const data = await retryResponse.json();
+              resolve(data);
+            } catch (error) {
+              reject(error);
+            }
+          });
+        });
+      }
+
+      // Try to refresh the token
+      isRefreshing = true;
+      const newToken = await refreshAccessToken();
+      isRefreshing = false;
+
+      if (newToken) {
+        // Notify all waiting requests
+        onTokenRefreshed(newToken);
+
+        // Retry the original request with new token
+        const newHeaders = {
+          ...headers,
+          'Authorization': `Bearer ${newToken}`,
+        };
+
+        response = await fetch(`${API_BASE_URL}${endpoint}`, {
+          ...fetchOptions,
+          headers: newHeaders,
+        });
+      } else {
+        // Refresh failed, redirect to login
+        window.location.href = '/signin';
+        throw new Error('Session expired. Please login again.');
+      }
+    } else {
+      // For login/logout endpoints, don't try to refresh
+      if (!endpoint.includes('/auth/login/')) {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        window.location.href = '/signin';
+      }
       throw new Error('Unauthorized');
     }
-    // For login endpoint, let it fall through to error handling below
   }
 
   // Handle other errors
@@ -68,6 +196,41 @@ async function apiRequest<T>(
   }
 
   return response.json();
+}
+
+/**
+ * Download file handler (for binary responses like PDFs)
+ */
+async function downloadFile(endpoint: string, filename: string): Promise<void> {
+  const token = getAuthToken();
+  const headers: HeadersInit = {};
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.statusText}`);
+  }
+
+  // Get the blob from response
+  const blob = await response.blob();
+
+  // Create download link
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+
+  // Cleanup
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
 }
 
 // ==================== API Client with All Methods ====================
@@ -226,6 +389,8 @@ export const apiClient = {
     return apiRequest(`/domains/${queryParams}`);
   },
 
+  getDomain: (id: number) => apiRequest(`/domains/${id}/`),
+
   createDomain: (data: any) => apiRequest('/domains/', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -357,6 +522,10 @@ export const apiClient = {
 
   getPromptAnalytics: (id: number) => apiRequest(`/prompts/prompts/${id}/analytics/`),
 
+  getPromptAnalyticsByDomain: (domainId: number) => {
+    return apiRequest(`/prompts/mentions/analytics/?domain_id=${domainId}`);
+  },
+
   // ===== Alerts =====
   getAlerts: (params?: any) => {
     const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
@@ -450,6 +619,10 @@ export const apiClient = {
 
   getCompetitorDetail: (id: number) => apiRequest(`/competitors/competitors/${id}/`),
 
+  getCompetitorsByDomain: (domainId: number) => {
+    return apiRequest(`/competitors/competitors/?domain_id=${domainId}`);
+  },
+
   updateCompetitor: (id: number, data: any) => apiRequest(`/competitors/competitors/${id}/`, {
     method: 'PUT',
     body: JSON.stringify(data),
@@ -457,6 +630,11 @@ export const apiClient = {
 
   deleteCompetitor: (id: number) => apiRequest(`/competitors/competitors/${id}/`, {
     method: 'DELETE',
+  }),
+
+  startCompetitorAnalysis: (domainId: number) => apiRequest('/competitors/start-analysis/', {
+    method: 'POST',
+    body: JSON.stringify({ domain_id: domainId }),
   }),
 
   getCompetitorAnalytics: (params?: any) => {
@@ -529,13 +707,13 @@ export const apiClient = {
   // Share of Voice helpers for ShareOfVoice page
   
 
-  getShareOfVoiceByDomain: (params: { domain_id: string; days?: number; platform?: string }) => {
+  getShareOfVoiceByDomain: (params: { domain_id: string; days?: number; platform?: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/analytics/share-of-voice/by_domain/${queryParams}`);
+    return apiRequest(`/analytics/share-of-voice/by_domain/${queryParams}`, options);
   },
 
   getShareOfVoiceComparison: (params: { domain_id: string; date?: string; platform?: string }) => {
@@ -547,16 +725,40 @@ export const apiClient = {
     return apiRequest(`/analytics/share-of-voice/comparison/${queryParams}`);
   },
 
-  // ===== Share of Voice (moved from engine to backend)
-  getShareOfVoiceLatestEngine: (params: { domain_id: string }) => {
+  getShareOfVoiceLatestEngine: (params: { domain_id: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiClient.get(`/analytics/share-of-voice/latest/${queryParams}`);
+    return apiRequest(`/analytics/share-of-voice/${queryParams}`, options);
   },
 
-  // ===== Competitor Prompt Analytics (moved from engine to backend)
-  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string }) => {
-    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiClient.get(`/competitors/competitor-prompt-analytics/${queryParams}`);
+  // ===== Engine (port 8001) helpers for competitor sentiment (optional for Sentiment page)
+  getEngine: <T>(endpoint: string) => {
+    const engineBaseUrl = import.meta.env.VITE_ENGINE_API_URL || 'http://localhost:8001';
+    const apiUrl = `${engineBaseUrl}${endpoint}`;
+    return fetch(apiUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(localStorage.getItem('access_token') ? {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        } : {}),
+      },
+    }).then(async (response) => {
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
+        throw new Error(error.detail || error.error || `HTTP ${response.status}`);
+      }
+      return response.json();
+    });
+  },
+
+  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string; competitor_id?: string; page_size?: string; is_mentioned?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
+      ...(params.page_size ? { page_size: params.page_size } : {}),
+      ...(params.is_mentioned ? { is_mentioned: params.is_mentioned } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/competitor-prompt-analytics/${queryParams}`, options);
   },
 
   getCompetitorGapsEngine: (params: { domain_id: string; competitor_id?: string }) => {
@@ -567,32 +769,60 @@ export const apiClient = {
     return apiClient.get(`/competitors/competitor-prompt-analytics/gaps/${queryParams}`);
   },
 
-  // ===== Competitor endpoints (moved from engine to backend)
-  getEngineCompetitors: (params: { domain_id: string }) => {
-    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiClient.get(`/competitors/competitors/${queryParams}`);
+  getCompetitorHeatmap: (params: { domain_id: string; days?: number; platform?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.days ? { days: String(params.days) } : {}),
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/heatmap/${queryParams}`, options);
   },
 
-  getEngineCompetitorDetail: (id: number) => apiClient.get(`/competitors/competitors/${id}/`),
-  getEngineCompetitorAnalytics: (id: number) => apiClient.get(`/competitors/competitors/${id}/analytics/`),
+  getCompetitorMetricSnapshots: (params: { domain_id: string; days?: number; competitor_id?: string; platform?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.days ? { days: String(params.days) } : {}),
+      ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/competitor-metric-snapshots/${queryParams}`, options);
+  },
+
+  getEngineCompetitors: (params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/competitors/by_domain/${queryParams}`, options);
+  },
+
+  getEngineCompetitorDetail: (id: number) => apiRequest(`/competitors/competitors/${id}/`),
+  getEngineCompetitorAnalytics: (id: number) => apiRequest(`/competitors/competitor-analytics/?competitor_id=${id}`),
 
   // Competitor Analysis APIs
-  getCompetitiveStrengthAnalysis: (params: { domain_id: string }) => {
-    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiRequest(`/competitors/competitive-strength-analysis${queryParams}`);
+  getCompetitiveStrengthAnalysis: (params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/competitive-strength-analysis${queryParams}`, options);
   },
 
-  getCompetitiveInsights: (params: { domain_id: string }) => {
-    const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiRequest(`/competitors/competitive-insights${queryParams}`);
+  getCompetitiveInsights: (params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/competitive-insights${queryParams}`, options);
   },
 
-  getAnswerGapAnalysis: (params: { domain_id: string; competitor_id?: string }) => {
+  getAnswerGapAnalysis: (params: { domain_id: string; competitor_id?: string; platform?: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
+      ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
-    return apiRequest(`/competitors/answer-gap-analysis${queryParams}`);
+    return apiRequest(`/competitors/answer-gap-analysis${queryParams}`, options);
   },
 
   // ===== Dashboard =====
@@ -622,6 +852,68 @@ export const apiClient = {
   deleteIntegration: (id: number) => apiRequest(`/integrations/integrations/${id}/`, {
     method: 'DELETE',
   }),
+
+  // ===== Reports =====
+  // Report Templates
+  getReportTemplates: () => apiRequest('/reports/templates/'),
+
+  getReportTemplate: (id: number) => apiRequest(`/reports/templates/${id}/`),
+
+  // Scheduled Reports
+  getScheduledReports: (params?: any) => {
+    const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return apiRequest(`/reports/scheduled/${queryParams}`);
+  },
+
+  createScheduledReport: (data: any) => apiRequest('/reports/scheduled/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  getScheduledReport: (id: number) => apiRequest(`/reports/scheduled/${id}/`),
+
+  updateScheduledReport: (id: number, data: any) => apiRequest(`/reports/scheduled/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  }),
+
+  deleteScheduledReport: (id: number) => apiRequest(`/reports/scheduled/${id}/`, {
+    method: 'DELETE',
+  }),
+
+  pauseScheduledReport: (id: number) => apiRequest(`/reports/scheduled/${id}/pause/`, {
+    method: 'POST',
+  }),
+
+  resumeScheduledReport: (id: number) => apiRequest(`/reports/scheduled/${id}/resume/`, {
+    method: 'POST',
+  }),
+
+  // Generated Reports
+  getGeneratedReports: (params?: any) => {
+    const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return apiRequest(`/reports/generated/${queryParams}`);
+  },
+
+  getGeneratedReport: (id: number) => apiRequest(`/reports/generated/${id}/`),
+
+  downloadReport: async (id: number, filename?: string) => {
+    // Get report details first to get the correct filename
+    const report: any = await apiRequest(`/reports/generated/${id}/`);
+    const downloadFilename = filename || `${report.name}.${report.format.toLowerCase()}`;
+    return downloadFile(`/reports/generated/${id}/download/`, downloadFilename);
+  },
+
+  // Report Generation
+  generateReport: (data: any) => apiRequest('/reports/generation/generate_now/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  checkGenerationTask: (taskId: string) => {
+    const queryParams = `?task_id=${taskId}`;
+    return apiRequest(`/reports/generation/task_status/${queryParams}`);
+  },
 };
 
 // Also export as 'api' for flexibility

@@ -2,6 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageLoader } from "@/components/PageLoader";
 import { useToast } from "@/hooks/use-toast";
 import {
   Select,
@@ -123,13 +124,7 @@ const HistoricalTrends = () => {
   };
 
   if (isLoading) {
-    return (
-      <div className="p-8 space-y-8 bg-background animate-fade-in">
-        <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">Loading historical trends...</p>
-        </div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   // Check if we have any data

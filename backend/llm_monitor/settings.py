@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'topics',
     'analytics',
     'integrations',
+    'reports',
 ]
 # Site URL for building absolute links in emails
 SITE_URL = config('SITE_URL', default='http://localhost:8080')
@@ -158,8 +159,8 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
     ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 20
+    'DEFAULT_PAGINATION_CLASS': 'llm_monitor.pagination.CustomPageNumberPagination',
+    'PAGE_SIZE': 20  # Default page size (can be overridden with ?page_size= up to 1000)
 }
 
 # CORS settings
@@ -197,6 +198,9 @@ EMAIL_USE_TLS = True
 EMAIL_USE_SSL = False
 EMAIL_HOST_USER = "appkodes@gmail.com"
 EMAIL_HOST_PASSWORD = "chykvzrenfscmseb"
+
+# Engine (processing) service configuration
+ENGINE_API_URL = config('ENGINE_API_URL', default='http://localhost:8001')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # OpenAI API Configuration
@@ -206,8 +210,10 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    # Increased from 60 minutes to 8 hours to reduce frequent session timeouts
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),
+    # Increased from 7 days to 30 days for better user experience
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,

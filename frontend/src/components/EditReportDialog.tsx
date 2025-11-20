@@ -36,12 +36,12 @@ export const EditReportDialog = ({ open, onOpenChange, report, onSave }: EditRep
 
   useEffect(() => {
     if (report) {
-      setName(report.name);
-      setDescription(report.description);
-      setSchedule(report.schedule);
-      setSelectedFormats(report.format);
-      setRecipients(report.recipients);
-      setStatus(report.status);
+      setName(report.name || "");
+      setDescription(report.description || "");
+      setSchedule(report.schedule || "");
+      setSelectedFormats(report.format || []);
+      setRecipients(report.recipients || []);
+      setStatus(report.status || "active");
     }
   }, [report]);
 

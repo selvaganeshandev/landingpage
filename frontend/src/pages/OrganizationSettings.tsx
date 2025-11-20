@@ -9,7 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/services/api";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -57,9 +57,15 @@ export default function OrganizationSettings() {
     sentiment_score: string;
     created_at: string;
     modified_at: string;
+    processing_status?: string;
+    track_message?: string;
   }>>([]);
 
   const [newDomain, setNewDomain] = useState("");
+  const [newDomainCountry, setNewDomainCountry] = useState("us");
+  const [newDomainKeywords, setNewDomainKeywords] = useState<string[]>([]);
+  const [keywordInput, setKeywordInput] = useState("");
+  const [isFetchingKeywords, setIsFetchingKeywords] = useState(false);
 
   // Team members state
   const [teamMembers, setTeamMembers] = useState<Array<{
@@ -136,6 +142,21 @@ export default function OrganizationSettings() {
     loadData();
   }, []);
 
+  // Poll for domain updates when there are processing domains
+  useEffect(() => {
+    const hasProcessingDomains = domains.some(d =>
+      d.processing_status && ['INIT', 'SCHD', 'PROC'].includes(d.processing_status)
+    );
+
+    if (!hasProcessingDomains) return;
+
+    const interval = setInterval(() => {
+      loadDomains();
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [domains]);
+
   const loadData = async () => {
     try {
       setIsLoading(true);
@@ -185,6 +206,60 @@ export default function OrganizationSettings() {
     }
   };
 
+  const handleAddKeyword = () => {
+    const trimmedInput = keywordInput.trim();
+    if (!trimmedInput) return;
+
+    // Split by comma and add all non-empty keywords
+    const newKeywords = trimmedInput
+      .split(',')
+      .map(k => k.trim())
+      .filter(k => k && !newDomainKeywords.includes(k));
+
+    if (newKeywords.length > 0) {
+      setNewDomainKeywords([...newDomainKeywords, ...newKeywords]);
+      setKeywordInput("");
+    }
+  };
+
+  const handleRemoveKeyword = (keyword: string) => {
+    setNewDomainKeywords(newDomainKeywords.filter(k => k !== keyword));
+  };
+
+  const handleFetchKeywordsFromGSC = async () => {
+    if (!newDomain.trim()) {
+      toast({
+        title: "Domain required",
+        description: "Please enter a domain name first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setIsFetchingKeywords(true);
+
+      // TODO: Implement actual GSC API call
+      // For now, show a message that this feature is coming soon
+      toast({
+        title: "Coming Soon",
+        description: "Google Search Console integration is being set up. This feature will be available soon.",
+      });
+
+      // Placeholder for when GSC integration is ready:
+      // const response = await apiClient.fetchKeywordsFromGSC({ domain: newDomain.trim() });
+      // setNewDomainKeywords([...newDomainKeywords, ...response.keywords]);
+    } catch (error: any) {
+      toast({
+        title: "Error fetching keywords",
+        description: error.message || "Failed to fetch keywords from Google Search Console.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsFetchingKeywords(false);
+    }
+  };
+
   const handleAddDomain = async () => {
     if (!newDomain.trim()) {
       toast({
@@ -203,16 +278,28 @@ export default function OrganizationSettings() {
       const response = await apiClient.createDomain({
         name: domainName,
         url: domainUrl,
+        country: newDomainCountry,
+        keywords: newDomainKeywords.length > 0 ? newDomainKeywords.join(',') : undefined,
       });
 
-      // Reload domains to get the updated list
-      await loadDomains();
+      // Reload domains to get the updated list (both local state and global store)
+      await loadDomains(); // Update local state for this page
+
+      // Also update the global domain store so DomainSelector refreshes
+      const { useDomainStore } = await import('@/stores/domainStore');
+      await useDomainStore.getState().loadDomains();
+
+      // Reset form
       setNewDomain("");
+      setNewDomainCountry("us");
+      setNewDomainKeywords([]);
+      setKeywordInput("");
       setAddDomainDialogOpen(false);
 
       toast({
-        title: "Domain added",
-        description: `${domainName} has been added to your organization.`,
+        title: "Brand added successfully!",
+        description: `${domainName} is now being processed. We'll notify you when it's ready.`,
+        duration: 5000,
       });
     } catch (error: any) {
       toast({
@@ -229,8 +316,12 @@ export default function OrganizationSettings() {
     try {
       await apiClient.deleteDomain(id);
 
-      // Reload domains to get the updated list
-      await loadDomains();
+      // Reload domains to get the updated list (both local state and global store)
+      await loadDomains(); // Update local state for this page
+
+      // Also update the global domain store so DomainSelector refreshes
+      const { useDomainStore } = await import('@/stores/domainStore');
+      await useDomainStore.getState().loadDomains();
 
       toast({
         title: "Domain removed",
@@ -423,17 +514,6 @@ export default function OrganizationSettings() {
     return integrations.filter(i => i.domainId === domainId);
   };
 
-  if (isLoading) {
-    return (
-      <div className="p-8 flex items-center justify-center min-h-[400px]">
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-6 w-6 animate-spin" />
-          <span>Loading organization data...</span>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
       <div>
@@ -491,28 +571,64 @@ export default function OrganizationSettings() {
                 <p>No domains added yet</p>
               </div>
             ) : (
-              domains.map((domain) => (
-                <div
-                  key={domain.id}
-                  className="flex items-center justify-between p-3 border rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <Globe className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <p className="font-medium capitalize">{domain.name}</p>
-                      <p className="text-sm text-muted-foreground">{domain.url}</p>
+              domains.map((domain) => {
+                const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
+                const isFailed = domain.processing_status === 'FAIL';
+                const isCompleted = !domain.processing_status || domain.processing_status === 'COMP';
 
+                const getStatusLabel = () => {
+                  if (domain.processing_status === 'INIT') return 'Initializing';
+                  if (domain.processing_status === 'SCHD') return 'Scheduled';
+                  if (domain.processing_status === 'PROC') return 'Processing';
+                  if (domain.processing_status === 'FAIL') return 'Failed';
+                  return 'Ready';
+                };
+
+                return (
+                  <div
+                    key={domain.id}
+                    className="flex items-center justify-between p-3 border rounded-lg"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="font-medium capitalize">{domain.name}</p>
+                        <p className="text-sm text-muted-foreground">{domain.url}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {/* Status Badge */}
+                      {isProcessing && (
+                        <Badge variant="outline" className="gap-1 border-orange-500 text-orange-600 bg-orange-50">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          {getStatusLabel()}
+                        </Badge>
+                      )}
+                      {isFailed && (
+                        <Badge variant="outline" className="gap-1 border-red-500 text-red-600 bg-red-50">
+                          <AlertCircle className="h-3 w-3" />
+                          Failed
+                        </Badge>
+                      )}
+                      {isCompleted && (
+                        <Badge variant="outline" className="gap-1 border-green-500 text-green-600 bg-green-50">
+                          <CheckCircle2 className="h-3 w-3" />
+                          Ready
+                        </Badge>
+                      )}
+
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setConfirmDomainId(domain.id)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setConfirmDomainId(domain.id)}
-                  >
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </CardContent>
@@ -912,7 +1028,7 @@ export default function OrganizationSettings() {
       </Dialog>
 
       <Dialog open={addDomainDialogOpen} onOpenChange={setAddDomainDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Add Domain</DialogTitle>
             <DialogDescription>
@@ -920,6 +1036,7 @@ export default function OrganizationSettings() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            {/* Domain Name */}
             <div className="space-y-2">
               <Label htmlFor="domain-name">Domain Name</Label>
               <Input
@@ -927,11 +1044,128 @@ export default function OrganizationSettings() {
                 placeholder="example.com"
                 value={newDomain}
                 onChange={(e) => setNewDomain(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && handleAddDomain()}
               />
               <p className="text-xs text-muted-foreground">
                 Enter the domain name without http:// or https://
               </p>
+            </div>
+
+            {/* Country Selector */}
+            <div className="space-y-2">
+              <Label htmlFor="domain-country">Country</Label>
+              <Select value={newDomainCountry} onValueChange={setNewDomainCountry}>
+                <SelectTrigger id="domain-country">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="us">United States</SelectItem>
+                  <SelectItem value="gb">United Kingdom</SelectItem>
+                  <SelectItem value="ca">Canada</SelectItem>
+                  <SelectItem value="au">Australia</SelectItem>
+                  <SelectItem value="de">Germany</SelectItem>
+                  <SelectItem value="fr">France</SelectItem>
+                  <SelectItem value="es">Spain</SelectItem>
+                  <SelectItem value="it">Italy</SelectItem>
+                  <SelectItem value="jp">Japan</SelectItem>
+                  <SelectItem value="in">India</SelectItem>
+                  <SelectItem value="br">Brazil</SelectItem>
+                  <SelectItem value="mx">Mexico</SelectItem>
+                  <SelectItem value="nl">Netherlands</SelectItem>
+                  <SelectItem value="se">Sweden</SelectItem>
+                  <SelectItem value="no">Norway</SelectItem>
+                  <SelectItem value="dk">Denmark</SelectItem>
+                  <SelectItem value="fi">Finland</SelectItem>
+                  <SelectItem value="pl">Poland</SelectItem>
+                  <SelectItem value="be">Belgium</SelectItem>
+                  <SelectItem value="at">Austria</SelectItem>
+                  <SelectItem value="ch">Switzerland</SelectItem>
+                  <SelectItem value="ie">Ireland</SelectItem>
+                  <SelectItem value="nz">New Zealand</SelectItem>
+                  <SelectItem value="sg">Singapore</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Select the primary country for this brand
+              </p>
+            </div>
+
+            {/* Keywords Input */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="domain-keywords">Keywords (Optional)</Label>
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  onClick={handleFetchKeywordsFromGSC}
+                  disabled={isFetchingKeywords}
+                  className="gap-2"
+                >
+                  {isFetchingKeywords ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                    </svg>
+                  )}
+                  Fetch from GSC
+                </Button>
+              </div>
+              <Input
+                id="domain-keywords"
+                placeholder="Enter keywords separated by commas"
+                value={keywordInput}
+                onChange={(e) => setKeywordInput(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAddKeyword();
+                  }
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Add keywords separated by commas. Press Enter to add.
+              </p>
+
+              {/* Keyword Tags */}
+              {newDomainKeywords.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-2 p-3 border rounded-lg bg-muted/30 max-h-32 overflow-y-auto">
+                    {newDomainKeywords.map((keyword, index) => (
+                      <Badge
+                        key={index}
+                        variant="default"
+                        className="gap-1 pr-1"
+                      >
+                        {keyword}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-4 w-4 p-0 hover:bg-background/20"
+                          onClick={() => handleRemoveKeyword(keyword)}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="flex justify-start">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setNewDomainKeywords([])}
+                      className="h-8 text-xs"
+                    >
+                      Clear all
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>

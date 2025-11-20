@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Check, Globe, Loader2, ChevronDown } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Check, Globe, Loader2, ChevronDown, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -40,71 +40,72 @@ export const DomainSelector = () => {
     error,
     loadDomains,
     setSelectedDomain,
-    selectDefaultDomain,
-    clearDomainStore
+    setDomainSwitching
   } = useDomainStore();
   const { user } = useAuth();
 
   // Load domains on component mount
   useEffect(() => {
-    clearDomainStore();
+    // Don't clear the store - preserve the selected domain to prevent flash
     loadDomains();
-  }, [loadDomains, clearDomainStore]);
+  }, [loadDomains]);
 
-  // After domains load, restore last selected domain from server
+  // Poll for domain status updates every 10 seconds if there are processing domains
   useEffect(() => {
-    if (!user) return;
-    if (domains.length === 0) return;
-    
-    const restoreDomain = async () => {
-      // Load from server (primary source of truth)
+    const hasProcessingDomains = domains.some(d =>
+      d.processing_status && ['INIT', 'SCHD', 'PROC'].includes(d.processing_status)
+    );
+
+    if (!hasProcessingDomains) return;
+
+    const interval = setInterval(() => {
+      loadDomains();
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [domains, loadDomains]);
+
+  // If currently selected domain is processing, switch to first completed domain
+  useEffect(() => {
+    if (!selectedDomain || !user) return;
+
+    const isCurrentDomainProcessing = selectedDomain.processing_status &&
+      ['INIT', 'SCHD', 'PROC'].includes(selectedDomain.processing_status);
+
+    if (isCurrentDomainProcessing) {
+      // Find first completed domain
+      const firstCompletedDomain = domains.find(d =>
+        d.id !== selectedDomain.id && (!d.processing_status || d.processing_status === 'COMP')
+      );
+
+      if (firstCompletedDomain) {
+        // Switch to completed domain
+        (async () => {
+          const { updateActiveDomain } = await import('@/utils/activeDomain');
+          await updateActiveDomain(user.id, firstCompletedDomain.id, firstCompletedDomain);
+          setSelectedDomain(firstCompletedDomain);
+        })();
+      }
+    }
+  }, [selectedDomain, domains, user, setSelectedDomain]);
+
+  // Sync selected domain to server after domains load (only if not already synced)
+  useEffect(() => {
+    if (!user || !selectedDomain || domains.length === 0) return;
+
+    const syncToServer = async () => {
+      // Load from server to check if it's in sync
       const { loadActiveDomainFromServer, updateActiveDomain } = await import('@/utils/activeDomain');
       const serverActiveDomainId = await loadActiveDomainFromServer(user.id);
-      
-      if (serverActiveDomainId) {
-        const domainId = parseInt(serverActiveDomainId, 10);
-        const exists = domains.find(d => d.id === domainId);
-        if (exists) {
-          // Sync both systems: set Zustand store and verify active_domain_id matches
-          setSelectedDomain(exists);
-          // Verify active_domain_id is in sync
-          const currentActiveId = localStorage.getItem(`active_domain_id:${user.id}`);
-          if (currentActiveId !== String(domainId)) {
-            console.log(`[DomainSelector] Syncing active_domain_id with server value ${domainId}`);
-            await updateActiveDomain(user.id, domainId, exists);
-          }
-          return;
-        }
-      }
-      
-      // If server has no active domain or domain doesn't exist, use first domain
-      if (!serverActiveDomainId || serverActiveDomainId === null || serverActiveDomainId === '') {
-        console.log(`[DomainSelector] No active domain found for user ${user.id}, setting first domain`);
-        const firstDomain = domains[0];
-        if (firstDomain) {
-          // Update both systems: Zustand store and server
-          setSelectedDomain(firstDomain);
-          const success = await updateActiveDomain(user.id, firstDomain.id, firstDomain);
-          if (success) {
-            console.log(`[DomainSelector] Successfully set first domain ${firstDomain.id} as active for user ${user.id}`);
-          } else {
-            console.warn(`[DomainSelector] Failed to set first domain ${firstDomain.id} as active for user ${user.id}`);
-          }
-        }
-      } else if (!selectedDomain || !domains.find(d => d.id === selectedDomain.id)) {
-        // Server has active domain but it doesn't exist in current domain list
-        const firstDomain = domains[0];
-        if (firstDomain) {
-          console.log(`[DomainSelector] Active domain ${serverActiveDomainId} not found in domain list, using first domain`);
-          setSelectedDomain(firstDomain);
-          // Update server with first domain
-          await updateActiveDomain(user.id, firstDomain.id, firstDomain);
-        }
+
+      // If server value doesn't match current selection, update server
+      if (serverActiveDomainId !== String(selectedDomain.id)) {
+        await updateActiveDomain(user.id, selectedDomain.id, selectedDomain);
       }
     };
-    
-    void restoreDomain();
-  }, [domains, user, setSelectedDomain, selectedDomain]);
+
+    void syncToServer();
+  }, [domains, user, selectedDomain]);
 
   // Show error if domain loading failed
   useEffect(() => {
@@ -120,7 +121,24 @@ export const DomainSelector = () => {
   const handleDomainSelect = async (domainId: number) => {
     const domain = domains.find(d => d.id === domainId);
     if (domain) {
+      // Check if domain is still processing or failed - don't allow selection
+      if (domain.processing_status && ['INIT', 'SCHD', 'PROC', 'FAIL'].includes(domain.processing_status)) {
+
+        const isFailed = domain.processing_status === 'FAIL';
+        toast({
+          title: isFailed ? "Domain Processing Failed" : "Domain Processing",
+          description: isFailed
+            ? `Processing failed: ${domain.track_message || 'Unknown error'}. Please try re-adding this domain.`
+            : "This domain is still being processed. Please wait until processing completes.",
+          variant: isFailed ? "destructive" : "default",
+        });
+        return;
+      }
+
+      // Start domain switching - show page loader
+      setDomainSwitching(true);
       setOpen(false);
+
       if (user) {
         // Update both Zustand store and server/localStorage in one call
         // This ensures both systems stay in sync
@@ -146,6 +164,11 @@ export const DomainSelector = () => {
         // If no user, just update Zustand store (shouldn't happen in normal flow)
         setSelectedDomain(domain);
       }
+
+      // Hide page loader after data has had time to load (1 second)
+      setTimeout(() => {
+        setDomainSwitching(false);
+      }, 1000);
     }
   };
 
@@ -176,6 +199,15 @@ export const DomainSelector = () => {
   }
 
   const selectedFaviconUrl = selectedDomain ? getFaviconUrl(selectedDomain.url) : null;
+
+  // Sort domains to put the selected domain first
+  const sortedDomains = [...domains].sort((a, b) => {
+    // Selected domain always comes first
+    if (selectedDomain?.id === a.id) return -1;
+    if (selectedDomain?.id === b.id) return 1;
+    // Then sort by name
+    return a.name.localeCompare(b.name);
+  });
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -210,14 +242,25 @@ export const DomainSelector = () => {
           <CommandList>
             <CommandEmpty>No domains found.</CommandEmpty>
             <CommandGroup heading="Your Domains">
-              {domains.map((domain) => {
+              {sortedDomains.map((domain) => {
                 const faviconUrl = getFaviconUrl(domain.url);
+                const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
+                const isFailed = domain.processing_status === 'FAIL';
+                const isDisabled = isProcessing || isFailed;
+                const processingLabel = domain.processing_status === 'INIT' ? 'Initializing...' :
+                                       domain.processing_status === 'SCHD' ? 'Scheduled...' :
+                                       domain.processing_status === 'PROC' ? 'Processing...' : 'Processing...';
+
                 return (
                   <CommandItem
                     key={domain.id}
                     value={domain.name}
                     onSelect={() => handleDomainSelect(domain.id)}
-                    className="flex items-center justify-between gap-2"
+                    className={cn(
+                      "flex items-center justify-between gap-2",
+                      isDisabled && "opacity-60 cursor-not-allowed"
+                    )}
+                    disabled={isDisabled}
                   >
                     <div className="flex items-center gap-2 flex-1 min-w-0">
                       {faviconUrl ? (
@@ -234,17 +277,35 @@ export const DomainSelector = () => {
                       <Globe className={cn("h-4 w-4 flex-shrink-0", faviconUrl && "hidden")} />
                       <div className="flex flex-col flex-1 min-w-0">
                         <span className="truncate">{domain.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {domain.total_mentions} mentions
-                        </span>
+                        {isProcessing ? (
+                          <span className="text-xs text-orange-500 flex items-center gap-1">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            {processingLabel}
+                          </span>
+                        ) : isFailed ? (
+                          <span className="text-xs text-red-500 flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" />
+                            Failed
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {domain.total_mentions} mentions
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <Check
-                      className={cn(
-                        "h-4 w-4 flex-shrink-0",
-                        selectedDomain?.id === domain.id ? "opacity-100" : "opacity-0"
-                      )}
-                    />
+                    {isProcessing ? (
+                      <AlertCircle className="h-4 w-4 flex-shrink-0 text-orange-500" />
+                    ) : isFailed ? (
+                      <AlertCircle className="h-4 w-4 flex-shrink-0 text-red-500" />
+                    ) : (
+                      <Check
+                        className={cn(
+                          "h-4 w-4 flex-shrink-0",
+                          selectedDomain?.id === domain.id ? "opacity-100" : "opacity-0"
+                        )}
+                      />
+                    )}
                   </CommandItem>
                 );
               })}

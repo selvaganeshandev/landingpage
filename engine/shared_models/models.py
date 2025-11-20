@@ -482,9 +482,10 @@ class Competitor(models.Model):
     track_message = models.TextField(blank=True, null=True, help_text="Status message or error details")
     tracked_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when last tracked")
     total_mentions = models.IntegerField(default=0, help_text="Total number of mentions")
+    total_citations = models.IntegerField(default=0, help_text="Total number of citations")
     visibility_score = models.DecimalField(
-        max_digits=5, 
-        decimal_places=2, 
+        max_digits=5,
+        decimal_places=2,
         default=0.0,
         help_text="Visibility score"
     )
@@ -810,6 +811,67 @@ class CompetitorPromptAnalytics(models.Model):
     
     def __str__(self):
         return f"{self.competitor.name} - {self.prompt.prompt[:50]}... [{self.track_status}]"
+
+
+class CompetitorMetricSnapshot(models.Model):
+    competitor = models.ForeignKey(Competitor, on_delete=models.CASCADE, related_name='shared_metric_snapshots', null=True, blank=True)
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='shared_metric_snapshots')
+    timestamp = models.DateTimeField(auto_now_add=True)
+    total_mentions = models.IntegerField(default=0)
+    total_citations = models.IntegerField(default=0)
+    visibility_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    sentiment_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    average_position = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    share_of_voice_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    trend_percentage = models.DecimalField(max_digits=6, decimal_places=2, default=0.0)
+    track_status = models.CharField(max_length=4, blank=True, null=True)
+    platform_metrics = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'competitor_metric_snapshots'
+        indexes = [
+            models.Index(fields=['competitor', '-timestamp']),
+            models.Index(fields=['domain', '-timestamp']),
+        ]
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        label = self.competitor.name if self.competitor else self.domain.name
+        return f"{label} snapshot @ {self.timestamp}"
+
+
+class CompetitiveInsight(models.Model):
+    IMPACT_CHOICES = [
+        ('high', 'High'),
+        ('medium', 'Medium'),
+        ('low', 'Low'),
+    ]
+
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='competitive_insights')
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    insight_type = models.CharField(max_length=100, blank=True, null=True)
+    category = models.CharField(max_length=100, blank=True, null=True)
+    impact = models.CharField(max_length=20, choices=IMPACT_CHOICES, default='medium')
+    snapshot_version = models.CharField(max_length=255)
+    insight_data = models.JSONField(default=dict, blank=True)
+    model_name = models.CharField(max_length=100, blank=True, null=True)
+    generated_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'competitive_insights'
+        ordering = ['-generated_at']
+        indexes = [
+            models.Index(fields=['domain', '-generated_at']),
+            models.Index(fields=['domain', 'snapshot_version']),
+            models.Index(fields=['impact']),
+        ]
+        unique_together = [('domain', 'snapshot_version', 'title')]
+
+    def __str__(self):
+        return f"{self.domain.name} insight: {self.title}"
 
 
 class PromptMetricSnapshot(models.Model):

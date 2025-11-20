@@ -6,7 +6,8 @@ import { CompetitorComparison } from "@/components/CompetitorComparison";
 import { MentionTable } from "@/components/MentionTable";
 import { TrendChart } from "@/components/TrendChart";
 import { TimeFilter } from "@/components/TimeFilter";
-import { Eye, TrendingUp, Target, Bell, Link2, FileText } from "lucide-react";
+import { PageLoader } from "@/components/PageLoader";
+import { Eye, TrendingUp, Target, Bell, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/services/api";
@@ -28,9 +29,11 @@ const Dashboard = () => {
   const [selectedLLM, setSelectedLLM] = useState("all");
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>(null);
-  const [domainId, setDomainId] = useState<string>("");
   const { toast } = useToast();
   const hasMountedRef = useRef(false);
+
+  // Use ref to track the current domain ID to prevent re-renders
+  const currentDomainIdRef = useRef<string>("");
 
   // LLM modules configuration
   const llmModules = [
@@ -46,31 +49,7 @@ const Dashboard = () => {
     ? domainNameRaw.charAt(0).toUpperCase() + domainNameRaw.slice(1)
     : "Domain name";
 
-  // Sync domain_id from selectedDomain (Zustand store) or server when domain changes
-  useEffect(() => {
-    if (!user) return;
-    
-    const syncDomain = async () => {
-      // Priority 1: Use selectedDomain from Zustand store (most up-to-date when user changes domain)
-      if (selectedDomain?.id) {
-        const newDomainId = String(selectedDomain.id);
-        if (newDomainId !== domainId) {
-          setDomainId(newDomainId);
-          return;
-        }
-      }
-      
-      // Priority 2: Fallback to server (primary source of truth on initial load)
-      const serverActiveDomain = await loadActiveDomainFromServer(user.id);
-      const serverDomainId = serverActiveDomain || '';
-      
-      if (serverDomainId !== domainId) {
-        setDomainId(serverDomainId);
-      }
-    };
-    
-    void syncDomain();
-  }, [user, selectedDomain?.id, domainId]);
+
 
   const handleExportReport = () => {
     toast({
@@ -85,33 +64,40 @@ const Dashboard = () => {
 
   async function fetchSummary() {
     if (!user) return;
-    
-    // Try to get from server first (primary source of truth)
-    const serverActiveDomain = await loadActiveDomainFromServer(user.id);
-    const currentDomainId = serverActiveDomain || domainId || loadActiveDomain(user.id) || '';
-    
+
+    // Get domain ID - prefer selectedDomain from Zustand, fallback to server
+    let currentDomainId = selectedDomain?.id ? String(selectedDomain.id) : '';
+
     if (!currentDomainId) {
-      console.warn('Dashboard: No active domain for user', user.id);
-      toast({ 
-        title: "No Domain Selected", 
-        description: "Please select a domain to view dashboard data.", 
-        variant: "destructive" 
+      const serverActiveDomain = await loadActiveDomainFromServer(user.id);
+      currentDomainId = serverActiveDomain || loadActiveDomain(user.id) || '';
+    }
+
+    if (!currentDomainId) {
+      toast({
+        title: "No Domain Selected",
+        description: "Please select a domain to view dashboard data.",
+        variant: "destructive"
       });
       return;
     }
-    
+
+    // If domain hasn't changed, don't re-fetch
+    if (currentDomainIdRef.current === currentDomainId && summary) {
+      return;
+    }
+
+    currentDomainIdRef.current = currentDomainId;
+
     try {
       setLoading(true);
-      console.log('Dashboard: Fetching summary for domain:', currentDomainId, 'days:', timePeriod, 'llm:', selectedLLM);
       const data = await api.getDashboardSummary({
         domain_id: currentDomainId,
         days: Number(timePeriod),
         llm_model: selectedLLM !== 'all' ? selectedLLM : undefined
       });
-      console.log('Dashboard: API response received:', data);
       setSummary(data);
     } catch (e) {
-      console.error('Dashboard: API error:', e);
       const errorMessage = e instanceof Error ? e.message : String(e);
       // Only show error for actual errors, not empty data
       const isNetworkError = errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Network');
@@ -150,15 +136,12 @@ const Dashboard = () => {
       void fetchSummary();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, domainId]);
-  
-  // Fetch summary when filters change (but not on initial mount)
-  useEffect(() => {
-    if (hasMountedRef.current) {
-      void fetchSummary();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timePeriod, selectedLLM]);
+  }, [user, selectedDomain?.id, timePeriod, selectedLLM]);
+
+  // Show loading state whenever we're fetching data
+  if (loading || !summary) {
+    return <PageLoader />;
+  }
 
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
@@ -185,8 +168,8 @@ const Dashboard = () => {
             </Select>
             <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
             <Button variant="outline" onClick={handleExportReport}>Export Report</Button>
-            <Button onClick={handleRefreshData} className="gradient-primary shadow-md shadow-primary/20">
-              Refresh Data
+            <Button onClick={handleRefreshData} className="gradient-primary shadow-md shadow-primary/20" disabled={loading}>
+              {loading ? "Loading..." : "Refresh Data"}
             </Button>
           </div>
         </div>

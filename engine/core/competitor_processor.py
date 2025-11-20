@@ -12,8 +12,9 @@ Flow:
 Note: Uses existing PromptAnalytics data instead of making new API calls to save costs and ensure consistency.
 """
 
+import json
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -26,11 +27,15 @@ from shared_models.models import (
     Competitor,
     CompetitorPromptAnalytics,
     CompetitorAnalytics,
+    CompetitorMetricSnapshot,
+    CompetitiveInsight,
     ShareOfVoiceAnalytics,
     Domain,
     Prompt,
     PromptAnalytics
 )
+
+from .analytics_helpers import get_openai_client
 
 
 logger = logging.getLogger(__name__)
@@ -53,6 +58,7 @@ class CompetitorProcessor:
         """
         self.max_concurrent_prompts = max_concurrent_prompts
         logger.info(f"CompetitorProcessor initialized with max_concurrent_prompts={max_concurrent_prompts}")
+        self._openai_client = None
     
     def process_competitor(self, competitor: Competitor) -> Dict[str, Any]:
         """
@@ -521,11 +527,17 @@ class CompetitorProcessor:
                 avg_sentiment=Avg('sentiment_score'),
                 mentioned_count=Count('id', filter=Q(is_mentioned=True))
             )
+
+            total_citations = 0
+            for citation_list in analytics_qs.values_list('citation_list', flat=True):
+                if citation_list and isinstance(citation_list, list):
+                    total_citations += len(citation_list)
             
             # Update Competitor aggregate fields
             with transaction.atomic():
                 comp = Competitor.objects.select_for_update().get(id=competitor.id)
                 comp.total_mentions = totals['total_mentions'] or 0
+                comp.total_citations = total_citations
                 comp.average_position = totals['avg_position'] or 0.0
                 comp.sentiment_score = totals['avg_sentiment'] or 0.0
                 comp.visibility_score = self._calculate_visibility_score(
@@ -534,7 +546,7 @@ class CompetitorProcessor:
                     avg_position=totals['avg_position']
                 )
                 comp.save(update_fields=[
-                    'total_mentions', 'average_position', 'sentiment_score', 
+                    'total_mentions', 'total_citations', 'average_position', 'sentiment_score',
                     'visibility_score', 'modified_at'
                 ])
             
@@ -550,6 +562,14 @@ class CompetitorProcessor:
             
             # Update ShareOfVoice
             self._update_share_of_voice(competitor)
+            competitor.refresh_from_db()
+            self._create_metric_snapshot(
+                competitor=competitor,
+                totals=totals,
+                total_citations=total_citations,
+                analytics_qs=analytics_qs
+            )
+            self._maybe_generate_competitive_insights(competitor.domain)
             
             logger.info(f"Successfully aggregated analytics for competitor {competitor.id}")
         
@@ -701,4 +721,238 @@ class CompetitorProcessor:
         except Exception as e:
             logger.error(f"Error calculating market positions: {str(e)}")
             raise
+
+    def _create_metric_snapshot(self, competitor: Competitor, totals: Dict[str, Any], total_citations: int, analytics_qs) -> None:
+        """
+        Persist a snapshot of competitor metrics after each processing run.
+        """
+        try:
+            current_share = Decimal(str(competitor.share_of_voice_percentage or 0))
+            last_snapshot = CompetitorMetricSnapshot.objects.filter(
+                competitor=competitor
+            ).order_by('-timestamp').first()
+
+            trend_percentage = Decimal('0.0')
+            if last_snapshot and last_snapshot.share_of_voice_percentage and last_snapshot.share_of_voice_percentage != 0:
+                prev_share = Decimal(str(last_snapshot.share_of_voice_percentage))
+                if prev_share != 0:
+                    change = ((current_share - prev_share) / prev_share) * 100
+                    trend_percentage = Decimal(str(round(change, 2)))
+
+            platform_metrics = []
+            platform_stats = analytics_qs.values('platform').annotate(
+                platform_mentions=Sum('mention_count'),
+                avg_sentiment=Avg('sentiment_score')
+            )
+            total_mentions = totals.get('total_mentions') or 0
+            for stat in platform_stats:
+                platform_name = stat['platform'] or 'Unknown'
+                mentions = stat['platform_mentions'] or 0
+                if not mentions:
+                    continue
+                share = 0
+                if total_mentions:
+                    share = round((Decimal(str(mentions)) / Decimal(str(total_mentions))) * 100, 2)
+                platform_metrics.append({
+                    'platform': platform_name,
+                    'mentions': float(mentions),
+                    'share_percentage': float(share),
+                    'sentiment_score': float(stat['avg_sentiment'] or 0),
+                })
+
+            CompetitorMetricSnapshot.objects.create(
+                competitor=competitor,
+                domain=competitor.domain,
+                total_mentions=totals.get('total_mentions') or 0,
+                total_citations=total_citations,
+                visibility_score=competitor.visibility_score or 0,
+                sentiment_score=competitor.sentiment_score or 0,
+                average_position=competitor.average_position or 0,
+                share_of_voice_percentage=current_share,
+                trend_percentage=trend_percentage,
+                track_status=competitor.track_status,
+                platform_metrics=platform_metrics,
+            )
+        except Exception as e:
+            logger.error(f"Error creating metric snapshot for competitor {competitor.id}: {str(e)}", exc_info=True)
+
+    def _maybe_generate_competitive_insights(self, domain: Domain) -> None:
+        """
+        Generate and persist AI insights only when all competitors for a domain
+        have completed processing and we do not already have insights for the latest snapshot version.
+        """
+        try:
+            if Competitor.objects.filter(domain=domain, track_status__in=['INIT', 'SCHD', 'PROC']).exists():
+                return
+
+            latest_snapshot = CompetitorMetricSnapshot.objects.filter(domain=domain).order_by('-timestamp').first()
+            if not latest_snapshot:
+                return
+
+            snapshot_version = latest_snapshot.timestamp.strftime('%Y%m%d%H%M%S')
+            if CompetitiveInsight.objects.filter(domain=domain, snapshot_version=snapshot_version).exists():
+                return
+
+            context = self._build_insight_context(domain)
+            if not context.get('players'):
+                return
+
+            insights, model_name = self._generate_ai_insights(context)
+            if not insights:
+                return
+
+            for entry in insights[:2]:
+                try:
+                    CompetitiveInsight.objects.create(
+                        domain=domain,
+                        title=entry.get('title', 'Insight').strip()[:255],
+                        description=entry.get('description', '').strip(),
+                        insight_type=entry.get('type') or entry.get('category'),
+                        category=entry.get('category'),
+                        impact=(entry.get('impact') or 'medium').lower(),
+                        snapshot_version=snapshot_version,
+                        insight_data=entry,
+                        model_name=model_name,
+                    )
+                except Exception as create_err:
+                    logger.error("Failed to persist competitive insight for domain %s: %s", domain.id, create_err, exc_info=True)
+        except Exception as e:
+            logger.error("Error generating competitive insights for domain %s: %s", domain.id, e, exc_info=True)
+
+    def _build_insight_context(self, domain: Domain) -> Dict[str, Any]:
+        """
+        Assemble structured metrics used by the LLM to craft insights.
+        """
+        competitors = Competitor.objects.filter(domain=domain).order_by('-share_of_voice_percentage')
+        players = []
+        for comp in competitors:
+            latest_snapshot = comp.metric_snapshots.order_by('-timestamp').first()
+            players.append({
+                'name': comp.name,
+                'share_of_voice': float(comp.share_of_voice_percentage or 0),
+                'visibility': float(comp.visibility_score or 0),
+                'sentiment': float(comp.sentiment_score or 0),
+                'trend': float(comp.trend_percentage or 0),
+                'total_mentions': comp.total_mentions,
+                'platforms': latest_snapshot.platform_metrics if latest_snapshot else [],
+            })
+
+        sov_records = ShareOfVoiceAnalytics.objects.filter(
+            domain=domain,
+            platform='ChatGPT'
+        ).order_by('-timestamp')
+        sov_summary = [
+            {
+                'timestamp': sov.timestamp.isoformat(),
+                'share_percentage': float(sov.share_percentage or 0),
+                'competitor': sov.competitor.name if sov.competitor else 'Your Brand',
+                'is_you': sov.competitor is None,
+            }
+            for sov in sov_records[:20]
+        ]
+
+        your_brand_metrics = sov_records.filter(competitor__isnull=True).first()
+        prompt_stats = PromptAnalytics.objects.filter(
+            prompt__group__domain=domain,
+            track_status='COMP'
+        ).aggregate(
+            total_mentions=Sum('total_mentions'),
+            avg_sentiment=Avg('sentiment_score'),
+        )
+
+        return {
+            'domain': {
+                'name': domain.name,
+                'url': domain.url,
+                'your_brand_share': float((your_brand_metrics.share_percentage if your_brand_metrics else 0) or 0),
+                'your_brand_mentions': int(prompt_stats.get('total_mentions') or 0),
+                'your_brand_sentiment': float((prompt_stats.get('avg_sentiment') or 0) * 100),
+            },
+            'generated_at': timezone.now().isoformat(),
+            'players': players,
+            'share_of_voice_history': sov_summary,
+        }
+
+    def _generate_ai_insights(self, context: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
+        """
+        Call OpenAI to generate insights from the compiled context.
+        """
+        try:
+            if self._openai_client is None:
+                self._openai_client = get_openai_client()
+        except Exception as client_error:
+            logger.error("OpenAI client not available for insights: %s", client_error)
+            return [], ''
+
+        model_name = getattr(settings, 'OPENAI_INSIGHTS_MODEL', 'gpt-4o-mini')
+        domain_name = context.get('domain', {}).get('name', 'the brand')
+
+        prompt = f"""You are a competitive intelligence analyst providing ACTIONABLE strategic insights to help {domain_name} increase brand visibility in AI search results.
+
+Generate exactly 2 ACTIONABLE insights that help the brand take specific actions. Each insight MUST:
+- Be specific and actionable (not generic advice like "improve visibility")
+- Include concrete numbers/percentages from the data
+- Suggest a clear next step or strategy
+- Focus on competitive gaps, opportunities, or immediate threats
+
+Required JSON format for each insight:
+- title: Specific, action-oriented title with numbers (e.g., "Target 10 High-Traffic Queries Where Competitors Dominate")
+- description: 2-3 sentences: (1) Specific data point, (2) Why it matters, (3) Recommended action
+- type: "success" (wins to leverage), "warning" (losing ground), "opportunity" (gaps to exploit), "risk" (competitive threats)
+- impact: "high" (urgent, >20% gap), "medium" (important, 10-20% gap), "low" (<10% gap)
+- category: One of "market_position", "sentiment", "visibility", "growth", "opportunity"
+
+EXAMPLES:
+✅ GOOD: "Capitalize on 15% Higher Sentiment vs Top Competitor" with specific comparison content strategy
+❌ BAD: "Low Share of Voice" - too generic, no action
+
+DATA:
+{json.dumps(context, default=str, indent=2)}
+
+Return ONLY valid JSON array with 2 insights, no other text."""
+
+        try:
+            response = self._openai_client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are an expert competitive intelligence analyst who provides specific, actionable insights with concrete recommendations."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=1200,
+            )
+            content = response.choices[0].message.content.strip()
+            parsed = self._parse_insight_response(content)
+            if isinstance(parsed, list):
+                return parsed, getattr(response, 'model', model_name)
+            if isinstance(parsed, dict) and 'insights' in parsed:
+                return parsed['insights'], getattr(response, 'model', model_name)
+        except Exception as e:
+            logger.error("Failed to generate AI insights: %s", e, exc_info=True)
+        return [], ''
+
+    @staticmethod
+    def _parse_insight_response(content: str):
+        """
+        Attempt to extract JSON from an LLM response that may contain extra text or code fences.
+        """
+        cleaned = content.strip()
+        if cleaned.startswith('```'):
+            cleaned = cleaned.split('```', 2)
+            if len(cleaned) >= 2:
+                cleaned = cleaned[1]
+        cleaned = cleaned.replace('```json', '').replace('```', '').strip()
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            # Try to locate JSON array subset
+            start = content.find('[')
+            end = content.rfind(']')
+            if start != -1 and end != -1 and end > start:
+                snippet = content[start:end + 1]
+                try:
+                    return json.loads(snippet)
+                except Exception:
+                    return None
+        return None
 

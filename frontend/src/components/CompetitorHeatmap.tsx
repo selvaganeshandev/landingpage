@@ -1,5 +1,7 @@
 import { Card } from "@/components/ui/card";
-import { Building2 } from "lucide-react";
+import { Building2, Info } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface HeatmapData {
   competitor: string;
@@ -7,6 +9,7 @@ interface HeatmapData {
     [key: string]: number;
   };
   isYou?: boolean;
+  url?: string;
 }
 
 interface CompetitorHeatmapProps {
@@ -14,12 +17,28 @@ interface CompetitorHeatmapProps {
   platforms: string[];
 }
 
+const getFaviconUrl = (url?: string) => {
+  if (!url) return "";
+  try {
+    const normalized = url.startsWith("http") ? url : `https://${url}`;
+    const parsed = new URL(normalized);
+    return `https://www.google.com/s2/favicons?domain=${parsed.hostname}&sz=64`;
+  } catch (e) {
+    try {
+      const parsed = new URL(`https://${url}`);
+      return `https://www.google.com/s2/favicons?domain=${parsed.hostname}&sz=64`;
+    } catch {
+      return "";
+    }
+  }
+};
+
 const getHeatmapColor = (value: number) => {
-  if (value >= 25) return "bg-success/80 text-white";
-  if (value >= 20) return "bg-success/60 text-white";
-  if (value >= 15) return "bg-success/40";
-  if (value >= 10) return "bg-success/20";
-  return "bg-muted";
+  if (value >= 30) return "bg-emerald-600 text-white";
+  if (value >= 20) return "bg-emerald-500 text-white";
+  if (value >= 10) return "bg-emerald-400 text-white";
+  if (value >= 5) return "bg-emerald-200 text-emerald-900";
+  return "bg-emerald-100 text-emerald-900";
 };
 
 export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) => {
@@ -28,15 +47,32 @@ export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) =
     return (
       <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
         <div className="space-y-6">
-          <div className="pb-4 border-b border-border/50">
-            <h3 className="text-lg font-semibold flex items-center gap-2 font-outfit">
-              <Building2 className="h-5 w-5 text-primary" />
+        <div className="pb-4 border-b border-border/50">
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-semibold font-inter">
               Competitor Analysis Heatmap
             </h3>
-            <p className="text-sm text-muted-foreground mt-1">
-              Percentage of mentions per AI provider for each brand
-            </p>
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="How we calculate this heatmap"
+                    className="w-5 h-5 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary transition-colors"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs leading-relaxed">
+                  Percentages come from the latest competitor metric snapshots. We total mention counts per AI provider for each brand, compare them to the platform’s overall mentions, then express share as a percentage so every column adds up to 100%.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
+          <p className="text-sm text-muted-foreground mt-1">
+            Percentage of mentions per AI provider for each brand
+          </p>
+        </div>
           <div className="flex items-center justify-center py-12">
             <p className="text-sm text-muted-foreground">No heatmap data available yet.</p>
           </div>
@@ -49,10 +85,27 @@ export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) =
     <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
       <div className="space-y-6">
         <div className="pb-4 border-b border-border/50">
-          <h3 className="text-lg font-semibold flex items-center gap-2 font-inter">
-            <Building2 className="h-5 w-5 text-primary" />
-            Competitor Analysis Heatmap
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-semibold font-inter">
+              Competitor Analysis Heatmap
+            </h3>
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="How we calculate this heatmap"
+                    className="w-5 h-5 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary transition-colors"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs leading-relaxed">
+                  Percentages come from the latest competitor metric snapshots. We total mention counts per AI provider for each brand, compare them to the platform’s overall mentions, then express share as a percentage so every column adds up to 100%.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <p className="text-sm text-muted-foreground mt-1">
             Percentage of mentions per AI provider for each brand
           </p>
@@ -83,15 +136,28 @@ export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) =
                   style={{ gridTemplateColumns: `220px repeat(${platforms.length}, 1fr)` }}
                 >
                   <div className="flex items-center gap-3 font-medium text-sm">
-                    <div className="w-8 h-8 rounded-xl gradient-primary shadow-md flex items-center justify-center">
-                      <Building2 className="h-4 w-4 text-white" />
+                    <div className="w-9 h-9 rounded-xl bg-white border border-border shadow-sm flex items-center justify-center overflow-hidden">
+                      {row.url ? (
+                        <img
+                          src={getFaviconUrl(row.url)}
+                          alt={`${row.competitor} favicon`}
+                          className="h-full w-full object-contain p-1"
+                          loading="lazy"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const fallbackIcon = e.currentTarget.parentElement?.querySelector('.heatmap-fallback-icon');
+                            if (fallbackIcon) fallbackIcon.classList.remove('hidden');
+                          }}
+                        />
+                      ) : null}
+                      <Building2 className={cn("heatmap-fallback-icon h-4 w-4 text-primary", row.url && "hidden")} />
                     </div>
                     <span className="truncate font-inter font-semibold">{row.competitor}</span>
                   </div>
                   {platforms.map((platform) => (
                     <div
                       key={platform}
-                      className={`p-3 rounded-xl text-center font-semibold text-sm transition-all duration-300 hover:scale-105 hover:shadow-md ${getHeatmapColor(
+                      className={`p-3 rounded-xl text-center font-semibold text-sm ${getHeatmapColor(
                         row.platforms[platform] || 0
                       )}`}
                     >

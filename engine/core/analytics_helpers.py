@@ -24,10 +24,26 @@ def process_prompt_with_perplexity(prompt_text: str, user_domain: str, client: A
     return process_prompt_with_perplexity_wrapper(prompt_text, user_domain, client, group)
 
 def get_openai_client():
-	"""Return OpenAI client if configured in Django settings; else raise."""
+	"""
+	Initialize and return OpenAI client using settings from database or .env.
+	Uses the same method as ChatGPTClient for consistency - reads from settings.OPENAI_API_KEY
+	which comes from engine/.env via python-decouple.
+	"""
+	# First try database Settings model (if available)
+	try:
+		from serp.models import Settings
+		settings_obj = Settings.objects.first()
+		if settings_obj and settings_obj.chatgpt_enabled and settings_obj.chatgpt_api_key:
+			from openai import OpenAI
+			return OpenAI(api_key=settings_obj.chatgpt_api_key, timeout=60)
+	except (ImportError, Exception):
+		pass  # Fall through to .env method
+	
+	# Fallback to .env file (same as ChatGPTClient)
 	api_key = getattr(settings, "OPENAI_API_KEY", None)
 	if not api_key:
-		raise Exception("OpenAI API key not configured")
+		raise Exception("OpenAI API key not configured. Set OPENAI_API_KEY in engine/.env file")
+	
 	try:
 		from openai import OpenAI  # lazy import
 		return OpenAI(api_key=api_key, timeout=60)
@@ -111,15 +127,132 @@ def extract_position_from_response(response: str, user_domain: str, citation_url
 	return None
 
 
+def _extract_competitor_mentions(text: str, user_domain: str, all_urls: List[str] = None) -> List[str]:
+	"""
+	Extract competitor brand/company names from LLM response text.
+	Uses multiple strategies: URL analysis, company name patterns, and keyword extraction.
+
+	Args:
+		text: The LLM response text
+		user_domain: The user's domain (to exclude from competitors)
+		all_urls: List of all URLs found in the text
+
+	Returns:
+		List of competitor names found in the text
+	"""
+	if not text:
+		return []
+
+	competitors = set()
+	user_domain_clean = _get_domain_from_url(user_domain).lower()
+	user_sld = user_domain_clean.split('.')[0] if user_domain_clean else ""
+
+	# Strategy 1: Extract company names from URLs (MOST RELIABLE)
+	# This is the most accurate source - if they have a URL, they're a real company
+	if all_urls:
+		# Common domains to exclude (not competitors)
+		excluded_domains = {
+			'google', 'facebook', 'twitter', 'linkedin', 'instagram', 'youtube',
+			'github', 'stackoverflow', 'wikipedia', 'medium', 'amazon', 'aws',
+			'microsoft', 'apple', 'w3', 'mozilla', 'chrome', 'example', 'test',
+			'localhost', 'schema', 'json', 'xml'
+		}
+
+		for url in all_urls:
+			domain = _get_domain_from_url(url)
+			if not domain or domain == user_domain_clean:
+				continue
+
+			# Extract SLD (second-level domain) as potential competitor name
+			sld = domain.split('.')[0] if domain else ""
+
+			# Skip if it's an excluded common domain or matches user's domain
+			if sld.lower() in excluded_domains or sld.lower() == user_sld.lower():
+				continue
+
+			if sld and len(sld) >= 3:
+				# Title case the SLD for cleaner names
+				competitors.add(sld.title())
+
+	# Strategy 2: DISABLED - Too unreliable, creates false positives
+	# Only use URL-based and domain mention extraction
+
+	# Strategy 3: Extract brand names from text - VERY STRICT RULES
+	# Only accept brands that appear with .com/.io/.net/.org in text OR
+	# are single compound words with clear mixed case (e.g., FlyNax, OxyClassifieds)
+
+	# Pattern 1: Brand names with domain extensions mentioned in text
+	# E.g., "FlyNax.com" or "visit OxyClassifieds.io"
+	domain_mention_pattern = r'([A-Z][a-zA-Z]+)\.(com|io|net|org|co)\b'
+	domain_matches = re.findall(domain_mention_pattern, text, re.IGNORECASE)
+
+	for match in domain_matches:
+		brand_name = match[0].strip()
+		if brand_name and len(brand_name) >= 3 and brand_name.lower() != user_sld.lower():
+			competitors.add(brand_name)
+
+	# Pattern 2: Single-word compound brands in numbered lists
+	# Must be CamelCase or mixed case (e.g., FlyNax, OxyClassifieds, ClassiPress)
+	# Pattern: "1. **BrandName**:" where BrandName is a single compound word
+	single_brand_pattern = r'[\d\.\*\-•]\s+\*\*([A-Z][a-z]*[A-Z][a-zA-Z]+)\*\*\s*:'
+	single_brand_matches = re.findall(single_brand_pattern, text)
+
+	# Very strict filtering for single brands
+	excluded_generic = {
+		'creating', 'monetization', 'engagement', 'management', 'integration',
+		'features', 'benefits', 'overview', 'pricing', 'examples', 'solutions',
+		'marketplace', 'classified', 'wordpress', 'plugins', 'ecommerce'
+	}
+
+	for name in single_brand_matches:
+		name = name.strip()
+		if not name or len(name) < 3:
+			continue
+
+		# Skip if matches user's domain
+		if name.lower() == user_sld.lower():
+			continue
+
+		# Must be a single word (no spaces)
+		if ' ' in name:
+			continue
+
+		# Skip generic terms
+		if name.lower() in excluded_generic:
+			continue
+
+		# Must have at least 2 capital letters (indicates compound brand name)
+		capital_count = sum(1 for c in name if c.isupper())
+		if capital_count >= 2:
+			competitors.add(name)
+
+	# Deduplicate by lowercase (keep the version with most capitals for brand consistency)
+	# E.g., keep "FlyNax" instead of "flynax"
+	deduplicated = {}
+	for comp in competitors:
+		comp_lower = comp.lower()
+		if comp_lower not in deduplicated:
+			deduplicated[comp_lower] = comp
+		else:
+			# Keep the version with more capital letters (more likely the official brand name)
+			existing = deduplicated[comp_lower]
+			if sum(1 for c in comp if c.isupper()) > sum(1 for c in existing if c.isupper()):
+				deduplicated[comp_lower] = comp
+
+	# Convert to list and return (limit to top 20 to avoid noise)
+	competitor_list = sorted(list(deduplicated.values()))[:20]
+	return competitor_list
+
+
 def _count_mentions_with_word_boundaries(text: str, mention_patterns: List[str]) -> int:
 	"""
 	Count mentions using regex with word boundaries to avoid overlaps.
 	Deduplicates by matched span ranges to prevent double-counting.
-	
+
 	Args:
 		text: Text to search in
 		mention_patterns: List of patterns to search for
-	
+
 	Returns:
 		Count of unique mentions (non-overlapping matches)
 	"""
@@ -206,6 +339,10 @@ def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
 			sentiment = "positive"
 		elif polarity < -0.1:
 			sentiment = "negative"
+
+	# Extract competitor mentions from the response text
+	competitor_mentions = _extract_competitor_mentions(text, user_domain, all_urls)
+
 	return {
 		"is_mention": has_mention or has_citation,
 		"mention_count": mention_count,
@@ -216,6 +353,7 @@ def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
 		"citation_count": citation_count,  # Now uses only domain URLs
 		"has_citation": has_citation,
 		"all_urls": all_urls,  # Kept for reference but not used for citation_count
+		"competitor_mention_list": competitor_mentions,  # NEW: List of competitor names
 	}
 
 
@@ -290,6 +428,9 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
             elif polarity < -0.1:
                 sentiment = "negative"
 
+        # Extract competitor mentions from the response text
+        competitor_mentions = _extract_competitor_mentions(text, user_domain, all_urls)
+
         print({
             "response_text": text,
             "is_mention": (mention_count > 0) or has_citation,
@@ -301,8 +442,9 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
             "citation_count": citation_count,
             "has_citation": has_citation,
             "all_urls": all_urls,
+            "competitor_mention_list": competitor_mentions,
         })
-        
+
         return {
             "response_text": text,
             "is_mention": (mention_count > 0) or has_citation,
@@ -314,6 +456,7 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
             "citation_count": citation_count,
             "has_citation": has_citation,
             "all_urls": all_urls,
+            "competitor_mention_list": competitor_mentions,  # NEW: List of competitor names
         }
         
         

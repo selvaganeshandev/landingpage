@@ -27,6 +27,7 @@ class Competitor(models.Model):
     track_message = models.TextField(blank=True, null=True)
     tracked_at = models.DateTimeField(null=True, blank=True)
     total_mentions = models.IntegerField(default=0)
+    total_citations = models.IntegerField(default=0)
     visibility_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     sentiment_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     average_position = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
@@ -151,9 +152,78 @@ class CompetitorPromptAnalytics(models.Model):
             models.Index(fields=['competitor', 'is_mentioned']),
             models.Index(fields=['competitor', '-position']),
             models.Index(fields=['competitor', 'platform', 'tracked_at']),
+            # CRITICAL: Optimized index for ViewMentionsDialog query (competitor_id + is_mentioned filter)
+            models.Index(fields=['competitor', 'is_mentioned', '-mention_count']),
         ]
         ordering = ['competitor', 'position']
     
     def __str__(self):
         return f"{self.competitor.name} - {self.prompt.prompt[:50]}... [{self.track_status}]"
+
+
+class CompetitorMetricSnapshot(models.Model):
+    """
+    Periodic snapshot of competitor metrics captured after each processing run.
+    """
+    competitor = models.ForeignKey(Competitor, on_delete=models.CASCADE, related_name='metric_snapshots', null=True, blank=True)
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='competitor_metric_snapshots')
+    timestamp = models.DateTimeField(auto_now_add=True)
+    total_mentions = models.IntegerField(default=0)
+    total_citations = models.IntegerField(default=0)
+    visibility_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    sentiment_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    average_position = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    share_of_voice_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    trend_percentage = models.DecimalField(max_digits=6, decimal_places=2, default=0.0)
+    track_status = models.CharField(max_length=4, blank=True, null=True)
+    platform_metrics = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'competitor_metric_snapshots'
+        indexes = [
+            models.Index(fields=['competitor', '-timestamp']),
+            models.Index(fields=['domain', '-timestamp']),
+        ]
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        label = self.competitor.name if self.competitor else self.domain.name
+        return f"{label} snapshot @ {self.timestamp}"
+
+
+class CompetitiveInsight(models.Model):
+    """
+    Stores AI-generated competitive insights persisted per domain and snapshot version.
+    """
+    IMPACT_CHOICES = [
+        ('high', 'High'),
+        ('medium', 'Medium'),
+        ('low', 'Low'),
+    ]
+
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='competitive_insights')
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    insight_type = models.CharField(max_length=100, blank=True, null=True)
+    category = models.CharField(max_length=100, blank=True, null=True)
+    impact = models.CharField(max_length=20, choices=IMPACT_CHOICES, default='medium')
+    snapshot_version = models.CharField(max_length=255)
+    insight_data = models.JSONField(default=dict, blank=True)
+    model_name = models.CharField(max_length=100, blank=True, null=True)
+    generated_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'competitive_insights'
+        ordering = ['-generated_at']
+        indexes = [
+            models.Index(fields=['domain', '-generated_at']),
+            models.Index(fields=['domain', 'snapshot_version']),
+            models.Index(fields=['impact']),
+        ]
+        unique_together = [('domain', 'snapshot_version', 'title')]
+
+    def __str__(self):
+        return f"{self.domain.name} insight: {self.title}"
 

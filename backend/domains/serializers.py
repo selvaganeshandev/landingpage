@@ -12,7 +12,8 @@ class DomainSerializer(serializers.ModelSerializer):
             'id', 'name', 'url', 'organisation', 'organisation_name',
             'total_mentions', 'total_citations', 'visibility_score', 
             'average_position', 'active_alerts', 'sentiment_category', 
-            'sentiment_score', 'created_at', 'modified_at'
+            'sentiment_score', 'processing_status', 'track_message', 'tracked_at',
+            'created_at', 'modified_at'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
 

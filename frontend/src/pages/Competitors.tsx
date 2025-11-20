@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { CompetitorHeatmap } from "@/components/CompetitorHeatmap";
 import { useToast } from "@/hooks/use-toast";
 import { useContentGeneration } from "@/hooks/useContentGeneration";
 import { AddCompetitorDialog } from "@/components/AddCompetitorDialog";
+import { PageLoader } from "@/components/PageLoader";
 import {
   Select,
   SelectContent,
@@ -18,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
+import { 
   Plus,
   TrendingUp,
   TrendingDown,
@@ -28,7 +29,8 @@ import {
   MessageSquare,
   AlertCircle,
   Search,
-  Sparkles
+  Sparkles,
+  Loader2
 } from "lucide-react";
 import { 
   RadarChart,
@@ -46,8 +48,11 @@ import {
   Tooltip, 
   ResponsiveContainer,
   Legend,
-  Cell
+  Cell,
+  TooltipProps,
 } from "recharts";
+import type { LegendProps } from "recharts";
+import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
@@ -55,30 +60,288 @@ import { useDomainStore } from "@/stores/domainStore";
 
 // Static data constants removed - all data now comes from APIs
 
+type VisibilityLegendProps = LegendProps & {
+  disabledBrands: string[];
+  onToggle: (brand: string) => void;
+};
+
+const VisibilityLegend = ({ payload, disabledBrands, onToggle }: VisibilityLegendProps) => {
+  if (!payload || !payload.length) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-3 mt-4 px-4">
+      {payload.map((entry) => {
+        const brand = String(entry.value);
+        const active = !disabledBrands.includes(brand);
+        return (
+          <button
+            key={brand}
+            type="button"
+            onClick={() => onToggle(brand)}
+            className={`flex items-center gap-2 rounded-full px-3 py-1 transition border text-xs ${
+              active ? 'border-primary/60 bg-primary/5 text-foreground' : 'border-border text-muted-foreground'
+            }`}
+          >
+            <span
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: entry.color, opacity: active ? 1 : 0.35 }}
+            />
+            <span className="font-medium">{brand}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
+type VisibilityTooltipProps = TooltipProps<ValueType, NameType> & {
+  disabledBrands: string[];
+};
+
+const VisibilityTooltip = ({ active, label, payload, disabledBrands }: VisibilityTooltipProps) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const filtered = payload.filter((entry) => !disabledBrands.includes(String(entry.name)));
+  if (!filtered.length) return null;
+  const yourBrandEntry = filtered.find((entry) => String(entry.name).toLowerCase() === 'your brand');
+  const competitorEntries = filtered.filter((entry) => entry !== yourBrandEntry);
+  return (
+    <div className="rounded-xl border border-border bg-card px-3 py-2 shadow-lg">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">{label}</p>
+      <div className="space-y-1.5">
+        {yourBrandEntry && (
+          <div className="pb-2 border-b border-border/50">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: yourBrandEntry.color }} />
+              <span className="font-semibold">{yourBrandEntry.name}</span>
+              <span className="text-muted-foreground">{yourBrandEntry.value} mentions</span>
+            </div>
+          </div>
+        )}
+        {competitorEntries.map((entry) => (
+          <div key={`${entry.name}-${entry.color}`} className="flex items-center gap-2 text-sm">
+            <span
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: entry.color }}
+            />
+            <span className="font-medium">{entry.name}</span>
+            <span className="text-muted-foreground">{entry.value} mentions</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const Competitors = () => {
   const navigate = useNavigate();
-  const [timePeriod, setTimePeriod] = useState("90");
+  const [timePeriod, setTimePeriod] = useState("7");
   const [selectedTab, setSelectedTab] = useState("overview");
+  const [selectedLLM, setSelectedLLM] = useState("all");
   const { toast } = useToast();
   const { navigateToContentGeneration } = useContentGeneration();
   const [addCompetitorDialogOpen, setAddCompetitorDialogOpen] = useState(false);
   const { user } = useAuth();
-  const { selectedDomain } = useDomainStore();
+  const { selectedDomain, loadDomains } = useDomainStore();
   const [domainId, setDomainId] = useState<string | null>(null);
+  const [loadedDomainId, setLoadedDomainId] = useState<string | null>(null);
   const [competitors, setCompetitors] = useState<any[]>([]);
   const [sovLatest, setSovLatest] = useState<any>(null);
   const [sovSeries, setSovSeries] = useState<any[]>([]);
   const [platformMap, setPlatformMap] = useState<Record<string, Array<{ brand: string; mentions: number }>>>({});
   const [heatmap, setHeatmap] = useState<any[]>([]);
+  const [heatmapPlatforms, setHeatmapPlatforms] = useState<string[]>([]);
   const [topBrands, setTopBrands] = useState<any[]>([]);
-  const [promptCards, setPromptCards] = useState<any[]>([]);
+  const [promptRows, setPromptRows] = useState<any[]>([]);
+  const [promptCompetitorFilter, setPromptCompetitorFilter] = useState<string>("all");
   const [competitiveMetrics, setCompetitiveMetrics] = useState<any[]>([]);
   const [competitiveInsights, setCompetitiveInsights] = useState<any[]>([]);
   const [answerGapData, setAnswerGapData] = useState<any[]>([]);
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
-  const [promptsDisplayLimit, setPromptsDisplayLimit] = useState(10); // Load more state for prompts
-  const [promptPlatformFilter, setPromptPlatformFilter] = useState<string>("all"); // Platform filter for prompts
-  const [availablePromptPlatforms, setAvailablePromptPlatforms] = useState<string[]>([]); // Available platforms for filter
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [hasLoadedData, setHasLoadedData] = useState(false);
+  const [disabledBrands, setDisabledBrands] = useState<string[]>([]);
+  const [isStartingAnalysis, setIsStartingAnalysis] = useState(false);
+  const [strengthDisabledBrands, setStrengthDisabledBrands] = useState<string[]>([]);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const domainProcessingStatus = selectedDomain?.processing_status || null;
+  const isDomainProcessing = Boolean(selectedDomain && domainProcessingStatus && domainProcessingStatus !== 'COMP');
+
+  // Poll for status updates every 10 seconds when domain is processing
+  useEffect(() => {
+    if (!isDomainProcessing) return;
+
+    const interval = setInterval(() => {
+      loadDomains(); // Refresh domain status from server
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [isDomainProcessing, loadDomains]);
+
+  const promptCards = useMemo(() => {
+    if (!promptRows.length) return [];
+
+    const windowDays = Number(timePeriod) || 7;
+    const windowMs = windowDays * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const platformFilter = selectedLLM?.toLowerCase() || 'all';
+    const competitorFilter = promptCompetitorFilter;
+
+    const filteredRows = promptRows.filter((row) => {
+      if (!row.mentionCount || row.mentionCount <= 0) return false;
+      if (competitorFilter !== 'all' && String(row.competitorId) !== competitorFilter) return false;
+      if (platformFilter !== 'all' && (row.platform || '').toLowerCase() !== platformFilter) return false;
+      if (row.trackedAt) {
+        const rowTime = new Date(row.trackedAt).getTime();
+        if (!Number.isNaN(rowTime) && windowMs > 0 && now - rowTime > windowMs) return false;
+      }
+      return true;
+    });
+
+    if (!filteredRows.length) {
+      return [];
+    }
+
+    type PromptAggregate = {
+      prompt: string;
+      brandCounts: Record<string, number>;
+      total: number;
+      platformCounts: Record<string, number>;
+      citationTotal: number;
+    };
+
+    const brandTotals = new Map<string, number>();
+    const promptMap = new Map<string, PromptAggregate>();
+
+    filteredRows.forEach((row) => {
+      const brandName = row.competitorName || 'Unknown';
+      brandTotals.set(brandName, (brandTotals.get(brandName) || 0) + row.mentionCount);
+
+      const key = row.promptText;
+      const aggregate =
+        promptMap.get(key) ||
+        {
+          prompt: row.promptText,
+          brandCounts: {},
+          total: 0,
+          platformCounts: {},
+          citationTotal: 0,
+        };
+
+      aggregate.brandCounts[brandName] = (aggregate.brandCounts[brandName] || 0) + row.mentionCount;
+      aggregate.total += row.mentionCount;
+      aggregate.platformCounts[row.platform] = (aggregate.platformCounts[row.platform] || 0) + row.mentionCount;
+      aggregate.citationTotal += row.citationCount || 0;
+
+      promptMap.set(key, aggregate);
+    });
+
+    if (!promptMap.size) return [];
+
+    const sortedBrandNames = Array.from(brandTotals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name]) => name);
+
+    const fallbackBrands = competitors.map((c) => c.name);
+    const brandPriority = sortedBrandNames.length ? sortedBrandNames : fallbackBrands;
+    const baseBrands = brandPriority.slice(0, Math.min(3, brandPriority.length || 3));
+    const brandsToDisplay = baseBrands.length ? baseBrands : fallbackBrands.slice(0, 3);
+
+    const cards = Array.from(promptMap.values())
+      .sort((a, b) => b.total - a.total)
+      .map((aggregate, idx) => {
+        const winnerEntry = Object.entries(aggregate.brandCounts).sort((a, b) => b[1] - a[1])[0];
+        const winner = winnerEntry ? winnerEntry[0] : 'N/A';
+
+        const topPlatformEntry = Object.entries(aggregate.platformCounts).sort((a, b) => b[1] - a[1])[0];
+        const topPlatform = topPlatformEntry ? `${topPlatformEntry[0]} (${topPlatformEntry[1]} mentions)` : null;
+
+        return {
+          id: idx + 1,
+          prompt: aggregate.prompt,
+          brands: brandsToDisplay,
+          counts: brandsToDisplay.map((brand) => aggregate.brandCounts[brand] || 0),
+          total: aggregate.total,
+          winner,
+          topPlatform,
+          citationTotal: aggregate.citationTotal,
+        };
+      });
+
+    return cards;
+  }, [promptRows, promptCompetitorFilter, selectedLLM, timePeriod, competitors]);
+
+  const sortHeatmapRows = (rows: any[], platformKeys: string[]) => {
+    if (!Array.isArray(rows) || rows.length === 0) return rows;
+    return [...rows].sort((a, b) => {
+      if (a.isYou && !b.isYou) return -1;
+      if (!a.isYou && b.isYou) return 1;
+      const sumPlatforms = (row: any) =>
+        platformKeys.reduce((acc, plat) => acc + Number(row.platforms?.[plat] ?? 0), 0);
+      return sumPlatforms(b) - sumPlatforms(a);
+    });
+  };
+
+  const handleStartAnalysis = async () => {
+    if (!domainId) {
+      toast({
+        title: "Error",
+        description: "No domain selected. Please select a domain first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsStartingAnalysis(true);
+
+    try {
+      const response = await apiClient.startCompetitorAnalysis(parseInt(domainId, 10));
+
+      if (response.success) {
+        toast({
+          title: "Competitor Analysis Started",
+          description: `Successfully extracted ${response.created_count} competitors. Analytics will begin shortly.`,
+        });
+
+        // Update competitors list from response
+        if (response.competitors && Array.isArray(response.competitors)) {
+          const mapped = response.competitors.map((c: any) => {
+            const rawSentiment = Number(c.sentiment_score || 0);
+            const totalMentions = Number(c.total_mentions || 0);
+            let sentimentPercent = 0;
+            if (rawSentiment === -1 || (rawSentiment === 0 && totalMentions === 0)) {
+              sentimentPercent = 0;
+            } else {
+              sentimentPercent = Math.round((rawSentiment + 1) * 50);
+            }
+
+            return {
+              id: c.id,
+              name: c.name || 'Unknown',
+              url: c.url || '',
+              mentions: c.total_mentions || 0,
+              visibility: Number(c.visibility_score || 0),
+              sentiment: sentimentPercent,
+              avgPosition: Number(c.average_position || 0),
+              shareOfVoice: Number(c.share_of_voice_percentage || 0),
+              trend: Number(c.trend_percentage || 0),
+              isYou: false,
+            };
+          });
+          setCompetitors(mapped);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to start competitor analysis');
+      }
+    } catch (error: any) {
+      console.error('Failed to start competitor analysis:', error);
+      toast({
+        title: "Failed to Start Analysis",
+        description: error?.message || "An error occurred while starting competitor analysis. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsStartingAnalysis(false);
+    }
+  };
 
   const handleExportReport = () => {
     toast({
@@ -86,15 +349,31 @@ const Competitors = () => {
       description: "Your competitor analysis report is being generated...",
     });
   };
-  
+
   // Sync domainId from selectedDomain (Zustand store) or server when domain changes
   useEffect(() => {
     if (!user) return;
-    
+
     // Priority 1: Use selectedDomain from Zustand store (most up-to-date when user changes domain)
     if (selectedDomain?.id) {
       const newDomainId = String(selectedDomain.id);
       if (newDomainId !== domainId) {
+        // Clear all state when domain changes to prevent flash of old data
+        setCompetitors([]);
+        setSovLatest(null);
+        setSovSeries([]);
+        setPlatformMap({});
+        setHeatmap([]);
+        setHeatmapPlatforms([]);
+        setTopBrands([]);
+        setPromptRows([]);
+        setCompetitiveMetrics([]);
+        setCompetitiveInsights([]);
+        setAnswerGapData([]);
+        setHasLoadedData(false);
+        setIsPageLoading(true);
+        setLoadedDomainId(null); // Clear loaded domain ID to indicate we haven't loaded this domain yet
+
         setDomainId(newDomainId);
         return;
       }
@@ -110,100 +389,102 @@ const Competitors = () => {
   }, [user, selectedDomain?.id, domainId]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    if (loadAbortRef.current) {
+      loadAbortRef.current.abort();
+    }
+    loadAbortRef.current = controller;
+    let didAbort = false;
+
     const load = async () => {
-      if (!domainId) return;
-      try {
-        // Load main competitor data first - use backend API which includes "You"
-        const [list, latest, byDomain, compPromptAnalytics] = await Promise.all([
-          apiClient.get(`/competitors/competitors/by_domain/?domain_id=${domainId}`),
-          apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }),
-          apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }),
-          apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId }),
-        ] as any);
+      if (!domainId) {
+        setHasLoadedData(false);
+        setIsPageLoading(true);
+        return;
+      }
 
-        // Load competitive analysis APIs separately with better error handling
-        setIsLoadingAnalysis(true);
-        let strengthAnalysis: any = undefined;
-        let insights: any = undefined;
-        let gaps: any = undefined;
-
-        try {
-          console.log('🔵 API CALL: Loading competitive strength analysis for domain:', domainId);
-          const url = `/competitors/competitive-strength-analysis?domain_id=${domainId}`;
-          console.log('🔵 API URL:', url);
-          strengthAnalysis = await apiClient.getCompetitiveStrengthAnalysis({ domain_id: domainId });
-          console.log('✅ Competitive strength analysis response:', strengthAnalysis);
-          console.log('✅ Response type:', typeof strengthAnalysis, 'Is array:', Array.isArray(strengthAnalysis));
-          // If API returns empty array, that's valid - we'll show empty state
-          if (Array.isArray(strengthAnalysis) && strengthAnalysis.length === 0) {
-            console.log('ℹ️ API returned empty array - will show empty state');
-          }
-        } catch (e: any) {
-          console.error('❌ Failed to load competitive strength analysis:', e);
-          console.error('❌ Error message:', e?.message);
-          console.error('❌ Error stack:', e?.stack);
-          // Don't set to empty array - leave as undefined to indicate API call failed
-          strengthAnalysis = undefined;
-        }
-
-        try {
-          console.log('🔵 API CALL: Loading competitive insights for domain:', domainId);
-          const url = `/competitors/competitive-insights?domain_id=${domainId}`;
-          console.log('🔵 API URL:', url);
-          insights = await apiClient.getCompetitiveInsights({ domain_id: domainId });
-          console.log('✅ Competitive insights response:', insights);
-          console.log('✅ Response type:', typeof insights, 'Is array:', Array.isArray(insights));
-          // If API returns empty array, that's valid - we'll show empty state
-          if (Array.isArray(insights) && insights.length === 0) {
-            console.log('ℹ️ API returned empty array - will show empty state');
-          }
-        } catch (e: any) {
-          console.error('❌ Failed to load competitive insights:', e);
-          console.error('❌ Error message:', e?.message);
-          console.error('❌ Error stack:', e?.stack);
-          // Don't set to empty array - leave as undefined to indicate API call failed
-          insights = undefined;
-        }
-
-        try {
-          console.log('🔵 API CALL: Loading answer gap analysis for domain:', domainId);
-          const url = `/competitors/answer-gap-analysis?domain_id=${domainId}`;
-          console.log('🔵 API URL:', url);
-          gaps = await apiClient.getAnswerGapAnalysis({ domain_id: domainId });
-          console.log('✅ Answer gap analysis response:', gaps);
-          console.log('✅ Response type:', typeof gaps, 'Is array:', Array.isArray(gaps));
-          // If API returns empty array, that's valid - we'll show empty state
-          if (Array.isArray(gaps) && gaps.length === 0) {
-            console.log('ℹ️ API returned empty array - will show empty state');
-          }
-        } catch (e: any) {
-          console.error('❌ Failed to load answer gap analysis:', e);
-          console.error('❌ Error message:', e?.message);
-          console.error('❌ Error stack:', e?.stack);
-          // Don't set to empty array - leave as undefined to indicate API call failed
-          gaps = undefined;
-        }
-        
+      if (domainProcessingStatus && domainProcessingStatus !== 'COMP') {
+        setHasLoadedData(true);
+        setLoadedDomainId(domainId);
+        setIsPageLoading(false);
         setIsLoadingAnalysis(false);
+        setCompetitors([]);
+        setTopBrands([]);
+        setPromptRows([]);
+        setPlatformMap({});
+        setSovSeries([]);
+        setHeatmap([]);
+        setHeatmapPlatforms([]);
+        setAnswerGapData([]);
+        return;
+      }
+      setHasLoadedData(false);
+      setIsPageLoading(true);
 
-        // Color array for different competitors
-        const competitorColors = [
-          'hsl(var(--primary))',
-          'hsl(var(--chart-2))',
-          'hsl(var(--chart-3))',
-          'hsl(var(--chart-4))',
-          'hsl(var(--chart-5))',
-          'hsl(var(--success))',
-          'hsl(var(--warning))',
-          'hsl(var(--destructive))',
-        ];
-        
-        // Normalize competitor list - now includes "You" as first item
+      const startTime = performance.now();
+      console.log('⏱️ Starting Competitors page load...');
+
+      try {
+        // Load main competitor data first (in parallel)
+        const batchStartTime = performance.now();
+        const platformParam = selectedLLM !== 'all' ? selectedLLM : undefined;
+        const [list, latest, byDomain, compPromptAnalytics, snapshotHistory, heatmapResponse] = await Promise.all([
+          apiClient.getEngineCompetitors({ domain_id: domainId, platform: platformParam }, { signal: controller.signal }),
+          apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }, { signal: controller.signal }),
+          apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }, { signal: controller.signal }),
+          apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId }, { signal: controller.signal }),
+          apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
+          apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
+        ] as any);
+        console.log(`⏱️ Main data loaded in ${((performance.now() - batchStartTime) / 1000).toFixed(2)}s`);
+
+        // Load competitive analysis APIs IN PARALLEL with better error handling
+        setIsLoadingAnalysis(true);
+        const analysisStartTime = performance.now();
+
+        const [strengthAnalysis, insights, gaps] = await Promise.all([
+          apiClient.getCompetitiveStrengthAnalysis({
+            domain_id: domainId,
+            platform: selectedLLM !== 'all' ? selectedLLM : undefined
+          }, { signal: controller.signal }).catch((e: any) => {
+            console.error('❌ Failed to load competitive strength analysis:', e?.message);
+            return undefined;
+          }),
+
+          apiClient.getCompetitiveInsights({
+            domain_id: domainId,
+            platform: selectedLLM !== 'all' ? selectedLLM : undefined
+          }, { signal: controller.signal }).catch((e: any) => {
+            console.error('❌ Failed to load competitive insights:', e?.message);
+            return undefined;
+          }),
+
+          apiClient.getAnswerGapAnalysis({
+            domain_id: domainId,
+            competitor_id: promptCompetitorFilter !== 'all' ? promptCompetitorFilter : undefined,
+            platform: selectedLLM !== 'all' ? selectedLLM : undefined
+          }, { signal: controller.signal }).catch((e: any) => {
+            console.error('❌ Failed to load answer gap analysis:', e?.message);
+            return undefined;
+          }),
+        ]);
+
+        console.log(`⏱️ AI analysis loaded in ${((performance.now() - analysisStartTime) / 1000).toFixed(2)}s (parallel)`);
+        setHasLoadedData(true);
+        setLoadedDomainId(domainId); // Mark this domain as loaded
+        // Normalize competitor list
         const mapped = (Array.isArray(list) ? list : list?.results || []).map((c: any, idx: number) => {
           // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
           // Formula: (sentiment + 1) * 50 to normalize -1..1 to 0..100
+          // Special case: -1 (no data) or 0 with no mentions should show 0%
           const rawSentiment = Number(c.sentiment_score || 0);
-          const sentimentPercent = Math.round((rawSentiment + 1) * 50);
+          const totalMentions = Number(c.total_mentions || 0);
+          let sentimentPercent = 0;
+          if (rawSentiment === -1 || (rawSentiment === 0 && totalMentions === 0)) {
+            sentimentPercent = 0; // No data or unmentioned
+          } else {
+            sentimentPercent = Math.round((rawSentiment + 1) * 50);
+          }
           
           const isYou = c.is_you === true || c.name === 'You';
           
@@ -219,9 +500,10 @@ const Competitors = () => {
             domainName: c.domain_name || c.name || 'Unknown', // Domain name for "You"
             url: c.url || (c.domain_name || '').toLowerCase(),
             mentions: c.total_mentions || 0,
+            citations: c.total_citations || 0,
             visibility: Math.round(Number(c.visibility_score || 0)),
             sentiment: sentimentPercent,
-            avgPosition: Number(c.average_position || 0).toFixed ? Number(c.average_position).toFixed(1) : (c.average_position || 0),
+            averagePosition: Number(c.average_position || 0),
             shareOfVoice: Math.round(Number(c.share_of_voice_percentage || 0)),
             trend: Number(c.trend_percentage || 0),
             color: competitorColors[idx % competitorColors.length], // Different color for each competitor
@@ -232,40 +514,66 @@ const Competitors = () => {
 
         setSovLatest(latest);
 
-        // Build mention history series from SoV by_domain (use mention_count)
-        // API now returns unified list with "You" first
+        // Prepare Share of Voice rows for fallback/platform data
         const rows = Array.isArray(byDomain) ? byDomain : byDomain?.results || [];
-        const grouped: Record<string, Record<string, number>> = {};
+        const groupedRows: Record<string, Record<string, number>> = {};
         rows.forEach((r: any) => {
           const month = r.timestamp || r.date || '';
-          if (!grouped[month]) grouped[month] = {};
-          // Format brand name: "Brand Name (You)" for your brand
-          let brand = r.brand_name || r.competitor?.name || (r.is_you ? 'You' : 'Your Brand');
-          if (r.is_you && r.domain_name) {
-            brand = `${r.domain_name} (You)`;
-          } else if (r.is_you && !r.competitor) {
-            // Try to get domain name from the first mapped competitor if available
-            const youCompetitor = mapped.find(c => c.isYou);
-            if (youCompetitor?.domainName) {
-              brand = `${youCompetitor.domainName} (You)`;
-            }
-          }
-          grouped[month][brand] = (grouped[month][brand] || 0) + (Number(r.mention_count || 0));
+          if (!groupedRows[month]) groupedRows[month] = {};
+          const brand = r.competitor?.name || 'Your Brand';
+          groupedRows[month][brand] = (groupedRows[month][brand] || 0) + (Number(r.mention_count || 0));
         });
-        const months = Object.keys(grouped).sort();
-        const brands = new Set<string>();
-        Object.values(grouped).forEach(m => Object.keys(m).forEach(b => brands.add(b)));
-        const brandArray = Array.from(brands);
-        
-        // Build series dynamically based on actual brands
-        const series = months.map(m => {
-          const entry: any = { month: m };
-          brandArray.forEach(brand => {
-            entry[brand] = grouped[m][brand] || 0;
+        const months = Object.keys(groupedRows).sort();
+        const fallbackBrandSet = new Set<string>();
+        Object.values(groupedRows).forEach(m => Object.keys(m).forEach(b => fallbackBrandSet.add(b)));
+        const fallbackBrands = Array.from(fallbackBrandSet);
+
+        // Build mention history series from snapshots if available
+        const snapshotRows = Array.isArray(snapshotHistory) ? snapshotHistory : snapshotHistory?.results || [];
+        const apiHeatmapRows = Array.isArray(heatmapResponse?.rows) ? heatmapResponse.rows : [];
+        const apiHeatmapPlatforms = Array.isArray(heatmapResponse?.platforms) ? heatmapResponse.platforms : [];
+        const yourBrandLabel = 'Your Brand';
+        if (snapshotRows.length > 0) {
+          const groupedSnapshots: Record<string, Record<string, number>> = {};
+          const brandNames = new Set<string>();
+          snapshotRows.forEach((snap: any) => {
+            const timestamp = snap.timestamp || snap.created_at || '';
+            const label = timestamp ? new Date(timestamp).toISOString().split('T')[0] : `Snapshot ${snap.id}`;
+            const brand = snap.competitor_name || snap.competitor?.name || 'Unknown';
+            brandNames.add(brand);
+            if (!groupedSnapshots[label]) groupedSnapshots[label] = {};
+            groupedSnapshots[label][brand] = Number(snap.total_mentions || 0);
           });
-          return entry;
-        });
-        setSovSeries(series);
+          const sortedLabels = Object.keys(groupedSnapshots).sort();
+          const brands = Array.from(brandNames);
+          let series = sortedLabels.map((label) => {
+            const entry: Record<string, number | string> = { month: label };
+            brands.forEach((brand) => {
+              entry[brand] = groupedSnapshots[label]?.[brand] || 0;
+            });
+            return entry;
+          });
+          let effectiveBrands = [...brands];
+          if (!brands.includes(yourBrandLabel) && fallbackBrands.includes(yourBrandLabel)) {
+            series = series.map((entry) => ({
+              ...entry,
+              [yourBrandLabel]: groupedRows[String(entry.month)]?.[yourBrandLabel] || 0,
+            }));
+            effectiveBrands.push(yourBrandLabel);
+          }
+          setSovSeries(series);
+          setDisabledBrands((prev) => prev.filter((brand) => effectiveBrands.includes(brand)));
+        } else {
+          const fallbackSeries = months.map(m => {
+            const entry: any = { month: m };
+            fallbackBrands.forEach(brand => {
+              entry[brand] = groupedRows[m]?.[brand] || 0;
+            });
+            return entry;
+          });
+          setSovSeries(fallbackSeries);
+          setDisabledBrands((prev) => prev.filter((brand) => fallbackBrands.includes(brand)));
+        }
 
         // Platform-specific share for latest month using byDomain rows
         const lastDate = months[months.length - 1];
@@ -295,22 +603,51 @@ const Competitors = () => {
         });
         setPlatformMap(platOut);
 
+        // Map brand names to URLs for favicon usage
+        const competitorUrlMap: Record<string, string> = {};
+        mapped.forEach((comp: any) => {
+          if (comp.name && comp.url) {
+            competitorUrlMap[comp.name] = comp.url;
+          }
+        });
+        if (selectedDomain?.name && selectedDomain?.url) {
+          competitorUrlMap[selectedDomain.name] = selectedDomain.url;
+        }
+        competitorUrlMap[yourBrandLabel] = selectedDomain?.url || competitorUrlMap[yourBrandLabel] || '';
+
         // Heatmap: competitor (row) vs platform percentage
-        const platforms = Object.keys(platOut);
+        const fallbackPlatforms = Object.keys(platOut);
         const brandsSet = new Set<string>();
         Object.values(platOut).forEach(arr => arr.forEach(e => brandsSet.add(e.brand)));
-        const brandsArr = Array.from(brandsSet);
-        const heatArr = brandsArr.map(brand => ({
+        const brands = Array.from(brandsSet);
+        const fallbackHeatmap = brands.map((brand) => ({
           competitor: brand,
-          platforms: platforms.reduce((acc: any, p) => {
+          platforms: fallbackPlatforms.reduce((acc: any, p) => {
             const total = (platOut[p] || []).reduce((s, e) => s + e.mentions, 0) || 1;
-            const item = (platOut[p] || []).find(e => e.brand === brand);
+            const item = (platOut[p] || []).find((entry) => entry.brand === brand);
             acc[p] = item ? Number(((item.mentions / total) * 100).toFixed(1)) : 0;
             return acc;
           }, {}),
-          isYou: brand.includes('(You)') || brand.toLowerCase().includes('(you)')
+          isYou: brand.toLowerCase().includes('your'),
+          url: competitorUrlMap[brand] || '',
         }));
-        setHeatmap(heatArr);
+
+        if (apiHeatmapRows.length && apiHeatmapPlatforms.length) {
+          const formattedHeatmap = apiHeatmapRows.map((row: any) => ({
+            competitor: row.name,
+            platforms: apiHeatmapPlatforms.reduce((acc: any, platform: string) => {
+              acc[platform] = Number(row.platforms?.[platform] ?? 0);
+              return acc;
+            }, {}),
+            isYou: Boolean(row.isYou),
+            url: row.url || competitorUrlMap[row.name] || (row.isYou ? competitorUrlMap[yourBrandLabel] : ''),
+          }));
+          setHeatmap(sortHeatmapRows(formattedHeatmap, apiHeatmapPlatforms));
+          setHeatmapPlatforms(apiHeatmapPlatforms);
+        } else {
+          setHeatmap(sortHeatmapRows(fallbackHeatmap, fallbackPlatforms));
+          setHeatmapPlatforms(fallbackPlatforms);
+        }
 
         // Top brands list - use mapped competitors which already has correct data and formatting
         // This data comes from the backend API and includes all necessary metrics
@@ -349,188 +686,20 @@ const Competitors = () => {
           brandNameMap.set(c.domainName || c.name, c.name);
         });
 
-        // Handle different API response formats
-        let compPromptRows: any[] = [];
-        if (Array.isArray(compPromptAnalytics)) {
-          compPromptRows = compPromptAnalytics;
-        } else if (compPromptAnalytics?.results && Array.isArray(compPromptAnalytics.results)) {
-          compPromptRows = compPromptAnalytics.results;
-        } else if (compPromptAnalytics?.data && Array.isArray(compPromptAnalytics.data)) {
-          compPromptRows = compPromptAnalytics.data;
-        }
-        
-        // First, collect ALL unique prompts from the data (before any filtering)
-        // This ensures we show all prompts, not just those with data for top 3 brands
-        const allUniquePrompts = new Set<string>();
-        compPromptRows.forEach((row: any) => {
-          const promptText = row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`;
-          if (promptText && promptText !== 'Prompt #') {
-            allUniquePrompts.add(promptText);
-          }
-        });
-        
-        // Filter by platform if selected (before processing)
-        let filteredRows = compPromptRows;
-        if (promptPlatformFilter && promptPlatformFilter !== "all") {
-          filteredRows = compPromptRows.filter((row: any) => {
-            const rowPlatform = (row?.platform || '').toLowerCase();
-            const filterPlatform = promptPlatformFilter.toLowerCase();
-            return rowPlatform === filterPlatform;
-          });
-          
-          // Also collect prompts from filtered rows to ensure we have all prompts for the selected platform
-          filteredRows.forEach((row: any) => {
-            const promptText = row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`;
-            if (promptText && promptText !== 'Prompt #') {
-              allUniquePrompts.add(promptText);
-            }
-          });
-        }
-        
-        console.log('📊 Prompt Analytics Data:', {
-          totalRows: compPromptRows.length,
-          filteredRows: filteredRows.length,
-          platformFilter: promptPlatformFilter,
-          totalUniquePrompts: allUniquePrompts.size,
-          displayBrands: displayBrands.map((b: any) => ({ name: b.name, originalName: b.originalName, id: b.id })),
-          sampleRow: filteredRows[0],
-        });
-        
-        // Initialize pmap with ALL unique prompts and all display brands set to 0
-        const pmap: Record<string, { counts: Record<string, number>; total: number; brandColors: Record<string, string> }> = {};
-        allUniquePrompts.forEach((promptText) => {
-          pmap[promptText] = { counts: {}, total: 0, brandColors: {} };
-          displayBrands.forEach((b: any) => {
-            pmap[promptText].counts[b.name] = 0;
-            pmap[promptText].brandColors[b.name] = b.color;
-          });
-        });
-        
-        // Now process the actual data (only for top 3 brands, but all prompts are already initialized)
-        filteredRows.forEach((row: any) => {
-          const promptText = row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`;
-          if (!promptText) return;
-          
-          // Get the brand name - try multiple ways to match
-          let brand = '';
-          // Try different ways to get competitor info from API response
-          const competitorName = row?.competitor?.name || row?.competitor_name || '';
-          const competitorId = row?.competitor?.id || row?.competitor || row?.competitor_id;
-          
-          // Try to find matching brand in displayBrands
-          let matchingBrand = null;
-          
-          // Match by ID first (most reliable)
-          if (competitorId) {
-            matchingBrand = displayBrands.find((b: any) => b.id === competitorId || b.id === String(competitorId));
-          }
-          
-          // If no ID match, try name matching
-          if (!matchingBrand && competitorName) {
-            // Match by original name, display name, or domain name (case-insensitive)
-            const normalizedCompetitorName = competitorName.toLowerCase().trim();
-            matchingBrand = displayBrands.find((b: any) => {
-              const normalizedOriginal = (b.originalName || '').toLowerCase().trim();
-              const normalizedDisplay = (b.name || '').toLowerCase().trim();
-              const normalizedDomain = (b.domainName || '').toLowerCase().trim();
-              
-              return normalizedOriginal === normalizedCompetitorName ||
-                     normalizedDisplay === normalizedCompetitorName ||
-                     normalizedDomain === normalizedCompetitorName ||
-                     normalizedDisplay.includes(normalizedCompetitorName) ||
-                     normalizedCompetitorName.includes(normalizedDisplay);
-            });
-          }
-          
-          if (matchingBrand) {
-            brand = matchingBrand.name;
-          } else {
-            // If no match found, skip this row (not in top 3)
-            console.log('⚠️ Skipping row - no matching brand:', {
-              competitorName,
-              competitorId,
-              availableBrands: displayBrands.map((b: any) => ({ id: b.id, name: b.name, originalName: b.originalName })),
-            });
-            return;
-          }
-          
-          // Only process if brand is in displayBrands
-          if (!displayBrands.some((b: any) => b.name === brand)) {
-            return;
-          }
-          
-          const count = Number(row?.mention_count || row?.total_mentions || (row?.is_mentioned ? 1 : 0));
-          if (!pmap[promptText]) {
-            pmap[promptText] = { counts: {}, total: 0, brandColors: {} };
-            displayBrands.forEach((b: any) => {
-              pmap[promptText].counts[b.name] = 0;
-              pmap[promptText].brandColors[b.name] = b.color;
-            });
-          }
-          
-          pmap[promptText].counts[brand] = (pmap[promptText].counts[brand] || 0) + count;
-          pmap[promptText].total += count;
-        });
-        
-        // Create cards - show ALL prompts (even if some brands have 0 mentions)
-        const cards = Object.entries(pmap)
-          .sort((a, b) => b[1].total - a[1].total)
-          .map(([promptText, v], idx) => {
-          const countsForDisplay = displayBrands.map((b: any) => v.counts[b.name] || 0);
-          
-          // Find winner - brand with highest mentions (only if there are mentions)
-          let winnerIdx = -1;
-          if (v.total > 0) {
-            winnerIdx = countsForDisplay.reduce((mi, val, i, arr) => {
-              // Only consider brands with actual mentions
-              if (val > 0 && (arr[mi] === 0 || val > arr[mi])) {
-                return i;
-              }
-              return mi;
-            }, 0);
-            // Verify the winner actually has mentions
-            if (countsForDisplay[winnerIdx] === 0) {
-              winnerIdx = -1;
-            }
-          }
-          
-          return {
-            id: idx + 1,
-            prompt: promptText,
-            brands: displayBrands.map((b: any) => b.name),
-            counts: countsForDisplay,
-            colors: displayBrands.map((b: any) => b.color),
-            total: v.total,
-            winner: winnerIdx >= 0 ? displayBrands[winnerIdx]?.name : null,
-          };
-        });
-        
-        // Get available platforms for the filter dropdown
-        const platformsSet = new Set<string>();
-        compPromptRows.forEach((row: any) => {
-          if (row?.platform) {
-            platformsSet.add(row.platform);
-          }
-        });
-        const availablePlatforms = Array.from(platformsSet).sort();
-        
-        console.log('📊 Processed Prompt Cards:', {
-          totalCards: cards.length,
-          availablePlatforms: availablePlatforms,
-          platformFilter: promptPlatformFilter,
-          sampleCard: cards[0] ? {
-            prompt: cards[0].prompt,
-            brands: cards[0].brands,
-            counts: cards[0].counts,
-            total: cards[0].total,
-            winner: cards[0].winner,
-          } : null,
-        });
-        
-        if (cards.length) setPromptCards(cards);
-        
-        // Store available platforms in state for the filter dropdown
-        setAvailablePromptPlatforms(availablePlatforms);
+        const compPromptRows = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
+        const normalizedPromptRows = compPromptRows.map((row: any, idx: number) => ({
+          id: row?.id || idx + 1,
+          promptId: row?.prompt || row?.prompt_id || idx + 1,
+          promptText: row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`,
+          competitorId: row?.competitor?.id || null,
+          competitorName: row?.competitor?.name || 'Your Brand',
+          mentionCount: Number(row?.mention_count || (row?.is_mentioned ? 1 : 0)),
+          platform: row?.platform || 'unknown',
+          trackedAt: row?.tracked_at || row?.created_at,
+          sentiment: row?.sentiment_category || 'neutral',
+          citationCount: Array.isArray(row?.citation_list) ? row.citation_list.length : Number(row?.total_citations || 0),
+        }));
+        setPromptRows(normalizedPromptRows);
 
         // Set competitive strength analysis data - ALWAYS use API response (even if empty)
         if (strengthAnalysis !== undefined && strengthAnalysis !== null) {
@@ -577,11 +746,29 @@ const Competitors = () => {
           setAnswerGapData([]);
         }
       } catch (e: any) {
+        if (controller.signal.aborted || didAbort || e?.name === 'AbortError') {
+          console.info('ℹ️ Competitors load aborted');
+          return;
+        }
         toast({ title: 'Failed to load competitors', description: String(e.message || e), variant: 'destructive' });
+        setHasLoadedData(true);
+        setLoadedDomainId(domainId); // Mark as loaded even on error to stop infinite loading
+      } finally {
+        if (!controller.signal.aborted && !didAbort) {
+          const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+          console.log(`✅ Competitors page fully loaded in ${totalTime}s`);
+          setIsPageLoading(false);
+        }
+        setIsLoadingAnalysis(false);
       }
     };
     void load();
-  }, [domainId, timePeriod, promptPlatformFilter]);
+
+    return () => {
+      didAbort = true;
+      controller.abort();
+    };
+  }, [domainId, timePeriod, selectedLLM, promptCompetitorFilter, domainProcessingStatus, toast]);
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
@@ -636,14 +823,15 @@ const Competitors = () => {
           
           const mapped = list.map((c: any, idx: number) => {
             // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
+            // Special case: -1 (no data) or 0 with no mentions should show 0%
             const rawSentiment = Number(c.sentiment_score || 0);
-            const sentimentPercent = Math.round((rawSentiment + 1) * 50);
-            const isYou = c.is_you === true || c.name === 'You';
-            
-            // Format name: "Brand Name (You)" for your brand
-            const displayName = isYou && c.domain_name 
-              ? `${c.domain_name} (You)`
-              : (c.name || 'Unknown');
+            const totalMentions = Number(c.total_mentions || 0);
+            let sentimentPercent = 0;
+            if (rawSentiment === -1 || (rawSentiment === 0 && totalMentions === 0)) {
+              sentimentPercent = 0; // No data or unmentioned
+            } else {
+              sentimentPercent = Math.round((rawSentiment + 1) * 50);
+            }
             
             return {
               id: c.id,
@@ -691,6 +879,194 @@ const Competitors = () => {
 
   const heatmapData = heatmap;
 
+  // Show loading during initial load or when switching domains
+  // Keep showing loader until we've loaded data for the current domain
+  if (isPageLoading || !hasLoadedData || loadedDomainId !== domainId) {
+    return <PageLoader sidebarOpen />;
+  }
+
+  if (isDomainProcessing && selectedDomain) {
+    const processingNote = selectedDomain.track_message || "We're generating prompts and discovering competitors for this brand.";
+    return (
+      <div className="p-8 space-y-6 bg-background animate-fade-in">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold tracking-tight">Competitor Analysis</h1>
+              <p className="text-muted-foreground mt-2">
+                Compare your brand's AI visibility against competitors
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={handleExportReport}>
+                <FileText className="h-4 w-4 mr-2" />
+                Export Report
+              </Button>
+              <Button onClick={handleAddCompetitor} className="gradient-primary shadow-md shadow-primary/20">
+                <Plus className="h-4 w-4 mr-2" />
+                Add Competitor
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <Card className="p-6 border-dashed border-primary/40 bg-card/70">
+          <div className="flex flex-col md:flex-row gap-4 items-start">
+            <div className="p-3 rounded-full bg-primary/10 text-primary">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+            <div className="flex-1 space-y-2">
+              <h3 className="text-lg font-semibold">
+                Setting up competitor tracking for {selectedDomain.name}
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                {processingNote}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                This can take a few minutes while we gather keywords, generate prompts, and auto-discover competitors.
+                We'll kick off competitor analytics automatically once this stage is complete.
+              </p>
+              <div className="flex flex-wrap gap-3 pt-2">
+                <Button variant="outline" size="sm" onClick={() => void loadDomains()}>
+                  Refresh Status
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
+                  Go to Dashboard
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <AddCompetitorDialog
+          open={addCompetitorDialogOpen}
+          onOpenChange={setAddCompetitorDialogOpen}
+          onAdd={handleAddCompetitorSubmit}
+        />
+      </div>
+    );
+  }
+
+  // Show "Start Analysing" state when there are no competitors
+  if (competitors.length === 0 && !isPageLoading && hasLoadedData) {
+    return (
+      <div className="p-8 space-y-6 bg-background animate-fade-in">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold tracking-tight">Competitor Analysis</h1>
+              <p className="text-muted-foreground mt-2">
+                Compare your brand's AI visibility against competitors
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <Card className="p-12 border-0 bg-transparent shadow-none">
+          <div className="flex flex-col items-center text-center space-y-6 max-w-2xl mx-auto">
+            <div className="p-4 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 text-primary">
+              <Target className="h-12 w-12" />
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold">Start analysing your competitors</h2>
+              <p className="text-muted-foreground text-base">
+                Our app can do the complete top 5 competitor analysis
+              </p>
+            </div>
+
+            <p className="text-sm text-muted-foreground max-w-md">
+              We'll automatically discover your top competitors from existing prompt analytics data,
+              extract their mentions across AI platforms, and provide comprehensive competitive insights.
+            </p>
+
+            <Button
+              onClick={handleStartAnalysis}
+              disabled={isStartingAnalysis}
+              size="lg"
+              className="gradient-primary shadow-lg shadow-primary/20 mt-4"
+            >
+              {isStartingAnalysis ? (
+                <>
+                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                  Analysing...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-5 w-5 mr-2" />
+                  Start Analysing
+                </>
+              )}
+            </Button>
+          </div>
+        </Card>
+
+        <AddCompetitorDialog
+          open={addCompetitorDialogOpen}
+          onOpenChange={setAddCompetitorDialogOpen}
+          onAdd={handleAddCompetitorSubmit}
+        />
+      </div>
+    );
+  }
+
+  // Check if all competitor details are showing zero values
+  const allCompetitorsHaveZeroData = competitors.length > 0 && competitors.every(c => 
+    c.mentions === 0 && 
+    c.citations === 0 && 
+    c.visibility === 0 && 
+    c.shareOfVoice === 0 && 
+    c.sentiment === 0
+  );
+
+  // Check if filtering by platform returns no data or only zero values
+  // Also check if all competitors have zero data (even without filter)
+  const hasNoDataForPlatform = (selectedLLM !== 'all' && (
+    (competitors.length === 0 || competitors.every(c => c.mentions === 0 && c.citations === 0)) &&
+    competitiveMetrics.length === 0 &&
+    heatmap.length === 0 &&
+    answerGapData.length === 0
+  )) || allCompetitorsHaveZeroData;
+
+  // Show empty state when filtering by platform returns no data or all competitors have zero data
+  if (hasNoDataForPlatform) {
+    return (
+      <div className="p-8 space-y-6 bg-background animate-fade-in">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-foreground tracking-tight">Competitors</h1>
+            <p className="text-muted-foreground mt-1">
+              Track and analyze competitor performance across AI platforms
+            </p>
+          </div>
+        </div>
+
+        {/* Empty state for filtered platform with no data */}
+        <div className="flex flex-col items-center justify-center py-32 space-y-6">
+          <div className="w-24 h-24 rounded-full bg-muted/30 flex items-center justify-center mb-4">
+            <Search className="h-12 w-12 text-muted-foreground" />
+          </div>
+          <h3 className="text-2xl font-semibold text-foreground">No Data for {selectedLLM !== 'all' ? selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1) : 'Competitors'}</h3>
+          <p className="text-sm text-muted-foreground max-w-md text-center">
+            {selectedLLM !== 'all'
+              ? "There is no competitor data available for the selected LLM platform. This could mean competitors haven't been analyzed on this platform yet, or no mentions were found."
+              : "All competitor details are showing zero values. This could mean competitors haven't been analyzed yet, or no mentions were found."
+            }
+          </p>
+          <div className="flex gap-3 mt-6">
+            <Button
+              onClick={() => setSelectedLLM('all')}
+              className="gradient-primary"
+              size="lg"
+            >
+              Clear Filter & View All LLMs
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
       {/* Header */}
@@ -715,18 +1091,35 @@ const Competitors = () => {
         </div>
 
         <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
-          <TabsList className="bg-muted/50 p-1 border border-border">
-            <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Overview</TabsTrigger>
-            <TabsTrigger value="prompts" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Prompts</TabsTrigger>
-            <TabsTrigger value="competitors" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Competitors</TabsTrigger>
-            <TabsTrigger value="answer-gap" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Answer Gap</TabsTrigger>
-          </TabsList>
+          {competitors.length > 0 && (
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <TabsList className="bg-muted/50 p-1 border border-border">
+                <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Overview</TabsTrigger>
+                <TabsTrigger value="prompts" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Prompts</TabsTrigger>
+                <TabsTrigger value="answer-gap" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Answer Gap</TabsTrigger>
+              </TabsList>
+
+              <div className="flex items-center gap-3">
+                <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
+                <Select value={selectedLLM} onValueChange={setSelectedLLM}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="All LLMs" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All LLMs</SelectItem>
+                    <SelectItem value="chatgpt">ChatGPT</SelectItem>
+                    <SelectItem value="claude">Claude</SelectItem>
+                    <SelectItem value="gemini">Gemini</SelectItem>
+                    <SelectItem value="perplexity">Perplexity</SelectItem>
+                    <SelectItem value="grok">Grok</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
 
           {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-6 mt-6">
-            <div className="flex items-center justify-between">
-              <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
-            </div>
+          <TabsContent value="overview" className="space-y-6 mt-0">
 
             {/* Competitor Cards - Limited to 3 in overview */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -736,18 +1129,9 @@ const Competitors = () => {
                   key={competitor.id}
                   className={`p-6 transition-all duration-300 backdrop-blur-sm bg-card/80 ${
                     competitor.isYou
-                      ? 'border-2 border-primary cursor-default'
-                      : 'cursor-pointer border border-border hover:border-primary'
+                      ? 'border-2 border-primary'
+                      : 'border border-border hover:border-primary'
                   }`}
-                  onClick={() => {
-                    if (!competitor.isYou) {
-                      // Create URL slug from competitor URL or name
-                      const urlSlug = competitor.url 
-                        ? competitor.url.replace(/^https?:\/\//, '').replace(/\.com$/, '').replace(/\./g, '').toLowerCase()
-                        : competitor.name.toLowerCase().replace(/\s+/g, '');
-                      navigate(`/competitors/${urlSlug}`);
-                    }
-                  }}
                 >
                   <div className="space-y-4">
                     <div className="flex items-start justify-between">
@@ -765,24 +1149,24 @@ const Competitors = () => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* First Row */}
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
                         <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Mentions</p>
-                        <p className="text-2xl font-bold font-inter">{competitor.mentions}</p>
+                        <p className="text-xl font-bold font-inter">{competitor.mentions}</p>
                       </div>
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Share</p>
-                        <p className="text-2xl font-bold font-inter">{competitor.shareOfVoice}%</p>
+                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Citations</p>
+                        <p className="text-xl font-bold font-inter">{competitor.citations || 0}</p>
+                      </div>
+                      {/* Second Row */}
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border">
+                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Avg Visibility</p>
+                        <p className="text-xl font-bold font-inter">{competitor.visibility}%</p>
                       </div>
                       <div className="p-3 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Visibility</p>
-                        <p className="text-lg font-bold font-inter">{competitor.visibility}</p>
-                        <Progress value={competitor.visibility} className="h-1.5 mt-2" />
-                      </div>
-                      <div className="p-3 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Sentiment</p>
-                        <p className="text-lg font-bold font-inter">{competitor.sentiment}%</p>
-                        <Progress value={competitor.sentiment} className="h-1.5 mt-2" />
+                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Avg Position</p>
+                        <p className="text-xl font-bold font-inter">{competitor.averagePosition?.toFixed(1) || '0.0'}</p>
                       </div>
                     </div>
 
@@ -801,7 +1185,12 @@ const Competitors = () => {
                         </div>
                       </div>
                       {!competitor.isYou && (
-                        <Button variant="ghost" size="sm" className="text-primary">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-primary"
+                          onClick={() => navigate(`/competitors/${competitor.id}`)}
+                        >
                           View Details →
                         </Button>
                       )}
@@ -810,19 +1199,34 @@ const Competitors = () => {
                 </Card>
                 ))
               ) : (
-                <div className="col-span-full flex flex-col items-center justify-center py-12 space-y-2">
-                  <p className="text-sm text-muted-foreground">No competitors data available yet.</p>
-                  <p className="text-xs text-muted-foreground">Check console for API response details.</p>
+                <div className="col-span-full flex flex-col items-center justify-center py-32 space-y-4">
+                  <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                    <Target className="h-10 w-10 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-foreground">No Competitors Added Yet</h3>
+                  <p className="text-sm text-muted-foreground max-w-md text-center">
+                    Track your competitors to see how your brand performs against them in AI search results.
+                  </p>
+                  <Button
+                    onClick={() => setAddCompetitorDialogOpen(true)}
+                    className="mt-4 gradient-primary"
+                    size="lg"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Your Competitor
+                  </Button>
                 </div>
               )}
             </div>
 
+            {/* Show rest of content only if there are competitors */}
+            {competitors.length > 0 && (
+              <>
             {/* Brand Visibility Over Time */}
             <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
               <div className="space-y-6">
                 <div className="pb-4 border-b border-border">
-                  <h3 className="text-lg font-semibold flex items-center gap-2 font-inter">
-                    <TrendingUp className="h-5 w-5 text-primary" />
+                  <h3 className="text-lg font-semibold font-inter">
                     Brand Visibility Over Time
                   </h3>
                   <p className="text-sm text-muted-foreground mt-1">
@@ -831,37 +1235,65 @@ const Competitors = () => {
                 </div>
                 {sovSeries.length > 0 ? (
                   <ResponsiveContainer width="100%" height={350}>
-                    <LineChart data={sovSeries}>
+                        <LineChart data={sovSeries}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                       <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                      <Tooltip 
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "var(--radius)",
-                        }}
-                      />
-                      <Legend />
-                      {Object.keys(sovSeries[0] || {}).filter(k => k !== 'month').map((brandKey, idx) => {
-                        const colors = [
-                          { stroke: "hsl(var(--primary))", fill: "hsl(var(--primary))", width: 3, r: 4 },
-                          { stroke: "hsl(var(--chart-2))", fill: "hsl(var(--chart-2))", width: 2, r: 3 },
-                          { stroke: "hsl(var(--chart-3))", fill: "hsl(var(--chart-3))", width: 2, r: 3 },
-                        ];
-                        const color = colors[idx] || colors[0];
-                        return (
-                          <Line 
-                            key={brandKey}
-                            type="monotone" 
-                            dataKey={brandKey}
-                            name={brandKey}
-                            stroke={color.stroke}
-                            strokeWidth={color.width}
-                            dot={{ fill: color.fill, r: color.r }}
+                          <Tooltip 
+                            content={(props) => (
+                              <VisibilityTooltip {...props} disabledBrands={disabledBrands} />
+                            )}
                           />
-                        );
-                      })}
+                          <Legend content={(props: LegendProps) => (
+                            <VisibilityLegend
+                              {...props}
+                              disabledBrands={disabledBrands}
+                              onToggle={(brand) => {
+                                setDisabledBrands((prev) =>
+                                  prev.includes(brand)
+                                    ? prev.filter((b) => b !== brand)
+                                    : [...prev, brand]
+                                );
+                              }}
+                            />
+                          )} />
+                          {Object.keys(sovSeries[0] || {})
+                            .filter(k => k !== 'month')
+                            .map((brandKey, idx) => {
+                              const disabled = disabledBrands.includes(brandKey);
+                              const colors = [
+                                "hsl(var(--primary))",
+                                "hsl(var(--chart-2))",
+                                "hsl(var(--chart-3))",
+                                "hsl(var(--chart-4))",
+                                "hsl(var(--chart-5))",
+                                "#FF6B6B",
+                                "#4ECDC4",
+                              ];
+                              const color = colors[idx % colors.length];
+                              return (
+                                <Line 
+                                  key={brandKey}
+                                  type="monotone" 
+                                  dataKey={brandKey}
+                                  name={brandKey}
+                                  stroke={color}
+                                  strokeWidth={2.5}
+                                  strokeOpacity={disabled ? 0.25 : 1}
+                                  strokeDasharray={disabled ? "6 6" : undefined}
+                                  dot={
+                                    disabled
+                                      ? { r: 0 }
+                                      : { fill: "hsl(var(--background))", stroke: color, strokeWidth: 2, r: 4 }
+                                  }
+                                  activeDot={
+                                    disabled
+                                      ? false
+                                      : { r: 6, strokeWidth: 3, stroke: color, fill: "hsl(var(--background))" }
+                                  }
+                                />
+                              );
+                            })}
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (
@@ -872,46 +1304,65 @@ const Competitors = () => {
               </div>
             </Card>
 
-            {/* Heatmap and Top Brands */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <CompetitorHeatmap 
-                  data={heatmapData} 
-                  platforms={Object.keys(platformMap).length > 0 ? Object.keys(platformMap) : []} 
-                />
-              </div>
-              <div>
-                <TopBrandsList brands={topBrands} totalMentions={topBrands.length ? topBrands.reduce((s,b)=>s+b.mentions,0) : 0} />
-              </div>
-            </div>
+            {/* Heatmap full width */}
+            <CompetitorHeatmap 
+              data={heatmapData} 
+              platforms={heatmapPlatforms.length ? heatmapPlatforms : Object.keys(platformMap)} 
+            />
 
             {/* Competitive Analysis */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold">Competitive Strength Analysis</h3>
-                  {isLoadingAnalysis && (
-                    <span className="text-xs text-muted-foreground">Loading...</span>
-                  )}
+              <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80 flex flex-col">
+                <div className="space-y-1 mb-6">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold font-inter">Competitive Strength Analysis</h3>
+                    {isLoadingAnalysis && (
+                      <span className="text-xs text-muted-foreground">Loading...</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Radar view of how each brand scores across visibility, sentiment, position, coverage, and growth.
+                  </p>
                 </div>
                 {competitiveMetrics && competitiveMetrics.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={350}>
-                    <RadarChart data={competitiveMetrics}>
+                  <div className="flex-1 min-h-[360px] flex items-center justify-center">
+                    <div className="w-full max-w-[520px] translate-y-[-20px]">
+                      <ResponsiveContainer width="100%" height={420}>
+                        <RadarChart data={competitiveMetrics} margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
                       <PolarGrid stroke="hsl(var(--border))" />
-                      <PolarAngleAxis 
-                        dataKey="metric" 
+                      <PolarAngleAxis
+                        dataKey="metric"
                         stroke="hsl(var(--muted-foreground))"
                         fontSize={12}
                       />
-                      <PolarRadiusAxis angle={90} domain={[0, 100]} stroke="hsl(var(--muted-foreground))" />
-                      <Tooltip 
+                      <PolarRadiusAxis
+                        angle={90}
+                        domain={[0, 100]}
+                        stroke="hsl(var(--muted-foreground))"
+                        tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }}
+                      />
+                      <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "var(--radius)",
                         }}
                       />
-                      <Legend />
+                      <Legend
+                        content={(props: LegendProps) => (
+                          <VisibilityLegend
+                            {...props}
+                            disabledBrands={strengthDisabledBrands}
+                            onToggle={(brand) => {
+                              setStrengthDisabledBrands((prev) =>
+                                prev.includes(brand)
+                                  ? prev.filter((b) => b !== brand)
+                                  : [...prev, brand]
+                              );
+                            }}
+                          />
+                        )}
+                      />
                       {competitiveMetrics[0] && Object.keys(competitiveMetrics[0]).filter(k => k !== 'metric').map((brandKey, idx) => {
                         const colors = [
                           { stroke: "hsl(var(--primary))", fill: "hsl(var(--primary))", opacity: 0.3 },
@@ -919,22 +1370,27 @@ const Competitors = () => {
                           { stroke: "hsl(var(--chart-3))", fill: "hsl(var(--chart-3))", opacity: 0.2 },
                         ];
                         const color = colors[idx] || colors[0];
-                        // Format brand name for display - "you" becomes "You", others get formatted
-                        const displayName = brandKey === 'you' ? 'You' : brandKey.charAt(0).toUpperCase() + brandKey.slice(1).replace(/([A-Z])/g, ' $1');
+                        // Format brand name for display
+                        const displayName = brandKey.charAt(0).toUpperCase() + brandKey.slice(1).replace(/([A-Z])/g, ' $1');
+                        const disabled = strengthDisabledBrands.includes(displayName);
                         return (
-                          <Radar 
+                          <Radar
                             key={brandKey}
                             name={displayName}
                             dataKey={brandKey}
                             stroke={color.stroke}
                             fill={color.fill}
-                            fillOpacity={color.opacity}
-                            strokeWidth={brandKey === 'you' ? 2 : 1.5}  // Make "You" thicker
+                            fillOpacity={disabled ? 0.05 : color.opacity}
+                            strokeWidth={idx === 0 ? 2 : 1.5}
+                            strokeOpacity={disabled ? 0.25 : 1}
+                            strokeDasharray={disabled ? "6 6" : undefined}
                           />
                         );
                       })}
-                    </RadarChart>
-                  </ResponsiveContainer>
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-64 space-y-2">
                     <p className="text-sm text-muted-foreground">No competitive strength data available yet.</p>
@@ -944,36 +1400,61 @@ const Competitors = () => {
               </Card>
 
               <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold font-outfit">Competitive Intelligence</h3>
-                  {isLoadingAnalysis && (
-                    <span className="text-xs text-muted-foreground">Loading...</span>
-                  )}
+                <div className="space-y-1 mb-6">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold font-inter">Competitive Intelligence</h3>
+                    {isLoadingAnalysis && (
+                      <span className="text-xs text-muted-foreground">Loading...</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    AI-generated callouts that summarize notable wins, risks, and opportunities for your domain.
+                  </p>
                 </div>
                 <div className="space-y-3">
                   {competitiveInsights && competitiveInsights.length > 0 ? (
-                    competitiveInsights.map((insight: any, idx: number) => (
-                      <div key={idx} className="p-5 rounded-xl transition-all duration-300 border border-border hover:border-primary bg-card/50">
-                        <div className="flex items-start gap-3">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md ${
-                            insight.type === 'success' ? 'bg-success/10 text-success' :
-                            insight.type === 'warning' ? 'bg-warning/10 text-warning' :
-                            'gradient-primary text-white'
-                          }`}>
-                            <Target className="h-5 w-5" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <h4 className="font-semibold text-sm font-outfit">{insight.title}</h4>
-                              <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
-                                {insight.impact}
-                              </Badge>
+                    <>
+                      {competitiveInsights.slice(0, 2).map((insight: any, idx: number) => (
+                        <div key={idx} className="p-5 rounded-xl transition-all duration-300 border border-border hover:border-primary bg-card/50">
+                          <div className="flex items-start gap-3">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md ${
+                              insight.type === 'success' ? 'bg-success/10 text-success' :
+                              insight.type === 'warning' ? 'bg-warning/10 text-warning' :
+                              'gradient-primary text-white'
+                            }`}>
+                              <Target className="h-5 w-5" />
                             </div>
-                            <p className="text-sm text-muted-foreground leading-relaxed">{insight.description}</p>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <h4 className="font-semibold text-sm font-inter">{insight.title}</h4>
+                                <Badge variant={insight.impact === 'high' ? 'default' : 'secondary'} className="text-xs">
+                                  {insight.impact}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground leading-relaxed">{insight.description}</p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))
+                      ))}
+                      {competitiveInsights.length > 2 && (
+                        <div className="flex justify-end pt-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-primary hover:text-primary/80"
+                            onClick={() => {
+                              // TODO: Implement view all insights modal or navigate to insights page
+                              toast({
+                                title: "View All Insights",
+                                description: `Showing ${competitiveInsights.length} total insights`,
+                              });
+                            }}
+                          >
+                            View All ({competitiveInsights.length})
+                          </Button>
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-8 space-y-2">
                       <p className="text-sm text-muted-foreground">No competitive insights available yet.</p>
@@ -983,73 +1464,50 @@ const Competitors = () => {
                 </div>
               </Card>
             </div>
-
-            {/* Platform Breakdown */}
-            <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-              <h3 className="text-lg font-semibold mb-6 font-inter">Platform-Specific Competition</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {Object.keys(platformMap).length > 0 ? (
-                  Object.entries(platformMap).map(([platform, data]) => (
-                    <div key={platform} className="space-y-4">
-                      <h4 className="font-medium text-center">{platform}</h4>
-                      <ResponsiveContainer width="100%" height={200}>
-                        <BarChart data={data}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                          <XAxis 
-                            dataKey="brand" 
-                            stroke="hsl(var(--muted-foreground))" 
-                            fontSize={10}
-                            angle={-45}
-                            textAnchor="end"
-                            height={80}
-                          />
-                          <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} />
-                          <Tooltip />
-                          <Bar dataKey="mentions" radius={[8, 8, 0, 0]}>
-                            <Cell fill="hsl(var(--primary))" />
-                            <Cell fill="hsl(var(--chart-2))" />
-                            <Cell fill="hsl(var(--chart-3))" />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  ))
-                ) : (
-                  <div className="col-span-full flex items-center justify-center py-8">
-                    <p className="text-sm text-muted-foreground">No platform data available yet.</p>
-                  </div>
-                )}
-              </div>
-            </Card>
+              </>
+            )}
           </TabsContent>
 
           {/* Prompts Tab */}
           <TabsContent value="prompts" className="space-y-6 mt-6">
             <Card className="p-6">
               <div className="space-y-6">
-                <div className="flex items-center justify-between pb-4 border-b border-border">
-                  <div>
-                    <h3 className="text-lg font-semibold font-inter">Prompt Performance Analysis</h3>
-                    <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
+                <div className="flex flex-col gap-4 pb-4 border-b border-border">
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-lg font-semibold font-inter">Prompt Performance Analysis</h3>
+                        <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
+                      </div>
+                      <Badge variant="secondary">
+                        <MessageSquare className="h-3 w-3 mr-1" />
+                        {promptCards.length} Prompts Tracked
+                      </Badge>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <Select value={promptPlatformFilter} onValueChange={setPromptPlatformFilter}>
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="All Platforms" />
+                  <div className="flex flex-col md:flex-row gap-3">
+                    <Select value={promptCompetitorFilter} onValueChange={setPromptCompetitorFilter}>
+                      <SelectTrigger className="w-full md:w-64">
+                        <SelectValue placeholder="All competitors" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All Platforms</SelectItem>
-                        {availablePromptPlatforms.map((platform) => (
-                          <SelectItem key={platform} value={platform}>
-                            {platform}
+                        <SelectItem value="all">All competitors</SelectItem>
+                        {competitors.map((comp) => (
+                          <SelectItem key={comp.id} value={String(comp.id)}>
+                            {comp.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <Badge variant="secondary">
-                      <MessageSquare className="h-3 w-3 mr-1" />
-                      {promptCards.length} Prompts Tracked
-                    </Badge>
+                    <div className="flex-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>Filters:</span>
+                      <Badge variant="outline" className="text-xs">
+                        {timePeriod} day window
+                      </Badge>
+                      <Badge variant="outline" className="text-xs capitalize">
+                        {selectedLLM === 'all' ? 'All platforms' : selectedLLM}
+                      </Badge>
+                    </div>
                   </div>
                 </div>
 
@@ -1062,17 +1520,25 @@ const Competitors = () => {
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <h4 className="font-medium mb-2">{prompt.prompt}</h4>
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                               <Eye className="h-4 w-4" />
-                              <span>{prompt.total || 0} total mentions</span>
-                              {prompt.winner && (
+                              <span className="font-medium text-foreground">{prompt.total} total mentions</span>
+                              {prompt.topPlatform && (
                                 <>
-                                  <span className="text-xs">•</span>
-                                  <Badge variant="outline" className="text-xs">
-                                    Winner: {prompt.winner}
+                                  <span>•</span>
+                                  <Badge variant="outline" className="text-[11px]">
+                                    {prompt.topPlatform}
                                   </Badge>
                                 </>
                               )}
+                              <span>•</span>
+                              <Badge variant="secondary" className="text-[11px]">
+                                Winner: {prompt.winner}
+                              </Badge>
+                              <span>•</span>
+                              <Badge variant="outline" className="text-[11px]">
+                                {prompt.citationTotal} citations
+                              </Badge>
                             </div>
                           </div>
                         </div>
@@ -1119,79 +1585,15 @@ const Competitors = () => {
                     </>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-8 space-y-2">
-                      <p className="text-sm text-muted-foreground">No prompt performance data available yet.</p>
+                      <p className="text-sm text-muted-foreground text-center">
+                        No prompt performance data for the current filters.
+                      </p>
                       <p className="text-xs text-muted-foreground">Check console for API response details.</p>
                     </div>
                   )}
                 </div>
               </div>
             </Card>
-          </TabsContent>
-
-          {/* Competitors Tab */}
-          <TabsContent value="competitors" className="space-y-6 mt-6">
-            <div className="grid grid-cols-1 gap-6">
-              {competitors.length > 0 ? (
-                competitors.map((competitor) => (
-                <Card key={competitor.id} className="p-6">
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className="w-16 h-16 rounded-2xl gradient-primary shadow-glow flex items-center justify-center">
-                          <span className="text-2xl font-bold text-white font-inter">
-                            {competitor.name.substring(0, 1)}
-                          </span>
-                        </div>
-                        <div>
-                          <h3 className="text-2xl font-bold font-inter">{competitor.name}</h3>
-                          <p className="text-muted-foreground">{competitor.url}</p>
-                        </div>
-                      </div>
-                      {/* {!competitor.isYou && (
-                        <Button onClick={() => {
-                          // Create URL slug from competitor URL or name
-                          const urlSlug = competitor.url 
-                            ? competitor.url.replace(/^https?:\/\//, '').replace(/\.com$/, '').replace(/\./g, '').toLowerCase()
-                            : competitor.name.toLowerCase().replace(/\s+/g, '');
-                          navigate(`/competitors/${urlSlug}`);
-                        }}>
-                          View Full Analysis
-                        </Button>
-                      )} */}
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Mentions</p>
-                        <p className="text-3xl font-bold font-inter">{competitor.mentions}</p>
-                      </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Visibility</p>
-                        <p className="text-3xl font-bold font-inter">{competitor.visibility}</p>
-                      </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Sentiment</p>
-                        <p className="text-3xl font-bold font-inter">{competitor.sentiment}%</p>
-                      </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Position</p>
-                        <p className="text-3xl font-bold font-inter">{competitor.avgPosition}</p>
-                      </div>
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border">
-                        <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Share</p>
-                        <p className="text-3xl font-bold font-inter">{competitor.shareOfVoice}%</p>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-                ))
-              ) : (
-                <div className="flex flex-col items-center justify-center py-12 space-y-2">
-                  <p className="text-sm text-muted-foreground">No competitors data available yet.</p>
-                  <p className="text-xs text-muted-foreground">Check console for API response details.</p>
-                </div>
-              )}
-            </div>
           </TabsContent>
 
           {/* Answer Gap Tab */}

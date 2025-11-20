@@ -13,6 +13,9 @@ export interface Domain {
   active_alerts: number;
   sentiment: string;
   sentiment_score: string;
+  processing_status?: 'INIT' | 'SCHD' | 'PROC' | 'COMP' | 'FAIL';
+  track_message?: string | null;
+  tracked_at?: string | null;
   created_at: string;
   modified_at: string;
 }
@@ -21,12 +24,14 @@ interface DomainState {
   domains: Domain[];
   selectedDomain: Domain | null;
   isLoading: boolean;
+  isDomainSwitching: boolean;
   error: string | null;
-  
+
   // Actions
   setDomains: (domains: Domain[]) => void;
   setSelectedDomain: (domain: Domain | null) => void;
   setLoading: (loading: boolean) => void;
+  setDomainSwitching: (switching: boolean) => void;
   setError: (error: string | null) => void;
   loadDomains: () => Promise<void>;
   selectDomainById: (id: number) => void;
@@ -40,10 +45,11 @@ export const useDomainStore = create<DomainState>()(
       domains: [],
       selectedDomain: null,
       isLoading: false,
+      isDomainSwitching: false,
       error: null,
 
       setDomains: (domains) => set({ domains }),
-      
+
       setSelectedDomain: (domain) => {
         set({ selectedDomain: domain });
         // Sync with active_domain_id localStorage when domain is set
@@ -61,47 +67,73 @@ export const useDomainStore = create<DomainState>()(
                   if (userId) {
                     const { saveActiveDomain } = await import('@/utils/activeDomain');
                     saveActiveDomain(userId, domain.id);
-                    console.log(`[domainStore] Synced active_domain_id:${userId} with domain ${domain.id}`);
                   }
                 } catch (e) {
                   // Ignore token parsing errors
                 }
               }
             } catch (error) {
-              console.warn('[domainStore] Failed to sync with active_domain_id:', error);
+              // Silently ignore sync errors
             }
           })();
         }
       },
       
       setLoading: (loading) => set({ isLoading: loading }),
-      
+
+      setDomainSwitching: (switching) => set({ isDomainSwitching: switching }),
+
       setError: (error) => set({ error }),
       
       loadDomains: async () => {
         try {
           set({ isLoading: true, error: null });
-          
+
           // Import apiClient dynamically to avoid circular dependencies
           const { apiClient } = await import('@/services/api');
           const response = await apiClient.getDomains();
-          
-          set({ 
-            domains: response.domains,
-            selectedDomain: null, // Clear selected domain when loading fresh data
-            isLoading: false 
-          });
-          
-          // If no domain is selected and we have domains, select the first one
-          const { selectedDomain } = get();
-          if (!selectedDomain && response.domains.length > 0) {
-            set({ selectedDomain: response.domains[0] });
+
+          // Get user ID to restore active domain
+          let activeDomainId: string | null = null;
+          try {
+            const token = localStorage.getItem('access_token') || '';
+            if (token) {
+              const payload = JSON.parse(atob(token.split('.')[1] || '""'));
+              const userId = payload?.user_id || payload?.id;
+              if (userId) {
+                // Import activeDomain utilities
+                const { loadActiveDomain } = await import('@/utils/activeDomain');
+                activeDomainId = loadActiveDomain(userId);
+              }
+            }
+          } catch (e) {
+            // Ignore token parsing errors
           }
-          
+
+          // Find the selected domain from cache
+          let selectedDomain = null;
+          if (activeDomainId) {
+            const domainId = parseInt(activeDomainId, 10);
+            selectedDomain = response.domains.find((d: any) => d.id === domainId) || null;
+          }
+
+          // If no cached domain or cached domain doesn't exist, select first completed domain
+          if (!selectedDomain && response.domains.length > 0) {
+            selectedDomain = response.domains.find((d: any) =>
+              !d.processing_status || d.processing_status === 'COMP'
+            ) || response.domains[0];
+          }
+
+          set({
+            domains: response.domains,
+            selectedDomain: selectedDomain,
+            isLoading: false
+          });
+
         } catch (error: any) {
-          set({ 
+          set({
             error: error.message || 'Failed to load domains',
-            isLoading: false 
+            isLoading: false
           });
         }
       },
