@@ -10,7 +10,7 @@ from decimal import Decimal
 
 # Backend models
 from domains.models import Domain
-from prompts.models import PromptAnalytics, DomainMetricSnapshot, PromptGroupMetricSnapshot
+from prompts.models import PromptAnalytics, DomainMetricSnapshot, PromptGroupMetricSnapshot, PromptGroup, Prompt
 from competitors.models import Competitor
 from .models import ShareOfVoiceAnalytics
 
@@ -37,9 +37,10 @@ def get_sentiment_category(sentiment_score):
     if sentiment_score is None:
         return "neutral"
     score = float(sentiment_score)
-    if score > 0.33:
+    # Adjusted thresholds: positive > 0.1, negative < -0.1, neutral otherwise
+    if score > 0.1:
         return "positive"
-    elif score < -0.33:
+    elif score < -0.1:
         return "negative"
     else:
         return "neutral"
@@ -172,17 +173,33 @@ def _calculate_visibility_score(
 @permission_classes([IsAuthenticated])
 def dashboard_summary(request):
     """
-    Get comprehensive dashboard data for a domain, filtered by days.
+    Get comprehensive dashboard data for a domain, filtered by days and optionally by LLM platform.
     
     Query Parameters:
     - domain_id (required): Domain ID
     - days (optional, default=30): Number of days to look back (7, 30, 90, etc.)
+    - llm_model (optional): Filter by LLM platform (chatgpt, claude, gemini, perplexity, grok). Use 'all' or omit for all platforms.
     """
     import logging
     logger = logging.getLogger(__name__)
     
     domain_id = request.query_params.get('domain_id')
     days = int(request.query_params.get('days', 30))
+    llm_model = request.query_params.get('llm_model')
+    
+    # Normalize platform name if provided (e.g., 'chatgpt' -> 'ChatGPT')
+    platform_filter = None
+    if llm_model and llm_model != 'all':
+        # Map lowercase to proper case platform names
+        platform_map = {
+            'chatgpt': 'ChatGPT',
+            'claude': 'Claude',
+            'gemini': 'Gemini',
+            'perplexity': 'Perplexity',
+            'grok': 'Grok'
+        }
+        platform_filter = platform_map.get(llm_model.lower(), llm_model.capitalize())
+        logger.info(f"Dashboard API: Filtering by platform: {platform_filter}")
     
     if not domain_id:
         return Response(
@@ -226,6 +243,10 @@ def dashboard_summary(request):
         period_type__in=period_types
     ).exclude(platform__isnull=True).exclude(platform='')  # Only use platform-specific snapshots
     
+    # Apply platform filter if provided
+    if platform_filter:
+        snapshot_qs = snapshot_qs.filter(platform=platform_filter)
+    
     # Debug: Log snapshot count and check all snapshots for this domain
     snapshot_count_before_agg = snapshot_qs.count()
     logger.info(f"Dashboard API: Found {snapshot_count_before_agg} snapshots matching criteria")
@@ -262,6 +283,10 @@ def dashboard_summary(request):
         snapshot_date__lte=prev_end_date,
         period_type__in=period_types
     ).exclude(platform__isnull=True).exclude(platform='')  # Only use platform-specific snapshots
+    
+    # Apply platform filter if provided
+    if platform_filter:
+        prev_snapshot_qs = prev_snapshot_qs.filter(platform=platform_filter)
     
     # Aggregate metrics from snapshots (will be recalculated from raw data if snapshots have no mentions)
     total_mentions = snapshot_qs.aggregate(
@@ -364,9 +389,25 @@ def dashboard_summary(request):
     # Active alerts from domain
     active_alerts = domain.active_alerts or 0
     
+    # Total prompts count for the domain (count individual prompts, not prompt groups)
+    # Filter by platform/LLM if provided
+    prompt_qs = Prompt.objects.filter(group__domain_id=domain_id)
+    
+    # If platform filter is provided, filter prompts that have analytics for that platform
+    if platform_filter:
+        # Get unique prompt IDs that have analytics for the specified platform
+        prompt_ids_with_platform = PromptAnalytics.objects.filter(
+            prompt__group__domain_id=domain_id,
+            platform=platform_filter
+        ).values_list('prompt_id', flat=True).distinct()
+        prompt_qs = prompt_qs.filter(id__in=prompt_ids_with_platform)
+    
+    total_prompts = prompt_qs.count()
+    
     metrics = {
         'total_mentions': int(total_mentions),
         'total_citations': int(total_citations),
+        'total_prompts': int(total_prompts),
         'visibility_score': round(visibility_score, 2),
         'avg_position': int(round(avg_position)) if avg_position > 0 else 0,
         'active_alerts': active_alerts,
@@ -423,6 +464,10 @@ def dashboard_summary(request):
         period_type__in=period_types
     ).exclude(platform__isnull=True).exclude(platform='')
     
+    # Apply platform filter if provided
+    if platform_filter:
+        platform_snapshots = platform_snapshots.filter(platform=platform_filter)
+    
     # Aggregate by platform
     platform_aggregates = {}
     for snapshot in platform_snapshots:
@@ -463,6 +508,10 @@ def dashboard_summary(request):
         timestamp__lte=end_date
     )
     
+    # Apply platform filter if provided
+    if platform_filter:
+        sov_qs = sov_qs.filter(platform=platform_filter)
+    
     share_of_voice = None
     if sov_qs.exists():
         latest_day = sov_qs.order_by('-timestamp').first().timestamp
@@ -489,8 +538,28 @@ def dashboard_summary(request):
             except Competitor.DoesNotExist:
                 continue
         
+        # Build unified list with "You" first
+        all_brands = []
+        if your_brand:
+            all_brands.append({
+                'competitor_id': None,
+                'name': 'You',  # Label as "You"
+                'url': '',  # Domain URL can be added if needed
+                'share_percentage': float(your_brand.share_percentage),
+                'mention_count': your_brand.mention_count,
+                'market_position': 1,
+                'trend': 0,
+                'is_you': True
+            })
+        
+        for comp in competitors_list:
+            comp['is_you'] = False
+            all_brands.append(comp)
+        
         share_of_voice = {
             'date': latest_day.isoformat() if latest_day else None,
+            'brands': all_brands,  # Unified list with "You" first
+            # Keep backward compatibility
             'your_brand': {
                 'share_percentage': float(your_brand.share_percentage) if your_brand else 0,
                 'mention_count': your_brand.mention_count if your_brand else 0,
@@ -567,7 +636,13 @@ def dashboard_summary(request):
         track_status='COMP',
         created_at__gte=start_datetime,
         created_at__lte=end_datetime
-    ).order_by('-created_at')[:10]
+    )
+    
+    # Apply platform filter if provided
+    if platform_filter:
+        recent_analytics = recent_analytics.filter(platform=platform_filter)
+    
+    recent_analytics = recent_analytics.order_by('-created_at')[:10]
     
     recent_mentions = []
     for a in recent_analytics:

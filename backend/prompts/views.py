@@ -519,7 +519,7 @@ def get_mention_detail(request, analytics_id):
             'id': analytics_record.id,
             'rank': 1,  # This would need to be calculated based on position/score
             'platform': analytics_record.platform,
-            'sentiment': getattr(analytics_record, 'sentiment_category', None) or getattr(analytics_record, 'sentiment', ''),
+            'sentiment': getattr(analytics_record, 'sentiment_category', 'neutral'),
             'sentiment_score': float(analytics_record.sentiment_score),
             'created_at': analytics_record.created_at.isoformat(),
             'time_ago': _get_time_ago(analytics_record.created_at),
@@ -545,6 +545,7 @@ def get_mention_detail(request, analytics_id):
             'domain_name': (group.domain.name if group else ''),
             'domain_url': (group.domain.url if group else ''),
             'group_id': group.group_id if group else None,
+            'prompt_id': prompt.id,
             
             # Citations with detailed structure
             'citations': citations_data,
@@ -915,7 +916,7 @@ def prompt_groups_list(request):
                 )
                 
                 # Calculate visibility growth: compare current mentions with previous period (last 7 days vs previous 7 days)
-                current_mentions = group.total_mentions
+                # Only show growth if there's historical data across multiple time periods
                 visibility_growth = None
                 
                 try:
@@ -938,15 +939,30 @@ def prompt_groups_list(request):
                         created_at__lt=seven_days_ago
                     ).count()
                     
-                    # Calculate percentage growth
+                    # Only calculate growth if we have data in BOTH periods (historical comparison)
+                    # This prevents showing 100% growth when there's only data in one period
                     if previous_period_mentions > 0:
+                        # We have historical data, calculate growth
                         visibility_growth = round(((current_period_mentions - previous_period_mentions) / previous_period_mentions) * 100, 1)
-                    elif current_period_mentions > 0:
-                        # If previous period had 0 mentions but current has some, show 100% growth
-                        visibility_growth = 100.0
+                    elif current_period_mentions > 0 and previous_period_mentions == 0:
+                        # Current period has data but previous doesn't - check if we have ANY older data
+                        # If we have data older than 14 days, it means we're tracking but just no data in previous period
+                        older_mentions = analytics.filter(
+                            is_mention=True,
+                            is_published=True,
+                            created_at__lt=fourteen_days_ago
+                        ).count()
+                        
+                        if older_mentions > 0:
+                            # We have historical data (older than 14 days), so this is a valid comparison
+                            # Previous period had 0, current has some = 100% growth
+                            visibility_growth = 100.0
+                        else:
+                            # No historical data at all, don't show growth
+                            visibility_growth = None
                     else:
-                        # Both periods have 0 mentions, no growth
-                        visibility_growth = 0.0
+                        # Both periods have 0 mentions, no growth to show
+                        visibility_growth = None
                 except Exception as e:
                     logger.warning(f"Error calculating visibility growth for group {group.id}: {e}")
                     visibility_growth = None
@@ -965,6 +981,9 @@ def prompt_groups_list(request):
                     'primary_prompt': primary_prompt_text,
                     'secondary_prompts': secondary_prompts_list,
                     'visibility_growth': visibility_growth,
+                    'track_status': group.track_status,
+                    'track_message': group.track_message,
+                    'tracked_at': group.tracked_at.isoformat() if group.tracked_at else None,
                     'analytics_summary': {
                         'total_analytics': analytics.count(),
                         'mentions_count': analytics.filter(is_mention=True, is_published=True).count(),
@@ -1112,16 +1131,20 @@ def prompt_groups_list(request):
 def prompt_group_detail(request, group_id):
     """
     Get, update, or delete a specific prompt group
+    Optional query parameter: platform - filter metrics by platform
     """
     try:
         group = get_object_or_404(PromptGroup, id=group_id)
         
         if request.method == 'GET':
+            # Get platform filter from query parameter
+            platform_filter = request.GET.get('platform')
+            
             # Get detailed information about the group
             prompts = group.prompts.all().order_by('created_at')
-            analytics = PromptAnalytics.objects.filter(
-                prompt__group=group
-            )
+            # Get all analytics for the group (for summary stats)
+            analytics = PromptAnalytics.objects.filter(prompt__group=group)
+            # Analytics filtering is done per-prompt below to show all variants with platform-specific metrics
 
             # Derive primary and secondary prompts for detail view
             primary_prompt_obj = group.prompts.filter(type='primary').order_by('created_at').first()
@@ -1132,8 +1155,75 @@ def prompt_group_detail(request, group_id):
             
             prompts_data = []
             for prompt in prompts:
-                prompt_analytics = analytics.filter(prompt=prompt)
-                prompt_mentions = prompt_analytics.filter(is_mention=True, is_published=True).count()
+                # Get all analytics for this prompt (for platforms list)
+                all_prompt_analytics = PromptAnalytics.objects.filter(prompt=prompt)
+                
+                # Get platform-filtered analytics for metrics calculation
+                if platform_filter:
+                    # Filter by both prompt and platform
+                    prompt_analytics = all_prompt_analytics.filter(platform=platform_filter)
+                else:
+                    # Use all analytics for this prompt
+                    prompt_analytics = all_prompt_analytics
+                
+                # Sum total_mentions from analytics records, not just count records
+                # This matches how group.total_mentions is calculated (Sum of total_mentions field)
+                mention_analytics = prompt_analytics.filter(is_mention=True, is_published=True)
+                prompt_mentions = sum(analytic.total_mentions or 1 for analytic in mention_analytics)
+                
+                # Calculate citations count
+                total_citations = 0
+                for analytic in prompt_analytics:
+                    citation_list = getattr(analytic, 'citation_list', []) or []
+                    total_citations += len(citation_list) if citation_list else 0
+                
+                # Calculate sentiment breakdown - use sentiment_score weighted by mentions (like dashboard)
+                # Dashboard uses: sentiment_score > 0.33 = positive, -0.33 to 0.33 = neutral, < -0.33 = negative
+                total_positive_mentions = 0
+                total_neutral_mentions = 0
+                total_negative_mentions = 0
+                
+                # Only count mentions (is_mention=True, is_published=True) for sentiment calculation
+                mention_analytics = prompt_analytics.filter(is_mention=True, is_published=True)
+                for analytic in mention_analytics:
+                    sentiment_score = float(analytic.sentiment_score or 0)
+                    # Count each mention (not just analytics record)
+                    mentions = analytic.total_mentions or 1
+                    
+                    if sentiment_score > 0.33:
+                        total_positive_mentions += mentions
+                    elif sentiment_score >= -0.33:
+                        total_neutral_mentions += mentions
+                    else:
+                        total_negative_mentions += mentions
+                
+                total_sentiment_mentions = total_positive_mentions + total_neutral_mentions + total_negative_mentions
+                sentiment_percentages = {
+                    'positive': round((total_positive_mentions / total_sentiment_mentions * 100) if total_sentiment_mentions > 0 else 0, 1),
+                    'neutral': round((total_neutral_mentions / total_sentiment_mentions * 100) if total_sentiment_mentions > 0 else 0, 1),
+                    'negative': round((total_negative_mentions / total_sentiment_mentions * 100) if total_sentiment_mentions > 0 else 0, 1)
+                }
+                
+                # Get latest analytics for position (most recent tracked date)
+                latest_analytic = prompt_analytics.order_by('-created_at').first()
+                latest_position = float(latest_analytic.position) if latest_analytic else 0
+                
+                # Get latest mention analytics ID for navigation
+                latest_mention_analytic = prompt_analytics.filter(
+                    is_mention=True, 
+                    is_published=True
+                ).order_by('-created_at').first()
+                latest_mention_id = latest_mention_analytic.id if latest_mention_analytic else None
+                
+                # Get all platforms that have analytics for this prompt (for filtering)
+                # Use all_prompt_analytics to get complete platform list, not filtered
+                all_platforms = list(all_prompt_analytics.values_list('platform', flat=True).distinct())
+                all_platforms = [p for p in all_platforms if p]  # Remove None/empty values
+                # Ensure we have at least the latest platform if available
+                latest_all_analytic = all_prompt_analytics.order_by('-created_at').first()
+                if latest_all_analytic and latest_all_analytic.platform and latest_all_analytic.platform not in all_platforms:
+                    all_platforms.append(latest_all_analytic.platform)
+                
                 prompts_data.append({
                     'id': prompt.id,
                     'prompt_text': prompt.prompt,
@@ -1144,7 +1234,13 @@ def prompt_group_detail(request, group_id):
                     'created_at': prompt.created_at.isoformat(),
                     'analytics_count': prompt_analytics.count(),
                     'mentions_count': prompt_mentions,
-                    'avg_position': float(prompt_analytics.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0)
+                    'avg_position': float(prompt_analytics.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0),
+                    'latest_position': latest_position,
+                    'citations_count': total_citations,
+                    'sentiment': sentiment_percentages,
+                    'platform': latest_analytic.platform if latest_analytic else None,
+                    'platforms': all_platforms,  # All platforms for this prompt
+                    'latest_mention_id': latest_mention_id
                 })
 
             # Platform distribution for the group - use PromptGroupMetricSnapshot
@@ -1295,6 +1391,33 @@ def prompt_group_detail(request, group_id):
                 logger.warning(f"Error calculating visibility growth for group {group.id}: {e}")
                 visibility_growth = None
             
+            # Calculate average_position from PromptGroupMetricSnapshot (same as graph) for consistency
+            # Use the same snapshots used for trends calculation
+            calculated_avg_position = 0.0
+            try:
+                # Get all snapshots used in trends (last 180 days)
+                all_snapshots = PromptGroupMetricSnapshot.objects.filter(
+                    prompt_group=group,
+                    snapshot_date__gte=start_date,
+                    snapshot_date__lte=end_date
+                )
+                
+                position_sum = 0
+                position_weight = 0
+                for snapshot in all_snapshots:
+                    if snapshot.average_position and snapshot.mentions > 0:
+                        position_sum += float(snapshot.average_position) * snapshot.mentions
+                        position_weight += snapshot.mentions
+                
+                if position_weight > 0:
+                    calculated_avg_position = float(position_sum / position_weight)
+                else:
+                    # Fallback to model field if no snapshot data
+                    calculated_avg_position = float(group.average_position)
+            except Exception as e:
+                logger.warning(f"Error calculating average position for group {group.id}: {e}")
+                calculated_avg_position = float(group.average_position)
+            
             return Response({
                 'group': {
                     'id': group.id,
@@ -1306,7 +1429,7 @@ def prompt_group_detail(request, group_id):
                     'secondary_prompts': secondary_prompts_list,
                     'total_mentions': group.total_mentions,
                     'total_citations': group.total_citations,
-                    'average_position': float(group.average_position),
+                    'average_position': calculated_avg_position,
                     'visibility_growth': visibility_growth,
                     'created_at': group.created_at.isoformat(),
                     'modified_at': group.modified_at.isoformat(),
@@ -1607,14 +1730,14 @@ def prompt_detail(request, prompt_id):
                     'total_mentions': analytic.total_mentions,
                     'total_citations': analytic.total_citations,
                     'position': float(analytic.position),
-                    'sentiment': analytic.sentiment,
+                    'sentiment': getattr(analytic, 'sentiment_category', 'neutral'),
                     'sentiment_score': float(analytic.sentiment_score),
                     'context_summary': analytic.context_summary,
                     'views': analytic.views,
                     'shares': analytic.shares,
                     'engagement_score': float(analytic.engagement_score),
                     'created_at': analytic.created_at.isoformat(),
-                    'citations_count': len(analytic.citations) if analytic.citations else 0
+                    'citations_count': len(getattr(analytic, 'citation_list', []) or [])
                 })
             
             return Response({
@@ -1772,7 +1895,7 @@ def prompt_analytics(request, prompt_id):
                 'total_mentions': analytic.total_mentions,
                 'total_citations': analytic.total_citations,
                 'position': float(analytic.position),
-                'sentiment': getattr(analytic, 'sentiment_category', None) or getattr(analytic, 'sentiment', ''),
+                'sentiment': getattr(analytic, 'sentiment_category', 'neutral'),
                 'sentiment_score': float(analytic.sentiment_score),
                 'context_summary': analytic.context_summary,
                 'views': analytic.views,

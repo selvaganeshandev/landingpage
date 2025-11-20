@@ -152,6 +152,7 @@ CORS_ALLOW_CREDENTIALS = True
 # Domain processing settings
 MAX_CONCURRENT_DOMAINS = config('MAX_CONCURRENT_DOMAINS', default=10, cast=int)
 MAX_CONCURRENT_PROMPT_ANALYTICS = config('MAX_CONCURRENT_PROMPT_ANALYTICS', default=10, cast=int)
+MAX_CONCURRENT_COMPETITOR_PROMPTS = config('MAX_CONCURRENT_COMPETITOR_PROMPTS', default=10, cast=int)
 
 # Prompt engine knobs
 # How many keywords to fetch from DataForSEO per domain

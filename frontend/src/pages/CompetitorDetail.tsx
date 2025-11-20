@@ -43,6 +43,10 @@ import {
   Pie,
   Cell
 } from "recharts";
+import { apiClient } from "@/services/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { getActiveDomainId } from "@/utils/activeDomain";
+import { useDomainStore } from "@/stores/domainStore";
 
 const CompetitorDetail = () => {
   const { id } = useParams();
@@ -704,20 +708,24 @@ const CompetitorDetail = () => {
               <TabsContent value="overview" className="space-y-4">
                 <div>
                   <h3 className="text-lg font-semibold mb-3 font-inter">About {competitor.name}</h3>
-                  <p className="text-muted-foreground leading-relaxed">{competitor.description}</p>
+                  <p className="text-muted-foreground leading-relaxed">
+                    Competitive analysis and performance metrics for {competitor.name}.
+                  </p>
                 </div>
-                <div className="pt-4">
-                  <h3 className="text-lg font-semibold mb-4 font-inter">Sentiment Distribution</h3>
-                  <div className="grid grid-cols-3 gap-4">
-                    {sentimentData.map((item) => (
-                      <div key={item.name} className="p-4 rounded-xl border border-border bg-muted/30">
-                        <p className="text-sm text-muted-foreground mb-2">{item.name}</p>
-                        <p className="text-3xl font-bold font-inter">{item.value}%</p>
-                        <Progress value={item.value} className="h-2 mt-2" />
-                      </div>
-                    ))}
+                {sentimentData.length > 0 && (
+                  <div className="pt-4">
+                    <h3 className="text-lg font-semibold mb-4 font-inter">Sentiment Distribution</h3>
+                    <div className="grid grid-cols-3 gap-4">
+                      {sentimentData.map((item) => (
+                        <div key={item.name} className="p-4 rounded-xl border border-border bg-muted/30">
+                          <p className="text-sm text-muted-foreground mb-2">{item.name}</p>
+                          <p className="text-3xl font-bold font-inter">{item.value}%</p>
+                          <Progress value={item.value} className="h-2 mt-2" />
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </TabsContent>
 
               <TabsContent value="mentions" className="space-y-2">
@@ -748,6 +756,9 @@ const CompetitorDetail = () => {
                             <span>{mention.citations} citations</span>
                           </span>
                         </div>
+                        <Button variant="ghost" size="sm">
+                          <ExternalLink className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
                   ))

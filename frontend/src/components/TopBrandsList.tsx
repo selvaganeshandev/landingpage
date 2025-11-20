@@ -62,12 +62,7 @@ export const TopBrandsList = ({ brands, totalMentions }: TopBrandsListProps) => 
                   <Building2 className="h-5 w-5 text-white" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h4 className="font-semibold truncate font-inter">{brand.name}</h4>
-                    {brand.isYou && (
-                      <Badge variant="default" className="text-xs gradient-primary border-0">You</Badge>
-                    )}
-                  </div>
+                  <h4 className="font-semibold truncate font-inter mb-1">{brand.name}</h4>
                   <p className="text-xs text-muted-foreground truncate">{brand.url}</p>
                 </div>
                 <div className="text-right flex-shrink-0">

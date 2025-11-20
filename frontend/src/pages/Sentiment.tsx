@@ -218,23 +218,50 @@ const Sentiment = () => {
   }, [rows]);
 
   // Competitor sentiment from engine competitor prompt analytics (average sentiment_score -> categories pct approx)
+  // Now includes "You" (your brand) from summary data
   const competitorSentiment = useMemo(() => {
     if (!competitorRows || !Array.isArray(competitorRows) || competitorRows.length === 0) return [] as any[];
     const map: Record<string, { name: string; pos: number; neu: number; neg: number; count: number }> = {};
-    competitorRows.forEach((r:any) => {
-      const key = r.competitor?.name || `Competitor ${r.competitor_id || ''}`;
-      if (!map[key]) map[key] = { name: key, pos: 0, neu: 0, neg: 0, count: 0 };
-      const cat = (r.sentiment_category || '').toLowerCase();
-      if (cat === 'positive') map[key].pos += 1; else if (cat === 'negative') map[key].neg += 1; else map[key].neu += 1;
-      map[key].count += 1;
-    });
+    
+    // Add "You" (your brand) from summary data
+    if (summary) {
+      map['You'] = {
+        name: 'You',
+        pos: Math.round((summary.positive_percentage / 100) * summary.total_mentions),
+        neu: Math.round((summary.neutral_percentage / 100) * summary.total_mentions),
+        neg: Math.round((summary.negative_percentage / 100) * summary.total_mentions),
+        count: summary.total_mentions
+      };
+    }
+    
+    // Add competitors from competitorRows
+    if (competitorRows && competitorRows.length > 0) {
+      competitorRows.forEach((r:any) => {
+        // Use competitor_name from serializer, fallback to competitor?.name or competitor_id
+        const key = r.competitor_name || r.competitor?.name || `Competitor ${r.competitor_id || r.competitor || ''}`;
+        if (!map[key]) map[key] = { name: key, pos: 0, neu: 0, neg: 0, count: 0 };
+        const cat = (r.sentiment_category || '').toLowerCase();
+        if (cat === 'positive') map[key].pos += 1; 
+        else if (cat === 'negative') map[key].neg += 1; 
+        else map[key].neu += 1;
+        map[key].count += 1;
+      });
+    }
+    
     return Object.values(map).map(v => ({
       name: v.name,
-      positive: v.count ? +(v.pos * 100 / v.count).toFixed(2) : 0,
-      neutral: v.count ? +(v.neu * 100 / v.count).toFixed(2) : 0,
-      negative: v.count ? +(v.neg * 100 / v.count).toFixed(2) : 0,
-    }));
-  }, [competitorRows]);
+      positive: v.count ? +(v.pos * 100 / v.count).toFixed(1) : 0,
+      neutral: v.count ? +(v.neu * 100 / v.count).toFixed(1) : 0,
+      negative: v.count ? +(v.neg * 100 / v.count).toFixed(1) : 0,
+      isYou: v.name === 'You'
+    })).sort((a, b) => {
+      // Sort "You" first, then by positive sentiment descending, then by name
+      if (a.isYou && !b.isYou) return -1;
+      if (!a.isYou && b.isYou) return 1;
+      if (a.positive !== b.positive) return b.positive - a.positive;
+      return a.name.localeCompare(b.name);
+    });
+  }, [competitorRows, summary]);
 
   const handleRefresh = () => {
     if (domainId) {
@@ -537,13 +564,18 @@ const Sentiment = () => {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${
-                        index === 0 
+                        competitor.isYou || index === 0
                           ? "bg-gradient-to-br from-primary to-secondary text-primary-foreground"
                           : "bg-muted text-muted-foreground"
                       }`}>
                         {index + 1}
                       </div>
-                      <h4 className="font-medium">{competitor.name}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium">{competitor.name}</h4>
+                        {competitor.isYou && (
+                          <Badge variant="default" className="gradient-primary border-0 text-xs">You</Badge>
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-center gap-6 text-sm">
                       <span className="text-success font-medium">{competitor.positive}%</span>

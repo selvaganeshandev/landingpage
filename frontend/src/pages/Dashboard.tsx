@@ -30,6 +30,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const { toast } = useToast();
+  const hasMountedRef = useRef(false);
 
   // Use ref to track the current domain ID to prevent re-renders
   const currentDomainIdRef = useRef<string>("");
@@ -38,10 +39,8 @@ const Dashboard = () => {
   const llmModules = [
     { value: "all", label: "All LLMs" },
     { value: "chatgpt", label: "ChatGPT" },
-    { value: "claude", label: "Claude" },
     { value: "gemini", label: "Gemini" },
     { value: "perplexity", label: "Perplexity" },
-    { value: "grok", label: "Grok" },
   ];
   
   // Get domain name for display
@@ -98,10 +97,6 @@ const Dashboard = () => {
         llm_model: selectedLLM !== 'all' ? selectedLLM : undefined
       });
       setSummary(data);
-      // Only show success toast if there's actual data, not for empty data
-      if (data && (data.total_mentions > 0 || data.total_citations > 0 || data.visibility_score !== 0)) {
-        toast({ title: "Data Loaded", description: "Dashboard updated." });
-      }
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
       // Only show error for actual errors, not empty data
@@ -134,8 +129,12 @@ const Dashboard = () => {
     }
   }
 
+  // Fetch summary once on mount
   useEffect(() => {
-    void fetchSummary();
+    if (!hasMountedRef.current && user && domainId) {
+      hasMountedRef.current = true;
+      void fetchSummary();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedDomain?.id, timePeriod, selectedLLM]);
 
@@ -148,9 +147,9 @@ const Dashboard = () => {
     <div className="p-8 space-y-8 bg-background animate-fade-in">
       <div className="space-y-4">
         <div className="flex items-start justify-between">
-          <div>
+          <div className="min-w-0 flex-1">
             <h1 className="text-4xl font-bold tracking-tight">Insights</h1>
-            <p className="text-muted-foreground mt-2">
+            <p className="text-muted-foreground mt-2 whitespace-nowrap">
               Overview of your domain's AI search visibility performance
             </p>
           </div>
@@ -179,11 +178,10 @@ const Dashboard = () => {
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <MetricCard
-          title="Total Mentions"
-          value={summary?.metrics?.total_mentions ?? "-"}
-          change={summary?.metrics?.mentions_change ?? undefined}
-          trend={summary?.metrics?.mentions_change && summary.metrics.mentions_change > 0 ? "up" : "down"}
-          icon={<Eye className="h-6 w-6" />}
+          title="Total Prompts"
+          value={summary?.metrics?.total_prompts ?? "-"}
+          icon={<FileText className="h-6 w-6" />}
+          href="/prompts"
         />
         <MetricCard
           title="Total Citations"
@@ -191,6 +189,14 @@ const Dashboard = () => {
           change={summary?.metrics?.citations_change ?? undefined}
           trend={summary?.metrics?.citations_change && summary.metrics.citations_change > 0 ? "up" : "down"}
           icon={<Link2 className="h-6 w-6" />}
+        />
+        <MetricCard
+          title="Total Mentions"
+          value={summary?.metrics?.total_mentions ?? "-"}
+          change={summary?.metrics?.mentions_change ?? undefined}
+          trend={summary?.metrics?.mentions_change && summary.metrics.mentions_change > 0 ? "up" : "down"}
+          icon={<Eye className="h-6 w-6" />}
+          href="/mentions"
         />
         <MetricCard
           title="Visibility Score"
@@ -205,11 +211,6 @@ const Dashboard = () => {
           change={summary?.metrics?.position_change ?? undefined}
           trend={summary?.metrics?.position_change && summary.metrics.position_change < 0 ? "up" : "down"}
           icon={<TrendingUp className="h-6 w-6" />}
-        />
-        <MetricCard
-          title="Active Alerts"
-          value={summary?.metrics?.active_alerts ?? "-"}
-          icon={<Bell className="h-6 w-6" />}
         />
       </div>
 

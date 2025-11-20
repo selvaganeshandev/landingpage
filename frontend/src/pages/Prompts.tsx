@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, FolderOpen, TrendingUp, Eye, Edit, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Search, FolderOpen, TrendingUp, Eye, Edit, Sparkles, Loader2, Clock, CheckCircle, XCircle, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Breadcrumb,
@@ -84,7 +84,7 @@ const Prompts = () => {
         });
       }
       // For empty data, just set empty array without showing error
-      if (reset) {
+      if (replace) {
         setPromptGroups([]);
       }
     } finally {
@@ -117,6 +117,28 @@ const Prompts = () => {
 
   const handleOrganizeGroups = () => {
     toast({ title: "Organize Groups", description: "Opening group organization panel..." });
+  };
+
+  const getStatusBadge = (trackStatus: string) => {
+    const status = trackStatus?.toUpperCase();
+    
+    // COMP and FAIL show "Completed" with success/green color (like sentiment positive)
+    if (status === 'COMP' || status === 'FAIL') {
+      return (
+        <Badge variant="secondary" className="bg-success/10 text-success border-success/20 hover:bg-success/10 hover:text-success">
+          <CheckCircle className="h-3 w-3 mr-1" />
+          Completed
+        </Badge>
+      );
+    }
+    
+    // All other statuses (PROC, SCHD, INIT, etc.) show "Processing" with no color (muted)
+    return (
+      <Badge variant="secondary" className="bg-muted text-muted-foreground hover:bg-muted hover:text-muted-foreground">
+        <Clock className="h-3 w-3 mr-1" />
+        Processing
+      </Badge>
+    );
   };
 
   return (
@@ -166,8 +188,11 @@ const Prompts = () => {
           <Card key={group.id} className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
             <div className="space-y-5">
               <div className="flex items-start justify-between">
-                <div className="space-y-2">
-                  <h3 className="text-xl font-semibold font-inter">{group.group_id}</h3>
+                <div className="space-y-2 flex-1">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-xl font-semibold font-inter">{group.group_id}</h3>
+                    {getStatusBadge(group.track_status)}
+                  </div>
                   {group.primary_prompt && (
                     <p className="text-sm text-muted-foreground font-mono bg-gradient-to-br from-muted/30 to-muted/50 px-3 py-2 rounded-xl inline-block border border-border">
                       {group.primary_prompt}

@@ -486,9 +486,18 @@ const Competitors = () => {
             sentimentPercent = Math.round((rawSentiment + 1) * 50);
           }
           
+          const isYou = c.is_you === true || c.name === 'You';
+          
+          // Format name: "Brand Name (You)" for your brand, otherwise just the name
+          const displayName = isYou && c.domain_name 
+            ? `${c.domain_name} (You)`
+            : (c.name || 'Unknown');
+          
           return {
             id: c.id,
-            name: c.name,
+            name: displayName,
+            originalName: c.name || 'Unknown', // Keep original for reference
+            domainName: c.domain_name || c.name || 'Unknown', // Domain name for "You"
             url: c.url || (c.domain_name || '').toLowerCase(),
             mentions: c.total_mentions || 0,
             citations: c.total_citations || 0,
@@ -497,8 +506,8 @@ const Competitors = () => {
             averagePosition: Number(c.average_position || 0),
             shareOfVoice: Math.round(Number(c.share_of_voice_percentage || 0)),
             trend: Number(c.trend_percentage || 0),
-            color: idx === 0 ? 'hsl(var(--primary))' : idx === 1 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-3))',
-            isYou: false, // Competitors are never "you" - "Your Brand" is shown separately in ShareOfVoice
+            color: competitorColors[idx % competitorColors.length], // Different color for each competitor
+            isYou: isYou, // "You" is now included in the list
           };
         });
         setCompetitors(mapped.length ? mapped : []);
@@ -572,7 +581,16 @@ const Competitors = () => {
         const platMap: Record<string, Record<string, number>> = {};
         latestRows.forEach((r: any) => {
           const plat = r.platform || 'Overall';
-          const brand = r.competitor?.name || 'Your Brand';
+          // Format brand name: "Brand Name (You)" for your brand
+          let brand = r.brand_name || r.competitor?.name || (r.is_you ? 'You' : 'Your Brand');
+          if (r.is_you && r.domain_name) {
+            brand = `${r.domain_name} (You)`;
+          } else if (r.is_you && !r.competitor) {
+            const youCompetitor = mapped.find(c => c.isYou);
+            if (youCompetitor?.domainName) {
+              brand = `${youCompetitor.domainName} (You)`;
+            }
+          }
           if (!platMap[plat]) platMap[plat] = {};
           platMap[plat][brand] = (platMap[plat][brand] || 0) + (Number(r.mention_count || 0));
         });
@@ -631,21 +649,42 @@ const Competitors = () => {
           setHeatmapPlatforms(fallbackPlatforms);
         }
 
-        // Top brands list from latest snapshot
-        const tb = (latest?.players || []).map((p: any) => ({
-          name: p?.competitor?.name || 'Your Brand',
-          url: '',
-          mentions: p?.mention_count || 0,
-          percentage: Number(p?.share_percentage || 0),
-          isYou: !p?.competitor,
-        })).sort((a: any, b: any) => b.mentions - a.mentions).slice(0, 5);
+        // Top brands list - use mapped competitors which already has correct data and formatting
+        // This data comes from the backend API and includes all necessary metrics
+        const tb = mapped
+          .map((c: any) => ({
+            name: c.name,
+            url: c.url || '',
+            mentions: c.mentions || 0,
+            percentage: c.shareOfVoice || 0,
+            isYou: c.isYou || false,
+          }))
+          .sort((a: any, b: any) => {
+            // Sort "You" first, then by mentions (descending)
+            if (a.isYou && !b.isYou) return -1;
+            if (!a.isYou && b.isYou) return 1;
+            return b.mentions - a.mentions;
+          })
+          .slice(0, 5); // Top 5 brands
+        
+        console.log('🏆 Top Brands by Visibility:', {
+          totalBrands: tb.length,
+          brands: tb.map(b => ({ name: b.name, mentions: b.mentions, percentage: b.percentage, isYou: b.isYou })),
+        });
+        
         if (tb.length) setTopBrands(tb);
 
         // Build dynamic prompt performance cards
         const displayBrands = (mapped.length ? mapped : [])
           .sort((a: any, b: any) => (b.isYou ? 1 : 0) - (a.isYou ? 1 : 0))
-          .slice(0, 3)
-          .map((c: any) => c.name);
+          .slice(0, 3);
+        
+        // Create a mapping from original names to display names for prompt analytics
+        const brandNameMap = new Map<string, string>();
+        displayBrands.forEach((c: any) => {
+          brandNameMap.set(c.originalName || c.name, c.name);
+          brandNameMap.set(c.domainName || c.name, c.name);
+        });
 
         const compPromptRows = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
         const normalizedPromptRows = compPromptRows.map((row: any, idx: number) => ({
@@ -767,11 +806,22 @@ const Competitors = () => {
 
       // Refresh the competitor list by reloading the main data
       // The useEffect will automatically reload all data when domainId changes
-      // For immediate refresh, we'll reload just the competitor list
+      // For immediate refresh, we'll reload just the competitor list - use backend API which includes "You"
       try {
-        const list = await apiClient.getEngineCompetitors({ domain_id: domainId });
+        const list = await apiClient.get(`/competitors/competitors/by_domain/?domain_id=${domainId}`);
         if (list && Array.isArray(list)) {
-          const mapped = list.map((c: any) => {
+          const competitorColors = [
+            'hsl(var(--primary))',
+            'hsl(var(--chart-2))',
+            'hsl(var(--chart-3))',
+            'hsl(var(--chart-4))',
+            'hsl(var(--chart-5))',
+            'hsl(var(--success))',
+            'hsl(var(--warning))',
+            'hsl(var(--destructive))',
+          ];
+          
+          const mapped = list.map((c: any, idx: number) => {
             // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
             // Special case: -1 (no data) or 0 with no mentions should show 0%
             const rawSentiment = Number(c.sentiment_score || 0);
@@ -785,7 +835,9 @@ const Competitors = () => {
             
             return {
               id: c.id,
-              name: c.name || 'Unknown',
+              name: displayName,
+              originalName: c.name || 'Unknown',
+              domainName: c.domain_name || c.name || 'Unknown',
               url: c.url || '',
               mentions: c.total_mentions || 0,
               visibility: Number(c.visibility_score || 0),
@@ -793,7 +845,8 @@ const Competitors = () => {
               avgPosition: Number(c.average_position || 0),
               shareOfVoice: Number(c.share_of_voice_percentage || 0),
               trend: Number(c.trend_percentage || 0),
-              isYou: false,
+              isYou: isYou,
+              color: competitorColors[idx % competitorColors.length],
             };
           });
           setCompetitors(mapped);
@@ -1068,10 +1121,10 @@ const Competitors = () => {
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6 mt-0">
 
-            {/* Competitor Cards */}
+            {/* Competitor Cards - Limited to 3 in overview */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {competitors.length > 0 ? (
-                competitors.map((competitor, idx) => (
+                competitors.slice(0, 3).map((competitor, idx) => (
                 <Card
                   key={competitor.id}
                   className={`p-6 transition-all duration-300 backdrop-blur-sm bg-card/80 ${
@@ -1085,14 +1138,14 @@ const Competitors = () => {
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="text-xl font-semibold font-inter">{competitor.name}</h3>
-                          {competitor.isYou && (
-                            <Badge variant="default" className="gradient-primary border-0">You</Badge>
-                          )}
                         </div>
                         <p className="text-sm text-muted-foreground">{competitor.url}</p>
                       </div>
-                      <div className="w-12 h-12 rounded-xl gradient-primary shadow-glow flex items-center justify-center font-bold text-white text-lg font-inter">
-                        #{idx + 1}
+                      <div 
+                        className="w-12 h-12 rounded-xl shadow-glow flex items-center justify-center font-bold text-white text-lg font-inter"
+                        style={{ backgroundColor: competitor.color }}
+                      >
+                        #{competitor.isYou ? 1 : idx + 1}
                       </div>
                     </div>
 
@@ -1460,7 +1513,8 @@ const Competitors = () => {
 
                 <div className="space-y-4">
                   {promptCards.length > 0 ? (
-                    promptCards.map((prompt: any) => (
+                    <>
+                      {promptCards.slice(0, promptsDisplayLimit).map((prompt: any) => (
                     <Card key={prompt.id} className="p-5 transition-all duration-300 border border-border hover:border-primary">
                       <div className="space-y-4">
                         <div className="flex items-start justify-between">
@@ -1490,23 +1544,45 @@ const Competitors = () => {
                         </div>
 
                         <div className="space-y-3">
-                          {(prompt.brands || []).map((brand: string, idx: number) => (
-                            <div key={brand} className="space-y-2">
-                              <div className="flex items-center justify-between text-sm">
-                                <span className="font-medium">{brand}</span>
-                                <span className="text-muted-foreground">{(prompt.counts && prompt.counts[idx]) || 0} mentions</span>
+                          {(prompt.brands || []).map((brand: string, idx: number) => {
+                            const mentionCount = (prompt.counts && prompt.counts[idx]) || 0;
+                            const brandColor = (prompt.colors && prompt.colors[idx]) || 'hsl(var(--muted))';
+                            const percentage = prompt.total > 0 ? (mentionCount / prompt.total) * 100 : 0;
+                            
+                            return (
+                              <div key={brand} className="space-y-2">
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="font-medium">{brand}</span>
+                                  <span className="text-muted-foreground">{mentionCount} mentions</span>
+                                </div>
+                                <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
+                                  <div
+                                    className="h-full transition-all"
+                                    style={{
+                                      width: `${percentage}%`,
+                                      backgroundColor: brandColor,
+                                    }}
+                                  />
+                                </div>
                               </div>
-                              <Progress value={(() => {
-                                const val = (prompt.counts && prompt.counts[idx]) || 0;
-                                const denom = prompt.total || (Array.isArray(prompt.counts) ? prompt.counts.reduce((s:number,v:number)=>s+v,0) : 0);
-                                return denom > 0 ? (val / denom) * 100 : 0;
-                              })()} className="h-2" />
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     </Card>
-                    ))
+                      ))}
+                      {promptCards.length > promptsDisplayLimit && (
+                        <div className="flex justify-center pt-4">
+                          <Button 
+                            variant="outline" 
+                            onClick={() => setPromptsDisplayLimit(prev => prev + 10)}
+                            className="w-full max-w-md"
+                          >
+                            Load More ({promptCards.length - promptsDisplayLimit} remaining)
+                          </Button>
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-8 space-y-2">
                       <p className="text-sm text-muted-foreground text-center">

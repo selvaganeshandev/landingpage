@@ -473,7 +473,10 @@ export const apiClient = {
     body: JSON.stringify(data),
   }),
 
-  getPromptGroupDetail: (id: number) => apiRequest(`/prompts/groups/${id}/`),
+  getPromptGroupDetail: (id: number, params?: Record<string, string>) => {
+    const queryString = params ? '?' + new URLSearchParams(params).toString() : '';
+    return apiRequest(`/prompts/groups/${id}/${queryString}`);
+  },
 
   updatePromptGroup: (id: number, data: any) => apiRequest(`/prompts/groups/${id}/`, {
     method: 'PUT',
@@ -763,7 +766,7 @@ export const apiClient = {
       domain_id: params.domain_id,
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
     }).toString()}`;
-    return apiClient.getEngine(`/api/competitor-prompt-analytics/gaps/${queryParams}`);
+    return apiClient.get(`/competitors/competitor-prompt-analytics/gaps/${queryParams}`);
   },
 
   getCompetitorHeatmap: (params: { domain_id: string; days?: number; platform?: string }, options?: RequestOptions) => {
@@ -823,13 +826,14 @@ export const apiClient = {
   },
 
   // ===== Dashboard =====
-  getDashboardSummary: (params: { domain_id: string; days?: number }) => {
-    const queryParams = `?${new URLSearchParams({
+  getDashboardSummary: (params: { domain_id: string; days?: number; llm_model?: string }) => {
+    const queryParams = new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
-    }).toString()}`;
+      ...(params.llm_model ? { llm_model: params.llm_model } : {}),
+    });
     // Use backend API endpoint
-    return apiClient.get(`/analytics/dashboard/summary/${queryParams}`);
+    return apiClient.get(`/analytics/dashboard/summary/?${queryParams.toString()}`);
   },
 
   // ===== Integrations =====
