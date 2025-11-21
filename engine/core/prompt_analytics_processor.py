@@ -1,15 +1,18 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.db.models import Sum, Avg, Count, Max, Q
 from shared_models.models import (
     Domain, Prompt, PromptAnalytics, PromptGroup, SentimentAnalytics,
-    PromptMetricSnapshot, PromptGroupMetricSnapshot, DomainMetricSnapshot
+    PromptMetricSnapshot, PromptGroupMetricSnapshot, DomainMetricSnapshot,
+    Competitor
 )
 from decimal import Decimal
 from datetime import date
 import logging
+import re
+from collections import Counter
 from .metric_snapshot_logger import (
     log_snapshot_creation_start, log_table_check, log_analytics_filtering,
     log_prompts_processing, log_platform_processing, log_snapshot_creation,
@@ -19,6 +22,215 @@ from .metric_snapshot_logger import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_competitors_for_domain(domain: Domain) -> Tuple[int, List[str]]:
+    """
+    Extract top competitors from prompt analytics and create Competitor records.
+    This is a simplified version that works with shared models in the engine.
+    
+    Returns:
+        Tuple of (created_count, list_of_competitor_names)
+    """
+    POSITIVE_KEYWORDS = [
+        'best', 'great', 'excellent', 'top', 'leading', 'premier',
+        'quality', 'popular', 'trusted', 'recommended', 'fast', 'easy'
+    ]
+    NEGATIVE_KEYWORDS = [
+        'poor', 'worst', 'bad', 'inferior', 'low-quality', 'slow',
+        'difficult', 'expensive', 'limited', 'outdated', 'problem'
+    ]
+    
+    def _clean_competitor_name(name: str) -> str:
+        """Clean and normalize competitor name"""
+        if not name:
+            return ""
+        name = name.strip()
+        name = re.sub(r'^https?://(www\.)?', '', name, flags=re.IGNORECASE)
+        name = name.split('/')[0]
+        suffixes = [
+            r'\s+(Inc\.?|LLC|Ltd\.?|Corporation|Corp\.?|Company|Co\.?)$',
+            r'\.(com|net|org|io|ai)$'
+        ]
+        for suffix in suffixes:
+            name = re.sub(suffix, '', name, flags=re.IGNORECASE)
+        name = name.strip()
+        if name.islower() or name.isupper():
+            name = name.title()
+        return name
+    
+    def _guess_competitor_url(competitor_name: str) -> str:
+        """Attempt to guess competitor URL from name"""
+        clean_name = competitor_name.lower().strip()
+        clean_name = re.sub(r'[^a-z0-9]', '', clean_name)
+        return f"https://www.{clean_name}.com"
+    
+    def _analyze_competitor_sentiment(context_summary: str, competitor_name: str) -> float:
+        """Analyze sentiment for a competitor based on context"""
+        if not context_summary:
+            return 0.0
+        response_lower = context_summary.lower()
+        competitor_lower = competitor_name.lower()
+        if competitor_lower not in response_lower:
+            return 0.0
+        sentences = re.split(r'(?<=[.!?])\s+', context_summary)
+        relevant_sentences = [s for s in sentences if competitor_lower in s.lower()]
+        relevant_text = ' '.join(relevant_sentences) if relevant_sentences else context_summary
+        relevant_lower = relevant_text.lower()
+        pos_hits = sum(relevant_lower.count(word) for word in POSITIVE_KEYWORDS)
+        neg_hits = sum(relevant_lower.count(word) for word in NEGATIVE_KEYWORDS)
+        if pos_hits + neg_hits == 0:
+            return 0.0
+        sentiment = (pos_hits - neg_hits) / max(pos_hits + neg_hits, 1)
+        return max(-1.0, min(1.0, sentiment))
+    
+    def _calculate_average_sentiment(stats: Dict[str, float]) -> float:
+        samples = stats.get('sentiment_samples', 0)
+        if not samples:
+            return 0.0
+        return stats['sentiment_sum'] / samples
+    
+    logger.info(f"Starting competitor extraction for domain: {domain.name} (ID: {domain.id})")
+    
+    # Step 1: Get all completed prompt analytics for this domain
+    all_analytics = PromptAnalytics.objects.filter(
+        prompt__group__domain=domain,
+        track_status='COMP'
+    )
+    
+    # Filter to only those with competitor mentions
+    analytics_with_mentions = []
+    for analytics in all_analytics:
+        mention_list = analytics.competitor_mention_list
+        if mention_list and isinstance(mention_list, list) and len(mention_list) > 0:
+            analytics_with_mentions.append({
+                'competitor_mention_list': mention_list,
+                'context_summary': analytics.context_summary or '',
+                'sentiment_score': float(analytics.sentiment_score or 0.0)
+            })
+    
+    total_prompts = len(analytics_with_mentions)
+    logger.info(f"Found {total_prompts} prompt analytics with competitor mentions for domain {domain.id} (out of {all_analytics.count()} total analytics)")
+    
+    if total_prompts == 0:
+        logger.warning(f"No analytics with competitor mentions found for domain {domain.id}")
+        return 0, []
+    
+    # Convert to queryset-like structure for processing
+    analytics_qs = analytics_with_mentions
+    
+    # Step 2: Extract and count all competitor mentions + sentiment estimates
+    competitor_stats: Dict[str, Dict[str, float]] = {}
+    
+    for analytics in analytics_qs:
+        mention_list = analytics.get('competitor_mention_list') or []
+        context_summary = analytics.get('context_summary') or ''
+        if mention_list and isinstance(mention_list, list):
+            for competitor_name in mention_list:
+                if competitor_name and isinstance(competitor_name, str):
+                    cleaned_name = _clean_competitor_name(competitor_name)
+                    if cleaned_name and cleaned_name.lower() != domain.name.lower():
+                        stats = competitor_stats.setdefault(cleaned_name, {
+                            'mentions': 0,
+                            'sentiment_sum': 0.0,
+                            'sentiment_samples': 0
+                        })
+                        stats['mentions'] += 1
+                        sentiment_estimate = _analyze_competitor_sentiment(
+                            context_summary=context_summary,
+                            competitor_name=cleaned_name
+                        )
+                        stats['sentiment_sum'] += sentiment_estimate
+                        stats['sentiment_samples'] += 1
+    
+    competitor_counter = Counter({
+        name: data['mentions']
+        for name, data in competitor_stats.items()
+    })
+    
+    logger.info(f"Found {len(competitor_counter)} unique competitor mentions")
+    
+    # Step 3: Filter competitors by minimum threshold
+    min_mentions_threshold = 2
+    filtered_competitors = {
+        name: count for name, count in competitor_counter.items()
+        if count >= min_mentions_threshold
+    }
+    
+    logger.info(f"Filtered to {len(filtered_competitors)} competitors with >= {min_mentions_threshold} mentions")
+    
+    # Step 4: Get top N competitors (between min and max)
+    min_competitors = 3
+    max_competitors = 5
+    sorted_competitors = sorted(
+        competitor_counter.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+    top_competitors = [
+        item for item in sorted_competitors
+        if item[0] in filtered_competitors
+    ][:max_competitors]
+    
+    target_count = min(max_competitors, len(sorted_competitors))
+    if len(top_competitors) < target_count:
+        existing = {name for name, _ in top_competitors}
+        for name, count in sorted_competitors:
+            if name in existing:
+                continue
+            top_competitors.append((name, count))
+            if len(top_competitors) == target_count:
+                break
+    
+    if len(top_competitors) < min_competitors:
+        top_competitors = sorted_competitors[:min_competitors]
+    
+    logger.info(f"Selected top {len(top_competitors)} competitors")
+    
+    # Step 5: Create Competitor records
+    created_competitors = []
+    created_count = 0
+    
+    for competitor_name, mention_count in top_competitors:
+        competitor_url = _guess_competitor_url(competitor_name)
+        stats = competitor_stats.get(competitor_name, {})
+        avg_sentiment = _calculate_average_sentiment(stats)
+        sentiment_decimal = Decimal(str(round(avg_sentiment, 2)))
+        
+        # Create or update competitor (created_by will be None in engine context)
+        competitor, created = Competitor.objects.get_or_create(
+            domain=domain,
+            name=competitor_name,
+            defaults={
+                'url': competitor_url,
+                'total_mentions': mention_count,
+                'sentiment_score': sentiment_decimal,
+                'track_status': 'INIT',
+                'track_message': 'Auto-extracted from prompt analytics',
+                'tracked_at': timezone.now(),
+                'created_by': None,  # Engine doesn't have user context
+            }
+        )
+        
+        if created:
+            created_count += 1
+            created_competitors.append(competitor_name)
+            logger.info(f"Created competitor: {competitor_name} ({mention_count} mentions)")
+        else:
+            # Update mention count if competitor already exists
+            fields_to_update = []
+            if competitor.total_mentions != mention_count:
+                competitor.total_mentions = mention_count
+                fields_to_update.append('total_mentions')
+            if competitor.sentiment_score != sentiment_decimal:
+                competitor.sentiment_score = sentiment_decimal
+                fields_to_update.append('sentiment_score')
+            if fields_to_update:
+                competitor.save(update_fields=fields_to_update + ['modified_at'])
+                logger.info(f"Updated competitor: {competitor_name} ({mention_count} mentions)")
+    
+    logger.info(f"Competitor extraction complete. Created {created_count} new competitors.")
+    return created_count, created_competitors
 
 
 class PromptAnalyticsProcessor:
@@ -548,6 +760,51 @@ class PromptAnalyticsProcessor:
                         
                         domain_fresh.tracked_at = timezone.now()
                         domain_fresh.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
+                        
+                        # Auto-extract competitors when domain analytics are complete
+                        # Note: This runs after domain is saved, so we check the saved status
+                        if domain_fresh.processing_status == 'COMP':
+                            logger.info(f"Domain {domain_fresh.id} is COMP, attempting competitor extraction...")
+                            try:
+                                # Get all completed analytics for this domain
+                                all_analytics = PromptAnalytics.objects.filter(
+                                    prompt__group__domain=domain_fresh,
+                                    track_status='COMP'
+                                )
+                                
+                                # Check if any analytics have competitor mentions
+                                analytics_with_competitors = []
+                                for analytics in all_analytics:
+                                    mention_list = analytics.competitor_mention_list
+                                    if mention_list and isinstance(mention_list, list) and len(mention_list) > 0:
+                                        analytics_with_competitors.append(analytics)
+                                
+                                analytics_count = len(analytics_with_competitors)
+                                
+                                logger.info(f"Checking competitor extraction for domain {domain_fresh.id}: {analytics_count} analytics with competitor mentions (out of {all_analytics.count()} total)")
+                                
+                                if analytics_count >= 1:  # Extract if we have at least 1 analytics with competitors
+                                    logger.info(f"Auto-extracting competitors for domain {domain_fresh.id} after domain completion")
+                                    try:
+                                        # Extract competitors directly using shared models
+                                        created_count, competitor_names = _extract_competitors_for_domain(domain_fresh)
+                                        if created_count > 0:
+                                            logger.info(f"✅ Auto-extracted {created_count} competitors for domain {domain_fresh.id}: {', '.join(competitor_names)}")
+                                        else:
+                                            logger.info(f"ℹ️ No new competitors extracted for domain {domain_fresh.id} (insufficient data or already exists)")
+                                    except Exception as service_err:
+                                        logger.error(f"Error during competitor extraction: {str(service_err)}", exc_info=True)
+                                        import traceback
+                                        logger.error(f"Traceback: {traceback.format_exc()}")
+                                else:
+                                    logger.info(f"ℹ️ Skipping competitor extraction for domain {domain_fresh.id} - no analytics with competitor mentions found ({analytics_count} out of {all_analytics.count()} analytics)")
+                            except Exception as comp_error:
+                                logger.error(f"Error extracting competitors for domain {domain_fresh.id}: {str(comp_error)}", exc_info=True)
+                                import traceback
+                                logger.error(f"Traceback: {traceback.format_exc()}")
+                                # Don't fail domain completion if competitor extraction fails
+                        else:
+                            logger.info(f"Domain {domain_fresh.id} status is {domain_fresh.processing_status}, skipping competitor extraction")
                     else:
                         logger.info(f"Domain {domain.id} already in status {domain_fresh.processing_status}, skipping")
             else:

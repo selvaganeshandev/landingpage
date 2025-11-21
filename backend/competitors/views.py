@@ -119,6 +119,52 @@ class CompetitorViewSet(viewsets.ModelViewSet):
         for comp in competitors_data:
             comp['is_you'] = False  # Flag competitors
         
+        # Get domain to include as "You"
+        from domains.models import Domain
+        from analytics.models import ShareOfVoiceAnalytics
+        try:
+            # Ensure user has access to this domain
+            user = request.user
+            if user.role == 'super_admin':
+                domain = Domain.objects.get(id=domain_id)
+            else:
+                domain = Domain.objects.get(id=domain_id, organisation=user.organisation)
+        except Domain.DoesNotExist:
+            return Response(
+                {'error': 'Domain not found or you do not have access to it'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get latest share of voice for "You"
+        your_sov = ShareOfVoiceAnalytics.objects.filter(
+            domain_id=domain_id,
+            competitor__isnull=True
+        ).order_by('-timestamp').first()
+        
+        # Build "You" entry
+        you_entry = {
+            'id': None,
+            'domain': domain.id,
+            'domain_name': domain.name,
+            'name': 'You',
+            'url': domain.url,
+            'track_status': domain.processing_status,
+            'track_message': domain.track_message,
+            'tracked_at': domain.tracked_at.isoformat() if domain.tracked_at else None,
+            'total_mentions': domain.total_mentions,
+            'total_citations': domain.total_citations,
+            'visibility_score': float(domain.visibility_score),
+            'sentiment_score': float(domain.sentiment_score),
+            'average_position': float(domain.average_position),
+            'share_of_voice_percentage': float(your_sov.share_percentage) if your_sov else 0.0,
+            'trend_percentage': 0.0,
+            'created_by': None,
+            'created_by_email': None,
+            'created_at': domain.created_at.isoformat(),
+            'modified_at': domain.modified_at.isoformat(),
+            'is_you': True
+        }
+        
         # Return "You" first, then competitors
         return Response([you_entry] + competitors_data)
     

@@ -159,11 +159,23 @@ const Competitors = () => {
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [hasLoadedData, setHasLoadedData] = useState(false);
   const [disabledBrands, setDisabledBrands] = useState<string[]>([]);
-  const [isStartingAnalysis, setIsStartingAnalysis] = useState(false);
   const [strengthDisabledBrands, setStrengthDisabledBrands] = useState<string[]>([]);
+  const [promptsDisplayLimit, setPromptsDisplayLimit] = useState<number>(10);
   const loadAbortRef = useRef<AbortController | null>(null);
   const domainProcessingStatus = selectedDomain?.processing_status || null;
   const isDomainProcessing = Boolean(selectedDomain && domainProcessingStatus && domainProcessingStatus !== 'COMP');
+  
+  // Competitor colors for consistent styling
+  const competitorColors = [
+    'hsl(var(--primary))',
+    'hsl(var(--chart-2))',
+    'hsl(var(--chart-3))',
+    'hsl(var(--chart-4))',
+    'hsl(var(--chart-5))',
+    'hsl(var(--success))',
+    'hsl(var(--warning))',
+    'hsl(var(--destructive))',
+  ];
 
   // Poll for status updates every 10 seconds when domain is processing
   useEffect(() => {
@@ -175,6 +187,29 @@ const Competitors = () => {
 
     return () => clearInterval(interval);
   }, [isDomainProcessing, loadDomains]);
+
+  // Auto-refresh competitors data when competitors exist but have no data (processing state)
+  useEffect(() => {
+    const allCompetitorsHaveZeroData = competitors.length > 0 && competitors.every(c => 
+      c.mentions === 0 && 
+      c.citations === 0 && 
+      c.visibility === 0 && 
+      c.shareOfVoice === 0 && 
+      c.sentiment === 0
+    );
+
+    if (allCompetitorsHaveZeroData && hasLoadedData && !isPageLoading) {
+      // Auto-refresh every 15 seconds when competitors are being processed
+      const interval = setInterval(() => {
+        if (domainId) {
+          // Trigger a reload by updating a dependency that causes useEffect to re-run
+          setDomainId(domainId);
+        }
+      }, 15000); // Poll every 15 seconds
+
+      return () => clearInterval(interval);
+    }
+  }, [competitors, hasLoadedData, isPageLoading, domainId]);
 
   const promptCards = useMemo(() => {
     if (!promptRows.length) return [];
@@ -203,6 +238,7 @@ const Competitors = () => {
     type PromptAggregate = {
       prompt: string;
       brandCounts: Record<string, number>;
+      brandCitationCounts: Record<string, number>;
       total: number;
       platformCounts: Record<string, number>;
       citationTotal: number;
@@ -221,12 +257,14 @@ const Competitors = () => {
         {
           prompt: row.promptText,
           brandCounts: {},
+          brandCitationCounts: {},
           total: 0,
           platformCounts: {},
           citationTotal: 0,
         };
 
       aggregate.brandCounts[brandName] = (aggregate.brandCounts[brandName] || 0) + row.mentionCount;
+      aggregate.brandCitationCounts[brandName] = (aggregate.brandCitationCounts[brandName] || 0) + (row.citationCount || 0);
       aggregate.total += row.mentionCount;
       aggregate.platformCounts[row.platform] = (aggregate.platformCounts[row.platform] || 0) + row.mentionCount;
       aggregate.citationTotal += row.citationCount || 0;
@@ -240,10 +278,53 @@ const Competitors = () => {
       .sort((a, b) => b[1] - a[1])
       .map(([name]) => name);
 
+    // Create a map of competitor names to their colors
+    const competitorColorMap = new Map<string, string>();
+    competitors.forEach((comp, idx) => {
+      competitorColorMap.set(comp.name, comp.color || competitorColors[idx % competitorColors.length]);
+    });
+
+    // Always include "You" brand if it exists in competitors, even if it has no mentions for this filter
+    const youBrand = competitors.find((c) => c.isYou);
     const fallbackBrands = competitors.map((c) => c.name);
-    const brandPriority = sortedBrandNames.length ? sortedBrandNames : fallbackBrands;
-    const baseBrands = brandPriority.slice(0, Math.min(3, brandPriority.length || 3));
-    const brandsToDisplay = baseBrands.length ? baseBrands : fallbackBrands.slice(0, 3);
+    
+    // Build brand priority: include "You" first if it exists, then sorted by mentions
+    let brandPriority: string[] = [];
+    if (youBrand && !sortedBrandNames.includes(youBrand.name)) {
+      brandPriority.push(youBrand.name);
+    }
+    brandPriority = [...brandPriority, ...sortedBrandNames];
+    
+    // If no sorted brands, use fallback
+    if (brandPriority.length === 0) {
+      brandPriority = fallbackBrands;
+    }
+    
+    // Show ALL competitors that have mentions OR are in the competitors list
+    // Include "You" first, then others sorted by mentions
+    const allBrandsWithMentions = new Set(brandPriority);
+    // Add all competitors that might not have mentions yet
+    competitors.forEach((comp) => {
+      allBrandsWithMentions.add(comp.name);
+    });
+    
+    // Build final list: "You" first, then others sorted by mentions
+    const brandsToDisplay: string[] = [];
+    if (youBrand) {
+      brandsToDisplay.push(youBrand.name);
+    }
+    // Add other brands sorted by mentions (excluding "You" if already added)
+    brandPriority.forEach((brand) => {
+      if (brand !== youBrand?.name) {
+        brandsToDisplay.push(brand);
+      }
+    });
+    // Add any remaining competitors that weren't in brandPriority
+    competitors.forEach((comp) => {
+      if (!brandsToDisplay.includes(comp.name)) {
+        brandsToDisplay.push(comp.name);
+      }
+    });
 
     const cards = Array.from(promptMap.values())
       .sort((a, b) => b.total - a.total)
@@ -254,11 +335,18 @@ const Competitors = () => {
         const topPlatformEntry = Object.entries(aggregate.platformCounts).sort((a, b) => b[1] - a[1])[0];
         const topPlatform = topPlatformEntry ? `${topPlatformEntry[0]} (${topPlatformEntry[1]} mentions)` : null;
 
+        // Map brands to their colors
+        const brandColors = brandsToDisplay.map((brand) => 
+          competitorColorMap.get(brand) || competitorColors[brandsToDisplay.indexOf(brand) % competitorColors.length]
+        );
+
         return {
           id: idx + 1,
           prompt: aggregate.prompt,
           brands: brandsToDisplay,
           counts: brandsToDisplay.map((brand) => aggregate.brandCounts[brand] || 0),
+          citationCounts: brandsToDisplay.map((brand) => aggregate.brandCitationCounts[brand] || 0),
+          colors: brandColors,
           total: aggregate.total,
           winner,
           topPlatform,
@@ -280,68 +368,6 @@ const Competitors = () => {
     });
   };
 
-  const handleStartAnalysis = async () => {
-    if (!domainId) {
-      toast({
-        title: "Error",
-        description: "No domain selected. Please select a domain first.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsStartingAnalysis(true);
-
-    try {
-      const response = await apiClient.startCompetitorAnalysis(parseInt(domainId, 10));
-
-      if (response.success) {
-        toast({
-          title: "Competitor Analysis Started",
-          description: `Successfully extracted ${response.created_count} competitors. Analytics will begin shortly.`,
-        });
-
-        // Update competitors list from response
-        if (response.competitors && Array.isArray(response.competitors)) {
-          const mapped = response.competitors.map((c: any) => {
-            const rawSentiment = Number(c.sentiment_score || 0);
-            const totalMentions = Number(c.total_mentions || 0);
-            let sentimentPercent = 0;
-            if (rawSentiment === -1 || (rawSentiment === 0 && totalMentions === 0)) {
-              sentimentPercent = 0;
-            } else {
-              sentimentPercent = Math.round((rawSentiment + 1) * 50);
-            }
-
-            return {
-              id: c.id,
-              name: c.name || 'Unknown',
-              url: c.url || '',
-              mentions: c.total_mentions || 0,
-              visibility: Number(c.visibility_score || 0),
-              sentiment: sentimentPercent,
-              avgPosition: Number(c.average_position || 0),
-              shareOfVoice: Number(c.share_of_voice_percentage || 0),
-              trend: Number(c.trend_percentage || 0),
-              isYou: false,
-            };
-          });
-          setCompetitors(mapped);
-        }
-      } else {
-        throw new Error(response.error || 'Failed to start competitor analysis');
-      }
-    } catch (error: any) {
-      console.error('Failed to start competitor analysis:', error);
-      toast({
-        title: "Failed to Start Analysis",
-        description: error?.message || "An error occurred while starting competitor analysis. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsStartingAnalysis(false);
-    }
-  };
 
   const handleExportReport = () => {
     toast({
@@ -418,8 +444,17 @@ const Competitors = () => {
         setAnswerGapData([]);
         return;
       }
-      setHasLoadedData(false);
-      setIsPageLoading(true);
+      // Don't set loading state when just filtering by LLM - keep existing data visible
+      // Only set loading if domain changed or initial load
+      if (loadedDomainId !== domainId || !hasLoadedData) {
+        setHasLoadedData(false);
+        setIsPageLoading(true);
+      } else {
+        // Keep existing data visible while filtering - just show analysis loading indicator
+        setIsLoadingAnalysis(true);
+        // Keep hasLoadedData true so panel doesn't disappear
+        setHasLoadedData(true);
+      }
 
       const startTime = performance.now();
       console.log('⏱️ Starting Competitors page load...');
@@ -473,7 +508,7 @@ const Competitors = () => {
         setHasLoadedData(true);
         setLoadedDomainId(domainId); // Mark this domain as loaded
         // Normalize competitor list
-        const mapped = (Array.isArray(list) ? list : list?.results || []).map((c: any, idx: number) => {
+        let mapped = (Array.isArray(list) ? list : list?.results || []).map((c: any, idx: number) => {
           // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
           // Formula: (sentiment + 1) * 50 to normalize -1..1 to 0..100
           // Special case: -1 (no data) or 0 with no mentions should show 0%
@@ -510,6 +545,30 @@ const Competitors = () => {
             isYou: isYou, // "You" is now included in the list
           };
         });
+        
+        // Ensure "You" is always included, even if API doesn't return it (e.g., when filtering by platform with zero mentions)
+        const hasYou = mapped.some((c: any) => c.isYou);
+        if (!hasYou && selectedDomain) {
+          const youCompetitor = {
+            id: -1, // Use -1 as a placeholder ID
+            name: `${selectedDomain.name} (You)`,
+            originalName: 'You',
+            domainName: selectedDomain.name || 'You',
+            url: selectedDomain.url || '',
+            mentions: 0,
+            citations: 0,
+            visibility: 0,
+            sentiment: 0,
+            averagePosition: 0,
+            shareOfVoice: 0,
+            trend: 0,
+            color: competitorColors[0], // Use first color for "You"
+            isYou: true,
+          };
+          // Add "You" at the beginning of the list
+          mapped = [youCompetitor, ...mapped];
+        }
+        
         setCompetitors(mapped.length ? mapped : []);
 
         setSovLatest(latest);
@@ -687,18 +746,35 @@ const Competitors = () => {
         });
 
         const compPromptRows = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
-        const normalizedPromptRows = compPromptRows.map((row: any, idx: number) => ({
-          id: row?.id || idx + 1,
-          promptId: row?.prompt || row?.prompt_id || idx + 1,
-          promptText: row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`,
-          competitorId: row?.competitor?.id || null,
-          competitorName: row?.competitor?.name || 'Your Brand',
-          mentionCount: Number(row?.mention_count || (row?.is_mentioned ? 1 : 0)),
-          platform: row?.platform || 'unknown',
-          trackedAt: row?.tracked_at || row?.created_at,
-          sentiment: row?.sentiment_category || 'neutral',
-          citationCount: Array.isArray(row?.citation_list) ? row.citation_list.length : Number(row?.total_citations || 0),
-        }));
+        
+        // Create mapping for "You" brand name before normalizing rows
+        const youBrandName = mapped.find((c: any) => c.isYou)?.name || (selectedDomain?.name ? `${selectedDomain.name} (You)` : 'Your Brand');
+        
+        const normalizedPromptRows = compPromptRows.map((row: any, idx: number) => {
+          // Map competitor name: if competitor is null, it's "You" brand
+          let competitorName = row?.competitor?.name;
+          if (!competitorName) {
+            // This is "You" brand - use the proper name from competitors list
+            competitorName = youBrandName;
+          } else {
+            // Map competitor name to display name from competitors list
+            const competitor = mapped.find((c: any) => c.originalName === competitorName || c.name === competitorName);
+            competitorName = competitor?.name || competitorName;
+          }
+          
+          return {
+            id: row?.id || idx + 1,
+            promptId: row?.prompt || row?.prompt_id || idx + 1,
+            promptText: row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`,
+            competitorId: row?.competitor?.id || null,
+            competitorName: competitorName,
+            mentionCount: Number(row?.mention_count || (row?.is_mentioned ? 1 : 0)),
+            platform: row?.platform || 'unknown',
+            trackedAt: row?.tracked_at || row?.created_at,
+            sentiment: row?.sentiment_category || 'neutral',
+            citationCount: Array.isArray(row?.citation_list) ? row.citation_list.length : Number(row?.total_citations || 0),
+          };
+        });
         setPromptRows(normalizedPromptRows);
 
         // Set competitive strength analysis data - ALWAYS use API response (even if empty)
@@ -750,16 +826,26 @@ const Competitors = () => {
           console.info('ℹ️ Competitors load aborted');
           return;
         }
-        toast({ title: 'Failed to load competitors', description: String(e.message || e), variant: 'destructive' });
+        // Only show error toast for actual errors, not for empty data
+        if (e?.response?.status !== 404 && e?.response?.status !== 200) {
+          console.error('Failed to load competitors:', e);
+          // Don't show toast for empty data - just log and continue
+        }
         setHasLoadedData(true);
         setLoadedDomainId(domainId); // Mark as loaded even on error to stop infinite loading
       } finally {
         if (!controller.signal.aborted && !didAbort) {
           const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
           console.log(`✅ Competitors page fully loaded in ${totalTime}s`);
+          // Always set loading to false after data loads, even when filtering
           setIsPageLoading(false);
+          setIsLoadingAnalysis(false);
+          setHasLoadedData(true);
+          setLoadedDomainId(domainId);
+        } else {
+          // Still clear loading states even if aborted
+          setIsLoadingAnalysis(false);
         }
-        setIsLoadingAnalysis(false);
       }
     };
     void load();
@@ -808,19 +894,8 @@ const Competitors = () => {
       // The useEffect will automatically reload all data when domainId changes
       // For immediate refresh, we'll reload just the competitor list - use backend API which includes "You"
       try {
-        const list = await apiClient.get(`/competitors/competitors/by_domain/?domain_id=${domainId}`);
+        const list: any = await apiClient.get(`/competitors/competitors/by_domain/?domain_id=${domainId}`);
         if (list && Array.isArray(list)) {
-          const competitorColors = [
-            'hsl(var(--primary))',
-            'hsl(var(--chart-2))',
-            'hsl(var(--chart-3))',
-            'hsl(var(--chart-4))',
-            'hsl(var(--chart-5))',
-            'hsl(var(--success))',
-            'hsl(var(--warning))',
-            'hsl(var(--destructive))',
-          ];
-          
           const mapped = list.map((c: any, idx: number) => {
             // Convert sentiment_score from -1 to 1 range to 0-100 percentage for display
             // Special case: -1 (no data) or 0 with no mentions should show 0%
@@ -832,6 +907,13 @@ const Competitors = () => {
             } else {
               sentimentPercent = Math.round((rawSentiment + 1) * 50);
             }
+            
+            const isYou = c.is_you === true || c.name === 'You';
+            
+            // Format name: "Brand Name (You)" for your brand, otherwise just the name
+            const displayName = isYou && c.domain_name 
+              ? `${c.domain_name} (You)`
+              : (c.name || 'Unknown');
             
             return {
               id: c.id,
@@ -947,8 +1029,11 @@ const Competitors = () => {
     );
   }
 
-  // Show "Start Analysing" state when there are no competitors
+  // Show processing state when there are no competitors or domain is processing
   if (competitors.length === 0 && !isPageLoading && hasLoadedData) {
+    const isDomainCompleted = domainProcessingStatus === 'COMP';
+    const isDomainProcessing = domainProcessingStatus && domainProcessingStatus !== 'COMP';
+    
     return (
       <div className="p-8 space-y-6 bg-background animate-fade-in">
         <div className="space-y-4">
@@ -959,44 +1044,72 @@ const Competitors = () => {
                 Compare your brand's AI visibility against competitors
               </p>
             </div>
+            <Button
+              onClick={() => {
+                setHasLoadedData(false);
+                setIsPageLoading(true);
+                // Trigger reload by updating domainId (which will trigger useEffect)
+                if (domainId) {
+                  setDomainId(domainId);
+                }
+              }}
+              variant="outline"
+              size="sm"
+            >
+              <Loader2 className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
           </div>
         </div>
 
         <Card className="p-12 border-0 bg-transparent shadow-none">
           <div className="flex flex-col items-center text-center space-y-6 max-w-2xl mx-auto">
             <div className="p-4 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 text-primary">
-              <Target className="h-12 w-12" />
+              {isDomainProcessing ? (
+                <Loader2 className="h-12 w-12 animate-spin" />
+              ) : (
+                <Target className="h-12 w-12" />
+              )}
             </div>
 
             <div className="space-y-2">
-              <h2 className="text-2xl font-bold">Start analysing your competitors</h2>
+              <h2 className="text-2xl font-bold">
+                {isDomainProcessing 
+                  ? "Processing Domain Analytics" 
+                  : isDomainCompleted
+                  ? "Extracting Competitors"
+                  : "Waiting for Domain Processing"}
+              </h2>
               <p className="text-muted-foreground text-base">
-                Our app can do the complete top 5 competitor analysis
+                {isDomainProcessing
+                  ? "Your domain is currently being processed. Competitors will be automatically extracted once processing is complete."
+                  : isDomainCompleted
+                  ? "Competitors are being automatically extracted from your prompt analytics data. This may take a few moments."
+                  : "Please wait for domain processing to complete. Competitors will be automatically extracted afterwards."}
               </p>
             </div>
 
             <p className="text-sm text-muted-foreground max-w-md">
-              We'll automatically discover your top competitors from existing prompt analytics data,
-              extract their mentions across AI platforms, and provide comprehensive competitive insights.
+              {isDomainProcessing
+                ? "Once your domain analytics are complete, we'll automatically discover your top competitors from the prompt analytics data."
+                : "We automatically discover your top competitors from existing prompt analytics data and extract their mentions across AI platforms."}
             </p>
 
             <Button
-              onClick={handleStartAnalysis}
-              disabled={isStartingAnalysis}
+              onClick={() => {
+                setHasLoadedData(false);
+                setIsPageLoading(true);
+                // Trigger reload by updating domainId (which will trigger useEffect)
+                if (domainId) {
+                  setDomainId(domainId);
+                }
+              }}
+              variant="outline"
               size="lg"
-              className="gradient-primary shadow-lg shadow-primary/20 mt-4"
+              className="mt-4"
             >
-              {isStartingAnalysis ? (
-                <>
-                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                  Analysing...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-5 w-5 mr-2" />
-                  Start Analysing
-                </>
-              )}
+              <Loader2 className="h-5 w-5 mr-2" />
+              Refresh to Check Status
             </Button>
           </div>
         </Card>
@@ -1010,7 +1123,7 @@ const Competitors = () => {
     );
   }
 
-  // Check if all competitor details are showing zero values
+  // Check if all competitor details are showing zero values (processing state)
   const allCompetitorsHaveZeroData = competitors.length > 0 && competitors.every(c => 
     c.mentions === 0 && 
     c.citations === 0 && 
@@ -1020,15 +1133,93 @@ const Competitors = () => {
   );
 
   // Check if filtering by platform returns no data or only zero values
-  // Also check if all competitors have zero data (even without filter)
-  const hasNoDataForPlatform = (selectedLLM !== 'all' && (
+  const hasNoDataForPlatform = selectedLLM !== 'all' && (
     (competitors.length === 0 || competitors.every(c => c.mentions === 0 && c.citations === 0)) &&
     competitiveMetrics.length === 0 &&
     heatmap.length === 0 &&
     answerGapData.length === 0
-  )) || allCompetitorsHaveZeroData;
+  );
 
-  // Show empty state when filtering by platform returns no data or all competitors have zero data
+  // Show processing state when competitors exist but have no data yet
+  if (allCompetitorsHaveZeroData && !hasNoDataForPlatform) {
+    return (
+      <div className="p-8 space-y-6 bg-background animate-fade-in">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight">Competitor Analysis</h1>
+            <p className="text-muted-foreground mt-2">
+              Compare your brand's AI visibility against competitors
+            </p>
+          </div>
+          <Button
+            onClick={() => window.location.reload()}
+            variant="outline"
+            size="sm"
+          >
+            <Loader2 className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
+
+        <Card className="p-12 border-0 bg-transparent shadow-none">
+          <div className="flex flex-col items-center text-center space-y-6 max-w-2xl mx-auto">
+            <div className="p-4 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 text-primary">
+              <Loader2 className="h-12 w-12 animate-spin" />
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold">Processing Competitors</h2>
+              <p className="text-muted-foreground text-base">
+                {competitors.length} competitor{competitors.length !== 1 ? 's' : ''} found and being analyzed
+              </p>
+            </div>
+
+            <p className="text-sm text-muted-foreground max-w-md">
+              Competitors have been extracted and are currently being processed. Analytics data will appear here once processing is complete. This may take a few moments.
+            </p>
+
+            <div className="flex gap-3 mt-4">
+              <Button
+                onClick={() => {
+                  setHasLoadedData(false);
+                  setIsPageLoading(true);
+                  // Trigger reload by updating domainId (which will trigger useEffect)
+                  if (domainId) {
+                    setDomainId(domainId);
+                  }
+                }}
+                variant="outline"
+                size="lg"
+              >
+                <Loader2 className="h-5 w-5 mr-2" />
+                Refresh to Check Status
+              </Button>
+            </div>
+
+            {/* Show list of competitors being processed */}
+            {competitors.length > 0 && (
+              <div className="mt-6 w-full max-w-md">
+                <p className="text-sm font-medium mb-3">Competitors being processed:</p>
+                <div className="space-y-2">
+                  {competitors.map((comp: any) => (
+                    <div key={comp.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border">
+                      <span className="font-medium">{comp.name}</span>
+                      <Badge variant="outline" className="gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Processing
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  // Show empty state when filtering by platform returns no data
   if (hasNoDataForPlatform) {
     return (
       <div className="p-8 space-y-6 bg-background animate-fade-in">
@@ -1048,10 +1239,7 @@ const Competitors = () => {
           </div>
           <h3 className="text-2xl font-semibold text-foreground">No Data for {selectedLLM !== 'all' ? selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1) : 'Competitors'}</h3>
           <p className="text-sm text-muted-foreground max-w-md text-center">
-            {selectedLLM !== 'all'
-              ? "There is no competitor data available for the selected LLM platform. This could mean competitors haven't been analyzed on this platform yet, or no mentions were found."
-              : "All competitor details are showing zero values. This could mean competitors haven't been analyzed yet, or no mentions were found."
-            }
+            There is no competitor data available for the selected LLM platform. This could mean competitors haven't been analyzed on this platform yet, or no mentions were found.
           </p>
           <div className="flex gap-3 mt-6">
             <Button
@@ -1108,10 +1296,8 @@ const Competitors = () => {
                   <SelectContent>
                     <SelectItem value="all">All LLMs</SelectItem>
                     <SelectItem value="chatgpt">ChatGPT</SelectItem>
-                    <SelectItem value="claude">Claude</SelectItem>
                     <SelectItem value="gemini">Gemini</SelectItem>
                     <SelectItem value="perplexity">Perplexity</SelectItem>
-                    <SelectItem value="grok">Grok</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1546,6 +1732,7 @@ const Competitors = () => {
                         <div className="space-y-3">
                           {(prompt.brands || []).map((brand: string, idx: number) => {
                             const mentionCount = (prompt.counts && prompt.counts[idx]) || 0;
+                            const citationCount = (prompt.citationCounts && prompt.citationCounts[idx]) || 0;
                             const brandColor = (prompt.colors && prompt.colors[idx]) || 'hsl(var(--muted))';
                             const percentage = prompt.total > 0 ? (mentionCount / prompt.total) * 100 : 0;
                             
@@ -1553,7 +1740,15 @@ const Competitors = () => {
                               <div key={brand} className="space-y-2">
                                 <div className="flex items-center justify-between text-sm">
                                   <span className="font-medium">{brand}</span>
-                                  <span className="text-muted-foreground">{mentionCount} mentions</span>
+                                  <div className="flex items-center gap-3 text-muted-foreground">
+                                    <span>{mentionCount} mentions</span>
+                                    {citationCount > 0 && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{citationCount} citations</span>
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
                                   <div
