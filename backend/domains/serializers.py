@@ -9,7 +9,7 @@ class DomainSerializer(serializers.ModelSerializer):
     class Meta:
         model = Domain
         fields = [
-            'id', 'name', 'url', 'organisation', 'organisation_name',
+            'id', 'name', 'url', 'country', 'organisation', 'organisation_name',
             'total_mentions', 'total_citations', 'visibility_score', 
             'average_position', 'active_alerts', 'sentiment_category', 
             'sentiment_score', 'processing_status', 'track_message', 'tracked_at',

@@ -7,12 +7,12 @@ import { MentionTable } from "@/components/MentionTable";
 import { TrendChart } from "@/components/TrendChart";
 import { TimeFilter } from "@/components/TimeFilter";
 import { PageLoader } from "@/components/PageLoader";
-import { Eye, TrendingUp, Target, Bell, Link2 } from "lucide-react";
+import { Eye, TrendingUp, Target, Bell, Link2, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { loadActiveDomain, loadActiveDomainFromServer } from "@/utils/activeDomain";
+import { loadActiveDomain, loadActiveDomainFromServer, getActiveDomainId } from "@/utils/activeDomain";
 import { useDomainStore } from "@/stores/domainStore";
 import {
   Select,
@@ -29,6 +29,7 @@ const Dashboard = () => {
   const [selectedLLM, setSelectedLLM] = useState("all");
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>(null);
+  const [domainId, setDomainId] = useState<string | null>(null);
   const { toast } = useToast();
   const hasMountedRef = useRef(false);
 
@@ -49,7 +50,23 @@ const Dashboard = () => {
     ? domainNameRaw.charAt(0).toUpperCase() + domainNameRaw.slice(1)
     : "Domain name";
 
+  // Sync domainId from selectedDomain or localStorage
+  useEffect(() => {
+    if (!user) return;
 
+    if (selectedDomain?.id) {
+      const newDomainId = String(selectedDomain.id);
+      if (newDomainId !== domainId) {
+        setDomainId(newDomainId);
+      }
+    } else {
+      const serverActiveDomain = getActiveDomainId(user);
+      const serverDomainId = serverActiveDomain || '';
+      if (serverDomainId !== domainId) {
+        setDomainId(serverDomainId);
+      }
+    }
+  }, [user, selectedDomain?.id, domainId]);
 
   const handleExportReport = () => {
     toast({
@@ -129,14 +146,13 @@ const Dashboard = () => {
     }
   }
 
-  // Fetch summary once on mount
+  // Fetch summary when dependencies change
   useEffect(() => {
-    if (!hasMountedRef.current && user && domainId) {
-      hasMountedRef.current = true;
+    if (user && domainId) {
       void fetchSummary();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, selectedDomain?.id, timePeriod, selectedLLM]);
+  }, [user, domainId, timePeriod, selectedLLM]);
 
   // Show loading state whenever we're fetching data
   if (loading || !summary) {

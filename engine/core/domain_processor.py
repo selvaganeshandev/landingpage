@@ -7,7 +7,6 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from shared_models.models import Domain, Keyword, PromptGroup, Prompt, PromptAnalytics, Organisation, SentimentAnalytics
-from .rest_client import DataForSEOClient
 from .chatgpt_client import ChatGPTClient
 import numpy as np
 try:
@@ -29,10 +28,6 @@ class DomainProcessor:
     
     def __init__(self):
         self.max_concurrent_domains = getattr(settings, 'MAX_CONCURRENT_DOMAINS', 10)
-        self.dataforseo_client = DataForSEOClient(
-            username=getattr(settings, 'DATAFORSEO_USERNAME', ''),
-            password=getattr(settings, 'DATAFORSEO_PASSWORD', '')
-        )
         self.chatgpt_client = ChatGPTClient()
         self.active_threads = {}
         self.lock = threading.Lock()
@@ -89,94 +84,56 @@ class DomainProcessor:
         Process a single domain
         """
         try:
-            domain = Domain.objects.get(id=domain_id)
-            print(f"Processing domain: {domain.name}")
-            
-            # Update status to processing
-            domain.processing_status = 'PROC'
-            domain.track_message = 'Starting domain processing...'
-            domain.tracked_at = timezone.now()
-            domain.save()
-            print(f"🔵 LOG: Domain {domain.id} ({domain.name}) - Status set to PROC, starting processing...")
-            
-            # Step 1: Check if domain has any keywords at all
-            all_keywords_exist = Keyword.objects.filter(domain=domain).exists()
-            
-            if not all_keywords_exist:
-                # First time: Fetch keywords from DataForSEO (only once per domain)
-                print(f"Initial keyword fetch for {domain.name} from DataForSEO")
-                domain.track_message = 'Scraping keywords from search data...'
-                domain.tracked_at = timezone.now()
-                domain.save(update_fields=['track_message', 'tracked_at', 'modified_at'])
-
-                kw_limit = getattr(settings, 'KEYWORD_EXTRACT_LIMIT', 50)
-                keywords_from_api = self.dataforseo_client.scrape_target_domain(domain.name, limit=kw_limit)
+            # Use select_for_update to prevent race conditions
+            with transaction.atomic():
+                domain = Domain.objects.select_for_update().get(id=domain_id)
                 
-                if not keywords_from_api:
-                    domain.processing_status = 'FAIL'
-                    domain.track_message = 'No keywords found from DataForSEO API'
-                    domain.tracked_at = timezone.now()
-                    domain.save()
+                # Verify domain is still in SCHD status (not already being processed)
+                if domain.processing_status != 'SCHD':
+                    print(f"Domain {domain.id} ({domain.name}) is not in SCHD status (current: {domain.processing_status}), skipping")
                     return
                 
-                # Store unique keywords in database (get_or_create ensures uniqueness per domain)
-                print(f"Storing {len(keywords_from_api)} unique keywords for {domain.name}")
-                self._store_keywords(domain, keywords_from_api)
+                # Update status to processing
+                domain.processing_status = 'PROC'
+                domain.track_message = 'Starting domain processing...'
+                domain.tracked_at = timezone.now()
+                domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
+                print(f"🔵 LOG: Domain {domain.id} ({domain.name}) - Status set to PROC, starting processing...")
             
-            # Step 2: Get only unused keywords (where last_used_for_generation is NULL)
-            # These are unique keywords that haven't been used for prompt generation yet
+            # Step 1: Get only unused keywords (where last_used_for_generation is NULL)
+            # Keywords are now MANDATORY and must be provided during domain creation
             unused_keywords_qs = Keyword.objects.filter(
                 domain=domain,
                 auto_generate_prompts=True,
                 last_used_for_generation__isnull=True  # Only unused keywords
             ).order_by('-priority', 'created_at')
             
-            # Step 3: If all keywords are used, fetch new keywords from DataForSEO
-            if not unused_keywords_qs.exists():
-                # Check if there are any keywords at all (used or unused)
-                total_keywords = Keyword.objects.filter(domain=domain).count()
-                
-                if total_keywords > 0:
-                    # All existing keywords have been used, fetch new keywords from DataForSEO
-                    print(f"All {total_keywords} keywords have been used for {domain.name}. Fetching new keywords from DataForSEO.")
-                    kw_limit = getattr(settings, 'KEYWORD_EXTRACT_LIMIT', 50)
-                    keywords_from_api = self.dataforseo_client.scrape_target_domain(domain.name, limit=kw_limit)
-                    
-                    if not keywords_from_api:
-                        domain.processing_status = 'COMP'
-                        domain.track_message = 'All keywords have been used. No new keywords found from DataForSEO API.'
-                        domain.tracked_at = timezone.now()
-                        domain.save()
-                        print(f"No new keywords found from DataForSEO API for {domain.name}.")
-                        return
-                    
-                    # Store new unique keywords in database
-                    print(f"Storing {len(keywords_from_api)} new unique keywords for {domain.name}")
-                    self._store_keywords(domain, keywords_from_api)
-                    
-                    # Re-query for unused keywords after fetching new ones
-                    unused_keywords_qs = Keyword.objects.filter(
-                        domain=domain,
-                        auto_generate_prompts=True,
-                        last_used_for_generation__isnull=True  # Only unused keywords
-                    ).order_by('-priority', 'created_at')
-                    
-                    # If still no unused keywords after fetching (shouldn't happen, but safety check)
-                    if not unused_keywords_qs.exists():
-                        domain.processing_status = 'COMP'
-                        domain.track_message = 'All keywords have been used. No unused keywords available after fetching new ones.'
-                        domain.tracked_at = timezone.now()
-                        domain.save()
-                        print(f"No unused keywords available for {domain.name} after fetching new keywords.")
-                        return
-                else:
-                    # No keywords at all (shouldn't happen after Step 1, but safety check)
-                    domain.processing_status = 'COMP'
-                    domain.track_message = 'No keywords available for prompt generation.'
+            # Step 2: Check if domain has any keywords at all
+            total_keywords = Keyword.objects.filter(domain=domain).count()
+            
+            if total_keywords == 0:
+                # No keywords at all - this should not happen if validation works, but handle gracefully
+                with transaction.atomic():
+                    domain = Domain.objects.select_for_update().get(id=domain_id)
+                    domain.processing_status = 'FAIL'
+                    domain.track_message = 'No keywords found. Please add keywords before processing.'
                     domain.tracked_at = timezone.now()
-                    domain.save()
-                    print(f"No keywords available for {domain.name}.")
-                    return
+                    domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
+                print(f"No keywords available for {domain.name}. Domain creation should require keywords.")
+                return
+            
+            # Step 3: If all keywords are used, mark as COMP and wait for new keywords
+            if not unused_keywords_qs.exists():
+                # All existing keywords have been used
+                print(f"All {total_keywords} keywords have been used for {domain.name}. Waiting for new keywords to be added.")
+                with transaction.atomic():
+                    domain = Domain.objects.select_for_update().get(id=domain_id)
+                    domain.processing_status = 'COMP'
+                    domain.track_message = 'All keywords have been processed. Add new keywords to continue processing.'
+                    domain.tracked_at = timezone.now()
+                    domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
+                print(f"Domain {domain.name} marked as COMP - all keywords processed. Add new keywords to reinit.")
+                return
             
             # Step 4: Use only unused, unique keywords for prompt generation
             keywords = list(unused_keywords_qs.values_list('keyword', flat=True))
@@ -189,7 +146,9 @@ class DomainProcessor:
             domain.tracked_at = timezone.now()
             domain.save(update_fields=['track_message', 'tracked_at', 'modified_at'])
 
-            prompts = self.chatgpt_client.generate_prompts_from_keywords(keywords, domain.name)
+            # Get country from domain, default to "United States" if not available
+            country = getattr(domain, 'country', 'United States') or 'United States'
+            prompts = self.chatgpt_client.generate_prompts_from_keywords(keywords, domain.name, country)
 
             # Ensure distinct prompts and ensure we have PROMPT_MIN_COUNT prompts per keyword
             prompts = self._deduplicate_prompts(prompts)
@@ -283,15 +242,21 @@ class DomainProcessor:
         """
         Store unique keywords in the database (per domain).
         Uses get_or_create to ensure uniqueness - same keyword won't be stored twice for the same domain.
+        Keywords are normalized to lowercase before storage.
         """
         with transaction.atomic():
             created_count = 0
             for keyword_text in keywords:
+                # Normalize keyword to lowercase and trim whitespace
+                normalized_keyword = keyword_text.strip().lower()
+                if not normalized_keyword or len(normalized_keyword) > 255:
+                    continue  # Skip invalid keywords
+                
                 keyword, created = Keyword.objects.get_or_create(
-                    keyword=keyword_text,
+                    keyword=normalized_keyword,
                     domain=domain,
                     defaults={
-                        'keyword': keyword_text,
+                        'keyword': normalized_keyword,
                         'domain': domain,
                         'auto_generate_prompts': True,  # Enable auto-generation by default
                         'priority': 0,  # Default priority
@@ -299,7 +264,7 @@ class DomainProcessor:
                 )
                 if created:
                     created_count += 1
-                    print(f"Created unique keyword: {keyword_text}")
+                    print(f"Created unique keyword: {normalized_keyword}")
             print(f"Stored {created_count} new unique keywords (out of {len(keywords)} total) for domain {domain.name}")
     
     def _store_prompt_groups(self, domain: Domain, grouped_prompts: List[Dict[str, Any]]):

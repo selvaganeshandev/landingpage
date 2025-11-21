@@ -359,7 +359,11 @@ def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
 
 def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any, group: Any = None) -> Dict[str, Any]:
     try:
-        country_text = "India"
+        # Get country from domain, default to "United States" if not available
+        country_text = "United States"
+        if group and hasattr(group, 'domain') and group.domain and hasattr(group.domain, 'country'):
+            country_text = group.domain.country or "United States"
+        
         system_prompt = f"You are a helpful assistant with access to current web search results. When answering questions, analyze the provided search results and combine them with your knowledge to provide comprehensive, up-to-date responses with current citations and links. Always prioritize the most recent and relevant information from the search results. Always provide answers in the context of {country_text} unless the user specifies another country."
 
         response = client.chat.completions.create(
@@ -467,11 +471,18 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
 
 def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
     try:
+        # Get country from domain, default to "United States" if not available
+        country_text = "United States"
+        if group and hasattr(group, 'domain') and group.domain and hasattr(group.domain, 'country'):
+            country_text = group.domain.country or "United States"
+        
         import google.generativeai as genai
         genai.configure(api_key=(client or {}).get('api_key'), transport="rest")
         model = genai.GenerativeModel('gemini-2.0-flash')
         prompt = (
-            f"Original Question: {prompt_text}\n\nBased on your knowledge, please provide a comprehensive and detailed response with:\n\n"
+            f"Original Question: {prompt_text}\n\n"
+            f"Context: Always provide answers in the context of {country_text} unless the user specifies another country.\n\n"
+            "Based on your knowledge, please provide a comprehensive and detailed response with:\n\n"
             "1. A thorough answer incorporating the latest information\n"
             "2. Include all relevant URLs and links\n"
             "3. Mention specific companies, tools, platforms, and services\n"
@@ -500,10 +511,16 @@ def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, clien
 
 def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
     try:
+        # Get country from domain, default to "United States" if not available
+        country_text = "United States"
+        if group and hasattr(group, 'domain') and group.domain and hasattr(group.domain, 'country'):
+            country_text = group.domain.country or "United States"
+        
         try:
             from perplexity import Perplexity
             perplexity_client = Perplexity(api_key=(client or {}).get('api_key'))
-            user_message = prompt_text
+            # Include country context in the prompt
+            user_message = f"{prompt_text} (Context: Provide answers in the context of {country_text} unless the user specifies another country.)"
             if len(user_message) > 250:
                 user_message = user_message[:250].rsplit(' ', 1)[0] + "..."
             

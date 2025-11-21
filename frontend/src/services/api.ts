@@ -423,6 +423,29 @@ export const apiClient = {
   getAvailableUsersForDomain: (domainId: number) => 
     apiRequest(`/domains/${domainId}/access/available-users/`),
 
+  // ===== Keywords =====
+  getKeywords: (params?: any) => {
+    const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return apiRequest(`/keywords/${queryParams}`);
+  },
+
+  getDomainKeywords: (domainId: number) => 
+    apiRequest(`/domains/${domainId}/keywords/`),
+
+  createKeyword: (data: any) => apiRequest('/keywords/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  updateKeyword: (id: number, data: any) => apiRequest(`/keywords/${id}/`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
+
+  deleteKeyword: (id: number) => apiRequest(`/keywords/${id}/`, {
+    method: 'DELETE',
+  }),
+
   // ===== Mentions =====
   getMentions: (params?: any) => {
     const cleaned: Record<string, string> = {};

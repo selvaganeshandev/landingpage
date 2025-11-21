@@ -6,6 +6,8 @@ from django.shortcuts import get_object_or_404
 from django.http import Http404
 from django.utils import timezone
 from django.db import transaction
+from django.conf import settings
+import logging
 from shared_models.models import (
     Domain, Prompt, PromptAnalytics, PromptGroup,
     Competitor, CompetitorPromptAnalytics, CompetitorAnalytics, ShareOfVoiceAnalytics
@@ -19,6 +21,8 @@ from .serializers import (
 )
 from django.db.models import Avg, Count, Q, Sum
 from .prompt_analytics_processor import PromptAnalyticsProcessor
+
+logger = logging.getLogger(__name__)
 
 
 # Global domain processor instance
@@ -82,14 +86,17 @@ def start_processing(request):
                     'error': 'Domain is already being processed'
                 }, status=status.HTTP_409_CONFLICT)
 
-            # Mark as processing and run inline
-            domain.processing_status = 'PROC'
-            domain.track_message = 'Processing inline via /api/start (sync)'
-            domain.tracked_at = timezone.now()
-            domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
+            # Set to SCHD so processor can handle the transition to PROC
+            # The processor expects SCHD status and will update it to PROC internally
+            # Handle both INIT and other statuses (except PROC which is checked above)
+            if domain.processing_status not in ['SCHD', 'PROC']:
+                domain.processing_status = 'SCHD'
+                domain.track_message = 'Scheduled for synchronous processing via /api/start'
+                domain.tracked_at = timezone.now()
+                domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
 
             try:
-                # Execute synchronously
+                # Execute synchronously - processor will handle SCHD -> PROC transition
                 domain_processor._process_single_domain(domain.id)
                 # DO NOT set status to COMP here - the processor handles status updates
                 # The domain will be in PROC status until analytics processing completes
@@ -127,13 +134,21 @@ def start_processing(request):
             domain.tracked_at = timezone.now()
             domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
 
-        process_domain_task.delay(domain_id)
+        # Try to enqueue Celery task, but don't fail if Celery is not available
+        # The processing loop will pick up SCHD domains anyway
+        try:
+            process_domain_task.delay(domain_id)
+            celery_mode = 'async'
+        except Exception as celery_err:
+            # Celery not available - processing loop will handle it
+            print(f"Celery not available, domain {domain_id} will be processed by the processing loop: {celery_err}")
+            celery_mode = 'loop'
 
         return Response({
             'success': True,
             'message': f'Started processing for domain: {domain.name}',
             'domain_id': domain_id,
-            'mode': 'async'
+            'mode': celery_mode
         })
             
     except Exception as e:
@@ -185,8 +200,8 @@ def domain_detail(request, domain_id):
         stats = {
             'keywords_count': domain.keywords.count(),
             'prompt_groups_count': domain.prompt_groups.count(),
-            'prompts_count': domain.prompts.count(),
-            'analytics_count': domain.prompt_analytics.count()
+            'prompts_count': Prompt.objects.filter(group__domain=domain).count(),
+            'analytics_count': PromptAnalytics.objects.filter(prompt__group__domain=domain).count()
         }
         
         return Response({
@@ -287,6 +302,12 @@ def start_prompt_analytics_processing(request):
     """
     try:
         domain_id = request.data.get('domain_id')
+        sync_param = request.data.get('sync')
+        if isinstance(sync_param, str):
+            sync = sync_param.lower() in ('true', '1', 'yes')
+        else:
+            sync = bool(sync_param)
+        
         if not domain_id:
             return Response({
                 'success': False,
@@ -296,23 +317,58 @@ def start_prompt_analytics_processing(request):
         # Check if domain exists
         domain = get_object_or_404(Domain, id=domain_id)
         
-        # Check if domain has prompts
-        prompts_count = domain.prompts.count()
+        # Check if domain has prompts (through prompt groups)
+        prompts = Prompt.objects.filter(group__domain=domain)
+        prompts_count = prompts.count()
         if prompts_count == 0:
             return Response({
                 'success': False,
                 'error': 'Domain has no prompts to process'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Enqueue Celery task for prompt analytics processing
-        process_prompt_analytics_task.delay(domain_id)
-        
-        return Response({
-            'success': True,
-            'message': f'Started prompt analytics processing for domain: {domain.name}',
-            'domain_id': domain_id,
-            'prompts_count': prompts_count
-        })
+        if sync:
+            # Process all prompts synchronously
+            processor = PromptAnalyticsProcessor(max_concurrent_prompts=getattr(settings, 'MAX_CONCURRENT_PROMPT_ANALYTICS', 10))
+            processed = 0
+            failed = 0
+            
+            # Get all INIT prompts for this domain
+            init_prompts = prompts.filter(track_status='INIT')
+            
+            for prompt in init_prompts:
+                try:
+                    result = processor.process_single_prompt(prompt.id)
+                    if 'error' not in result:
+                        processed += 1
+                    else:
+                        failed += 1
+                except Exception as e:
+                    failed += 1
+                    logger.error(f"Error processing prompt {prompt.id}: {str(e)}")
+            
+            return Response({
+                'success': True,
+                'message': f'Processed prompts for domain: {domain.name}',
+                'domain_id': domain_id,
+                'mode': 'sync',
+                'total_prompts': prompts_count,
+                'processed': processed,
+                'failed': failed
+            })
+        else:
+            # Use scheduler to process prompts asynchronously (group by group)
+            # The scheduler will pick up INIT prompt groups automatically
+            from .processing_tasks import process_prompt_analytics_scheduler
+            process_prompt_analytics_scheduler.delay()
+            
+            return Response({
+                'success': True,
+                'message': f'Started prompt analytics processing for domain: {domain.name}',
+                'domain_id': domain_id,
+                'mode': 'async',
+                'prompts_count': prompts_count,
+                'note': 'Prompts will be processed by the scheduler (group by group)'
+            })
             
     except Exception as e:
         return Response({
@@ -330,8 +386,8 @@ def prompt_analytics_status(request, domain_id):
     try:
         domain = get_object_or_404(Domain, id=domain_id)
         
-        # Get prompt processing statistics
-        prompts = domain.prompts.all()
+        # Get prompt processing statistics (through prompt groups)
+        prompts = Prompt.objects.filter(group__domain=domain)
         total_prompts = prompts.count()
         
         status_counts = {
@@ -342,8 +398,8 @@ def prompt_analytics_status(request, domain_id):
             'FAIL': prompts.filter(track_status='FAIL').count(),
         }
         
-        # Get analytics processing statistics
-        analytics = PromptAnalytics.objects.filter(prompt__domain=domain)
+        # Get analytics processing statistics (through prompt groups)
+        analytics = PromptAnalytics.objects.filter(prompt__group__domain=domain)
         total_analytics = analytics.count()
         
         # Derive platform status using platform field and prompt track_status
@@ -413,8 +469,8 @@ def prompt_analytics_summary(request, domain_id):
     try:
         domain = get_object_or_404(Domain, id=domain_id)
         
-        # Get aggregated analytics data
-        analytics = PromptAnalytics.objects.filter(prompt__domain=domain)
+        # Get aggregated analytics data (through prompt groups)
+        analytics = PromptAnalytics.objects.filter(prompt__group__domain=domain)
         
         # Calculate aggregated metrics
         aggregated_metrics = analytics.aggregate(

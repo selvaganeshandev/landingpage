@@ -20,6 +20,7 @@ class Domain(models.Model):
     
     name = models.CharField(max_length=255, help_text="Name of the domain")
     url = models.URLField(help_text="URL of the domain")
+    country = models.CharField(max_length=100, default='United States', help_text="Country name for domain context")
     organisation = models.ForeignKey(
         'authentication.Organisation', 
         on_delete=models.CASCADE, 

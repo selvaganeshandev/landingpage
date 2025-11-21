@@ -1,11 +1,10 @@
 # LLM Monitor Engine
 
-A Django-based processing engine for the LLM Monitor system that handles domain processing, keyword scraping, and prompt generation using multithreading.
+A Django-based processing engine for the LLM Monitor system that handles domain processing and prompt generation using multithreading.
 
 ## Features
 
-- **Domain Processing**: Processes domains with status "INIT" using multithreading (max 10 concurrent)
-- **Keyword Scraping**: Uses DataForSEO API to retrieve 50 related keywords per domain
+- **Domain Processing**: Processes domains with status "SCHD" using multithreading (max 10 concurrent)
 - **Prompt Generation**: Uses ChatGPT API to convert keywords into prompts
 - **NLP Grouping**: Groups prompts into sets with primary and secondary prompts
 - **REST API**: Provides API endpoints for monitoring and control
@@ -21,11 +20,9 @@ A Django-based processing engine for the LLM Monitor system that handles domain 
 │                 │    │                 │
 │ - Authentication│    │ - Domain        │
 │ - UI/API        │    │   Processing    │
-│ - Domain Mgmt   │    │ - Keyword       │
-│ - User Mgmt     │    │   Scraping      │
-└─────────────────┘    │ - Prompt        │
-                       │   Generation    │
-                       │ - NLP Grouping  │
+│ - Domain Mgmt   │    │ - Prompt        │
+│ - User Mgmt     │    │   Generation    │
+└─────────────────┘    │ - NLP Grouping  │
                        └─────────────────┘
 ```
 
@@ -42,7 +39,6 @@ A Django-based processing engine for the LLM Monitor system that handles domain 
    - Run migrations: `python manage.py migrate`
 
 3. **Environment Variables**:
-   - Set `DATAFORSEO_USERNAME` and `DATAFORSEO_PASSWORD` in settings
    - Set `OPENAI_API_KEY` in settings
 
 ## Usage
@@ -87,12 +83,11 @@ curl http://localhost:8001/api/domains/?status=COMP
 ## Processing Flow
 
 1. **Domain Selection**: Engine checks for domains with status "SCHD"
-2. **Keyword Scraping**: Uses DataForSEO API to get 50 keywords
-3. **Keyword Storage**: Stores keywords in the database
-4. **Prompt Generation**: Uses ChatGPT to create prompts from keywords
-5. **NLP Grouping**: Groups prompts using ChatGPT's NLP capabilities
-6. **Database Storage**: Stores prompt groups and prompts
-7. **Status Update**: Updates domain status to "COMP" or "FAIL"
+2. **Keyword Retrieval**: Retrieves keywords from the database (keywords are provided during domain creation)
+3. **Prompt Generation**: Uses ChatGPT to create prompts from keywords
+4. **NLP Grouping**: Groups prompts using SentenceTransformer-based clustering
+5. **Database Storage**: Stores prompt groups and prompts
+6. **Status Update**: Updates domain status to "PROC" (analytics processor will set to "COMP" when done)
 
 ## Configuration
 
@@ -101,10 +96,6 @@ curl http://localhost:8001/api/domains/?status=COMP
 ```python
 # Maximum concurrent domains (default: 10)
 MAX_CONCURRENT_DOMAINS = 10
-
-# DataForSEO credentials
-DATAFORSEO_USERNAME = "your_username"
-DATAFORSEO_PASSWORD = "your_password"
 
 # OpenAI API key
 OPENAI_API_KEY = "your_api_key"
@@ -135,7 +126,7 @@ The engine provides real-time monitoring through:
 
 ## Error Handling
 
-- **API Failures**: DataForSEO and ChatGPT API failures are handled gracefully
+- **API Failures**: ChatGPT API failures are handled gracefully
 - **Database Errors**: Transaction rollback on database errors
 - **Thread Management**: Proper cleanup of failed threads
 - **Status Updates**: Failed domains are marked with error details
@@ -147,9 +138,8 @@ The engine provides real-time monitoring through:
 ```
 engine/
 ├── llm_monitor_engine/     # Django project settings
-├── domain_processor/       # Main processing app
+├── core/                   # Main processing app
 │   ├── management/         # Django management commands
-│   ├── rest_client.py     # DataForSEO API client
 │   ├── chatgpt_client.py  # OpenAI API client
 │   ├── domain_processor.py # Main processing logic
 │   ├── views.py           # API endpoints
@@ -172,7 +162,7 @@ engine/
 ### Common Issues
 
 1. **Database Connection**: Ensure PostgreSQL is running and accessible
-2. **API Keys**: Verify DataForSEO and OpenAI credentials
+2. **API Keys**: Verify OpenAI credentials
 3. **Thread Limits**: Adjust `MAX_CONCURRENT_DOMAINS` if needed
 4. **Memory Usage**: Monitor memory usage with high concurrent processing
 

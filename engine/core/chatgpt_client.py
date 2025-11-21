@@ -32,13 +32,14 @@ class ChatGPTClient:
             logger.warning(f"Failed to initialize OpenAI client: {str(e)}")
             self.client = None
     
-    def generate_prompts_from_keywords(self, keywords: List[str], domain_name: str) -> List[Dict[str, Any]]:
+    def generate_prompts_from_keywords(self, keywords: List[str], domain_name: str, country: str = "United States") -> List[Dict[str, Any]]:
         """
         Generate prompts from keywords using ChatGPT
         
         Args:
             keywords: List of keywords to generate prompts from
             domain_name: Name of the domain for context
+            country: Country name for context (default: "United States")
             
         Returns:
             List of generated prompts with metadata
@@ -62,12 +63,15 @@ class ChatGPTClient:
         # Create a system prompt for generating short, natural prompts like real ChatGPT users write
         system_prompt = f"""Generate short, natural prompts that real ChatGPT users would type for keywords related to "{domain_name}".
 
+Context: Generate prompts that are relevant to users in {country}. Consider local context, services, and preferences when appropriate.
+
 Guidelines:
 - Keep prompts SHORT (1 sentence, max 15-20 words)
 - Use conversational, natural language (like "What is...", "Tell me about...", "How to...")
 - Make them feel like real user queries, not formal business questions
 - Incorporate the keyword naturally
 - Each prompt should be a simple, direct question or request
+- Consider {country}-specific context when relevant (e.g., local services, regulations, market conditions)
 
 Return ONLY a JSON array with this structure:
 [

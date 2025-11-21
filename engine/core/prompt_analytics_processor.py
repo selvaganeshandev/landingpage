@@ -511,6 +511,7 @@ class PromptAnalyticsProcessor:
         """
         Check if all prompt groups for this domain are complete.
         If so, mark the domain as COMP (completed).
+        If unused keywords exist, automatically reset to INIT for next processing cycle.
         """
         try:
             # Count total groups and completed groups
@@ -526,12 +527,27 @@ class PromptAnalyticsProcessor:
 
                     # Only update if still in PROC status
                     if domain_fresh.processing_status == 'PROC':
-                        domain_fresh.processing_status = 'COMP'
-                        domain_fresh.track_message = f'Successfully completed all analytics for {total_groups} prompt groups'
+                        # Check if there are unused keywords for next cycle
+                        from shared_models.models import Keyword
+                        unused_keywords = Keyword.objects.filter(
+                            domain=domain_fresh,
+                            auto_generate_prompts=True,
+                            last_used_for_generation__isnull=True
+                        ).exists()
+                        
+                        if unused_keywords:
+                            # Reset to INIT to process new keywords automatically
+                            domain_fresh.processing_status = 'INIT'
+                            domain_fresh.track_message = 'Completed. New keywords detected - ready for next processing cycle'
+                            logger.info(f"Domain {domain.id} reset to INIT - unused keywords available")
+                        else:
+                            # No unused keywords, mark as COMP
+                            domain_fresh.processing_status = 'COMP'
+                            domain_fresh.track_message = f'Successfully completed all analytics for {total_groups} prompt groups'
+                            logger.info(f"✅ Domain {domain.id} ({domain.name}) marked as COMP - all {total_groups} groups completed, no unused keywords")
+                        
                         domain_fresh.tracked_at = timezone.now()
                         domain_fresh.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
-
-                        logger.info(f"✅ Domain {domain.id} ({domain.name}) marked as COMP - all {total_groups} groups completed")
                     else:
                         logger.info(f"Domain {domain.id} already in status {domain_fresh.processing_status}, skipping")
             else:

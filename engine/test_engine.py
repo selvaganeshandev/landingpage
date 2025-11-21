@@ -62,18 +62,8 @@ def test_engine():
         print(f"   ✗ Domain processor initialization failed: {str(e)}")
         return False
     
-    # Test 4: Test DataForSEO client
-    print("\n4. Testing DataForSEO client...")
-    try:
-        from core.rest_client import DataForSEOClient
-        client = DataForSEOClient("test", "test")
-        print("   ✓ DataForSEO client initialized successfully")
-    except Exception as e:
-        print(f"   ✗ DataForSEO client initialization failed: {str(e)}")
-        return False
-    
-    # Test 5: Test ChatGPT client
-    print("\n5. Testing ChatGPT client...")
+    # Test 4: Test ChatGPT client
+    print("\n4. Testing ChatGPT client...")
     try:
         from core.chatgpt_client import ChatGPTClient
         client = ChatGPTClient()

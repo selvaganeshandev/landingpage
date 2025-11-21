@@ -43,10 +43,6 @@ import {
   Pie,
   Cell
 } from "recharts";
-import { apiClient } from "@/services/api";
-import { useAuth } from "@/contexts/AuthContext";
-import { getActiveDomainId } from "@/utils/activeDomain";
-import { useDomainStore } from "@/stores/domainStore";
 
 const CompetitorDetail = () => {
   const { id } = useParams();
@@ -111,7 +107,7 @@ const CompetitorDetail = () => {
       setIsLoading(true);
       try {
         // Fetch competitor details, trend data, all competitors, and prompt analytics in parallel
-        const [data, snapshotData, allCompetitors, promptAnalytics] = await Promise.all([
+        const [data, snapshotData, allCompetitors, promptAnalytics]: any[] = await Promise.all([
           apiClient.getEngineCompetitorDetail(Number(id)),
           apiClient.getCompetitorMetricSnapshots({
             domain_id: domainId,

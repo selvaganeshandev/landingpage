@@ -4,6 +4,8 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
+from django.db import transaction
+from django.db import IntegrityError
 from .models import Domain, DomainAccess
 from .serializers import (
     DomainSerializer, DomainDetailSerializer,
@@ -11,7 +13,6 @@ from .serializers import (
 )
 from authentication.serializers import AccountSerializer
 from authentication.models import Account
-from .services import schedule_domain_processing
 
 
 @api_view(['GET', 'POST'])
@@ -50,6 +51,19 @@ def domain_list(request):
         data = request.data.copy()
         data['organisation'] = request.user.organisation.id
 
+        # Convert country code to country name
+        country_code = data.get('country', 'us')
+        country_map = {
+            'us': 'United States', 'gb': 'United Kingdom', 'ca': 'Canada',
+            'au': 'Australia', 'de': 'Germany', 'fr': 'France', 'es': 'Spain',
+            'it': 'Italy', 'jp': 'Japan', 'in': 'India', 'br': 'Brazil',
+            'mx': 'Mexico', 'nl': 'Netherlands', 'se': 'Sweden', 'no': 'Norway',
+            'dk': 'Denmark', 'fi': 'Finland', 'pl': 'Poland', 'be': 'Belgium',
+            'at': 'Austria', 'ch': 'Switzerland', 'ie': 'Ireland',
+            'nz': 'New Zealand', 'sg': 'Singapore'
+        }
+        data['country'] = country_map.get(country_code.lower(), 'United States')
+
         # Normalize domain name (strip scheme, www, path, port)
         raw_input = data.get('name') or data.get('url') or ''
         if isinstance(raw_input, str):
@@ -71,15 +85,70 @@ def domain_list(request):
                 normalized = normalized.split(':', 1)[0]
             data['name'] = normalized
         
+        # Validate keywords are provided (mandatory)
+        keywords_str = data.get('keywords', '')
+        if not keywords_str or not keywords_str.strip():
+            return Response(
+                {'error': 'At least one keyword is required. Keywords are mandatory for domain creation.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Parse keywords: split by comma, normalize to lowercase, trim whitespace
+        keywords_list = [
+            k.strip().lower() 
+            for k in keywords_str.split(',') 
+            if k.strip() and len(k.strip()) <= 255
+        ]
+        
+        if not keywords_list:
+            return Response(
+                {'error': 'At least one valid keyword is required. Keywords must be non-empty and less than 255 characters.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         serializer = DomainSerializer(data=data)
         if serializer.is_valid():
-            domain = serializer.save()
-            processing_triggered = schedule_domain_processing(domain)
-            return Response({
-                'message': 'Domain added successfully',
-                'domain': DomainSerializer(domain).data,
-                'processing_triggered': processing_triggered
-            }, status=status.HTTP_201_CREATED)
+            # Use transaction to ensure domain and keywords are created atomically
+            try:
+                with transaction.atomic():
+                    domain = serializer.save()
+                    
+                    # Create keywords in the same transaction
+                    from keywords.models import Keyword
+                    created_keywords = []
+                    for keyword_text in keywords_list:
+                        try:
+                            keyword, created = Keyword.objects.get_or_create(
+                                keyword=keyword_text,
+                                domain=domain,
+                                defaults={
+                                    'auto_generate_prompts': True,
+                                    'priority': 0
+                                }
+                            )
+                            if created:
+                                created_keywords.append(keyword_text)
+                        except IntegrityError:
+                            # Handle race condition - keyword already exists
+                            pass
+                    
+                    # Verify at least one keyword was created
+                    if not Keyword.objects.filter(domain=domain).exists():
+                        return Response(
+                            {'error': 'Failed to create keywords. Please try again.'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                        )
+                    
+                    return Response({
+                        'message': 'Domain added successfully',
+                        'domain': DomainSerializer(domain).data,
+                        'keywords_created': len(created_keywords)
+                    }, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                return Response(
+                    {'error': f'Failed to create domain: {str(e)}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/services/api";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -25,6 +26,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import { ProjectAccessManager } from "@/components/ProjectAccessManager";
 
 export default function OrganizationSettings() {
@@ -110,6 +125,12 @@ export default function OrganizationSettings() {
     admin: { label: "Admin", description: "Full access including team management" },
   };
   const [addDomainDialogOpen, setAddDomainDialogOpen] = useState(false);
+  const [addKeywordsDialogOpen, setAddKeywordsDialogOpen] = useState(false);
+  const [selectedDomainForKeywords, setSelectedDomainForKeywords] = useState<number | null>(null);
+  const [newKeywordsInput, setNewKeywordsInput] = useState("");
+  const [newKeywordsList, setNewKeywordsList] = useState<string[]>([]);
+  const [isAddingKeywords, setIsAddingKeywords] = useState(false);
+  const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
 
   // Project Access Manager states
   const [projectAccessDialogOpen, setProjectAccessDialogOpen] = useState(false);
@@ -206,24 +227,200 @@ export default function OrganizationSettings() {
     }
   };
 
+  const MAX_KEYWORD_LENGTH = 255;
+
+  // Country list for searchable dropdown
+  const countries = [
+    { value: "us", label: "United States" },
+    { value: "gb", label: "United Kingdom" },
+    { value: "ca", label: "Canada" },
+    { value: "au", label: "Australia" },
+    { value: "de", label: "Germany" },
+    { value: "fr", label: "France" },
+    { value: "es", label: "Spain" },
+    { value: "it", label: "Italy" },
+    { value: "jp", label: "Japan" },
+    { value: "in", label: "India" },
+    { value: "br", label: "Brazil" },
+    { value: "mx", label: "Mexico" },
+    { value: "nl", label: "Netherlands" },
+    { value: "se", label: "Sweden" },
+    { value: "no", label: "Norway" },
+    { value: "dk", label: "Denmark" },
+    { value: "fi", label: "Finland" },
+    { value: "pl", label: "Poland" },
+    { value: "be", label: "Belgium" },
+    { value: "at", label: "Austria" },
+    { value: "ch", label: "Switzerland" },
+    { value: "ie", label: "Ireland" },
+    { value: "nz", label: "New Zealand" },
+    { value: "sg", label: "Singapore" },
+  ];
+
+  const selectedCountry = countries.find(c => c.value === newDomainCountry);
+
   const handleAddKeyword = () => {
     const trimmedInput = keywordInput.trim();
     if (!trimmedInput) return;
 
-    // Split by comma and add all non-empty keywords
+    // Split by comma, normalize to lowercase, trim whitespace, validate length
     const newKeywords = trimmedInput
       .split(',')
-      .map(k => k.trim())
-      .filter(k => k && !newDomainKeywords.includes(k));
+      .map(k => k.trim().toLowerCase())
+      .filter(k => {
+        if (k.length === 0) return false;
+        if (k.length > MAX_KEYWORD_LENGTH) {
+          toast({
+            title: "Keyword too long",
+            description: `"${k}" exceeds ${MAX_KEYWORD_LENGTH} characters. Please shorten it.`,
+            variant: "destructive",
+          });
+          return false;
+        }
+        return true;
+      })
+      .filter(k => !newDomainKeywords.includes(k)); // Remove duplicates
 
     if (newKeywords.length > 0) {
       setNewDomainKeywords([...newDomainKeywords, ...newKeywords]);
       setKeywordInput("");
+    } else if (trimmedInput.split(',').some(k => k.trim().toLowerCase().length > MAX_KEYWORD_LENGTH)) {
+      // Already showed error for length, but check if all were duplicates
+      const allDuplicates = trimmedInput
+        .split(',')
+        .map(k => k.trim().toLowerCase())
+        .filter(k => k.length > 0 && k.length <= MAX_KEYWORD_LENGTH)
+        .every(k => newDomainKeywords.includes(k));
+      
+      if (allDuplicates) {
+        toast({
+          title: "Duplicate keywords",
+          description: "These keywords are already added.",
+          variant: "default",
+        });
+      }
     }
   };
 
   const handleRemoveKeyword = (keyword: string) => {
     setNewDomainKeywords(newDomainKeywords.filter(k => k !== keyword));
+  };
+
+  const handleOpenAddKeywordsDialog = (domainId: number) => {
+    setSelectedDomainForKeywords(domainId);
+    setNewKeywordsInput("");
+    setNewKeywordsList([]);
+    setAddKeywordsDialogOpen(true);
+  };
+
+  const handleAddKeywordToExisting = () => {
+    const trimmedInput = newKeywordsInput.trim();
+    if (!trimmedInput) return;
+
+    // Split by comma, normalize to lowercase, trim whitespace, validate length
+    const newKeywords = trimmedInput
+      .split(',')
+      .map(k => k.trim().toLowerCase())
+      .filter(k => {
+        if (k.length === 0) return false;
+        if (k.length > MAX_KEYWORD_LENGTH) {
+          toast({
+            title: "Keyword too long",
+            description: `"${k}" exceeds ${MAX_KEYWORD_LENGTH} characters. Please shorten it.`,
+            variant: "destructive",
+          });
+          return false;
+        }
+        return true;
+      })
+      .filter(k => !newKeywordsList.includes(k)); // Remove duplicates
+
+    if (newKeywords.length > 0) {
+      setNewKeywordsList([...newKeywordsList, ...newKeywords]);
+      setNewKeywordsInput("");
+    } else if (trimmedInput.split(',').some(k => k.trim().toLowerCase().length > MAX_KEYWORD_LENGTH)) {
+      // Already showed error for length, but check if all were duplicates
+      const allDuplicates = trimmedInput
+        .split(',')
+        .map(k => k.trim().toLowerCase())
+        .filter(k => k.length > 0 && k.length <= MAX_KEYWORD_LENGTH)
+        .every(k => newKeywordsList.includes(k));
+      
+      if (allDuplicates) {
+        toast({
+          title: "Duplicate keywords",
+          description: "These keywords are already added.",
+          variant: "default",
+        });
+      }
+    }
+  };
+
+  const handleRemoveKeywordFromExisting = (keyword: string) => {
+    setNewKeywordsList(newKeywordsList.filter(k => k !== keyword));
+  };
+
+  const handleAddKeywordsToDomain = async () => {
+    if (!selectedDomainForKeywords || newKeywordsList.length === 0) {
+      toast({
+        title: "Keywords required",
+        description: "Please add at least one keyword.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setIsAddingKeywords(true);
+      const domain = domains.find(d => d.id === selectedDomainForKeywords);
+      
+      // Add keywords one by one
+      let successCount = 0;
+      let errorCount = 0;
+      
+      for (const keywordText of newKeywordsList) {
+        try {
+          await apiClient.createKeyword({
+            keyword: keywordText,
+            domain: selectedDomainForKeywords,
+          });
+          successCount++;
+        } catch (error: any) {
+          errorCount++;
+          console.error(`Failed to add keyword "${keywordText}":`, error);
+        }
+      }
+
+      // Reload domains to get updated data
+      await loadDomains();
+
+      // Reset form
+      setNewKeywordsInput("");
+      setNewKeywordsList([]);
+      setAddKeywordsDialogOpen(false);
+      setSelectedDomainForKeywords(null);
+
+      if (errorCount === 0) {
+        toast({
+          title: "Keywords added successfully!",
+          description: `Added ${successCount} keyword(s) to ${domain?.name || 'domain'}.`,
+        });
+      } else {
+        toast({
+          title: "Partially successful",
+          description: `Added ${successCount} keyword(s), ${errorCount} failed (may already exist).`,
+          variant: "default",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error adding keywords",
+        description: error.message || "Failed to add keywords. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAddingKeywords(false);
+    }
   };
 
   const handleFetchKeywordsFromGSC = async () => {
@@ -270,6 +467,16 @@ export default function OrganizationSettings() {
       return;
     }
 
+    // Validate keywords are provided (mandatory)
+    if (newDomainKeywords.length === 0) {
+      toast({
+        title: "Keywords required",
+        description: "Please add at least one keyword before creating the domain. Keywords are mandatory.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setIsAddingDomain(true);
       const domainName = newDomain.trim();
@@ -279,7 +486,7 @@ export default function OrganizationSettings() {
         name: domainName,
         url: domainUrl,
         country: newDomainCountry,
-        keywords: newDomainKeywords.length > 0 ? newDomainKeywords.join(',') : undefined,
+        keywords: newDomainKeywords.join(','), // Keywords are now mandatory, always send
       });
 
       // Reload domains to get the updated list (both local state and global store)
@@ -617,6 +824,16 @@ export default function OrganizationSettings() {
                           Ready
                         </Badge>
                       )}
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenAddKeywordsDialog(domain.id)}
+                        className="gap-2"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add Keywords
+                      </Button>
 
                       <Button
                         variant="ghost"
@@ -1050,40 +1267,51 @@ export default function OrganizationSettings() {
               </p>
             </div>
 
-            {/* Country Selector */}
+            {/* Country Selector - Searchable */}
             <div className="space-y-2">
               <Label htmlFor="domain-country">Country</Label>
-              <Select value={newDomainCountry} onValueChange={setNewDomainCountry}>
-                <SelectTrigger id="domain-country">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="us">United States</SelectItem>
-                  <SelectItem value="gb">United Kingdom</SelectItem>
-                  <SelectItem value="ca">Canada</SelectItem>
-                  <SelectItem value="au">Australia</SelectItem>
-                  <SelectItem value="de">Germany</SelectItem>
-                  <SelectItem value="fr">France</SelectItem>
-                  <SelectItem value="es">Spain</SelectItem>
-                  <SelectItem value="it">Italy</SelectItem>
-                  <SelectItem value="jp">Japan</SelectItem>
-                  <SelectItem value="in">India</SelectItem>
-                  <SelectItem value="br">Brazil</SelectItem>
-                  <SelectItem value="mx">Mexico</SelectItem>
-                  <SelectItem value="nl">Netherlands</SelectItem>
-                  <SelectItem value="se">Sweden</SelectItem>
-                  <SelectItem value="no">Norway</SelectItem>
-                  <SelectItem value="dk">Denmark</SelectItem>
-                  <SelectItem value="fi">Finland</SelectItem>
-                  <SelectItem value="pl">Poland</SelectItem>
-                  <SelectItem value="be">Belgium</SelectItem>
-                  <SelectItem value="at">Austria</SelectItem>
-                  <SelectItem value="ch">Switzerland</SelectItem>
-                  <SelectItem value="ie">Ireland</SelectItem>
-                  <SelectItem value="nz">New Zealand</SelectItem>
-                  <SelectItem value="sg">Singapore</SelectItem>
-                </SelectContent>
-              </Select>
+              <Popover open={countryDropdownOpen} onOpenChange={setCountryDropdownOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={countryDropdownOpen}
+                    className="w-full justify-between"
+                    id="domain-country"
+                  >
+                    {selectedCountry ? selectedCountry.label : "Select country..."}
+                    <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search country..." />
+                    <CommandList>
+                      <CommandEmpty>No country found.</CommandEmpty>
+                      <CommandGroup>
+                        {countries.map((country) => (
+                          <CommandItem
+                            key={country.value}
+                            value={country.label}
+                            onSelect={() => {
+                              setNewDomainCountry(country.value);
+                              setCountryDropdownOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                newDomainCountry === country.value ? "opacity-100" : "opacity-0"
+                              )}
+                            />
+                            {country.label}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
               <p className="text-xs text-muted-foreground">
                 Select the primary country for this brand
               </p>
@@ -1092,7 +1320,9 @@ export default function OrganizationSettings() {
             {/* Keywords Input */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="domain-keywords">Keywords (Optional)</Label>
+                <Label htmlFor="domain-keywords">
+                  Keywords <span className="text-destructive">*</span> (Required)
+                </Label>
                 <Button
                   type="button"
                   variant="default"
@@ -1114,20 +1344,35 @@ export default function OrganizationSettings() {
                   Fetch from GSC
                 </Button>
               </div>
-              <Input
-                id="domain-keywords"
-                placeholder="Enter keywords separated by commas"
-                value={keywordInput}
-                onChange={(e) => setKeywordInput(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleAddKeyword();
-                  }
-                }}
-              />
+              <div className="space-y-2">
+                <Textarea
+                  id="domain-keywords"
+                  placeholder="Enter keywords separated by commas (e.g., seo, digital marketing)"
+                  value={keywordInput}
+                  onChange={(e) => setKeywordInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      handleAddKeyword();
+                    }
+                  }}
+                  className="min-h-[100px]"
+                />
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddKeyword}
+                    disabled={!keywordInput.trim()}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Keywords
+                  </Button>
+                </div>
+              </div>
               <p className="text-xs text-muted-foreground">
-                Add keywords separated by commas. Press Enter to add.
+                💡 Tip: Add at least one keyword separated by commas. Click "Add Keywords" or press Ctrl+Enter/Cmd+Enter to add to the list. Keywords are normalized to lowercase and must be under 255 characters.
               </p>
 
               {/* Keyword Tags */}
@@ -1227,6 +1472,99 @@ export default function OrganizationSettings() {
               }}
             >
               Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Keywords Dialog */}
+      <Dialog open={addKeywordsDialogOpen} onOpenChange={setAddKeywordsDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Add Keywords</DialogTitle>
+            <DialogDescription>
+              Add additional keywords to {domains.find(d => d.id === selectedDomainForKeywords)?.name || 'this domain'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {/* Keywords Input */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="add-keywords-input">
+                  Keywords <span className="text-destructive">*</span>
+                </Label>
+              </div>
+              <Textarea
+                id="add-keywords-input"
+                placeholder="Enter keywords separated by commas (e.g., seo, digital marketing). Press Ctrl+Enter or Cmd+Enter to add."
+                value={newKeywordsInput}
+                onChange={(e) => setNewKeywordsInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    handleAddKeywordToExisting();
+                  }
+                }}
+                className="min-h-[100px]"
+              />
+              <p className="text-xs text-muted-foreground">
+                💡 Tip: Add keywords separated by commas. Press Ctrl+Enter or Cmd+Enter to add. Keywords are normalized to lowercase and must be under 255 characters.
+              </p>
+
+              {/* Keyword Tags */}
+              {newKeywordsList.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-2 p-3 border rounded-lg bg-muted/30 max-h-32 overflow-y-auto">
+                    {newKeywordsList.map((keyword, index) => (
+                      <Badge
+                        key={index}
+                        variant="default"
+                        className="gap-1 pr-1"
+                      >
+                        {keyword}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-4 w-4 p-0 hover:bg-background/20"
+                          onClick={() => handleRemoveKeywordFromExisting(keyword)}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="flex justify-start">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setNewKeywordsList([])}
+                      className="h-8 text-xs"
+                    >
+                      Clear all
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddKeywordsDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddKeywordsToDomain} disabled={isAddingKeywords || newKeywordsList.length === 0}>
+              {isAddingKeywords ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Keywords
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
