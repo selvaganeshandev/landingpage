@@ -220,8 +220,9 @@ const Competitors = () => {
     const platformFilter = selectedLLM?.toLowerCase() || 'all';
     const competitorFilter = promptCompetitorFilter;
 
+    // Filter rows by competitor, platform, and time - but keep rows with 0 mentions
+    // so all competitors appear in the aggregation
     const filteredRows = promptRows.filter((row) => {
-      if (!row.mentionCount || row.mentionCount <= 0) return false;
       if (competitorFilter !== 'all' && String(row.competitorId) !== competitorFilter) return false;
       if (platformFilter !== 'all' && (row.platform || '').toLowerCase() !== platformFilter) return false;
       if (row.trackedAt) {
@@ -247,6 +248,15 @@ const Competitors = () => {
     const brandTotals = new Map<string, number>();
     const promptMap = new Map<string, PromptAggregate>();
 
+    // First, initialize all competitors in all prompts to ensure they appear even with 0 mentions
+    const allCompetitorNames = new Set(competitors.map(c => c.name));
+    filteredRows.forEach((row) => {
+      const brandName = row.competitorName || 'Unknown';
+      if (brandName !== 'Unknown') {
+        allCompetitorNames.add(brandName);
+      }
+    });
+
     filteredRows.forEach((row) => {
       const brandName = row.competitorName || 'Unknown';
       brandTotals.set(brandName, (brandTotals.get(brandName) || 0) + row.mentionCount);
@@ -263,6 +273,14 @@ const Competitors = () => {
           citationTotal: 0,
         };
 
+      // Initialize all competitors in this prompt aggregate to 0 if not already set
+      allCompetitorNames.forEach(compName => {
+        if (aggregate.brandCounts[compName] === undefined) {
+          aggregate.brandCounts[compName] = 0;
+          aggregate.brandCitationCounts[compName] = 0;
+        }
+      });
+
       aggregate.brandCounts[brandName] = (aggregate.brandCounts[brandName] || 0) + row.mentionCount;
       aggregate.brandCitationCounts[brandName] = (aggregate.brandCitationCounts[brandName] || 0) + (row.citationCount || 0);
       aggregate.total += row.mentionCount;
@@ -272,7 +290,22 @@ const Competitors = () => {
       promptMap.set(key, aggregate);
     });
 
-    if (!promptMap.size) return [];
+    // For prompts that don't have any rows but should show all competitors with 0
+    // This ensures prompts with only "You" brand still show all competitors
+    const promptsInRows = new Set(filteredRows.map(row => row.promptText));
+    promptMap.forEach((aggregate, promptText) => {
+      allCompetitorNames.forEach(compName => {
+        if (aggregate.brandCounts[compName] === undefined) {
+          aggregate.brandCounts[compName] = 0;
+          aggregate.brandCitationCounts[compName] = 0;
+        }
+      });
+    });
+
+    // Filter out prompts where no competitor has any mentions (total is 0)
+    const promptsWithMentions = Array.from(promptMap.entries()).filter(([_, aggregate]) => aggregate.total > 0);
+    
+    if (!promptsWithMentions.length) return [];
 
     const sortedBrandNames = Array.from(brandTotals.entries())
       .sort((a, b) => b[1] - a[1])
@@ -326,7 +359,8 @@ const Competitors = () => {
       }
     });
 
-    const cards = Array.from(promptMap.values())
+    const cards = promptsWithMentions
+      .map(([_, aggregate]) => aggregate)
       .sort((a, b) => b.total - a.total)
       .map((aggregate, idx) => {
         const winnerEntry = Object.entries(aggregate.brandCounts).sort((a, b) => b[1] - a[1])[0];
@@ -467,7 +501,7 @@ const Competitors = () => {
           apiClient.getEngineCompetitors({ domain_id: domainId, platform: platformParam }, { signal: controller.signal }),
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }, { signal: controller.signal }),
           apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }, { signal: controller.signal }),
-          apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId }, { signal: controller.signal }),
+          apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId, page_size: '1000' }, { signal: controller.signal }),
           apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
           apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
         ] as any);
@@ -768,13 +802,36 @@ const Competitors = () => {
             promptText: row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`,
             competitorId: row?.competitor?.id || null,
             competitorName: competitorName,
-            mentionCount: Number(row?.mention_count || (row?.is_mentioned ? 1 : 0)),
+            mentionCount: row?.mention_count !== null && row?.mention_count !== undefined 
+              ? Number(row.mention_count) 
+              : (row?.is_mentioned ? 1 : 0),
             platform: row?.platform || 'unknown',
             trackedAt: row?.tracked_at || row?.created_at,
             sentiment: row?.sentiment_category || 'neutral',
             citationCount: Array.isArray(row?.citation_list) ? row.citation_list.length : Number(row?.total_citations || 0),
           };
         });
+        
+        // Debug: Log the normalized rows to verify data
+        console.log('📊 Competitor Prompt Analytics - Normalized rows:', normalizedPromptRows.length);
+        if (normalizedPromptRows.length > 0) {
+          const sampleRows = normalizedPromptRows.slice(0, 5);
+          console.log('📊 Sample rows:', sampleRows.map(r => ({
+            prompt: r.promptText?.substring(0, 50),
+            competitor: r.competitorName,
+            mentionCount: r.mentionCount,
+            citationCount: r.citationCount
+          })));
+          
+          // Group by competitor to see mention counts
+          const byCompetitor = normalizedPromptRows.reduce((acc: any, row: any) => {
+            const name = row.competitorName || 'Unknown';
+            acc[name] = (acc[name] || 0) + row.mentionCount;
+            return acc;
+          }, {});
+          console.log('📊 Mentions by competitor:', byCompetitor);
+        }
+        
         setPromptRows(normalizedPromptRows);
 
         // Set competitive strength analysis data - ALWAYS use API response (even if empty)
@@ -1033,6 +1090,7 @@ const Competitors = () => {
   if (competitors.length === 0 && !isPageLoading && hasLoadedData) {
     const isDomainCompleted = domainProcessingStatus === 'COMP';
     const isDomainProcessing = domainProcessingStatus && domainProcessingStatus !== 'COMP';
+    const noCompetitorsFound = isDomainCompleted && !isDomainProcessing;
     
     return (
       <div className="p-8 space-y-6 bg-background animate-fade-in">
@@ -1044,21 +1102,31 @@ const Competitors = () => {
                 Compare your brand's AI visibility against competitors
               </p>
             </div>
-            <Button
-              onClick={() => {
-                setHasLoadedData(false);
-                setIsPageLoading(true);
-                // Trigger reload by updating domainId (which will trigger useEffect)
-                if (domainId) {
-                  setDomainId(domainId);
-                }
-              }}
-              variant="outline"
-              size="sm"
-            >
-              <Loader2 className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
+            <div className="flex gap-2">
+              {noCompetitorsFound && (
+                <Button
+                  onClick={() => setAddCompetitorDialogOpen(true)}
+                  size="sm"
+                >
+                  Add Competitor
+                </Button>
+              )}
+              <Button
+                onClick={() => {
+                  setHasLoadedData(false);
+                  setIsPageLoading(true);
+                  // Trigger reload by updating domainId (which will trigger useEffect)
+                  if (domainId) {
+                    setDomainId(domainId);
+                  }
+                }}
+                variant="outline"
+                size="sm"
+              >
+                <Loader2 className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -1067,6 +1135,8 @@ const Competitors = () => {
             <div className="p-4 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 text-primary">
               {isDomainProcessing ? (
                 <Loader2 className="h-12 w-12 animate-spin" />
+              ) : noCompetitorsFound ? (
+                <Search className="h-12 w-12" />
               ) : (
                 <Target className="h-12 w-12" />
               )}
@@ -1076,41 +1146,53 @@ const Competitors = () => {
               <h2 className="text-2xl font-bold">
                 {isDomainProcessing 
                   ? "Processing Domain Analytics" 
-                  : isDomainCompleted
-                  ? "Extracting Competitors"
+                  : noCompetitorsFound
+                  ? "No Competitors Found"
                   : "Waiting for Domain Processing"}
               </h2>
               <p className="text-muted-foreground text-base">
                 {isDomainProcessing
                   ? "Your domain is currently being processed. Competitors will be automatically extracted once processing is complete."
-                  : isDomainCompleted
-                  ? "Competitors are being automatically extracted from your prompt analytics data. This may take a few moments."
+                  : noCompetitorsFound
+                  ? "No competitors were automatically discovered from your prompt analytics data. You can manually add competitors to track."
                   : "Please wait for domain processing to complete. Competitors will be automatically extracted afterwards."}
               </p>
             </div>
 
-            <p className="text-sm text-muted-foreground max-w-md">
-              {isDomainProcessing
-                ? "Once your domain analytics are complete, we'll automatically discover your top competitors from the prompt analytics data."
-                : "We automatically discover your top competitors from existing prompt analytics data and extract their mentions across AI platforms."}
-            </p>
+            {!noCompetitorsFound && (
+              <p className="text-sm text-muted-foreground max-w-md">
+                {isDomainProcessing
+                  ? "Once your domain analytics are complete, we'll automatically discover your top competitors from the prompt analytics data."
+                  : "We automatically discover your top competitors from existing prompt analytics data and extract their mentions across AI platforms."}
+              </p>
+            )}
 
-            <Button
-              onClick={() => {
-                setHasLoadedData(false);
-                setIsPageLoading(true);
-                // Trigger reload by updating domainId (which will trigger useEffect)
-                if (domainId) {
-                  setDomainId(domainId);
-                }
-              }}
-              variant="outline"
-              size="lg"
-              className="mt-4"
-            >
-              <Loader2 className="h-5 w-5 mr-2" />
-              Refresh to Check Status
-            </Button>
+            {noCompetitorsFound ? (
+              <Button
+                onClick={() => setAddCompetitorDialogOpen(true)}
+                size="lg"
+                className="mt-4"
+              >
+                Add Competitor Manually
+              </Button>
+            ) : (
+              <Button
+                onClick={() => {
+                  setHasLoadedData(false);
+                  setIsPageLoading(true);
+                  // Trigger reload by updating domainId (which will trigger useEffect)
+                  if (domainId) {
+                    setDomainId(domainId);
+                  }
+                }}
+                variant="outline"
+                size="lg"
+                className="mt-4"
+              >
+                <Loader2 className="h-5 w-5 mr-2" />
+                Refresh to Check Status
+              </Button>
+            )}
           </div>
         </Card>
 

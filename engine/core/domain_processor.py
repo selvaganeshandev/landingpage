@@ -272,13 +272,40 @@ class DomainProcessor:
         Store prompt groups and prompts in the database
         """
         with transaction.atomic():
+            # Track used titles in this batch to ensure uniqueness
+            used_titles_in_batch = set()
+            
             for group_data in grouped_prompts:
                 # Create prompt group with interpretable group_id (title)
                 desired_group_id = group_data.get('title', 'Untitled').strip() or 'Untitled'
-                group_id = self._unique_group_id_for_domain(domain, desired_group_id)
+                # Remove numbers from desired group_id before processing
+                desired_group_id = self._remove_numbers_from_text(desired_group_id)
+                
+                # Ensure uniqueness within this batch first
+                base_title = desired_group_id
+                candidate_title = base_title
+                suffix_index = 0
+                descriptive_suffixes = ['Advanced', 'Essential', 'Core', 'Premium', 'Standard', 
+                                       'Basic', 'Professional', 'Expert', 'Complete', 'Ultimate']
+                
+                while candidate_title in used_titles_in_batch:
+                    if suffix_index < len(descriptive_suffixes):
+                        candidate_title = f"{base_title} {descriptive_suffixes[suffix_index]}"
+                        suffix_index += 1
+                    else:
+                        suffix_char = chr(ord('A') + (suffix_index - len(descriptive_suffixes)))
+                        candidate_title = f"{base_title} {suffix_char}"
+                        suffix_index += 1
+                
+                used_titles_in_batch.add(candidate_title)
+                
+                # Now ensure uniqueness in database
+                group_id = self._unique_group_id_for_domain(domain, candidate_title)
                 
                 # Extract theme from the group
                 theme = self._extract_theme_from_group(group_data)
+                # Remove numbers from theme
+                theme = self._remove_numbers_from_text(theme)
                 
                 prompt_group = PromptGroup.objects.create(
                     group_id=group_id,
@@ -380,18 +407,314 @@ class DomainProcessor:
                 }
             )
 
+    def _normalize_to_term(self, text: str, max_words: int = 2) -> str:
+        """
+        Normalize text to a term format with better semantic extraction:
+        - Prioritizes nouns and noun phrases
+        - Looks for meaningful word pairs that appear together
+        - Considers semantic relationships
+        - Limit to max_words (default 2)
+        - Join with "&" if 2 words, otherwise single word
+        """
+        if not text or not text.strip():
+            return "General"
+        
+        text_clean = text.strip()
+        
+        # Remove question marks
+        if text_clean.endswith('?'):
+            text_clean = text_clean[:-1].strip()
+        
+        # Remove common question starters and patterns
+        question_starters = [
+            'what is', 'what are', 'what do', 'what does', 'what did',
+            'how to', 'how does', 'how do', 'how can', 'how will',
+            'why is', 'why are', 'why do', 'why does',
+            'when to', 'when is', 'when are', 'when do', 'when does',
+            'where to', 'where is', 'where are', 'where do', 'where does',
+            'who is', 'who are', 'who do', 'who does',
+            'tell me', 'explain', 'describe', 'show me', 'give me',
+            'is there', 'are there', 'can i', 'should i', 'will i'
+        ]
+        
+        text_lower = text_clean.lower()
+        for starter in question_starters:
+            if text_lower.startswith(starter):
+                # Extract the main term after the question starter
+                remaining = text_clean[len(starter):].strip()
+                text_clean = remaining.strip('?').strip(' :-\'".,')
+                # Also remove common qualifiers that come after question starters
+                qualifiers = ['a ', 'an ', 'the ', 'any ', 'some ', 'good ', 'best ', 'better ']
+                for qual in qualifiers:
+                    if text_clean.lower().startswith(qual):
+                        text_clean = text_clean[len(qual):].strip()
+                break
+        
+        # Enhanced stop words including temporal, location, and descriptive words that shouldn't be in titles
+        stop_words = {
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+            'of', 'with', 'by', 'from', 'as', 'is', 'are', 'was', 'were', 'be',
+            'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+            'would', 'should', 'could', 'may', 'might', 'must', 'can', 'this',
+            'that', 'these', 'those', 'it', 'its', 'they', 'them', 'their',
+            'when', 'where', 'how', 'why', 'what', 'who', 'which',  # Question words
+            'there', 'here', 'good', 'bad', 'best', 'better', 'worse', 'worst',  # Descriptive/qualitative words
+            'online', 'offline', 'free', 'paid', 'new', 'old', 'latest',  # Common but not descriptive
+            'time', 'date', 'day', 'month', 'year', 'now', 'today', 'before', 'after',  # Temporal words
+            'location', 'place', 'area', 'region', 'city', 'country',  # Location words
+            'buy', 'purchase', 'get', 'find', 'save', 'use', 'make', 'take',  # Common verbs
+        }
+        
+        # Split into words
+        words = text_clean.split()
+        
+        # Extract meaningful words with their positions
+        # Prioritize words that appear later in the sentence (usually the object/topic)
+        meaningful_words = []
+        for i, word in enumerate(words):
+            word_clean = word.strip('.,!?;:\'"()[]{}').lower()
+            # Filter out numbers and words containing numbers
+            if word_clean and word_clean not in stop_words and len(word_clean) > 2:
+                # Skip words that contain numbers
+                if not any(char.isdigit() for char in word_clean):
+                    # Boost words that appear later in the sentence (usually the main topic)
+                    # But still include all meaningful words
+                    meaningful_words.append((word_clean, i))
+        
+        if not meaningful_words:
+            return "General"
+        
+        # Strategy 1: Look for common noun phrases (adjacent meaningful words)
+        # These are more likely to be meaningful concepts
+        noun_phrases = []
+        for i in range(len(meaningful_words) - 1):
+            word1, pos1 = meaningful_words[i]
+            word2, pos2 = meaningful_words[i + 1]
+            # Check if words are adjacent or close (within 2 positions)
+            if pos2 - pos1 <= 2:
+                noun_phrases.append((word1, word2, pos1))
+        
+        # Strategy 2: Prioritize words that are likely nouns (longer, more specific)
+        # Score words by length, position, and semantic importance
+        # Common domain-specific nouns get higher scores
+        domain_nouns = {
+            'medicine', 'medicines', 'medication', 'medications', 'prescription', 'prescriptions',
+            'app', 'apps', 'application', 'applications', 'software', 'platform', 'platforms',
+            'service', 'services', 'product', 'products', 'brand', 'brands',
+            'purchase', 'buying', 'buy', 'shopping', 'order', 'ordering',
+            'price', 'pricing', 'cost', 'costs', 'payment', 'payments',
+            'delivery', 'shipping', 'location', 'locations', 'store', 'stores',
+            'review', 'reviews', 'rating', 'ratings', 'quality', 'features',
+            'guide', 'guides', 'tutorial', 'tutorials', 'help', 'support',
+            'information', 'details', 'specifications', 'benefits', 'advantages'
+        }
+        
+        word_scores = {}
+        total_words = len(words) if words else 1
+        for word, pos in meaningful_words:
+            # Score based on length (longer = more specific)
+            length_score = len(word) * 3
+            # Boost words that appear later in sentence (usually the main topic/object)
+            # But not too late (avoid trailing words)
+            position_score = (total_words - pos) * 0.5 if pos < total_words * 0.8 else 0
+            base_score = length_score + position_score
+            
+            # Major boost for domain-specific nouns
+            if word in domain_nouns:
+                base_score += 30
+            
+            # Penalize very short words (less than 4 chars) unless they're domain nouns
+            if len(word) < 4 and word not in domain_nouns:
+                base_score -= 15
+            
+            word_scores[word] = base_score
+        
+        # Strategy 3: If we have noun phrases, prefer them
+        if noun_phrases:
+            # Score noun phrases by word scores
+            phrase_scores = []
+            for word1, word2, pos in noun_phrases:
+                score = word_scores.get(word1, 0) + word_scores.get(word2, 0) - pos
+                phrase_scores.append((score, word1, word2))
+            
+            # Sort by score and take the best
+            phrase_scores.sort(reverse=True, key=lambda x: x[0])
+            if phrase_scores:
+                _, word1, word2 = phrase_scores[0]
+                # Check if both words should be used together
+                # Only combine if they form a meaningful pair
+                if self._should_combine_words(word1, word2):
+                    capitalized = [word1.capitalize(), word2.capitalize()]
+                    return f"{capitalized[0]} & {capitalized[1]}"
+                else:
+                    # Prefer single-word title - use the more important word (higher score)
+                    # Prefer domain nouns if one is a domain noun
+                    word1_is_domain = word1 in domain_nouns
+                    word2_is_domain = word2 in domain_nouns
+                    if word1_is_domain and not word2_is_domain:
+                        return word1.capitalize()
+                    elif word2_is_domain and not word1_is_domain:
+                        return word2.capitalize()
+                    elif word_scores.get(word1, 0) >= word_scores.get(word2, 0):
+                        return word1.capitalize()
+                    else:
+                        return word2.capitalize()
+        
+        # Strategy 4: If no good phrases, take top 2 words by score
+        sorted_words = sorted(word_scores.items(), key=lambda x: x[1], reverse=True)
+        top_words = [word for word, _ in sorted_words[:max_words]]
+        
+        if len(top_words) >= 2:
+            word1, word2 = top_words[0], top_words[1]
+            # Check if both words should be used together
+            # Only combine if they form a meaningful pair
+            if self._should_combine_words(word1, word2):
+                capitalized = [word1.capitalize(), word2.capitalize()]
+                return f"{capitalized[0]} & {capitalized[1]}"
+            else:
+                # Prefer single-word title - use the most important word (first one has higher score)
+                return word1.capitalize()
+        elif len(top_words) == 1:
+            return top_words[0].capitalize()
+        
+        return "General"
+    
+    def _should_combine_words(self, word1: str, word2: str) -> bool:
+        """
+        Determine if two words should be combined with "&" symbol.
+        Returns True only if both words are meaningful and form a natural pair.
+        
+        Rules:
+        - Don't combine if one is a verb and the other is a noun (prefer noun)
+        - Don't combine if one word is much shorter (likely less important)
+        - Don't combine descriptive/qualitative words with nouns
+        - Don't combine temporal/location words with nouns
+        - Only combine if both are nouns/adjectives of similar importance
+        - Prefer single-word titles unless there's a strong semantic relationship
+        """
+        # Common verbs that shouldn't be combined with nouns
+        action_verbs = {
+            'buy', 'purchase', 'get', 'find', 'save', 'use', 'make', 'take',
+            'give', 'show', 'tell', 'help', 'need', 'want', 'know', 'see',
+            'go', 'come', 'look', 'check', 'search', 'order', 'book', 'choose',
+            'sell', 'provide', 'offer', 'deliver', 'ship', 'pay', 'cost'
+        }
+        
+        # Descriptive/qualitative words that shouldn't be combined with nouns
+        descriptive_words = {
+            'good', 'bad', 'best', 'better', 'worse', 'worst', 'great', 'nice',
+            'there', 'here', 'free', 'paid', 'new', 'old', 'latest', 'cheap',
+            'expensive', 'easy', 'hard', 'simple', 'complex', 'fast', 'slow',
+            'top', 'popular', 'famous', 'known', 'available', 'possible'
+        }
+        
+        # Temporal and location words that shouldn't be combined
+        temporal_location_words = {
+            'when', 'where', 'time', 'date', 'day', 'month', 'year', 'now',
+            'today', 'tomorrow', 'yesterday', 'before', 'after', 'during',
+            'location', 'place', 'area', 'region', 'city', 'country', 'state',
+            'online', 'offline', 'near', 'far', 'local', 'remote'
+        }
+        
+        word1_lower = word1.lower()
+        word2_lower = word2.lower()
+        
+        # If one word is a verb and the other is likely a noun, don't combine
+        if word1_lower in action_verbs and word2_lower not in action_verbs:
+            return False
+        if word2_lower in action_verbs and word1_lower not in action_verbs:
+            return False
+        
+        # If one word is descriptive and the other is a noun, don't combine
+        if word1_lower in descriptive_words and word2_lower not in descriptive_words:
+            return False
+        if word2_lower in descriptive_words and word1_lower not in descriptive_words:
+            return False
+        
+        # If one word is temporal/location and the other is not, don't combine
+        if word1_lower in temporal_location_words and word2_lower not in temporal_location_words:
+            return False
+        if word2_lower in temporal_location_words and word1_lower not in temporal_location_words:
+            return False
+        
+        # If one word is much shorter (less than 4 chars), it's likely less important
+        # Only combine if both are substantial words
+        if len(word1) < 4 or len(word2) < 4:
+            # Don't combine short words - prefer single-word titles
+            return False
+        
+        # If both words are very short (less than 3 chars), don't combine
+        if len(word1) < 3 or len(word2) < 3:
+            return False
+        
+        # Additional check: if one word is significantly longer, prefer the longer one
+        # (longer words are usually more specific and meaningful)
+        length_diff = abs(len(word1) - len(word2))
+        if length_diff > 5:  # If one word is much longer, don't combine
+            return False
+        
+        # Only combine if both words are substantial, similar length, and neither is a verb/descriptive/temporal word
+        # This means they're likely both nouns or both adjectives
+        return True
+    
     def _unique_group_id_for_domain(self, domain: Domain, base_id: str) -> str:
+        # Normalize base_id to term format (max 2 words with &)
+        normalized_base = self._normalize_to_term(base_id, max_words=2)
+        
+        # Remove any numbers from the base title
+        normalized_base = self._remove_numbers_from_text(normalized_base)
+        
         # truncate base to 90 chars to allow suffixes within 100-char field limit
-        base = (base_id or 'Group').strip()
-        base = base[:90].rstrip()
+        base = normalized_base[:90].rstrip()
         candidate = base
-        suffix = 1
+        
+        # Use descriptive suffixes instead of numbers for uniqueness
+        descriptive_suffixes = ['Advanced', 'Essential', 'Core', 'Premium', 'Standard', 
+                               'Basic', 'Professional', 'Expert', 'Complete', 'Ultimate']
+        suffix_index = 0
+        
         while PromptGroup.objects.filter(domain=domain, group_id=candidate).exists():
-            suffix += 1
-            candidate = f"{base} ({suffix})"
+            if suffix_index < len(descriptive_suffixes):
+                # Try adding a descriptive suffix
+                suffix = descriptive_suffixes[suffix_index]
+                candidate = f"{base} {suffix}"
+                suffix_index += 1
+            else:
+                # If we run out of descriptive suffixes, use alphabetical suffixes
+                suffix_char = chr(ord('A') + (suffix_index - len(descriptive_suffixes)))
+                candidate = f"{base} {suffix_char}"
+                suffix_index += 1
+            
             if len(candidate) > 100:
                 candidate = candidate[:100]
+        
         return candidate
+    
+    def _remove_numbers_from_text(self, text: str) -> str:
+        """
+        Remove all numbers and numeric patterns from text.
+        Returns the cleaned text, or "General" if text becomes empty.
+        """
+        if not text:
+            return "General"
+        
+        import re
+        # Remove standalone numbers
+        text = re.sub(r'\b\d+\b', '', text)
+        # Remove numbers in parentheses like "(1)", "(2)"
+        text = re.sub(r'\s*\(\d+\)\s*', '', text)
+        # Remove numbers with dashes like "-1", "-2"
+        text = re.sub(r'\s*-\d+\s*', '', text)
+        # Remove any remaining numeric characters
+        text = re.sub(r'\d+', '', text)
+        # Clean up extra spaces
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        # If text becomes empty after removing numbers, return default
+        if not text:
+            return "General"
+        
+        return text
 
     def _deduplicate_prompts(self, prompts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         seen = set()
@@ -501,7 +824,20 @@ class DomainProcessor:
 
             # Use smart NLP-based title extraction
             smart_title = self._extract_smart_title_from_prompts(cluster_prompts)
-            info['title'] = smart_title or f"Cluster {label+1}"
+            # Normalize to term format (max 2 words with &)
+            if smart_title:
+                normalized_title = self._normalize_to_term(smart_title, max_words=2)
+                # Remove any numbers from the title
+                normalized_title = self._remove_numbers_from_text(normalized_title)
+            else:
+                # Use descriptive fallback instead of "Cluster 1", "Cluster 2"
+                fallback_titles = ['General Topics', 'Core Concepts', 'Key Themes', 
+                                  'Main Topics', 'Primary Themes', 'Essential Topics',
+                                  'Important Concepts', 'Central Themes', 'Key Topics',
+                                  'Main Concepts']
+                fallback_index = label % len(fallback_titles)
+                normalized_title = fallback_titles[fallback_index]
+            info['title'] = normalized_title
 
             # Primary = top 1-3 closest; Secondary = rest
             sorted_within = [inds[i] for i in np.argsort(dists)]
@@ -527,19 +863,20 @@ class DomainProcessor:
 
     def _extract_smart_title_from_prompts(self, prompts_texts: List[str]) -> str:
         """
-        Extract a smart, concise title from a list of prompts using NLP techniques.
-        Uses noun phrase extraction, frequency analysis, and stop word filtering.
+        Extract a smart, concise title from a list of prompts using improved NLP techniques.
+        Analyzes all prompts together to find common themes and meaningful phrases.
+        Prioritizes words/phrases that appear across multiple prompts.
 
         Args:
             prompts_texts: List of prompt text strings from a cluster
 
         Returns:
-            A clean, professional 2-4 word title
+            A clean, professional term (max 2 words joined with &)
         """
         from collections import Counter
         import re
 
-        # Comprehensive stop words and question words to filter out
+        # Comprehensive stop words including temporal, location, and descriptive words
         stop_words = {
             'what', 'how', 'why', 'when', 'where', 'who', 'which', 'whose', 'whom',
             'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
@@ -551,142 +888,217 @@ class DomainProcessor:
             'should', 'may', 'might', 'must', 'shall',
             'some', 'any', 'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other',
             'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
-            'get', 'make', 'find', 'use', 'help', 'know', 'need', 'want', 'tell', 'show'
+            'get', 'make', 'find', 'use', 'help', 'know', 'need', 'want', 'tell', 'show',
+            'there', 'here', 'good', 'bad', 'best', 'better', 'worse', 'worst',  # Descriptive/qualitative
+            'online', 'offline', 'free', 'paid', 'new', 'old', 'latest',  # Common but not descriptive
+        }
+        
+        # Domain-specific nouns that should be prioritized
+        domain_nouns = {
+            'medicine', 'medicines', 'medication', 'medications', 'prescription', 'prescriptions',
+            'app', 'apps', 'application', 'applications', 'software', 'platform', 'platforms',
+            'service', 'services', 'product', 'products', 'brand', 'brands',
+            'purchase', 'buying', 'buy', 'shopping', 'order', 'ordering',
+            'price', 'pricing', 'cost', 'costs', 'payment', 'payments',
+            'delivery', 'shipping', 'location', 'locations', 'store', 'stores',
+            'review', 'reviews', 'rating', 'ratings', 'quality', 'features',
+            'guide', 'guides', 'tutorial', 'tutorials', 'help', 'support',
+            'information', 'details', 'specifications', 'benefits', 'advantages'
         }
 
-        # Extract all words and bigrams/trigrams from prompts
+        # Collect all meaningful words and bigrams from ALL prompts
         all_words = []
-        all_phrases = []
+        all_bigrams = []
 
         for prompt in prompts_texts:
-            # Clean and normalize text - preserve word boundaries
-            # Remove punctuation but keep spacing
+            # Clean and normalize text
             cleaned = re.sub(r'[^\w\s]', ' ', prompt.lower())
-            # Remove extra whitespace
             cleaned = re.sub(r'\s+', ' ', cleaned).strip()
             words = cleaned.split()
 
-            # Extract individual meaningful words
+            # Extract meaningful words
+            meaningful = []
             for word in words:
-                # Filter: length > 2, not a stop word, not a digit, not just punctuation remnants
-                if (len(word) > 2 and
-                    word not in stop_words and
-                    not word.isdigit() and
-                    word.isalpha()):  # Only keep alphabetic words
-                    all_words.append(word)
+                word_clean = word.strip('.,!?;:\'"()[]{}').lower()
+                # Filter out numbers and words containing numbers
+                if (word_clean and 
+                    word_clean not in stop_words and 
+                    len(word_clean) > 2 and 
+                    word_clean.isalpha() and
+                    not any(char.isdigit() for char in word_clean)):  # No numbers
+                    meaningful.append(word_clean)
+                    all_words.append(word_clean)
 
-            # Extract 2-word and 3-word phrases (noun phrases heuristic)
-            for i in range(len(words) - 1):
-                # Bigrams: only if both words are valid (alphabetic, length > 2)
-                if (len(words[i]) > 2 and len(words[i+1]) > 2 and
-                    words[i].isalpha() and words[i+1].isalpha()):
-                    # Skip if first word is a stop word (unless second word is content-rich)
-                    if words[i] not in stop_words or words[i+1] not in stop_words:
-                        bigram = f"{words[i]} {words[i+1]}"
-                        # Only keep if at least one word is not a stop word
-                        if words[i] not in stop_words or words[i+1] not in stop_words:
-                            all_phrases.append(bigram)
+            # Extract bigrams (adjacent meaningful words) - these are likely noun phrases
+            for i in range(len(meaningful) - 1):
+                word1 = meaningful[i]
+                word2 = meaningful[i + 1]
+                # Only create bigram if both words are meaningful (not stop words)
+                if word1 not in stop_words and word2 not in stop_words:
+                    bigram = f"{word1} {word2}"
+                    all_bigrams.append(bigram)
 
-                # Trigrams: only if all words are valid
-                if i < len(words) - 2:
-                    if (len(words[i]) > 2 and len(words[i+1]) > 2 and len(words[i+2]) > 2 and
-                        words[i].isalpha() and words[i+1].isalpha() and words[i+2].isalpha()):
-                        # Keep if it has meaningful content (at least 2 non-stop words)
-                        meaningful_count = sum(1 for w in [words[i], words[i+1], words[i+2]]
-                                             if w not in stop_words and len(w) > 2)
-                        if meaningful_count >= 2:
-                            trigram = f"{words[i]} {words[i+1]} {words[i+2]}"
-                            all_phrases.append(trigram)
-
-        # Count frequencies
+        # Count frequencies - words/phrases that appear in multiple prompts are more important
         word_freq = Counter(all_words)
-        phrase_freq = Counter(all_phrases)
+        bigram_freq = Counter(all_bigrams)
+        
+        # Boost scores for domain-specific nouns
+        for word in word_freq:
+            if word in domain_nouns:
+                word_freq[word] = word_freq[word] * 2  # Double the frequency for domain nouns
 
-        # Prefer multi-word phrases if they appear frequently
-        if phrase_freq:
-            # Get most common phrases
-            most_common_phrases = phrase_freq.most_common(10)
-
-            # Clean all phrases and score them
-            scored_phrases = []
-            for phrase, count in most_common_phrases:
-                # Accept phrases if: count >= 2, OR small cluster (<=3 prompts)
-                if count >= 2 or len(prompts_texts) <= 3:
-                    # Clean up the phrase
-                    phrase_words = phrase.split()
-                    # Filter out remaining stop words at boundaries
-                    while phrase_words and phrase_words[0] in stop_words:
-                        phrase_words.pop(0)
-                    while phrase_words and phrase_words[-1] in stop_words:
-                        phrase_words.pop()
-
-                    if len(phrase_words) >= 2:  # Only keep multi-word phrases
-                        # Score: prioritize longer phrases and higher counts
-                        # Score = count * 10 + word_count * 2
-                        score = count * 10 + len(phrase_words) * 2
-                        scored_phrases.append((score, phrase_words, count))
-
+        # Strategy 1: Prioritize bigrams that appear in multiple prompts
+        # These represent common themes across prompts
+        if bigram_freq:
+            # For small clusters (<=2 prompts), accept bigrams that appear once
+            # For larger clusters, prefer bigrams that appear in multiple prompts
+            min_count = 1 if len(prompts_texts) <= 2 else max(1, len(prompts_texts) // 2)
+            
+            # Get common bigrams sorted by frequency
+            # Prioritize bigrams that contain domain nouns
+            all_common_bigrams = [(bg, count) for bg, count in bigram_freq.most_common(10) if count >= min_count]
+            
+            # Score bigrams: prioritize those with domain nouns
+            scored_bigrams = []
+            for bg, count in all_common_bigrams:
+                words = bg.split()
+                score = count
+                # Boost score if bigram contains domain nouns
+                if len(words) == 2:
+                    if words[0] in domain_nouns:
+                        score += 10
+                    if words[1] in domain_nouns:
+                        score += 10
+                    # Boost if both are domain nouns
+                    if words[0] in domain_nouns and words[1] in domain_nouns:
+                        score += 20
+                scored_bigrams.append((score, bg, count))
+            
             # Sort by score (highest first)
-            scored_phrases.sort(reverse=True, key=lambda x: x[0])
+            scored_bigrams.sort(reverse=True, key=lambda x: x[0])
+            
+            if scored_bigrams:
+                # Take the best scored bigram
+                _, best_bigram, count = scored_bigrams[0]
+                words = best_bigram.split()
+                
+                # Ensure we have exactly 2 words
+                if len(words) == 2:
+                    # Additional validation: both words should be meaningful
+                    if len(words[0]) > 2 and len(words[1]) > 2:
+                        # Check if both words should be combined
+                        if self._should_combine_words(words[0], words[1]):
+                            return f"{words[0].capitalize()} & {words[1].capitalize()}"
+                        else:
+                            # Use the more important word (prefer domain noun, then longer)
+                            word1_is_domain = words[0] in domain_nouns
+                            word2_is_domain = words[1] in domain_nouns
+                            if word1_is_domain and not word2_is_domain:
+                                return words[0].capitalize()
+                            elif word2_is_domain and not word1_is_domain:
+                                return words[1].capitalize()
+                            elif len(words[1]) >= len(words[0]):
+                                return words[1].capitalize()
+                            else:
+                                return words[0].capitalize()
+                elif len(words) == 1:
+                    return words[0].capitalize()
 
-            # Take the best scored phrase
-            if scored_phrases:
-                _, title_words, _ = scored_phrases[0]
-                title_words = title_words[:4]  # Limit to 4 words
-                title = ' '.join(title_words).title()
-
-                # Additional cleanup: remove trailing prepositions
-                trailing_preps = {'Of', 'In', 'On', 'At', 'To', 'For', 'With', 'By'}
-                if title.split()[-1] in trailing_preps and len(title.split()) > 1:
-                    title = ' '.join(title.split()[:-1])
-
-                return title
-
-        # Fallback: use most common individual words to construct title
+        # Strategy 2: Use most common individual words that appear across prompts
+        # Prioritize domain-specific nouns
         if word_freq:
-            top_words = [word for word, _ in word_freq.most_common(4)]
-            # Limit to 3 words for individual word titles
-            title_words = top_words[:3]
-            title = ' '.join(title_words).title()
-            return title
+            # Prefer words that appear in multiple prompts
+            min_word_count = 1 if len(prompts_texts) <= 2 else max(1, len(prompts_texts) // 2)
+            
+            # Sort by frequency, but prioritize domain nouns
+            sorted_words = sorted(word_freq.items(), key=lambda x: (x[0] in domain_nouns, x[1]), reverse=True)
+            common_words = [(w, count) for w, count in sorted_words[:10] if count >= min_word_count]
+            
+            if len(common_words) >= 2:
+                # Take top 2 most common words (prioritizing domain nouns)
+                word1, count1 = common_words[0]
+                word2, count2 = common_words[1]
+                # Ensure both words are different and meaningful
+                if word1 != word2 and len(word1) > 2 and len(word2) > 2:
+                    # Check if both words should be combined
+                    if self._should_combine_words(word1, word2):
+                        return f"{word1.capitalize()} & {word2.capitalize()}"
+                    else:
+                        # Use the more important word (domain noun or higher frequency)
+                        word1_is_domain = word1 in domain_nouns
+                        word2_is_domain = word2 in domain_nouns
+                        if word1_is_domain and not word2_is_domain:
+                            return word1.capitalize()
+                        elif word2_is_domain and not word1_is_domain:
+                            return word2.capitalize()
+                        elif count1 > count2 or (count1 == count2 and len(word1) >= len(word2)):
+                            return word1.capitalize()
+                        else:
+                            return word2.capitalize()
+            elif len(common_words) == 1:
+                word, count = common_words[0]
+                if len(word) > 2:
+                    return word.capitalize()
 
-        # Last resort: use first few words from first prompt (filtered)
+        # Strategy 3: Fallback - use most frequent words, prioritizing domain nouns
+        if word_freq:
+            # Sort by domain noun priority first, then frequency
+            sorted_words = sorted(word_freq.items(), key=lambda x: (x[0] in domain_nouns, x[1]), reverse=True)
+            top_words = [word for word, _ in sorted_words[:2] if len(word) > 2]
+            if len(top_words) == 2:
+                word1, word2 = top_words[0], top_words[1]
+                # Check if both words should be combined
+                if self._should_combine_words(word1, word2):
+                    return f"{word1.capitalize()} & {word2.capitalize()}"
+                else:
+                    # Use the more important word (domain noun or first in sorted list)
+                    if word1 in domain_nouns:
+                        return word1.capitalize()
+                    elif word2 in domain_nouns:
+                        return word2.capitalize()
+                    else:
+                        return word1.capitalize()
+            elif len(top_words) == 1:
+                return top_words[0].capitalize()
+
+        # Last resort: use first meaningful words from first prompt
         if prompts_texts:
             first_prompt = prompts_texts[0]
-            words = first_prompt.lower().split()
-            meaningful = [w for w in words if w not in stop_words and len(w) > 2][:3]
-            if meaningful:
-                return ' '.join(meaningful).title()
+            cleaned = re.sub(r'[^\w\s]', ' ', first_prompt.lower())
+            words = cleaned.split()
+            meaningful = [w for w in words if w not in stop_words and len(w) > 2 and w.isalpha() and not any(char.isdigit() for char in w)][:2]
+            if len(meaningful) == 2:
+                word1, word2 = meaningful[0], meaningful[1]
+                # Check if both words should be combined
+                if self._should_combine_words(word1, word2):
+                    return f"{word1.capitalize()} & {word2.capitalize()}"
+                else:
+                    # Use the longer/more important word
+                    if len(word2) >= len(word1):
+                        return word2.capitalize()
+                    else:
+                        return word1.capitalize()
+            elif len(meaningful) == 1:
+                return meaningful[0].capitalize()
 
-        return "General Topics"
+        return "General"
 
     def _extract_theme_from_group(self, group_data: Dict[str, Any]) -> str:
         """
         Extract a concise theme from the prompt group using NLP
         Uses the title and primary prompts to identify the common theme
+        Returns a normalized term (max 2 words joined with &)
         """
         title = group_data.get('title', '').strip()
-        primary_prompts = group_data.get('primary_prompts', [])
 
         # Use the title as base (it's already derived from representative prompt)
         if title and title != 'Untitled':
-            # Extract key noun phrases (simple approach: first 2-4 meaningful words)
-            words = title.split()
-            # Filter out common stop words
-            stop_words = {'what', 'how', 'why', 'when', 'where', 'who', 'the', 'is', 'are', 'a', 'an', 'for', 'to', 'of', 'in', 'on', 'at'}
-            meaningful_words = [w for w in words if w.lower() not in stop_words]
+            # Normalize to term format (max 2 words with &)
+            theme = self._normalize_to_term(title, max_words=2)
+            return theme
 
-            # Take first 2-4 meaningful words as theme
-            theme_words = meaningful_words[:min(4, len(meaningful_words))]
-            if theme_words:
-                theme = ' '.join(theme_words).title()
-                # Limit to 50 chars for clean themes
-                if len(theme) > 50:
-                    theme = theme[:50].rsplit(' ', 1)[0]
-                return theme
-
-        # Fallback: if no meaningful theme, use "General" with number
-        return "General Topics"
+        # Fallback: if no meaningful theme, use "General"
+        return "General"
     
     def _build_expert_prompt_template(self, keyword: str, domain_name: str) -> str:
         return (

@@ -61,7 +61,7 @@ class ChatGPTClient:
         total_prompts = len(keywords) * prompts_per_keyword
         
         # Create a system prompt for generating short, natural prompts like real ChatGPT users write
-        system_prompt = f"""Generate short, natural prompts that real ChatGPT users would type for keywords related to "{domain_name}".
+        system_prompt = f"""Generate short, natural prompts that real ChatGPT users would type for the given keywords.
 
 Context: Generate prompts that are relevant to users in {country}. Consider local context, services, and preferences when appropriate.
 
@@ -385,10 +385,18 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         keywords, and themes.
         
         For each group, provide:
-        1. A descriptive group title (as a TERM or PHRASE, NOT a question)
-           - Use noun phrases like "Product Features", "Pricing Information", "User Guide"
+        1. A descriptive group title (as a TERM, NOT a question or incomplete sentence)
+           - Use noun phrases with MAXIMUM 2 words that represent the MAIN TOPIC/SUBJECT
+           - Focus on the actual subject matter (e.g., "Medicine & Apps", "Purchase & Delivery")
+           - If 2 words, join them with "&" symbol ONLY if both are meaningful nouns (e.g., "Product & Features", "Medicine & Purchase")
+           - If 1 word, use just that word if it's the main topic (e.g., "Medicines", "Pricing")
            - Avoid questions like "What is...", "How to...", "Tell me about..."
-           - Keep it short (2-4 words), descriptive, and category-like
+           - Avoid incomplete sentences or phrases
+           - NEVER include numbers in titles (no "1", "2", "Cluster 1", etc.)
+           - NEVER use descriptive/qualitative words like "good", "best", "there", "here" in titles
+           - NEVER use verbs like "buy", "purchase" alone - combine with nouns or use the noun instead
+           - Each group title must be UNIQUE and DISTINCT from other groups
+           - Examples: "Medicine & Apps", "Purchase & Delivery", "Pricing", "Support & Resources"
         2. Primary prompts (1-3 most important prompts in the group)
         3. Secondary prompts (supporting prompts in the group)
         4. Group description explaining the common theme
@@ -400,7 +408,7 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         - Can be used together in a content strategy
         
         Ensure each group has at least 1 primary prompt.
-        IMPORTANT: Group titles must be TERMS or PHRASES, never questions.
+        IMPORTANT: Group titles must be TERMS (1-2 words max, joined with "&" if 2 words), never questions or incomplete sentences.
         """
         
         # Prepare the user message with prompts
@@ -415,8 +423,15 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         {prompts_text}
         
         Please organize them into groups with clear themes. 
-        IMPORTANT: Group titles must be TERMS or PHRASES (like "Product Features", "User Guide"), 
-        NOT questions. Provide a group title, primary prompts, secondary prompts, and description for each group.
+        IMPORTANT: Group titles must be TERMS with MAXIMUM 2 words:
+        - If 2 words: join with "&" (e.g., "Product & Features", "Pricing & Information")
+        - If 1 word: use just that word (e.g., "Features", "Pricing")
+        - NOT questions or incomplete sentences
+        - NEVER include numbers in titles (no "1", "2", "Cluster 1", etc.)
+        - Each group title must be UNIQUE and DISTINCT from other groups
+        - Examples: "Product & Features", "User Guide", "Pricing", "Support & Resources"
+        
+        Provide a group title, primary prompts, secondary prompts, and description for each group.
         """
         
         try:
@@ -496,11 +511,11 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
     
     def _ensure_term_based_title(self, title: str) -> str:
         """
-        Ensure a group title is term-based (not a question)
-        Converts questions to terms/phrases
+        Ensure a group title is term-based (not a question or incomplete sentence)
+        Converts to max 2 words, joined with "&" if 2 words
         """
-        if not title:
-            return 'General Topics'
+        if not title or not title.strip():
+            return 'General'
         
         title_clean = title.strip()
         
@@ -508,33 +523,60 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         if title_clean.endswith('?'):
             title_clean = title_clean[:-1].strip()
         
-        # Check if it starts with question words and convert to term
-        question_starters = ['What is', 'How to', 'Tell me', 'Explain', 'What are', 'Why is', 'When to', 'Where to', 'How does', 'What do']
+        # Remove common question starters
+        question_starters = [
+            'what is', 'what are', 'what do', 'what does', 'what did',
+            'how to', 'how does', 'how do', 'how can', 'how will',
+            'why is', 'why are', 'why do', 'why does',
+            'when to', 'when is', 'when are', 'when do', 'when does',
+            'where to', 'where is', 'where are', 'where do', 'where does',
+            'who is', 'who are', 'who do', 'who does',
+            'tell me', 'explain', 'describe', 'show me', 'give me'
+        ]
+        
+        text_lower = title_clean.lower()
         for starter in question_starters:
-            if title_clean.startswith(starter):
+            if text_lower.startswith(starter):
                 # Extract the main term after the question starter
                 remaining = title_clean[len(starter):].strip()
-                if remaining:
-                    # Capitalize and add context to make it a term
-                    remaining = remaining.strip('?').strip()
-                    if remaining:
-                        # Convert to term format
-                        return remaining.title() + ' Information'
-                # If nothing after question starter, use generic term
-                return 'General Topics'
+                title_clean = remaining.strip('?').strip(' :-\'".,')
+                break
         
-        # If it's already a term/phrase (no question words), return as-is
-        # But ensure it's capitalized properly
-        if title_clean:
-            # Capitalize first letter of each word
-            words = title_clean.split()
-            if len(words) <= 4:  # Keep it short (2-4 words)
-                return ' '.join(word.capitalize() for word in words)
-            else:
-                # If too long, truncate and add context
-                return ' '.join(word.capitalize() for word in words[:3]) + ' Topics'
+        # Split into words and filter
+        words = title_clean.split()
         
-        return 'General Topics'
+        # Filter out stop words and keep meaningful words
+        stop_words = {
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+            'of', 'with', 'by', 'from', 'as', 'is', 'are', 'was', 'were', 'be',
+            'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+            'would', 'should', 'could', 'may', 'might', 'must', 'can', 'this',
+            'that', 'these', 'those', 'it', 'its', 'they', 'them', 'their'
+        }
+        
+        meaningful_words = []
+        for word in words:
+            # Remove punctuation
+            word_clean = word.strip('.,!?;:\'"()[]{}').lower()
+            if word_clean and word_clean not in stop_words and len(word_clean) > 1:
+                meaningful_words.append(word_clean)
+        
+        # Limit to max 2 words
+        if len(meaningful_words) > 2:
+            meaningful_words = meaningful_words[:2]
+        
+        # If no meaningful words, return default
+        if not meaningful_words:
+            return 'General'
+        
+        # Capitalize first letter of each word
+        capitalized = [word.capitalize() for word in meaningful_words]
+        
+        # Join with "&" if 2 words, otherwise return single word
+        if len(capitalized) == 2:
+            return f"{capitalized[0]} & {capitalized[1]}"
+        else:
+            return capitalized[0]
     
     def _create_fallback_groups(self, prompts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -575,47 +617,12 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
     
     def _category_to_term(self, category: str) -> str:
         """
-        Convert a category name to a term-based group title (not a question)
+        Convert a category name to a term-based group title (max 2 words, joined with &)
         Examples:
-        - "General" -> "General Topics"
-        - "Product" -> "Product Information"
-        - "Features" -> "Product Features"
+        - "General" -> "General"
+        - "Product" -> "Product"
+        - "Product Features" -> "Product & Features"
+        - "Pricing Information" -> "Pricing & Information"
         """
-        # Common category to term mappings
-        category_terms = {
-            'General': 'General Topics',
-            'Product': 'Product Information',
-            'Features': 'Product Features',
-            'Pricing': 'Pricing Information',
-            'Support': 'Support Resources',
-            'Guide': 'User Guide',
-            'Comparison': 'Product Comparison',
-            'Benefits': 'Product Benefits',
-            'Use Cases': 'Use Cases',
-            'Technical': 'Technical Details'
-        }
-        
-        # If exact match, use it
-        if category in category_terms:
-            return category_terms[category]
-        
-        # If category ends with common question words, remove them
-        category_clean = category.strip()
-        question_starters = ['What is', 'How to', 'Tell me', 'Explain', 'What are', 'Why is', 'When to', 'Where to']
-        for starter in question_starters:
-            if category_clean.startswith(starter):
-                # Extract the main term after the question starter
-                remaining = category_clean[len(starter):].strip()
-                if remaining:
-                    # Capitalize and add context
-                    return remaining.title() + ' Information'
-        
-        # Default: add "Information" or "Topics" to make it a term
-        if category_clean:
-            # If it's already a noun phrase, use it as-is
-            if len(category_clean.split()) <= 3 and not category_clean.endswith('?'):
-                return category_clean
-            # Otherwise, create a simple term
-            return category_clean + ' Topics'
-        
-        return 'General Topics'
+        # Use the same normalization logic as _ensure_term_based_title
+        return self._ensure_term_based_title(category)

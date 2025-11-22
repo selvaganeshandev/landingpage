@@ -33,8 +33,10 @@ const Dashboard = () => {
   const { toast } = useToast();
   const hasMountedRef = useRef(false);
 
-  // Use ref to track the current domain ID to prevent re-renders
+  // Use refs to track the current filters to prevent unnecessary re-fetches
   const currentDomainIdRef = useRef<string>("");
+  const currentTimePeriodRef = useRef<string>("");
+  const currentSelectedLLMRef = useRef<string>("");
 
   // LLM modules configuration
   const llmModules = [
@@ -76,10 +78,10 @@ const Dashboard = () => {
   };
 
   const handleRefreshData = () => {
-    void fetchSummary();
+    void fetchSummary(true);
   };
 
-  async function fetchSummary() {
+  async function fetchSummary(forceRefresh = false) {
     if (!user) return;
 
     // Get domain ID - prefer selectedDomain from Zustand, fallback to server
@@ -99,12 +101,20 @@ const Dashboard = () => {
       return;
     }
 
-    // If domain hasn't changed, don't re-fetch
-    if (currentDomainIdRef.current === currentDomainId && summary) {
+    // Check if all parameters are the same - only skip if nothing has changed
+    const domainChanged = currentDomainIdRef.current !== currentDomainId;
+    const timePeriodChanged = currentTimePeriodRef.current !== timePeriod;
+    const llmChanged = currentSelectedLLMRef.current !== selectedLLM;
+
+    // If nothing has changed, don't re-fetch (unless explicitly forced via refresh button)
+    if (!forceRefresh && !domainChanged && !timePeriodChanged && !llmChanged && summary) {
       return;
     }
 
+    // Update refs to track current state
     currentDomainIdRef.current = currentDomainId;
+    currentTimePeriodRef.current = timePeriod;
+    currentSelectedLLMRef.current = selectedLLM;
 
     try {
       setLoading(true);

@@ -102,10 +102,14 @@ def extract_position_from_response(response: str, user_domain: str, citation_url
         line_lower = line.lower()
         
         # Match numbered patterns: "1.", "1)", "(1)", "1:", "1 -", etc.
-        numbered_match = re.match(r'^[\*\s#]*(\d+)[\.\)\:\-\s]+', line)
+        # Exclude '#' to avoid matching hashtags/years like "#2023"
+        numbered_match = re.match(r'^[\*\s]*(\d+)[\.\)\:\-\s]+', line)
         
         if numbered_match:
             position = int(numbered_match.group(1))
+            # Validate position is reasonable (1-100), not a year or other large number
+            if position < 1 or position > 100:
+                continue
             
             # Create search window: current line + next 4 lines
             search_window_lines = lines[i:min(i + 5, len(lines))]
@@ -151,8 +155,11 @@ def extract_position_from_response(response: str, user_domain: str, citation_url
                 # Try to find position number in context
                 pos_match = re.search(r'(\d+)[\.\)\:]', context)
                 if pos_match:
-                    return int(pos_match.group(1))
-                # If no specific position but brand + citation exists, default to 1
+                    position = int(pos_match.group(1))
+                    # Validate position is reasonable (1-100), not a year or other large number
+                    if 1 <= position <= 100:
+                        return position
+                # If no valid position found but brand + citation exists, default to 1
                 return 1
     
     # Pass 3: If we have mentions but no numbered position found

@@ -180,8 +180,21 @@ const PromptDetail = () => {
   const getDominantSentiment = (sentiment: any) => {
     if (!sentiment) return 'neutral';
     const { positive = 0, neutral = 0, negative = 0 } = sentiment;
-    if (positive >= neutral && positive >= negative) return 'positive';
-    if (negative >= neutral && negative >= positive) return 'negative';
+    
+    // Find the maximum value
+    const maxValue = Math.max(positive, neutral, negative);
+    
+    // If all are 0, default to neutral
+    if (maxValue === 0) {
+      return 'neutral';
+    }
+    
+    // Return the sentiment with the highest percentage
+    // If positive is highest and greater than negative, return positive
+    if (positive === maxValue && positive > negative) return 'positive';
+    // If negative is highest and greater than positive, return negative
+    if (negative === maxValue && negative > positive) return 'negative';
+    // Otherwise return neutral (neutral is highest, or there's a tie)
     return 'neutral';
   };
 

@@ -1177,8 +1177,8 @@ def prompt_group_detail(request, group_id):
                     citation_list = getattr(analytic, 'citation_list', []) or []
                     total_citations += len(citation_list) if citation_list else 0
                 
-                # Calculate sentiment breakdown - use sentiment_score weighted by mentions (like dashboard)
-                # Dashboard uses: sentiment_score > 0.33 = positive, -0.33 to 0.33 = neutral, < -0.33 = negative
+                # Calculate sentiment breakdown - use sentiment_category directly (like Mentions page)
+                # This matches how mentions display sentiment, using the actual sentiment_category field
                 total_positive_mentions = 0
                 total_neutral_mentions = 0
                 total_negative_mentions = 0
@@ -1186,16 +1186,30 @@ def prompt_group_detail(request, group_id):
                 # Only count mentions (is_mention=True, is_published=True) for sentiment calculation
                 mention_analytics = prompt_analytics.filter(is_mention=True, is_published=True)
                 for analytic in mention_analytics:
-                    sentiment_score = float(analytic.sentiment_score or 0)
+                    # Use sentiment_category directly (like Mentions page does)
+                    sentiment_category = getattr(analytic, 'sentiment_category', None)
                     # Count each mention (not just analytics record)
                     mentions = analytic.total_mentions or 1
                     
-                    if sentiment_score > 0.33:
-                        total_positive_mentions += mentions
-                    elif sentiment_score >= -0.33:
-                        total_neutral_mentions += mentions
+                    # Normalize sentiment_category to lowercase for comparison
+                    if sentiment_category:
+                        sentiment_lower = sentiment_category.lower()
+                        if sentiment_lower == 'positive':
+                            total_positive_mentions += mentions
+                        elif sentiment_lower == 'negative':
+                            total_negative_mentions += mentions
+                        else:
+                            # Default to neutral if not positive or negative
+                            total_neutral_mentions += mentions
                     else:
-                        total_negative_mentions += mentions
+                        # If no sentiment_category, try to derive from sentiment_score as fallback
+                        sentiment_score = float(analytic.sentiment_score or 0)
+                        if sentiment_score > 0.33:
+                            total_positive_mentions += mentions
+                        elif sentiment_score < -0.33:
+                            total_negative_mentions += mentions
+                        else:
+                            total_neutral_mentions += mentions
                 
                 total_sentiment_mentions = total_positive_mentions + total_neutral_mentions + total_negative_mentions
                 sentiment_percentages = {

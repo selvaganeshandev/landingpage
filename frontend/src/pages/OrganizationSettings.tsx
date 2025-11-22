@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/services/api";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -259,6 +259,35 @@ export default function OrganizationSettings() {
 
   const selectedCountry = countries.find(c => c.value === newDomainCountry);
 
+  const cleanDomainInput = (input: string): string => {
+    if (!input.trim()) return input;
+    
+    try {
+      // Remove everything after the first slash (including query params, fragments, etc.)
+      let cleaned = input.trim();
+      
+      // Remove protocol if present (https:// or http://)
+      cleaned = cleaned.replace(/^https?:\/\//i, '');
+      
+      // Remove www. prefix (optional - you can remove this line if you want to keep www)
+      // cleaned = cleaned.replace(/^www\./i, '');
+      
+      // Extract only the domain part (everything before first slash, question mark, or hash)
+      const domainMatch = cleaned.match(/^([^\/\?#]+)/);
+      if (domainMatch) {
+        cleaned = domainMatch[1];
+      }
+      
+      // Remove trailing slash if present
+      cleaned = cleaned.replace(/\/+$/, '');
+      
+      return cleaned;
+    } catch (error) {
+      // If parsing fails, return original input
+      return input;
+    }
+  };
+
   const handleAddKeyword = () => {
     const trimmedInput = keywordInput.trim();
     if (!trimmedInput) return;
@@ -284,15 +313,14 @@ export default function OrganizationSettings() {
     if (newKeywords.length > 0) {
       setNewDomainKeywords([...newDomainKeywords, ...newKeywords]);
       setKeywordInput("");
-    } else if (trimmedInput.split(',').some(k => k.trim().toLowerCase().length > MAX_KEYWORD_LENGTH)) {
-      // Already showed error for length, but check if all were duplicates
-      const allDuplicates = trimmedInput
+    } else {
+      // Check if all were duplicates or invalid
+      const validKeywords = trimmedInput
         .split(',')
         .map(k => k.trim().toLowerCase())
-        .filter(k => k.length > 0 && k.length <= MAX_KEYWORD_LENGTH)
-        .every(k => newDomainKeywords.includes(k));
+        .filter(k => k.length > 0 && k.length <= MAX_KEYWORD_LENGTH);
       
-      if (allDuplicates) {
+      if (validKeywords.length > 0 && validKeywords.every(k => newDomainKeywords.includes(k))) {
         toast({
           title: "Duplicate keywords",
           description: "These keywords are already added.",
@@ -304,6 +332,168 @@ export default function OrganizationSettings() {
 
   const handleRemoveKeyword = (keyword: string) => {
     setNewDomainKeywords(newDomainKeywords.filter(k => k !== keyword));
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const fileName = file.name.toLowerCase();
+    const isCSV = fileName.endsWith('.csv');
+    const isXLSX = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+
+    if (!isCSV && !isXLSX) {
+      toast({
+        title: "Invalid file type",
+        description: "Please upload a CSV or XLSX file.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      let keywords: string[] = [];
+
+      if (isCSV) {
+        // Parse CSV file
+        const text = await file.text();
+        // Split by newlines
+        const lines = text.split(/\r?\n/);
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          // Split by comma, handling quoted values
+          const values: string[] = [];
+          let current = '';
+          let inQuotes = false;
+          
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"') {
+              inQuotes = !inQuotes;
+            } else if (char === ',' && !inQuotes) {
+              values.push(current.trim());
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          values.push(current.trim()); // Add last value
+          
+          // Process each value
+          for (const value of values) {
+            const cleaned = value.replace(/^"|"$/g, '').trim().toLowerCase();
+            if (cleaned && cleaned.length <= MAX_KEYWORD_LENGTH) {
+              keywords.push(cleaned);
+            }
+          }
+        }
+      } else if (isXLSX) {
+        // Parse XLSX file
+        try {
+          // Dynamic import for xlsx library
+          const XLSX = await import('xlsx');
+          const arrayBuffer = await file.arrayBuffer();
+          const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+          
+          // Extract keywords from all cells
+          for (const row of data) {
+            if (Array.isArray(row)) {
+              for (const cell of row) {
+                if (cell && typeof cell === 'string') {
+                  const cleaned = cell.trim().toLowerCase();
+                  if (cleaned && cleaned.length <= MAX_KEYWORD_LENGTH) {
+                    keywords.push(cleaned);
+                  }
+                } else if (typeof cell === 'number') {
+                  const cleaned = String(cell).trim().toLowerCase();
+                  if (cleaned && cleaned.length <= MAX_KEYWORD_LENGTH) {
+                    keywords.push(cleaned);
+                  }
+                }
+              }
+            }
+          }
+        } catch (xlsxError: any) {
+          toast({
+            title: "XLSX parsing error",
+            description: xlsxError?.message || "Failed to parse XLSX file. Please check the file format and try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      // Remove duplicates and empty values
+      const uniqueKeywords = [...new Set(keywords.filter(k => k.length > 0))];
+      
+      // Check maximum limit (100 keywords per upload)
+      const MAX_KEYWORDS_PER_UPLOAD = 100;
+      if (uniqueKeywords.length > MAX_KEYWORDS_PER_UPLOAD) {
+        toast({
+          title: "Too many keywords",
+          description: `File contains ${uniqueKeywords.length} keywords. Maximum ${MAX_KEYWORDS_PER_UPLOAD} keywords allowed per upload. Please split your file into smaller batches.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Filter out keywords that are already added
+      const newKeywords = uniqueKeywords.filter(k => !newDomainKeywords.includes(k));
+
+      if (newKeywords.length === 0) {
+        toast({
+          title: "No new keywords",
+          description: "All keywords from the file are already added or the file is empty.",
+          variant: "default",
+        });
+        return;
+      }
+
+      // Check if adding these keywords would exceed the total limit
+      const totalAfterAdd = newDomainKeywords.length + newKeywords.length;
+      if (totalAfterAdd > MAX_KEYWORDS_PER_UPLOAD) {
+        const canAdd = MAX_KEYWORDS_PER_UPLOAD - newDomainKeywords.length;
+        if (canAdd <= 0) {
+          toast({
+            title: "Keyword limit reached",
+            description: `You have already added ${newDomainKeywords.length} keywords. Maximum ${MAX_KEYWORDS_PER_UPLOAD} keywords allowed. Please remove some keywords before adding more.`,
+            variant: "destructive",
+          });
+          return;
+        } else {
+          // Add only what we can
+          const keywordsToAdd = newKeywords.slice(0, canAdd);
+          setNewDomainKeywords([...newDomainKeywords, ...keywordsToAdd]);
+          toast({
+            title: "Partial upload",
+            description: `Added ${keywordsToAdd.length} keyword(s) from ${file.name}. You already have ${newDomainKeywords.length} keywords. Maximum ${MAX_KEYWORDS_PER_UPLOAD} keywords allowed.`,
+            variant: "default",
+          });
+          return;
+        }
+      }
+
+      // Add new keywords
+      setNewDomainKeywords([...newDomainKeywords, ...newKeywords]);
+      
+      toast({
+        title: "Keywords uploaded",
+        description: `Added ${newKeywords.length} keyword(s) from ${file.name}`,
+        variant: "default",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Upload error",
+        description: error.message || "Failed to process the file. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      // Reset file input
+      event.target.value = '';
+    }
   };
 
   const handleOpenAddKeywordsDialog = (domainId: number) => {
@@ -338,15 +528,14 @@ export default function OrganizationSettings() {
     if (newKeywords.length > 0) {
       setNewKeywordsList([...newKeywordsList, ...newKeywords]);
       setNewKeywordsInput("");
-    } else if (trimmedInput.split(',').some(k => k.trim().toLowerCase().length > MAX_KEYWORD_LENGTH)) {
-      // Already showed error for length, but check if all were duplicates
-      const allDuplicates = trimmedInput
+    } else {
+      // Check if all were duplicates or invalid
+      const validKeywords = trimmedInput
         .split(',')
         .map(k => k.trim().toLowerCase())
-        .filter(k => k.length > 0 && k.length <= MAX_KEYWORD_LENGTH)
-        .every(k => newKeywordsList.includes(k));
+        .filter(k => k.length > 0 && k.length <= MAX_KEYWORD_LENGTH);
       
-      if (allDuplicates) {
+      if (validKeywords.length > 0 && validKeywords.every(k => newKeywordsList.includes(k))) {
         toast({
           title: "Duplicate keywords",
           description: "These keywords are already added.",
@@ -358,6 +547,168 @@ export default function OrganizationSettings() {
 
   const handleRemoveKeywordFromExisting = (keyword: string) => {
     setNewKeywordsList(newKeywordsList.filter(k => k !== keyword));
+  };
+
+  const handleFileUploadForExisting = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const fileName = file.name.toLowerCase();
+    const isCSV = fileName.endsWith('.csv');
+    const isXLSX = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+
+    if (!isCSV && !isXLSX) {
+      toast({
+        title: "Invalid file type",
+        description: "Please upload a CSV or XLSX file.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      let keywords: string[] = [];
+
+      if (isCSV) {
+        // Parse CSV file
+        const text = await file.text();
+        // Split by newlines
+        const lines = text.split(/\r?\n/);
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          // Split by comma, handling quoted values
+          const values: string[] = [];
+          let current = '';
+          let inQuotes = false;
+          
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"') {
+              inQuotes = !inQuotes;
+            } else if (char === ',' && !inQuotes) {
+              values.push(current.trim());
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          values.push(current.trim()); // Add last value
+          
+          // Process each value
+          for (const value of values) {
+            const cleaned = value.replace(/^"|"$/g, '').trim().toLowerCase();
+            if (cleaned && cleaned.length <= MAX_KEYWORD_LENGTH) {
+              keywords.push(cleaned);
+            }
+          }
+        }
+      } else if (isXLSX) {
+        // Parse XLSX file
+        try {
+          // Dynamic import for xlsx library
+          const XLSX = await import('xlsx');
+          const arrayBuffer = await file.arrayBuffer();
+          const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+          
+          // Extract keywords from all cells
+          for (const row of data) {
+            if (Array.isArray(row)) {
+              for (const cell of row) {
+                if (cell && typeof cell === 'string') {
+                  const cleaned = cell.trim().toLowerCase();
+                  if (cleaned && cleaned.length <= MAX_KEYWORD_LENGTH) {
+                    keywords.push(cleaned);
+                  }
+                } else if (typeof cell === 'number') {
+                  const cleaned = String(cell).trim().toLowerCase();
+                  if (cleaned && cleaned.length <= MAX_KEYWORD_LENGTH) {
+                    keywords.push(cleaned);
+                  }
+                }
+              }
+            }
+          }
+        } catch (xlsxError: any) {
+          toast({
+            title: "XLSX parsing error",
+            description: xlsxError?.message || "Failed to parse XLSX file. Please check the file format and try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      // Remove duplicates and empty values
+      const uniqueKeywords = [...new Set(keywords.filter(k => k.length > 0))];
+      
+      // Check maximum limit (100 keywords per upload)
+      const MAX_KEYWORDS_PER_UPLOAD = 100;
+      if (uniqueKeywords.length > MAX_KEYWORDS_PER_UPLOAD) {
+        toast({
+          title: "Too many keywords",
+          description: `File contains ${uniqueKeywords.length} keywords. Maximum ${MAX_KEYWORDS_PER_UPLOAD} keywords allowed per upload. Please split your file into smaller batches.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Filter out keywords that are already added
+      const newKeywords = uniqueKeywords.filter(k => !newKeywordsList.includes(k));
+
+      if (newKeywords.length === 0) {
+        toast({
+          title: "No new keywords",
+          description: "All keywords from the file are already added or the file is empty.",
+          variant: "default",
+        });
+        return;
+      }
+
+      // Check if adding these keywords would exceed the total limit
+      const totalAfterAdd = newKeywordsList.length + newKeywords.length;
+      if (totalAfterAdd > MAX_KEYWORDS_PER_UPLOAD) {
+        const canAdd = MAX_KEYWORDS_PER_UPLOAD - newKeywordsList.length;
+        if (canAdd <= 0) {
+          toast({
+            title: "Keyword limit reached",
+            description: `You have already added ${newKeywordsList.length} keywords. Maximum ${MAX_KEYWORDS_PER_UPLOAD} keywords allowed. Please remove some keywords before adding more.`,
+            variant: "destructive",
+          });
+          return;
+        } else {
+          // Add only what we can
+          const keywordsToAdd = newKeywords.slice(0, canAdd);
+          setNewKeywordsList([...newKeywordsList, ...keywordsToAdd]);
+          toast({
+            title: "Partial upload",
+            description: `Added ${keywordsToAdd.length} keyword(s) from ${file.name}. You already have ${newKeywordsList.length} keywords. Maximum ${MAX_KEYWORDS_PER_UPLOAD} keywords allowed.`,
+            variant: "default",
+          });
+          return;
+        }
+      }
+
+      // Add new keywords
+      setNewKeywordsList([...newKeywordsList, ...newKeywords]);
+      
+      toast({
+        title: "Keywords uploaded",
+        description: `Added ${newKeywords.length} keyword(s) from ${file.name}`,
+        variant: "default",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Upload error",
+        description: error.message || "Failed to process the file. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      // Reset file input
+      event.target.value = '';
+    }
   };
 
   const handleAddKeywordsToDomain = async () => {
@@ -1261,6 +1612,21 @@ export default function OrganizationSettings() {
                 placeholder="example.com"
                 value={newDomain}
                 onChange={(e) => setNewDomain(e.target.value)}
+                onBlur={(e) => {
+                  const cleaned = cleanDomainInput(e.target.value);
+                  if (cleaned !== e.target.value) {
+                    setNewDomain(cleaned);
+                  }
+                }}
+                onPaste={(e) => {
+                  // Get pasted text and clean it
+                  const pastedText = e.clipboardData.getData('text');
+                  const cleaned = cleanDomainInput(pastedText);
+                  if (cleaned !== pastedText) {
+                    e.preventDefault();
+                    setNewDomain(cleaned);
+                  }
+                }}
               />
               <p className="text-xs text-muted-foreground">
                 Enter the domain name without http:// or https://
@@ -1345,72 +1711,80 @@ export default function OrganizationSettings() {
                 </Button>
               </div>
               <div className="space-y-2">
-                <Textarea
+                {/* Tag Input - styled like textarea */}
+                <div
                   id="domain-keywords"
-                  placeholder="Enter keywords separated by commas (e.g., seo, digital marketing)"
-                  value={keywordInput}
-                  onChange={(e) => setKeywordInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      handleAddKeyword();
-                    }
-                  }}
-                  className="min-h-[100px]"
-                />
-                <div className="flex justify-end">
+                  className="flex flex-wrap gap-2 min-h-[100px] max-h-[300px] overflow-y-auto p-3 border border-input rounded-md bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
+                >
+                  {newDomainKeywords.map((keyword, index) => (
+                    <Badge
+                      key={index}
+                      variant="default"
+                      className="gap-1 pr-1 h-7"
+                    >
+                      {keyword}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-4 w-4 p-0 hover:bg-background/20"
+                        onClick={() => handleRemoveKeyword(keyword)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </Badge>
+                  ))}
+                  <Input
+                    type="text"
+                    placeholder={newDomainKeywords.length === 0 ? "Enter keywords and press Enter (e.g., seo, digital marketing)" : "Add more keywords..."}
+                    value={keywordInput}
+                    onChange={(e) => setKeywordInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === ",") {
+                        e.preventDefault();
+                        handleAddKeyword();
+                      }
+                    }}
+                    className="flex-1 min-w-[200px] border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 h-7"
+                  />
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    id="keyword-file-upload"
+                  />
                   <Button
                     type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleAddKeyword}
-                    disabled={!keywordInput.trim()}
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0"
+                    onClick={() => document.getElementById('keyword-file-upload')?.click()}
+                    title="Upload keywords from CSV or XLSX"
                   >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Keywords
+                    <Upload className="h-4 w-4" />
                   </Button>
                 </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                💡 Tip: Add at least one keyword separated by commas. Click "Add Keywords" or press Ctrl+Enter/Cmd+Enter to add to the list. Keywords are normalized to lowercase and must be under 255 characters.
-              </p>
-
-              {/* Keyword Tags */}
-              {newDomainKeywords.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex flex-wrap gap-2 p-3 border rounded-lg bg-muted/30 max-h-32 overflow-y-auto">
-                    {newDomainKeywords.map((keyword, index) => (
-                      <Badge
-                        key={index}
-                        variant="default"
-                        className="gap-1 pr-1"
-                      >
-                        {keyword}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-4 w-4 p-0 hover:bg-background/20"
-                          onClick={() => handleRemoveKeyword(keyword)}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </Badge>
-                    ))}
-                  </div>
-                  <div className="flex justify-start">
+                <div className="flex justify-between items-center">
+                  <p className="text-xs text-muted-foreground">
+                    💡 Type keywords and press Enter, or upload CSV/XLSX files. Max 100 keywords per upload. Each cell = one keyword.
+                  </p>
+                  {newDomainKeywords.length > 0 && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => setNewDomainKeywords([])}
+                      onClick={() => {
+                        setNewDomainKeywords([]);
+                        setKeywordInput("");
+                      }}
                       className="h-8 text-xs"
                     >
                       Clear all
                     </Button>
-                  </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -1494,59 +1868,81 @@ export default function OrganizationSettings() {
                   Keywords <span className="text-destructive">*</span>
                 </Label>
               </div>
-              <Textarea
-                id="add-keywords-input"
-                placeholder="Enter keywords separated by commas (e.g., seo, digital marketing). Press Ctrl+Enter or Cmd+Enter to add."
-                value={newKeywordsInput}
-                onChange={(e) => setNewKeywordsInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    handleAddKeywordToExisting();
-                  }
-                }}
-                className="min-h-[100px]"
-              />
-              <p className="text-xs text-muted-foreground">
-                💡 Tip: Add keywords separated by commas. Press Ctrl+Enter or Cmd+Enter to add. Keywords are normalized to lowercase and must be under 255 characters.
-              </p>
-
-              {/* Keyword Tags */}
-              {newKeywordsList.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex flex-wrap gap-2 p-3 border rounded-lg bg-muted/30 max-h-32 overflow-y-auto">
-                    {newKeywordsList.map((keyword, index) => (
-                      <Badge
-                        key={index}
-                        variant="default"
-                        className="gap-1 pr-1"
+              <div className="space-y-2">
+                {/* Tag Input - styled like textarea */}
+                <div
+                  id="add-keywords-input"
+                  className="flex flex-wrap gap-2 min-h-[100px] max-h-[300px] overflow-y-auto p-3 border border-input rounded-md bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
+                >
+                  {newKeywordsList.map((keyword, index) => (
+                    <Badge
+                      key={index}
+                      variant="default"
+                      className="gap-1 pr-1 h-7"
+                    >
+                      {keyword}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-4 w-4 p-0 hover:bg-background/20"
+                        onClick={() => handleRemoveKeywordFromExisting(keyword)}
                       >
-                        {keyword}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-4 w-4 p-0 hover:bg-background/20"
-                          onClick={() => handleRemoveKeywordFromExisting(keyword)}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </Badge>
-                    ))}
-                  </div>
-                  <div className="flex justify-start">
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </Badge>
+                  ))}
+                  <Input
+                    type="text"
+                    placeholder={newKeywordsList.length === 0 ? "Enter keywords and press Enter (e.g., seo, digital marketing)" : "Add more keywords..."}
+                    value={newKeywordsInput}
+                    onChange={(e) => setNewKeywordsInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === ",") {
+                        e.preventDefault();
+                        handleAddKeywordToExisting();
+                      }
+                    }}
+                    className="flex-1 min-w-[200px] border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 h-7"
+                  />
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={handleFileUploadForExisting}
+                    className="hidden"
+                    id="keyword-file-upload-existing"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0"
+                    onClick={() => document.getElementById('keyword-file-upload-existing')?.click()}
+                    title="Upload keywords from CSV or XLSX"
+                  >
+                    <Upload className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex justify-between items-center">
+                  <p className="text-xs text-muted-foreground">
+                    💡 Type keywords and press Enter, or upload CSV/XLSX files. Max 100 keywords per upload. Each cell = one keyword.
+                  </p>
+                  {newKeywordsList.length > 0 && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => setNewKeywordsList([])}
+                      onClick={() => {
+                        setNewKeywordsList([]);
+                        setNewKeywordsInput("");
+                      }}
                       className="h-8 text-xs"
                     >
                       Clear all
                     </Button>
-                  </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           </div>
           <DialogFooter>

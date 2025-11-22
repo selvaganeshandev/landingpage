@@ -880,6 +880,8 @@ def competitor_prompt_analytics_list(request):
     """
     competitor_id = request.query_params.get('competitor_id')
     domain_id = request.query_params.get('domain_id')
+    is_mentioned = request.query_params.get('is_mentioned')
+    page_size = request.query_params.get('page_size', '100')
     
     queryset = CompetitorPromptAnalytics.objects.all()
     
@@ -889,8 +891,22 @@ def competitor_prompt_analytics_list(request):
     if domain_id:
         queryset = queryset.filter(competitor__domain_id=domain_id)
     
+    # Filter by is_mentioned if provided
+    if is_mentioned is not None:
+        if is_mentioned.lower() == 'true':
+            queryset = queryset.filter(is_mentioned=True)
+        elif is_mentioned.lower() == 'false':
+            queryset = queryset.filter(is_mentioned=False)
+    
     queryset = queryset.select_related('competitor', 'prompt').order_by('-tracked_at')
-    serializer = CompetitorPromptAnalyticsSerializer(queryset[:100], many=True)
+    
+    # Support pagination with page_size
+    try:
+        limit = min(int(page_size), 1000)  # Max 1000 records
+    except (ValueError, TypeError):
+        limit = 100
+    
+    serializer = CompetitorPromptAnalyticsSerializer(queryset[:limit], many=True)
     return Response(serializer.data)
 
 
