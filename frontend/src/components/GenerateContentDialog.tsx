@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useDomainStore } from "@/stores/domainStore";
 import apiClient from "@/services/api";
 import {
@@ -63,6 +63,31 @@ export const GenerateContentDialog = ({
     wordCount: existingContent?.wordCount || 1500,
     scheduledDate: existingContent?.scheduledDate || new Date(),
   });
+
+  // Update form data when existingContent changes
+  useEffect(() => {
+    if (existingContent && open) {
+      setFormData({
+        articleType: existingContent?.type || "blog",
+        title: existingContent?.title || "",
+        keywords: Array.isArray(existingContent?.targetKeywords)
+          ? existingContent.targetKeywords.join(", ")
+          : (existingContent?.targetKeywords || ""),
+        tone: "professional",
+        style: "informative",
+        goal: "educate",
+        audience: "general",
+        depth: "comprehensive",
+        wordCount: existingContent?.wordCount || 1500,
+        scheduledDate: existingContent?.scheduledDate || new Date(),
+      });
+      // Reset step and states when new content is loaded
+      setStep(1);
+      setProgress(0);
+      setIsGenerating(false);
+      setError(null);
+    }
+  }, [existingContent, open]);
 
   const articleTypes = [
     {

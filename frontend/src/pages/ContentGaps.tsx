@@ -127,9 +127,17 @@ const ContentGaps = () => {
   const handleGenerateContentBrief = async (gap: any) => {
     // First, fetch detailed gap data including Content Ideas, SEO, and Action Plan
     try {
-      const detailData = await apiClient.getContentGapDetail({
-        domain_id: domainId,
-        prompt_id: gap.id
+      if (!domainId) {
+        toast({
+          title: "Error",
+          description: "Please select a domain first",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const detailData = await apiClient.getContentGapDetail(gap.id, {
+        domain_id: domainId
       });
 
       // Extract meaningful keywords from the question (remove common words)
