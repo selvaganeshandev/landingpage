@@ -129,21 +129,8 @@ export const GenerateContentDialog = ({
     }, 1000);
 
     try {
-      // Build source reference with additional context
-      let sourceReference = existingContent?.sourceReference || formData.title;
-      if (existingContent?.recommendation) {
-        sourceReference = `Question: ${existingContent.sourceReference}\n\nContext: ${existingContent.recommendation}`;
-        if (existingContent?.frequency) {
-          sourceReference += `\n\nMention Frequency: ${existingContent.frequency} times across platforms`;
-        }
-        if (existingContent?.competitorMentions && existingContent.competitorMentions.length > 0) {
-          const topCompetitors = existingContent.competitorMentions
-            .slice(0, 3)
-            .map((comp: any) => `${comp.brand} (${comp.share}%)`)
-            .join(', ');
-          sourceReference += `\n\nTop Competitors: ${topCompetitors}`;
-        }
-      }
+      // Use enriched source reference if already built, otherwise use default
+      const sourceReference = existingContent?.sourceReference || formData.title;
 
       // Prepare generation request
       const generationData = {

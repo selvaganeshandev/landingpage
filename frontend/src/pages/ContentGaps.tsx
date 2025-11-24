@@ -124,59 +124,177 @@ const ContentGaps = () => {
     navigate('/content-calendar');
   };
 
-  const handleGenerateContentBrief = (gap: any) => {
-    // Extract meaningful keywords from the question (remove common words)
-    const commonWords = ['what', 'how', 'why', 'when', 'where', 'is', 'are', 'the', 'a', 'an', 'to', 'for', 'of', 'in', 'on', 'with'];
-    const keywords = gap.question
-      .toLowerCase()
-      .replace(/[?.,!]/g, '')
-      .split(' ')
-      .filter((word: string) => word.length > 3 && !commonWords.includes(word))
-      .slice(0, 5) // Take top 5 keywords
-      .join(', ');
+  const handleGenerateContentBrief = async (gap: any) => {
+    // First, fetch detailed gap data including Content Ideas, SEO, and Action Plan
+    try {
+      const detailData = await apiClient.getContentGapDetail({
+        domain_id: domainId,
+        prompt_id: gap.id
+      });
 
-    // Determine article type based on question
-    let articleType = "guide";
-    const questionLower = gap.question.toLowerCase();
-    if (questionLower.includes('vs') || questionLower.includes('versus') || questionLower.includes('or')) {
-      articleType = "comparison";
-    } else if (questionLower.includes('how to') || questionLower.includes('how do')) {
-      articleType = "guide";
-    } else if (questionLower.match(/best|top \d+|list of/)) {
-      articleType = "listicle";
-    } else if (questionLower.includes('what is') || questionLower.includes('definition')) {
-      articleType = "blog";
+      // Extract meaningful keywords from the question (remove common words)
+      const commonWords = ['what', 'how', 'why', 'when', 'where', 'is', 'are', 'the', 'a', 'an', 'to', 'for', 'of', 'in', 'on', 'with'];
+      let keywords = gap.question
+        .toLowerCase()
+        .replace(/[?.,!]/g, '')
+        .split(' ')
+        .filter((word: string) => word.length > 3 && !commonWords.includes(word))
+        .slice(0, 5) // Take top 5 keywords
+        .join(', ');
+
+      // Enhance keywords with SEO suggestions if available
+      if (detailData?.seoSuggestions && detailData.seoSuggestions.length > 0) {
+        // Extract keywords from SEO suggestions
+        const seoKeywords = detailData.seoSuggestions
+          .filter((sug: any) => sug.suggestion.toLowerCase().includes('keyword'))
+          .map((sug: any) => {
+            // Try to extract quoted keywords
+            const match = sug.suggestion.match(/'([^']+)'|"([^"]+)"/);
+            return match ? (match[1] || match[2]) : null;
+          })
+          .filter(Boolean)
+          .join(', ');
+
+        if (seoKeywords) {
+          keywords = keywords + (keywords ? ', ' : '') + seoKeywords;
+        }
+      }
+
+      // Determine article type based on question or content recommendations
+      let articleType = "guide";
+      const questionLower = gap.question.toLowerCase();
+
+      // Check content recommendations for article type
+      if (detailData?.contentRecommendations && detailData.contentRecommendations.length > 0) {
+        const firstRec = detailData.contentRecommendations[0];
+        const typeMap: any = {
+          'comprehensive guide': 'guide',
+          'comparison article': 'comparison',
+          'listicle': 'listicle',
+          'blog post': 'blog',
+          'technical article': 'technical'
+        };
+        articleType = typeMap[firstRec.type?.toLowerCase()] || articleType;
+      } else {
+        // Fallback to question-based detection
+        if (questionLower.includes('vs') || questionLower.includes('versus') || questionLower.includes('or')) {
+          articleType = "comparison";
+        } else if (questionLower.includes('how to') || questionLower.includes('how do')) {
+          articleType = "guide";
+        } else if (questionLower.match(/best|top \d+|list of/)) {
+          articleType = "listicle";
+        } else if (questionLower.includes('what is') || questionLower.includes('definition')) {
+          articleType = "blog";
+        }
+      }
+
+      // Determine word count from content recommendations or priority
+      let wordCount = 1500;
+      if (detailData?.contentRecommendations && detailData.contentRecommendations.length > 0) {
+        const firstRec = detailData.contentRecommendations[0];
+        wordCount = parseInt(firstRec.estimatedWords) || wordCount;
+      } else {
+        if (gap.priority === 'high') {
+          wordCount = gap.frequency > 50 ? 2500 : 2000;
+        } else if (gap.priority === 'medium') {
+          wordCount = 1500;
+        } else {
+          wordCount = 1200;
+        }
+      }
+
+      // Build enriched source reference with all detailed information
+      let enrichedReference = `Question: ${gap.question}\n\nAI Recommendation: ${gap.recommendation}`;
+
+      // Add content recommendations
+      if (detailData?.contentRecommendations && detailData.contentRecommendations.length > 0) {
+        enrichedReference += '\n\n=== Content Structure Recommendations ===\n';
+        detailData.contentRecommendations.forEach((rec: any, idx: number) => {
+          enrichedReference += `\n${idx + 1}. ${rec.title} (${rec.type})\n`;
+          enrichedReference += `   Sections to include:\n`;
+          rec.sections.forEach((section: string) => {
+            enrichedReference += `   - ${section}\n`;
+          });
+        });
+      }
+
+      // Add SEO suggestions
+      if (detailData?.seoSuggestions && detailData.seoSuggestions.length > 0) {
+        enrichedReference += '\n\n=== SEO Optimization Points ===\n';
+        detailData.seoSuggestions.forEach((sug: any) => {
+          enrichedReference += `- ${sug.suggestion}\n`;
+        });
+      }
+
+      // Add competitor context
+      enrichedReference += `\n\n=== Market Context ===\n`;
+      enrichedReference += `Mention Frequency: ${gap.frequency} times across platforms\n`;
+      if (gap.competitorMentions && gap.competitorMentions.length > 0) {
+        enrichedReference += `Top Competitors:\n`;
+        gap.competitorMentions.slice(0, 3).forEach((comp: any) => {
+          enrichedReference += `- ${comp.brand}: ${comp.share}%\n`;
+        });
+      }
+
+      // Set the content data for the dialog
+      setSelectedContentForGeneration({
+        title: gap.question,
+        type: articleType,
+        targetKeywords: keywords.split(', ').filter((k: string) => k.length > 0),
+        priority: gap.priority,
+        wordCount: wordCount,
+        sourceType: "content_gap",
+        sourceId: gap.id,
+        sourceReference: enrichedReference,
+        // Additional context for better generation
+        competitorMentions: gap.competitorMentions,
+        recommendation: gap.recommendation,
+        frequency: gap.frequency,
+        platforms: gap.platforms,
+        // Include detailed data
+        contentRecommendations: detailData?.contentRecommendations,
+        seoSuggestions: detailData?.seoSuggestions,
+        actionPlan: detailData?.actionPlan
+      });
+
+      // Open the dialog
+      setGenerateDialogOpen(true);
+
+    } catch (error) {
+      console.error('Error fetching gap details:', error);
+      toast({
+        title: "Warning",
+        description: "Could not load detailed gap analysis. Using basic information.",
+        variant: "default",
+      });
+
+      // Fallback to basic mode if API fails
+      const commonWords = ['what', 'how', 'why', 'when', 'where', 'is', 'are', 'the', 'a', 'an', 'to', 'for', 'of', 'in', 'on', 'with'];
+      const keywords = gap.question
+        .toLowerCase()
+        .replace(/[?.,!]/g, '')
+        .split(' ')
+        .filter((word: string) => word.length > 3 && !commonWords.includes(word))
+        .slice(0, 5)
+        .join(', ');
+
+      setSelectedContentForGeneration({
+        title: gap.question,
+        type: "guide",
+        targetKeywords: keywords.split(', '),
+        priority: gap.priority,
+        wordCount: 1500,
+        sourceType: "content_gap",
+        sourceId: gap.id,
+        sourceReference: gap.question,
+        competitorMentions: gap.competitorMentions,
+        recommendation: gap.recommendation,
+        frequency: gap.frequency,
+        platforms: gap.platforms
+      });
+
+      setGenerateDialogOpen(true);
     }
-
-    // Determine word count based on priority and frequency
-    let wordCount = 1500;
-    if (gap.priority === 'high') {
-      wordCount = gap.frequency > 50 ? 2500 : 2000;
-    } else if (gap.priority === 'medium') {
-      wordCount = 1500;
-    } else {
-      wordCount = 1200;
-    }
-
-    // Set the content data for the dialog
-    setSelectedContentForGeneration({
-      title: gap.question,
-      type: articleType,
-      targetKeywords: keywords.split(', '),
-      priority: gap.priority,
-      wordCount: wordCount,
-      sourceType: "content_gap",
-      sourceId: gap.id,
-      sourceReference: gap.question,
-      // Additional context for better generation
-      competitorMentions: gap.competitorMentions,
-      recommendation: gap.recommendation,
-      frequency: gap.frequency,
-      platforms: gap.platforms
-    });
-
-    // Open the dialog
-    setGenerateDialogOpen(true);
   };
 
   const handleViewDetails = (gap: any) => {
