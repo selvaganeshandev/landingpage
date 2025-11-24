@@ -1354,12 +1354,32 @@ def content_gap_detail(request, gap_id):
         ).exclude(prompt_id=prompt_id).select_related('prompt')[:20]
 
         related_questions = []
+        seen_questions = set()  # Track unique questions
         for rp in related_prompts:
             rp_keywords = set(rp.prompt.prompt.lower().split())
             if len(keywords & rp_keywords) >= 2:  # At least 2 common keywords
+                # Skip duplicate questions
+                if rp.prompt.prompt in seen_questions:
+                    continue
+                seen_questions.add(rp.prompt.prompt)
+
+                # Calculate actual frequency from competitor analytics
+                rp_comp_mentions = CompetitorPromptAnalytics.objects.filter(
+                    prompt_id=rp.prompt_id,
+                    competitor__domain_id=domain_id
+                ).aggregate(total=models.Sum('mention_count'))['total'] or 0
+
+                # Also include your domain's mentions for this prompt
+                rp_your_mentions = PromptAnalytics.objects.filter(
+                    prompt_id=rp.prompt_id,
+                    prompt__group__domain_id=domain_id
+                ).aggregate(total=models.Sum('total_mentions'))['total'] or 0
+
+                total_frequency = rp_comp_mentions + rp_your_mentions
+
                 related_questions.append({
                     'question': rp.prompt.prompt,
-                    'frequency': 45  # Placeholder
+                    'frequency': total_frequency
                 })
                 if len(related_questions) >= 5:
                     break
