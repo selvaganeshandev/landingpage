@@ -4,9 +4,11 @@
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const ENGINE_URL = import.meta.env.VITE_ENGINE_URL || 'http://localhost:8001';
 
 interface RequestOptions extends RequestInit {
   skipAuth?: boolean;
+  useEngine?: boolean;
 }
 
 /**
@@ -84,7 +86,7 @@ async function apiRequest<T>(
   endpoint: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { skipAuth, ...fetchOptions } = options;
+  const { skipAuth, useEngine, ...fetchOptions } = options;
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -99,7 +101,10 @@ async function apiRequest<T>(
     }
   }
 
-  let response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  // Use engine URL if specified, otherwise use backend URL
+  const baseURL = useEngine ? ENGINE_URL : API_BASE_URL;
+
+  let response = await fetch(`${baseURL}${endpoint}`, {
     ...fetchOptions,
     headers,
   });
@@ -122,7 +127,7 @@ async function apiRequest<T>(
             };
 
             try {
-              const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
+              const retryResponse = await fetch(`${baseURL}${endpoint}`, {
                 ...fetchOptions,
                 headers: newHeaders,
               });
@@ -163,7 +168,7 @@ async function apiRequest<T>(
           'Authorization': `Bearer ${newToken}`,
         };
 
-        response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        response = await fetch(`${baseURL}${endpoint}`, {
           ...fetchOptions,
           headers: newHeaders,
         });
@@ -991,6 +996,7 @@ export const apiClient = {
   generateContent: (data: any) => apiRequest('/api/content/generate/', {
     method: 'POST',
     body: JSON.stringify(data),
+    useEngine: true,
   }),
 
   getGeneratedContents: (params?: { domain_id?: string; status?: string; source_type?: string; page?: number; page_size?: string }, options?: RequestOptions) => {
@@ -1001,18 +1007,25 @@ export const apiClient = {
       ...(params.page ? { page: String(params.page) } : {}),
       ...(params.page_size ? { page_size: params.page_size } : {}),
     }).toString()}` : '';
-    return apiRequest(`/api/content/${queryParams}`, options);
+    return apiRequest(`/api/content/${queryParams}`, {
+      ...options,
+      useEngine: true,
+    });
   },
 
-  getGeneratedContent: (contentId: number) => apiRequest(`/api/content/${contentId}/`, undefined),
+  getGeneratedContent: (contentId: number) => apiRequest(`/api/content/${contentId}/`, {
+    useEngine: true,
+  }),
 
   updateGeneratedContent: (contentId: number, data: any) => apiRequest(`/api/content/${contentId}/update/`, {
     method: 'PATCH',
     body: JSON.stringify(data),
+    useEngine: true,
   }),
 
   deleteGeneratedContent: (contentId: number) => apiRequest(`/api/content/${contentId}/delete/`, {
     method: 'DELETE',
+    useEngine: true,
   }),
 };
 
