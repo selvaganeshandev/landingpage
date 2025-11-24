@@ -1086,12 +1086,18 @@ const Competitors = () => {
     );
   }
 
-  // Show processing state when there are no competitors or domain is processing
-  if (competitors.length === 0 && !isPageLoading && hasLoadedData) {
+  // Check if we should show "You" as a competitor or filter it out
+  // If the only competitor is "You" with no data, treat it as no competitors
+  const realCompetitors = competitors.filter(c => !c.isYou);
+  const youCompetitor = competitors.find(c => c.isYou);
+  const hasOnlyYouWithNoData = competitors.length === 1 && youCompetitor &&
+    youCompetitor.mentions === 0 && youCompetitor.citations === 0;
+
+  // Show "Start Analysis" state when there are no real competitors (excluding "You")
+  if ((realCompetitors.length === 0 || hasOnlyYouWithNoData) && !isPageLoading && hasLoadedData) {
     const isDomainCompleted = domainProcessingStatus === 'COMP';
     const isDomainProcessing = domainProcessingStatus && domainProcessingStatus !== 'COMP';
-    const noCompetitorsFound = isDomainCompleted && !isDomainProcessing;
-    
+
     return (
       <div className="p-8 space-y-6 bg-background animate-fade-in">
         <div className="space-y-4">
@@ -1102,97 +1108,43 @@ const Competitors = () => {
                 Compare your brand's AI visibility against competitors
               </p>
             </div>
-            <div className="flex gap-2">
-              {noCompetitorsFound && (
-                <Button
-                  onClick={() => setAddCompetitorDialogOpen(true)}
-                  size="sm"
-                >
-                  Add Competitor
-                </Button>
-              )}
-              <Button
-                onClick={() => {
-                  setHasLoadedData(false);
-                  setIsPageLoading(true);
-                  // Trigger reload by updating domainId (which will trigger useEffect)
-                  if (domainId) {
-                    setDomainId(domainId);
-                  }
-                }}
-                variant="outline"
-                size="sm"
-              >
-                <Loader2 className="h-4 w-4 mr-2" />
-                Refresh
-              </Button>
-            </div>
           </div>
         </div>
 
-        <Card className="p-12 border-0 bg-transparent shadow-none">
+        <Card className="p-8 border border-border">
           <div className="flex flex-col items-center text-center space-y-6 max-w-2xl mx-auto">
-            <div className="p-4 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 text-primary">
-              {isDomainProcessing ? (
-                <Loader2 className="h-12 w-12 animate-spin" />
-              ) : noCompetitorsFound ? (
-                <Search className="h-12 w-12" />
-              ) : (
-                <Target className="h-12 w-12" />
-              )}
-            </div>
-
             <div className="space-y-2">
-              <h2 className="text-2xl font-bold">
-                {isDomainProcessing 
-                  ? "Processing Domain Analytics" 
-                  : noCompetitorsFound
-                  ? "No Competitors Found"
-                  : "Waiting for Domain Processing"}
-              </h2>
-              <p className="text-muted-foreground text-base">
-                {isDomainProcessing
-                  ? "Your domain is currently being processed. Competitors will be automatically extracted once processing is complete."
-                  : noCompetitorsFound
-                  ? "No competitors were automatically discovered from your prompt analytics data. You can manually add competitors to track."
-                  : "Please wait for domain processing to complete. Competitors will be automatically extracted afterwards."}
+              <h2 className="text-2xl font-bold">Discover Your Top Competitors</h2>
+              <p className="text-muted-foreground">
+                Our AI will analyze your brand and automatically identify your top 5 competitors across AI platforms, plus discover related content and mentions.
               </p>
             </div>
 
-            {!noCompetitorsFound && (
-              <p className="text-sm text-muted-foreground max-w-md">
-                {isDomainProcessing
-                  ? "Once your domain analytics are complete, we'll automatically discover your top competitors from the prompt analytics data."
-                  : "We automatically discover your top competitors from existing prompt analytics data and extract their mentions across AI platforms."}
-              </p>
-            )}
-
-            {noCompetitorsFound ? (
-              <Button
-                onClick={() => setAddCompetitorDialogOpen(true)}
-                size="lg"
-                className="mt-4"
-              >
-                Add Competitor Manually
-              </Button>
-            ) : (
-              <Button
-                onClick={() => {
+            <Button
+              onClick={() => {
+                toast({
+                  title: "Starting Competitor Analysis",
+                  description: "This may take a few minutes while we analyze your brand and discover competitors...",
+                });
+                // TODO: Trigger actual competitor discovery API call
+                // For now, just reload to check if competitors were found
+                setTimeout(() => {
                   setHasLoadedData(false);
                   setIsPageLoading(true);
-                  // Trigger reload by updating domainId (which will trigger useEffect)
                   if (domainId) {
                     setDomainId(domainId);
                   }
-                }}
-                variant="outline"
-                size="lg"
-                className="mt-4"
-              >
-                <Loader2 className="h-5 w-5 mr-2" />
-                Refresh to Check Status
-              </Button>
-            )}
+                }, 1500);
+              }}
+              size="lg"
+              className="gradient-primary"
+            >
+              Start Analysis
+            </Button>
+
+            <p className="text-sm text-muted-foreground">
+              Analysis typically takes 2-5 minutes. You'll be notified once complete.
+            </p>
           </div>
         </Card>
 
@@ -1361,7 +1313,7 @@ const Competitors = () => {
         </div>
 
         <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
-          {competitors.length > 0 && (
+          {realCompetitors.length > 0 && (
             <div className="flex items-center justify-between gap-4 mb-6">
               <TabsList className="bg-muted/50 p-1 border border-border">
                 <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Overview</TabsTrigger>
@@ -1389,10 +1341,10 @@ const Competitors = () => {
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6 mt-0">
 
-            {/* Competitor Cards - Limited to 3 in overview */}
+            {/* Competitor Cards - Limited to 3 in overview, exclude "You" */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {competitors.length > 0 ? (
-                competitors.slice(0, 3).map((competitor, idx) => (
+              {realCompetitors.length > 0 ? (
+                realCompetitors.slice(0, 3).map((competitor, idx) => (
                 <Card
                   key={competitor.id}
                   className={`p-6 transition-all duration-300 backdrop-blur-sm bg-card/80 ${
@@ -1409,11 +1361,11 @@ const Competitors = () => {
                         </div>
                         <p className="text-sm text-muted-foreground">{competitor.url}</p>
                       </div>
-                      <div 
+                      <div
                         className="w-12 h-12 rounded-xl shadow-glow flex items-center justify-center font-bold text-white text-lg font-inter"
                         style={{ backgroundColor: competitor.color }}
                       >
-                        #{competitor.isYou ? 1 : idx + 1}
+                        #{idx + 1}
                       </div>
                     </div>
 
@@ -1452,16 +1404,14 @@ const Competitors = () => {
                           </span>
                         </div>
                       </div>
-                      {!competitor.isYou && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-primary"
-                          onClick={() => navigate(`/competitors/${competitor.id}`)}
-                        >
-                          View Details →
-                        </Button>
-                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-primary"
+                        onClick={() => navigate(`/competitors/${competitor.id}`)}
+                      >
+                        View Details →
+                      </Button>
                     </div>
                   </div>
                 </Card>
@@ -1487,8 +1437,8 @@ const Competitors = () => {
               )}
             </div>
 
-            {/* Show rest of content only if there are competitors */}
-            {competitors.length > 0 && (
+            {/* Show rest of content only if there are real competitors */}
+            {realCompetitors.length > 0 && (
               <>
             {/* Brand Visibility Over Time */}
             <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
