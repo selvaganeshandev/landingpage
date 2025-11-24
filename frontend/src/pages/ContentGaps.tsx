@@ -48,24 +48,62 @@ const ContentGaps = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+
   const domainId = selectedDomain?.id?.toString();
 
+  // Reset page when domain changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [domainId]);
+
+  // Load summary data separately (only once)
+  useEffect(() => {
+    if (!domainId) {
+      return;
+    }
+
+    const loadSummary = async () => {
+      try {
+        const summaryData = await apiClient.getContentGapSummary({ domain_id: domainId });
+        setSummary(summaryData);
+      } catch (error: any) {
+        console.error('Failed to load content gap summary:', error);
+      }
+    };
+
+    loadSummary();
+  }, [domainId]);
+
+  // Load paginated content gaps
   useEffect(() => {
     if (!domainId) {
       setIsLoading(false);
       return;
     }
 
-    const loadData = async () => {
+    const loadGaps = async () => {
       setIsLoading(true);
       try {
-        const [gapsData, summaryData] = await Promise.all([
-          apiClient.getContentGaps({ domain_id: domainId }),
-          apiClient.getContentGapSummary({ domain_id: domainId })
-        ]);
+        const gapsData = await apiClient.getContentGaps({
+          domain_id: domainId,
+          page: currentPage,
+          page_size: '20'
+        });
 
-        setContentGaps(Array.isArray(gapsData) ? gapsData : []);
-        setSummary(summaryData);
+        // Handle paginated response
+        const gaps = Array.isArray(gapsData) ? gapsData : gapsData?.results || [];
+        const paginationInfo = !Array.isArray(gapsData) ? gapsData : null;
+
+        setContentGaps(gaps);
+
+        if (paginationInfo) {
+          setTotalPages(paginationInfo.total_pages || 0);
+          setTotalCount(paginationInfo.count || 0);
+        }
       } catch (error: any) {
         console.error('Failed to load content gaps:', error);
         toast({
@@ -78,8 +116,8 @@ const ContentGaps = () => {
       }
     };
 
-    loadData();
-  }, [domainId, toast]);
+    loadGaps();
+  }, [domainId, currentPage, toast]);
 
   const handleGenerateContentPlan = () => {
     navigateToContentGeneration({
@@ -269,6 +307,74 @@ const ContentGaps = () => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between pt-6 border-t border-border">
+            <div className="text-sm text-muted-foreground">
+              Showing page {currentPage} of {totalPages} ({totalCount} total gaps)
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(1)}
+                disabled={currentPage === 1}
+              >
+                First
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+              >
+                Previous
+              </Button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  return (
+                    <Button
+                      key={pageNum}
+                      variant={currentPage === pageNum ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setCurrentPage(pageNum)}
+                      className="w-10"
+                    >
+                      {pageNum}
+                    </Button>
+                  );
+                })}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+              >
+                Next
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={currentPage === totalPages}
+              >
+                Last
+              </Button>
+            </div>
           </div>
         )}
       </Card>

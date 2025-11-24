@@ -1155,7 +1155,26 @@ def content_gap_analysis(request):
         priority_order = {'high': 0, 'medium': 1, 'low': 2}
         content_gaps.sort(key=lambda x: (priority_order.get(x['priority'], 3), -x['frequency']))
 
-        return Response(content_gaps)
+        # Apply pagination
+        page = int(request.GET.get('page', 1))
+        page_size = int(request.GET.get('page_size', 20))
+
+        total_count = len(content_gaps)
+        total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 1
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
+
+        paginated_gaps = content_gaps[start_index:end_index]
+
+        return Response({
+            'results': paginated_gaps,
+            'count': total_count,
+            'total_pages': total_pages,
+            'current_page': page,
+            'page_size': page_size,
+            'has_next': page < total_pages,
+            'has_previous': page > 1,
+        })
 
     except Exception as e:
         import traceback

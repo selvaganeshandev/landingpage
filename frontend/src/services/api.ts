@@ -870,11 +870,13 @@ export const apiClient = {
   },
 
   // ===== Content Gaps =====
-  getContentGaps: (params: { domain_id: string; platform?: string; priority?: string }, options?: RequestOptions) => {
+  getContentGaps: (params: { domain_id: string; platform?: string; priority?: string; page?: number; page_size?: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.platform ? { platform: params.platform } : {}),
       ...(params.priority ? { priority: params.priority } : {}),
+      ...(params.page ? { page: String(params.page) } : {}),
+      ...(params.page_size ? { page_size: params.page_size } : {}),
     }).toString()}`;
     return apiRequest(`/competitors/content-gaps/${queryParams}`, options);
   },
