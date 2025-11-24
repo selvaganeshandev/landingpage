@@ -18,7 +18,8 @@ import {
   CheckCircle2,
   Edit,
   Settings,
-  ArrowLeft
+  ArrowLeft,
+  List
 } from "lucide-react";
 import {
   Select,
@@ -28,6 +29,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { GenerateContentDialog } from "@/components/GenerateContentDialog";
+import { apiClient } from "@/services/api";
+import { useDomainStore } from "@/stores/domainStore";
 
 interface ContentItem {
   id: string;
@@ -45,74 +48,52 @@ interface ContentItem {
 const ContentCalendar = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { selectedDomain } = useDomainStore();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [selectedView, setSelectedView] = useState("calendar");
+  const [selectedView, setSelectedView] = useState("list");
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null);
+  const [contentItems, setContentItems] = useState<ContentItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock content items with prioritization
-  const [contentItems] = useState<ContentItem[]>([
-    {
-      id: "1",
-      title: "Best Vegan BCAA Supplements - Complete Guide",
-      type: "guide",
-      status: "scheduled",
-      priority: "high",
-      scheduledDate: new Date(2025, 9, 20),
-      targetKeywords: ["vegan bcaa", "plant-based supplements"],
-      opportunitySource: "Answer Gap Analysis",
-      estimatedImpact: 94,
-      wordCount: 2000
-    },
-    {
-      id: "2",
-      title: "Plant Protein vs Whey: Which is Better for Athletes?",
-      type: "comparison",
-      status: "draft",
-      priority: "high",
-      scheduledDate: new Date(2025, 9, 22),
-      targetKeywords: ["plant protein athletes", "vegan protein powder"],
-      opportunitySource: "Competitor Weakness",
-      estimatedImpact: 87,
-      wordCount: 1800
-    },
-    {
-      id: "3",
-      title: "Top 10 Unflavored Plant Protein Powders in 2025",
-      type: "listicle",
-      status: "generated",
-      priority: "high",
-      scheduledDate: new Date(2025, 9, 24),
-      targetKeywords: ["unflavored plant protein", "natural protein powder"],
-      opportunitySource: "Answer Gap Analysis",
-      estimatedImpact: 82,
-      wordCount: 1500
-    },
-    {
-      id: "4",
-      title: "How to Choose Organic Plant-Based Protein Powder",
-      type: "blog",
-      status: "scheduled",
-      priority: "medium",
-      scheduledDate: new Date(2025, 9, 26),
-      targetKeywords: ["organic protein powder", "plant-based nutrition"],
-      opportunitySource: "High Visibility Topic",
-      estimatedImpact: 76,
-      wordCount: 1200
-    },
-    {
-      id: "5",
-      title: "Understanding Amino Acid Profiles in Vegan Proteins",
-      type: "technical",
-      status: "scheduled",
-      priority: "medium",
-      scheduledDate: new Date(2025, 9, 28),
-      targetKeywords: ["amino acids vegan", "protein quality"],
-      opportunitySource: "Content Gap",
-      estimatedImpact: 68,
-      wordCount: 2500
-    }
-  ]);
+  // Fetch generated content from API
+  useEffect(() => {
+    const fetchContent = async () => {
+      if (!selectedDomain) return;
+
+      try {
+        setLoading(true);
+        const response = await apiClient.getGeneratedContents({ domain_id: selectedDomain.id });
+
+        if (response.status === "success" && response.results) {
+          const formattedContent: ContentItem[] = response.results.map((item: any) => ({
+            id: item.id.toString(),
+            title: item.title,
+            type: item.article_type || "blog",
+            status: item.status || "draft",
+            priority: item.priority || "medium",
+            scheduledDate: item.scheduled_date ? new Date(item.scheduled_date) : new Date(),
+            targetKeywords: item.keywords ? item.keywords.split(",").map((k: string) => k.trim()) : [],
+            opportunitySource: item.source_type === "content_gap" ? "Content Gap" : item.source_type === "topic" ? "Topic" : "Manual",
+            estimatedImpact: 75,
+            wordCount: item.actual_word_count || item.word_count || 0
+          }));
+          setContentItems(formattedContent);
+        }
+      } catch (error) {
+        console.error("Error fetching content:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load content items",
+          variant: "destructive"
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchContent();
+  }, [selectedDomain, toast]);
 
   const handleGenerateContent = () => {
     setGenerateDialogOpen(true);
@@ -187,9 +168,17 @@ const ContentCalendar = () => {
   };
 
   const itemsForSelectedDate = contentItems.filter(
-    item => selectedDate && 
+    item => selectedDate &&
     item.scheduledDate.toDateString() === selectedDate.toDateString()
   );
+
+  // Calculate dynamic summary stats
+  const scheduledCount = contentItems.filter(item => item.status === "scheduled").length;
+  const highPriorityCount = contentItems.filter(item => item.priority === "high").length;
+  const generatedCount = contentItems.filter(item => item.status === "generated" || item.status === "published").length;
+  const avgImpact = contentItems.length > 0
+    ? Math.round(contentItems.reduce((sum, item) => sum + item.estimatedImpact, 0) / contentItems.length)
+    : 0;
 
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
@@ -242,7 +231,7 @@ const ContentCalendar = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Scheduled</p>
-              <p className="text-2xl font-bold font-inter">12</p>
+              <p className="text-2xl font-bold font-inter">{loading ? "-" : scheduledCount}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
               <Clock className="h-5 w-5 text-primary" />
@@ -253,7 +242,7 @@ const ContentCalendar = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">High Priority</p>
-              <p className="text-2xl font-bold font-inter">8</p>
+              <p className="text-2xl font-bold font-inter">{loading ? "-" : highPriorityCount}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-destructive/10 flex items-center justify-center">
               <AlertCircle className="h-5 w-5 text-destructive" />
@@ -264,7 +253,7 @@ const ContentCalendar = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Generated</p>
-              <p className="text-2xl font-bold font-inter">24</p>
+              <p className="text-2xl font-bold font-inter">{loading ? "-" : generatedCount}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center">
               <CheckCircle2 className="h-5 w-5 text-success" />
@@ -275,7 +264,7 @@ const ContentCalendar = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Avg Impact</p>
-              <p className="text-2xl font-bold font-inter">82%</p>
+              <p className="text-2xl font-bold font-inter">{loading ? "-" : `${avgImpact}%`}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
               <TrendingUp className="h-5 w-5 text-primary" />
@@ -286,10 +275,103 @@ const ContentCalendar = () => {
 
       <Tabs value={selectedView} onValueChange={setSelectedView}>
         <TabsList>
-          <TabsTrigger value="calendar">Calendar View</TabsTrigger>
-          <TabsTrigger value="list">List View</TabsTrigger>
-          <TabsTrigger value="pipeline">Content Pipeline</TabsTrigger>
+          <TabsTrigger value="list"><List className="h-4 w-4 mr-2" />List View</TabsTrigger>
+          <TabsTrigger value="calendar"><CalendarIcon className="h-4 w-4 mr-2" />Calendar View</TabsTrigger>
+          <TabsTrigger value="pipeline"><Target className="h-4 w-4 mr-2" />Content Pipeline</TabsTrigger>
         </TabsList>
+
+        {/* List View */}
+        <TabsContent value="list" className="space-y-4 mt-6">
+          {loading ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">Loading content...</p>
+            </div>
+          ) : contentItems.length === 0 ? (
+            <Card className="p-12 border border-dashed border-border">
+              <div className="text-center text-muted-foreground">
+                <FileText className="h-16 w-16 mx-auto mb-4 opacity-50" />
+                <h3 className="text-lg font-semibold mb-2">No content generated yet</h3>
+                <p className="mb-4">Start generating AI-powered content for your domain</p>
+                <Button
+                  variant="outline"
+                  onClick={handleGenerateContent}
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Generate Your First Content
+                </Button>
+              </div>
+            </Card>
+          ) : (
+            contentItems
+              .sort((a, b) => a.scheduledDate.getTime() - b.scheduledDate.getTime())
+              .map((item) => (
+                <Card key={item.id} className="p-6 hover:shadow-elegant transition-all">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-3">
+                        <span className="text-2xl">{getContentIcon(item.type)}</span>
+                        <div>
+                          <h3 className="text-lg font-semibold">{item.title}</h3>
+                          <p className="text-sm text-muted-foreground">
+                            {item.scheduledDate.toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        <Badge variant="outline" className={getPriorityColor(item.priority)}>
+                          {item.priority}
+                        </Badge>
+                        <Badge variant="outline" className={getStatusColor(item.status)}>
+                          {item.status}
+                        </Badge>
+                        <Badge variant="secondary">{item.type}</Badge>
+                        <Badge variant="secondary">{item.wordCount} words</Badge>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <p className="text-muted-foreground mb-1">Source</p>
+                          <p className="font-medium">{item.opportunitySource}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground mb-1">Estimated Impact</p>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary"
+                                style={{ width: `${item.estimatedImpact}%` }}
+                              />
+                            </div>
+                            <span className="font-medium">{item.estimatedImpact}%</span>
+                          </div>
+                        </div>
+                        <div className="col-span-2">
+                          <p className="text-muted-foreground mb-1">Target Keywords</p>
+                          <div className="flex flex-wrap gap-1">
+                            {item.targetKeywords.map((kw, idx) => (
+                              <Badge key={idx} variant="outline" className="text-xs">
+                                {kw}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleEditContent(item)}
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      Edit
+                    </Button>
+                  </div>
+                </Card>
+              ))
+          )}
+        </TabsContent>
 
         {/* Calendar View */}
         <TabsContent value="calendar" className="space-y-6 mt-6">
@@ -371,165 +453,158 @@ const ContentCalendar = () => {
           </div>
         </TabsContent>
 
-        {/* List View */}
-        <TabsContent value="list" className="space-y-4 mt-6">
-          {contentItems
-            .sort((a, b) => a.scheduledDate.getTime() - b.scheduledDate.getTime())
-            .map((item) => (
-              <Card key={item.id} className="p-6 hover:shadow-elegant transition-all">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-3">
-                      <span className="text-2xl">{getContentIcon(item.type)}</span>
-                      <div>
-                        <h3 className="text-lg font-semibold">{item.title}</h3>
-                        <p className="text-sm text-muted-foreground">
-                          {item.scheduledDate.toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 mb-4">
-                      <Badge variant="outline" className={getPriorityColor(item.priority)}>
-                        {item.priority}
-                      </Badge>
-                      <Badge variant="outline" className={getStatusColor(item.status)}>
-                        {item.status}
-                      </Badge>
-                      <Badge variant="secondary">{item.type}</Badge>
-                      <Badge variant="secondary">{item.wordCount} words</Badge>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-muted-foreground mb-1">Source</p>
-                        <p className="font-medium">{item.opportunitySource}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground mb-1">Estimated Impact</p>
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-primary"
-                              style={{ width: `${item.estimatedImpact}%` }}
-                            />
-                          </div>
-                          <span className="font-medium">{item.estimatedImpact}%</span>
-                        </div>
-                      </div>
-                      <div className="col-span-2">
-                        <p className="text-muted-foreground mb-1">Target Keywords</p>
-                        <div className="flex flex-wrap gap-1">
-                          {item.targetKeywords.map((kw, idx) => (
-                            <Badge key={idx} variant="outline" className="text-xs">
-                              {kw}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => handleEditContent(item)}
-                  >
-                    <Edit className="h-4 w-4 mr-2" />
-                    Edit
-                  </Button>
-                </div>
-              </Card>
-            ))}
-        </TabsContent>
-
         {/* Pipeline View */}
         <TabsContent value="pipeline" className="space-y-6 mt-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {/* Scheduled Column */}
-            <Card className="p-4 border border-border">
-              <div className="flex items-center gap-2 mb-4">
-                <Clock className="h-5 w-5 text-primary" />
-                <h3 className="font-semibold">Scheduled</h3>
-                <Badge variant="secondary" className="ml-auto">3</Badge>
+          {loading ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">Loading pipeline...</p>
+            </div>
+          ) : contentItems.length === 0 ? (
+            <Card className="p-12 border border-dashed border-border">
+              <div className="text-center text-muted-foreground">
+                <Target className="h-16 w-16 mx-auto mb-4 opacity-50" />
+                <h3 className="text-lg font-semibold mb-2">No content in pipeline</h3>
+                <p className="mb-4">Start organizing your content generation workflow</p>
+                <Button
+                  variant="outline"
+                  onClick={handleGenerateContent}
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Generate Content
+                </Button>
               </div>
-              <div className="space-y-3">
-                {contentItems.filter(i => i.status === "scheduled").map(item => (
-                  <Card key={item.id} className="p-3 cursor-pointer hover:shadow-md transition-all">
-                    <p className="font-medium text-sm mb-2 line-clamp-2">{item.title}</p>
-                    <div className="flex items-center justify-between text-xs">
-                      <Badge variant="outline" className={getPriorityColor(item.priority)}>
-                        {item.priority}
-                      </Badge>
-                      <span className="text-muted-foreground">
-                        {item.scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </span>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              {/* Scheduled Column */}
+              <Card className="p-4 border border-border">
+                <div className="flex items-center gap-2 mb-4">
+                  <Clock className="h-5 w-5 text-primary" />
+                  <h3 className="font-semibold">Scheduled</h3>
+                  <Badge variant="secondary" className="ml-auto">
+                    {contentItems.filter(i => i.status === "scheduled").length}
+                  </Badge>
+                </div>
+                <div className="space-y-3">
+                  {contentItems.filter(i => i.status === "scheduled").length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No scheduled content
                     </div>
-                  </Card>
-                ))}
-              </div>
-            </Card>
+                  ) : (
+                    contentItems.filter(i => i.status === "scheduled").map(item => (
+                      <Card key={item.id} className="p-3 cursor-pointer hover:shadow-md transition-all">
+                        <p className="font-medium text-sm mb-2 line-clamp-2">{item.title}</p>
+                        <div className="flex items-center justify-between text-xs">
+                          <Badge variant="outline" className={getPriorityColor(item.priority)}>
+                            {item.priority}
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            {item.scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </span>
+                        </div>
+                      </Card>
+                    ))
+                  )}
+                </div>
+              </Card>
 
-            {/* Draft Column */}
-            <Card className="p-4 border border-border">
-              <div className="flex items-center gap-2 mb-4">
-                <FileText className="h-5 w-5 text-warning" />
-                <h3 className="font-semibold">Draft</h3>
-                <Badge variant="secondary" className="ml-auto">1</Badge>
-              </div>
-              <div className="space-y-3">
-                {contentItems.filter(i => i.status === "draft").map(item => (
-                  <Card key={item.id} className="p-3 cursor-pointer hover:shadow-md transition-all">
-                    <p className="font-medium text-sm mb-2 line-clamp-2">{item.title}</p>
-                    <div className="flex items-center justify-between text-xs">
-                      <Badge variant="outline" className={getPriorityColor(item.priority)}>
-                        {item.priority}
-                      </Badge>
-                      <span className="text-muted-foreground">
-                        {item.scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </span>
+              {/* Draft Column */}
+              <Card className="p-4 border border-border">
+                <div className="flex items-center gap-2 mb-4">
+                  <FileText className="h-5 w-5 text-warning" />
+                  <h3 className="font-semibold">Draft</h3>
+                  <Badge variant="secondary" className="ml-auto">
+                    {contentItems.filter(i => i.status === "draft").length}
+                  </Badge>
+                </div>
+                <div className="space-y-3">
+                  {contentItems.filter(i => i.status === "draft").length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No drafts yet
                     </div>
-                  </Card>
-                ))}
-              </div>
-            </Card>
+                  ) : (
+                    contentItems.filter(i => i.status === "draft").map(item => (
+                      <Card key={item.id} className="p-3 cursor-pointer hover:shadow-md transition-all">
+                        <p className="font-medium text-sm mb-2 line-clamp-2">{item.title}</p>
+                        <div className="flex items-center justify-between text-xs">
+                          <Badge variant="outline" className={getPriorityColor(item.priority)}>
+                            {item.priority}
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            {item.scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </span>
+                        </div>
+                      </Card>
+                    ))
+                  )}
+                </div>
+              </Card>
 
-            {/* Generated Column */}
-            <Card className="p-4 border border-border">
-              <div className="flex items-center gap-2 mb-4">
-                <Sparkles className="h-5 w-5 text-primary" />
-                <h3 className="font-semibold">Generated</h3>
-                <Badge variant="secondary" className="ml-auto">1</Badge>
-              </div>
-              <div className="space-y-3">
-                {contentItems.filter(i => i.status === "generated").map(item => (
-                  <Card key={item.id} className="p-3 cursor-pointer hover:shadow-md transition-all">
-                    <p className="font-medium text-sm mb-2 line-clamp-2">{item.title}</p>
-                    <div className="flex items-center justify-between text-xs">
-                      <Badge variant="outline" className={getPriorityColor(item.priority)}>
-                        {item.priority}
-                      </Badge>
-                      <span className="text-muted-foreground">
-                        {item.scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </span>
+              {/* Generated Column */}
+              <Card className="p-4 border border-border">
+                <div className="flex items-center gap-2 mb-4">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  <h3 className="font-semibold">Generated</h3>
+                  <Badge variant="secondary" className="ml-auto">
+                    {contentItems.filter(i => i.status === "generated").length}
+                  </Badge>
+                </div>
+                <div className="space-y-3">
+                  {contentItems.filter(i => i.status === "generated").length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No generated content
                     </div>
-                  </Card>
-                ))}
-              </div>
-            </Card>
+                  ) : (
+                    contentItems.filter(i => i.status === "generated").map(item => (
+                      <Card key={item.id} className="p-3 cursor-pointer hover:shadow-md transition-all">
+                        <p className="font-medium text-sm mb-2 line-clamp-2">{item.title}</p>
+                        <div className="flex items-center justify-between text-xs">
+                          <Badge variant="outline" className={getPriorityColor(item.priority)}>
+                            {item.priority}
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            {item.scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </span>
+                        </div>
+                      </Card>
+                    ))
+                  )}
+                </div>
+              </Card>
 
-            {/* Published Column */}
-            <Card className="p-4 border border-border">
-              <div className="flex items-center gap-2 mb-4">
-                <CheckCircle2 className="h-5 w-5 text-success" />
-                <h3 className="font-semibold">Published</h3>
-                <Badge variant="secondary" className="ml-auto">0</Badge>
-              </div>
-              <div className="text-center py-8 text-muted-foreground text-sm">
-                No published content yet
-              </div>
-            </Card>
-          </div>
+              {/* Published Column */}
+              <Card className="p-4 border border-border">
+                <div className="flex items-center gap-2 mb-4">
+                  <CheckCircle2 className="h-5 w-5 text-success" />
+                  <h3 className="font-semibold">Published</h3>
+                  <Badge variant="secondary" className="ml-auto">
+                    {contentItems.filter(i => i.status === "published").length}
+                  </Badge>
+                </div>
+                <div className="space-y-3">
+                  {contentItems.filter(i => i.status === "published").length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No published content yet
+                    </div>
+                  ) : (
+                    contentItems.filter(i => i.status === "published").map(item => (
+                      <Card key={item.id} className="p-3 cursor-pointer hover:shadow-md transition-all">
+                        <p className="font-medium text-sm mb-2 line-clamp-2">{item.title}</p>
+                        <div className="flex items-center justify-between text-xs">
+                          <Badge variant="outline" className={getPriorityColor(item.priority)}>
+                            {item.priority}
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            {item.scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </span>
+                        </div>
+                      </Card>
+                    ))
+                  )}
+                </div>
+              </Card>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 
