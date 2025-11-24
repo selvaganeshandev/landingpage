@@ -986,6 +986,44 @@ export const apiClient = {
     const queryParams = `?task_id=${taskId}`;
     return apiRequest(`/reports/generation/task_status/${queryParams}`);
   },
+
+  // Content Generation (Engine API)
+  generateContent: (data: any) => apiRequest('/engine/core/content/generate/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }, {
+    baseURL: 'engine'
+  }),
+
+  getGeneratedContents: (params?: { domain_id?: string; status?: string; source_type?: string; page?: number; page_size?: string }, options?: RequestOptions) => {
+    const queryParams = params ? `?${new URLSearchParams({
+      ...(params.domain_id ? { domain_id: params.domain_id } : {}),
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.source_type ? { source_type: params.source_type } : {}),
+      ...(params.page ? { page: String(params.page) } : {}),
+      ...(params.page_size ? { page_size: params.page_size } : {}),
+    }).toString()}` : '';
+    return apiRequest(`/engine/core/content/${queryParams}`, options, {
+      baseURL: 'engine'
+    });
+  },
+
+  getGeneratedContent: (contentId: number) => apiRequest(`/engine/core/content/${contentId}/`, undefined, {
+    baseURL: 'engine'
+  }),
+
+  updateGeneratedContent: (contentId: number, data: any) => apiRequest(`/engine/core/content/${contentId}/update/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  }, {
+    baseURL: 'engine'
+  }),
+
+  deleteGeneratedContent: (contentId: number) => apiRequest(`/engine/core/content/${contentId}/delete/`, {
+    method: 'DELETE',
+  }, {
+    baseURL: 'engine'
+  }),
 };
 
 // Also export as 'api' for flexibility

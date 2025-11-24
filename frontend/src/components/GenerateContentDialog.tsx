@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useDomainStore } from "@/stores/domainStore";
+import apiClient from "@/services/api";
 import {
   Dialog,
   DialogContent,
@@ -36,15 +38,18 @@ interface GenerateContentDialogProps {
   existingContent?: any;
 }
 
-export const GenerateContentDialog = ({ 
-  open, 
+export const GenerateContentDialog = ({
+  open,
   onOpenChange,
-  existingContent 
+  existingContent
 }: GenerateContentDialogProps) => {
   const { toast } = useToast();
+  const { selectedDomain } = useDomainStore();
   const [step, setStep] = useState(1);
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [generatedContent, setGeneratedContent] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
     articleType: existingContent?.type || "blog",
@@ -98,35 +103,91 @@ export const GenerateContentDialog = ({
   ];
 
   const handleGenerate = async () => {
+    if (!selectedDomain) {
+      toast({
+        title: "Error",
+        description: "Please select a domain first",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsGenerating(true);
     setProgress(0);
+    setError(null);
+    setGeneratedContent(null);
 
-    // Simulate progress
-    const interval = setInterval(() => {
+    // Simulate progress for UX
+    const progressInterval = setInterval(() => {
       setProgress(prev => {
         if (prev >= 90) {
-          clearInterval(interval);
+          clearInterval(progressInterval);
           return 90;
         }
-        return prev + 10;
+        return prev + 5;
       });
-    }, 500);
+    }, 1000);
 
-    // Simulate generation
-    setTimeout(() => {
-      clearInterval(interval);
+    try {
+      // Prepare generation request
+      const generationData = {
+        domain_id: selectedDomain.id,
+        title: formData.title,
+        keywords: formData.keywords,
+        article_type: formData.articleType,
+        tone: formData.tone,
+        style: formData.style,
+        goal: formData.goal,
+        audience: formData.audience,
+        depth: formData.depth,
+        word_count: formData.wordCount,
+        source_type: existingContent?.sourceType || 'manual',
+        source_id: existingContent?.sourceId,
+        source_reference: existingContent?.sourceReference || formData.title,
+        priority: existingContent?.priority || 'medium',
+        scheduled_date: formData.scheduledDate
+      };
+
+      // Call the API to generate content
+      const response = await apiClient.generateContent(generationData);
+
+      clearInterval(progressInterval);
       setProgress(100);
+
+      if (response.status === 'success') {
+        setGeneratedContent(response.data);
+
+        toast({
+          title: "Content Generated Successfully!",
+          description: `Generated ${response.data.actual_word_count} words in ${response.data.generation_time_seconds}s`,
+        });
+
+        // Wait a moment to show success before closing
+        setTimeout(() => {
+          setIsGenerating(false);
+          onOpenChange(false);
+          setStep(1);
+          setProgress(0);
+          setGeneratedContent(null);
+        }, 2000);
+      } else {
+        throw new Error(response.message || 'Generation failed');
+      }
+
+    } catch (err: any) {
+      clearInterval(progressInterval);
       setIsGenerating(false);
-      
-      toast({
-        title: "Content Generated Successfully!",
-        description: "Your content has been added to the calendar",
-      });
-      
-      onOpenChange(false);
-      setStep(1);
       setProgress(0);
-    }, 5000);
+
+      const errorMessage = err.message || 'Failed to generate content. Please try again.';
+      setError(errorMessage);
+
+      toast({
+        title: "Generation Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    }
   };
 
   const renderStepContent = () => {
