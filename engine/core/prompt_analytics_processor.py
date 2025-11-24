@@ -761,50 +761,8 @@ class PromptAnalyticsProcessor:
                         domain_fresh.tracked_at = timezone.now()
                         domain_fresh.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
                         
-                        # Auto-extract competitors when domain analytics are complete
-                        # Note: This runs after domain is saved, so we check the saved status
-                        if domain_fresh.processing_status == 'COMP':
-                            logger.info(f"Domain {domain_fresh.id} is COMP, attempting competitor extraction...")
-                            try:
-                                # Get all completed analytics for this domain
-                                all_analytics = PromptAnalytics.objects.filter(
-                                    prompt__group__domain=domain_fresh,
-                                    track_status='COMP'
-                                )
-                                
-                                # Check if any analytics have competitor mentions
-                                analytics_with_competitors = []
-                                for analytics in all_analytics:
-                                    mention_list = analytics.competitor_mention_list
-                                    if mention_list and isinstance(mention_list, list) and len(mention_list) > 0:
-                                        analytics_with_competitors.append(analytics)
-                                
-                                analytics_count = len(analytics_with_competitors)
-                                
-                                logger.info(f"Checking competitor extraction for domain {domain_fresh.id}: {analytics_count} analytics with competitor mentions (out of {all_analytics.count()} total)")
-                                
-                                if analytics_count >= 1:  # Extract if we have at least 1 analytics with competitors
-                                    logger.info(f"Auto-extracting competitors for domain {domain_fresh.id} after domain completion")
-                                    try:
-                                        # Extract competitors directly using shared models
-                                        created_count, competitor_names = _extract_competitors_for_domain(domain_fresh)
-                                        if created_count > 0:
-                                            logger.info(f"✅ Auto-extracted {created_count} competitors for domain {domain_fresh.id}: {', '.join(competitor_names)}")
-                                        else:
-                                            logger.info(f"ℹ️ No new competitors extracted for domain {domain_fresh.id} (insufficient data or already exists)")
-                                    except Exception as service_err:
-                                        logger.error(f"Error during competitor extraction: {str(service_err)}", exc_info=True)
-                                        import traceback
-                                        logger.error(f"Traceback: {traceback.format_exc()}")
-                                else:
-                                    logger.info(f"ℹ️ Skipping competitor extraction for domain {domain_fresh.id} - no analytics with competitor mentions found ({analytics_count} out of {all_analytics.count()} analytics)")
-                            except Exception as comp_error:
-                                logger.error(f"Error extracting competitors for domain {domain_fresh.id}: {str(comp_error)}", exc_info=True)
-                                import traceback
-                                logger.error(f"Traceback: {traceback.format_exc()}")
-                                # Don't fail domain completion if competitor extraction fails
-                        else:
-                            logger.info(f"Domain {domain_fresh.id} status is {domain_fresh.processing_status}, skipping competitor extraction")
+                        # Competitor extraction is now manual-only (removed auto-extraction)
+                        # Users can manually extract competitors via the frontend or API
                     else:
                         logger.info(f"Domain {domain.id} already in status {domain_fresh.processing_status}, skipping")
             else:

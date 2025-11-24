@@ -821,6 +821,25 @@ export const apiClient = {
 
   getEngineCompetitorDetail: (id: number) => apiRequest(`/competitors/competitors/${id}/`),
   getEngineCompetitorAnalytics: (id: number) => apiRequest(`/competitors/competitor-analytics/?competitor_id=${id}`),
+  processCompetitor: async (id: number) => {
+    const engineBaseUrl = import.meta.env.VITE_ENGINE_API_URL || 'http://localhost:8001';
+    const token = getAuthToken();
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const response = await fetch(`${engineBaseUrl}/api/competitors/competitors/${id}/process/`, {
+      method: 'POST',
+      headers,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
+      throw new Error(error.detail || error.error || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
 
   // Competitor Analysis APIs
   getCompetitiveStrengthAnalysis: (params: { domain_id: string; platform?: string }, options?: RequestOptions) => {

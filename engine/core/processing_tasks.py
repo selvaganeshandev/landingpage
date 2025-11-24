@@ -62,18 +62,19 @@ def process_prompt_analytics_scheduler(self):
 @shared_task(bind=True, ignore_result=True, max_retries=3)
 def process_competitor_scheduler(self):
     """
-    Competitor processing scheduler - picks INIT competitors and processes them.
-    Should be run periodically via Celery Beat.
+    DEPRECATED: Competitor processing scheduler - no longer used.
+    Competitor processing is now manual-only via process_single_competitor_task.
+    This task is kept for backward compatibility but is not scheduled in Celery Beat.
     """
-    processor = CompetitorProcessor(max_concurrent_prompts=getattr(settings, 'MAX_CONCURRENT_COMPETITOR_PROMPTS', 10))
-    return processor.schedule_tick()
+    logger.warning("process_competitor_scheduler is deprecated. Use manual processing via POST /api/competitors/{id}/process/")
+    return {'scheduled': False, 'reason': 'deprecated', 'message': 'Use manual processing instead'}
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
 def process_single_competitor_task(self, competitor_id: int):
     """
-    Process a single competitor (for manual/on-demand processing).
-    Directly processes the competitor instead of going through scheduler.
+    Process a single competitor (manual/on-demand processing only).
+    This is the primary method for processing competitors - triggered via API endpoint.
     
     Args:
         competitor_id: ID of competitor to process

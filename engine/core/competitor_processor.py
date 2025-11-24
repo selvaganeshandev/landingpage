@@ -2,14 +2,16 @@
 Competitor Processing Module
 Handles end-to-end competitor tracking and analytics
 
-Flow:
+Flow (Manual Processing Only):
 1. Competitor created with track_status='INIT'
-2. Schedule_tick picks up INIT competitors
+2. User triggers processing via POST /api/competitors/{id}/process/
 3. Links all prompts with completed PromptAnalytics to competitor (creates CompetitorPromptAnalytics records)
 4. Extracts competitor mentions from existing PromptAnalytics.context_summary (no new API calls)
 5. Aggregates results into Competitor and ShareOfVoiceAnalytics
 
-Note: Uses existing PromptAnalytics data instead of making new API calls to save costs and ensure consistency.
+Note: 
+- Processing is manual-only (no automatic scheduler)
+- Uses existing PromptAnalytics data instead of making new API calls to save costs and ensure consistency
 """
 
 import json
@@ -166,33 +168,16 @@ class CompetitorProcessor:
     
     def schedule_tick(self) -> Dict[str, Any]:
         """
-        Main scheduling method - picks one INIT competitor and processes it.
+        DEPRECATED: Automatic scheduling method - no longer used.
+        Competitor processing is now manual-only via process_single_competitor_task.
+        
+        This method is kept for backward compatibility but should not be called.
         
         Returns:
-            dict: Status information about what was scheduled
+            dict: Status information indicating manual processing is required
         """
-        try:
-            # If a competitor is in progress, skip scheduling
-            # Check for 'PROC' (actual processing) or 'SCHD' (scheduled but not yet processing)
-            if Competitor.objects.filter(track_status__in=['SCHD', 'PROC']).exists():
-                return {'scheduled': False, 'reason': 'competitor_in_progress'}
-            
-            # Select one INIT competitor
-            competitor = (
-                Competitor.objects.filter(track_status='INIT')
-                .select_related('domain')
-                .order_by('modified_at')
-                .first()
-            )
-            if competitor is None:
-                return {'scheduled': False, 'reason': 'no_init_competitor'}
-            
-            # Use the process_competitor method
-            return self.process_competitor(competitor)
-        
-        except Exception as e:
-            logger.error(f"Error in schedule_tick: {str(e)}", exc_info=True)
-            return {'scheduled': False, 'reason': 'error', 'error': str(e)}
+        logger.warning("schedule_tick is deprecated. Use manual processing via POST /api/competitors/{id}/process/")
+        return {'scheduled': False, 'reason': 'deprecated', 'message': 'Use manual processing instead'}
     
     def _link_prompts_to_competitor(self, competitor: Competitor) -> int:
         """
