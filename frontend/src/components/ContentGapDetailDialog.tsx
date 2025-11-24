@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,16 +25,19 @@ import {
   Pie,
   Cell,
 } from "recharts";
-import { 
-  Target, 
-  TrendingUp, 
-  Lightbulb, 
+import {
+  Target,
+  TrendingUp,
+  Lightbulb,
   CheckCircle2,
   AlertCircle,
   FileText,
   Users,
-  Search
+  Search,
+  Loader2
 } from "lucide-react";
+import apiClient from "@/services/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface ContentGapDetailDialogProps {
   open: boolean;
@@ -48,6 +52,7 @@ interface ContentGapDetailDialogProps {
     competitorMentions: Array<{ brand: string; share: number }>;
     recommendation: string;
   } | null;
+  domainId: string | undefined;
 }
 
 const getPriorityColor = (priority: string) => {
@@ -63,7 +68,8 @@ const getPriorityColor = (priority: string) => {
   }
 };
 
-const trendData = [
+// Mock trend data - will be replaced when backend provides historical data
+const mockTrendData = [
   { month: "Jun", mentions: 98, coverage: 28 },
   { month: "Jul", mentions: 105, coverage: 30 },
   { month: "Aug", mentions: 115, coverage: 32 },
@@ -72,76 +78,91 @@ const trendData = [
   { month: "Nov", mentions: 127, coverage: 35 },
 ];
 
-const relatedQuestions = [
-  { question: "What vegan protein has the most complete amino acids?", frequency: 45 },
-  { question: "How much protein do I need for muscle building?", frequency: 38 },
-  { question: "Best time to take vegan protein powder?", frequency: 34 },
-  { question: "Can vegan protein replace whey for bodybuilding?", frequency: 29 },
-  { question: "What are BCAAs in vegan protein?", frequency: 22 },
-];
+export const ContentGapDetailDialog = ({ open, onOpenChange, gap, domainId }: ContentGapDetailDialogProps) => {
+  const { toast } = useToast();
+  const [detailData, setDetailData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-const contentRecommendations = [
-  {
-    type: "Comprehensive Guide",
-    title: "Complete Guide to Muscle Building with Plant Protein",
-    sections: [
-      "Science of muscle protein synthesis",
-      "Amino acid profile comparison",
-      "Optimal timing and dosage",
-      "Sample meal plans and recipes",
-      "Workout nutrition strategies",
-      "Success stories and case studies"
-    ],
-    estimatedWords: "2500-3000",
-    impact: "high"
-  },
-  {
-    type: "Video Content",
-    title: "Plant Protein vs Whey: What Science Says",
-    sections: [
-      "Side-by-side nutritional comparison",
-      "Absorption rate analysis",
-      "Expert interviews (nutritionists)",
-      "Real athlete testimonials",
-      "Q&A segment"
-    ],
-    estimatedWords: "Script: 1200-1500",
-    impact: "high"
-  },
-  {
-    type: "Interactive Tool",
-    title: "Vegan Protein Calculator",
-    sections: [
-      "Personal protein requirement calculator",
-      "Meal planning tool",
-      "Supplement timing optimizer",
-      "Progress tracker"
-    ],
-    estimatedWords: "Support content: 800-1000",
-    impact: "medium"
-  }
-];
+  useEffect(() => {
+    if (!gap || !domainId || !open) {
+      return;
+    }
 
-const seoSuggestions = [
-  { suggestion: "Target long-tail keyword: 'best vegan protein powder for muscle building beginners'", priority: "high" },
-  { suggestion: "Add FAQ schema markup for 'How much protein for muscle building'", priority: "high" },
-  { suggestion: "Create pillar page linking to related muscle building content", priority: "medium" },
-  { suggestion: "Optimize images with alt text including 'vegan muscle building'", priority: "medium" },
-  { suggestion: "Build internal links from product pages to educational content", priority: "low" },
-];
+    const loadDetailData = async () => {
+      setIsLoading(true);
+      try {
+        const data = await apiClient.getContentGapDetail(gap.id, { domain_id: domainId });
+        setDetailData(data);
+      } catch (error: any) {
+        console.error('Failed to load content gap details:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load detailed analysis. Showing basic information.",
+          variant: "destructive",
+        });
+        // Keep basic gap data even if detail fetch fails
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-const actionPlan = [
-  { step: "Research and outline comprehensive guide", timeline: "Week 1", owner: "Content Team" },
-  { step: "Interview nutritionists and athletes", timeline: "Week 2", owner: "Video Team" },
-  { step: "Write and design main guide", timeline: "Week 3-4", owner: "Content Team" },
-  { step: "Develop interactive calculator", timeline: "Week 4-5", owner: "Dev Team" },
-  { step: "Produce and edit video content", timeline: "Week 5-6", owner: "Video Team" },
-  { step: "SEO optimization and internal linking", timeline: "Week 6", owner: "SEO Team" },
-  { step: "Launch and promote content", timeline: "Week 7", owner: "Marketing Team" },
-];
+    loadDetailData();
+  }, [gap, domainId, open, toast]);
 
-export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDetailDialogProps) => {
   if (!gap) return null;
+
+  // Use API data if available, otherwise fall back to gap data
+  const relatedQuestions = detailData?.relatedQuestions || [];
+  const competitorBreakdown = detailData?.competitorBreakdown || gap.competitorMentions;
+  const estimatedImpact = detailData?.estimatedImpact || `+${Math.round((100 - gap.currentCoverage) * 0.3)}%`;
+
+  // Mock data for features not yet in API
+  const contentRecommendations = [
+    {
+      type: "Comprehensive Guide",
+      title: `Complete Guide: ${gap.question}`,
+      sections: [
+        "In-depth analysis and explanation",
+        "Real-world examples and case studies",
+        "Step-by-step implementation guide",
+        "Common pitfalls and how to avoid them",
+        "Expert tips and best practices",
+        "Frequently asked questions"
+      ],
+      estimatedWords: "2500-3000",
+      impact: gap.priority === "high" ? "high" : "medium"
+    },
+    {
+      type: "Video Content",
+      title: `Video Guide: ${gap.question}`,
+      sections: [
+        "Visual demonstration",
+        "Expert interviews",
+        "Side-by-side comparisons",
+        "Real user testimonials",
+        "Q&A segment"
+      ],
+      estimatedWords: "Script: 1200-1500",
+      impact: gap.priority === "high" ? "high" : "medium"
+    }
+  ];
+
+  const seoSuggestions = [
+    { suggestion: `Target long-tail keyword variations of "${gap.question}"`, priority: gap.priority },
+    { suggestion: "Add FAQ schema markup for related questions", priority: "high" },
+    { suggestion: "Create comprehensive pillar page covering the topic", priority: gap.priority === "high" ? "high" : "medium" },
+    { suggestion: "Optimize images with relevant alt text", priority: "medium" },
+    { suggestion: "Build internal links from related content", priority: "low" },
+  ];
+
+  const actionPlan = [
+    { step: "Research and outline content", timeline: "Week 1", owner: "Content Team" },
+    { step: "Interview subject matter experts", timeline: "Week 1-2", owner: "Content Team" },
+    { step: "Write and design content", timeline: "Week 2-3", owner: "Content Team" },
+    { step: "Create supporting visuals/video", timeline: "Week 3-4", owner: "Design/Video Team" },
+    { step: "SEO optimization and review", timeline: "Week 4", owner: "SEO Team" },
+    { step: "Publish and promote content", timeline: "Week 5", owner: "Marketing Team" },
+  ];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -156,6 +177,12 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
           </DialogDescription>
         </DialogHeader>
 
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-16 space-y-4">
+            <Loader2 className="h-12 w-12 text-primary animate-spin" />
+            <p className="text-muted-foreground">Loading detailed analysis...</p>
+          </div>
+        ) : (
         <div className="space-y-6">
           {/* Summary Cards */}
           <div className="grid grid-cols-4 gap-4">
@@ -182,8 +209,8 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
               <div className="flex items-center justify-between mb-2">
                 <TrendingUp className="h-5 w-5 text-success" />
               </div>
-              <p className="text-2xl font-bold text-success">+23%</p>
-              <p className="text-xs text-muted-foreground">Growth (6 mo)</p>
+              <p className="text-2xl font-bold text-success">{estimatedImpact}</p>
+              <p className="text-xs text-muted-foreground">Est. Impact</p>
             </Card>
 
             <Card className="p-4 border border-border">
@@ -211,7 +238,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
                 <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4">Mention Trend</h4>
                   <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={trendData}>
+                    <LineChart data={mockTrendData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                       <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
@@ -222,10 +249,10 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
                           borderRadius: "var(--radius)",
                         }}
                       />
-                      <Line 
-                        type="monotone" 
-                        dataKey="mentions" 
-                        stroke="hsl(var(--primary))" 
+                      <Line
+                        type="monotone"
+                        dataKey="mentions"
+                        stroke="hsl(var(--primary))"
                         strokeWidth={3}
                         name="Monthly Mentions"
                       />
@@ -236,7 +263,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
                 <Card className="p-6 border border-border">
                   <h4 className="font-semibold mb-4">Coverage Trend</h4>
                   <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={trendData}>
+                    <LineChart data={mockTrendData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                       <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
@@ -287,19 +314,21 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
               <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Competitor Share of Voice</h4>
                 <div className="space-y-4">
-                  {gap.competitorMentions.map((comp) => (
-                    <div key={comp.brand}>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-medium">{comp.brand}</span>
-                        <span className="text-2xl font-bold" style={{ 
-                          color: comp.brand === "VegFit Pro" ? "hsl(var(--primary))" : "inherit" 
-                        }}>
-                          {comp.share}%
-                        </span>
+                  {competitorBreakdown && competitorBreakdown.length > 0 ? (
+                    competitorBreakdown.map((comp: any) => (
+                      <div key={comp.brand}>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium">{comp.brand}</span>
+                          <span className="text-2xl font-bold">
+                            {comp.share}%
+                          </span>
+                        </div>
+                        <Progress value={comp.share} className="h-3" />
                       </div>
-                      <Progress value={comp.share} className="h-3" />
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No competitor data available</p>
+                  )}
                 </div>
               </Card>
 
@@ -329,15 +358,22 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
               <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Related Questions ({relatedQuestions.length})</h4>
                 <div className="space-y-3">
-                  {relatedQuestions.map((q, idx) => (
-                    <div key={idx} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
-                      <div className="flex items-start justify-between mb-2">
-                        <p className="font-medium flex-1">{q.question}</p>
-                        <Badge variant="secondary">{q.frequency} mentions</Badge>
+                  {relatedQuestions.length > 0 ? (
+                    relatedQuestions.map((q: any, idx: number) => (
+                      <div key={idx} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
+                        <div className="flex items-start justify-between mb-2">
+                          <p className="font-medium flex-1">{q.question}</p>
+                          <Badge variant="secondary">{q.frequency} mentions</Badge>
+                        </div>
+                        <Progress value={(q.frequency / (relatedQuestions[0]?.frequency || 1)) * 100} className="h-1.5" />
                       </div>
-                      <Progress value={(q.frequency / relatedQuestions[0].frequency) * 100} className="h-1.5" />
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 space-y-2">
+                      <Search className="h-12 w-12 text-muted-foreground opacity-50" />
+                      <p className="text-sm text-muted-foreground">No related questions found</p>
                     </div>
-                  ))}
+                  )}
                 </div>
               </Card>
 
@@ -462,6 +498,7 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap }: ContentGapDe
             </TabsContent>
           </Tabs>
         </div>
+        )}
       </DialogContent>
     </Dialog>
   );

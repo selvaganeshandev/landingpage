@@ -1,15 +1,18 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    CompetitorViewSet, 
-    CompetitorAnalyticsViewSet, 
+    CompetitorViewSet,
+    CompetitorAnalyticsViewSet,
     CompetitorPromptViewSet,
     CompetitorPromptAnalyticsViewSet,
     CompetitorMetricSnapshotViewSet,
     competitive_strength_analysis,
     competitive_insights,
     answer_gap_analysis,
-    competitor_heatmap
+    competitor_heatmap,
+    content_gap_analysis,
+    content_gap_summary,
+    content_gap_detail
 )
 
 router = DefaultRouter()
@@ -31,6 +34,10 @@ urlpatterns = [
     path('competitive-insights/', competitive_insights, name='competitive_insights'),
     path('answer-gap-analysis/', answer_gap_analysis, name='answer_gap_analysis'),
     path('heatmap/', competitor_heatmap, name='competitor_heatmap'),
+    # Content Gap Analysis endpoints
+    path('content-gaps/', content_gap_analysis, name='content_gap_analysis'),
+    path('content-gaps/summary/', content_gap_summary, name='content_gap_summary'),
+    path('content-gaps/<int:gap_id>/', content_gap_detail, name='content_gap_detail'),
     # Router routes last
     path('', include(router.urls)),
 ]

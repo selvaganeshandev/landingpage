@@ -869,6 +869,32 @@ export const apiClient = {
     return apiRequest(`/competitors/answer-gap-analysis${queryParams}`, options);
   },
 
+  // ===== Content Gaps =====
+  getContentGaps: (params: { domain_id: string; platform?: string; priority?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+      ...(params.priority ? { priority: params.priority } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/content-gaps/${queryParams}`, options);
+  },
+
+  getContentGapSummary: (params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/content-gaps/summary/${queryParams}`, options);
+  },
+
+  getContentGapDetail: (gapId: number, params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/content-gaps/${gapId}/${queryParams}`, options);
+  },
+
   // ===== Dashboard =====
   getDashboardSummary: (params: { domain_id: string; days?: number; llm_model?: string }) => {
     const queryParams = new URLSearchParams({
