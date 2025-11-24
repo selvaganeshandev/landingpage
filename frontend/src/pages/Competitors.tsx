@@ -302,23 +302,8 @@ const Competitors = () => {
   const promptCards = useMemo(() => {
     if (!promptRows.length) return [];
 
-    const windowDays = Number(timePeriod) || 7;
-    const windowMs = windowDays * 24 * 60 * 60 * 1000;
-    const now = Date.now();
-    const platformFilter = selectedLLM?.toLowerCase() || 'all';
-    const competitorFilter = promptCompetitorFilter;
-
-    // Filter rows by competitor, platform, and time - but keep rows with 0 mentions
-    // so all competitors appear in the aggregation
-    const filteredRows = promptRows.filter((row) => {
-      if (competitorFilter !== 'all' && String(row.competitorId) !== competitorFilter) return false;
-      if (platformFilter !== 'all' && (row.platform || '').toLowerCase() !== platformFilter) return false;
-      if (row.trackedAt) {
-        const rowTime = new Date(row.trackedAt).getTime();
-        if (!Number.isNaN(rowTime) && windowMs > 0 && now - rowTime > windowMs) return false;
-      }
-      return true;
-    });
+    // Use all rows without filtering by competitor, platform, or time
+    const filteredRows = promptRows;
 
     if (!filteredRows.length) {
       return [];
@@ -451,8 +436,10 @@ const Competitors = () => {
       .map(([_, aggregate]) => aggregate)
       .sort((a, b) => b.total - a.total)
       .map((aggregate, idx) => {
-        const winnerEntry = Object.entries(aggregate.brandCounts).sort((a, b) => b[1] - a[1])[0];
-        const winner = winnerEntry ? winnerEntry[0] : 'N/A';
+        // Find winner - only consider brands with mentions > 0
+        const brandsWithMentions = Object.entries(aggregate.brandCounts).filter(([_, count]) => count > 0);
+        const winnerEntry = brandsWithMentions.sort((a, b) => b[1] - a[1])[0];
+        const winner = winnerEntry ? `${winnerEntry[0]} (${winnerEntry[1]} mentions)` : 'N/A';
 
         const topPlatformEntry = Object.entries(aggregate.platformCounts).sort((a, b) => b[1] - a[1])[0];
         const topPlatform = topPlatformEntry ? `${topPlatformEntry[0]} (${topPlatformEntry[1]} mentions)` : null;
@@ -477,7 +464,7 @@ const Competitors = () => {
       });
 
     return cards;
-  }, [promptRows, promptCompetitorFilter, selectedLLM, timePeriod, competitors]);
+  }, [promptRows, competitors]);
 
   const sortHeatmapRows = (rows: any[], platformKeys: string[]) => {
     if (!Array.isArray(rows) || rows.length === 0) return rows;
@@ -1867,43 +1854,15 @@ const Competitors = () => {
           <TabsContent value="prompts" className="space-y-6 mt-6">
             <Card className="p-6">
               <div className="space-y-6">
-                <div className="flex flex-col gap-4 pb-4 border-b border-border">
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <h3 className="text-lg font-semibold font-inter">Prompt Performance Analysis</h3>
-                        <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
-                      </div>
-                      <Badge variant="secondary">
-                        <MessageSquare className="h-3 w-3 mr-1" />
-                        {promptCards.length} Prompts Tracked
-                      </Badge>
-                    </div>
+                <div className="flex items-center justify-between pb-4 border-b border-border">
+                  <div>
+                    <h3 className="text-lg font-semibold font-inter">Prompt Performance Analysis</h3>
+                    <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
                   </div>
-                  <div className="flex flex-col md:flex-row gap-3">
-                    <Select value={promptCompetitorFilter} onValueChange={setPromptCompetitorFilter}>
-                      <SelectTrigger className="w-full md:w-64">
-                        <SelectValue placeholder="All competitors" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All competitors</SelectItem>
-                        {competitors.map((comp) => (
-                          <SelectItem key={comp.id} value={String(comp.id)}>
-                            {comp.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <div className="flex-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span>Filters:</span>
-                      <Badge variant="outline" className="text-xs">
-                        {timePeriod} day window
-                      </Badge>
-                      <Badge variant="outline" className="text-xs capitalize">
-                        {selectedLLM === 'all' ? 'All platforms' : selectedLLM}
-                      </Badge>
-                    </div>
-                  </div>
+                  <Badge variant="secondary">
+                    <MessageSquare className="h-3 w-3 mr-1" />
+                    {promptCards.length} Prompts Tracked
+                  </Badge>
                 </div>
 
                 <div className="space-y-4">
