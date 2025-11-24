@@ -6,18 +6,19 @@ import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  Calendar as CalendarIcon, 
-  Plus, 
-  Sparkles, 
-  Clock, 
+import {
+  Calendar as CalendarIcon,
+  Plus,
+  Sparkles,
+  Clock,
   Target,
   FileText,
   TrendingUp,
   AlertCircle,
   CheckCircle2,
   Edit,
-  Settings
+  Settings,
+  ArrowLeft
 } from "lucide-react";
 import {
   Select,
@@ -185,11 +186,20 @@ const ContentCalendar = () => {
     <div className="p-8 space-y-6 bg-background animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight font-inter">Content Calendar</h1>
-          <p className="text-muted-foreground mt-1">
-            AI-powered content generation prioritized by opportunity
-          </p>
+        <div className="flex items-center gap-4">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => navigate(-1)}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight font-inter">Content Calendar</h1>
+            <p className="text-muted-foreground mt-1">
+              AI-powered content generation prioritized by opportunity
+            </p>
+          </div>
         </div>
         <div className="flex gap-3">
           <Button 
