@@ -4,9 +4,11 @@
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const ENGINE_URL = import.meta.env.VITE_ENGINE_URL || 'http://localhost:8001';
 
 interface RequestOptions extends RequestInit {
   skipAuth?: boolean;
+  useEngine?: boolean;
 }
 
 /**
@@ -84,7 +86,7 @@ async function apiRequest<T>(
   endpoint: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { skipAuth, ...fetchOptions } = options;
+  const { skipAuth, useEngine, ...fetchOptions } = options;
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -99,7 +101,10 @@ async function apiRequest<T>(
     }
   }
 
-  let response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  // Use engine URL if specified, otherwise use backend URL
+  const baseURL = useEngine ? ENGINE_URL : API_BASE_URL;
+
+  let response = await fetch(`${baseURL}${endpoint}`, {
     ...fetchOptions,
     headers,
   });
@@ -122,7 +127,7 @@ async function apiRequest<T>(
             };
 
             try {
-              const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
+              const retryResponse = await fetch(`${baseURL}${endpoint}`, {
                 ...fetchOptions,
                 headers: newHeaders,
               });
@@ -163,7 +168,7 @@ async function apiRequest<T>(
           'Authorization': `Bearer ${newToken}`,
         };
 
-        response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        response = await fetch(`${baseURL}${endpoint}`, {
           ...fetchOptions,
           headers: newHeaders,
         });
@@ -797,12 +802,14 @@ export const apiClient = {
     });
   },
 
-  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string; competitor_id?: string; page_size?: string; is_mentioned?: string }, options?: RequestOptions) => {
+  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string; competitor_id?: string; page_size?: string; is_mentioned?: string; platform?: string; page?: number }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
       ...(params.page_size ? { page_size: params.page_size } : {}),
       ...(params.is_mentioned ? { is_mentioned: params.is_mentioned } : {}),
+      ...(params.platform ? { platform: params.platform } : {}),
+      ...(params.page ? { page: params.page.toString() } : {}),
     }).toString()}`;
     return apiRequest(`/competitors/competitor-prompt-analytics/${queryParams}`, options);
   },
@@ -888,6 +895,34 @@ export const apiClient = {
       ...(params.platform ? { platform: params.platform } : {}),
     }).toString()}`;
     return apiRequest(`/competitors/answer-gap-analysis${queryParams}`, options);
+  },
+
+  // ===== Content Gaps =====
+  getContentGaps: (params: { domain_id: string; platform?: string; priority?: string; page?: number; page_size?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+      ...(params.priority ? { priority: params.priority } : {}),
+      ...(params.page ? { page: String(params.page) } : {}),
+      ...(params.page_size ? { page_size: params.page_size } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/content-gaps/${queryParams}`, options);
+  },
+
+  getContentGapSummary: (params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/content-gaps/summary/${queryParams}`, options);
+  },
+
+  getContentGapDetail: (gapId: number, params: { domain_id: string; platform?: string }, options?: RequestOptions) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.platform ? { platform: params.platform } : {}),
+    }).toString()}`;
+    return apiRequest(`/competitors/content-gaps/${gapId}/${queryParams}`, options);
   },
 
   // ===== Dashboard =====
@@ -979,6 +1014,42 @@ export const apiClient = {
     const queryParams = `?task_id=${taskId}`;
     return apiRequest(`/reports/generation/task_status/${queryParams}`);
   },
+
+  // Content Generation (Engine API)
+  generateContent: (data: any) => apiRequest('/api/content/generate/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+    useEngine: true,
+  }),
+
+  getGeneratedContents: (params?: { domain_id?: string; status?: string; source_type?: string; page?: number; page_size?: string }, options?: RequestOptions) => {
+    const queryParams = params ? `?${new URLSearchParams({
+      ...(params.domain_id ? { domain_id: params.domain_id } : {}),
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.source_type ? { source_type: params.source_type } : {}),
+      ...(params.page ? { page: String(params.page) } : {}),
+      ...(params.page_size ? { page_size: params.page_size } : {}),
+    }).toString()}` : '';
+    return apiRequest(`/api/content/${queryParams}`, {
+      ...options,
+      useEngine: true,
+    });
+  },
+
+  getGeneratedContent: (contentId: number) => apiRequest(`/api/content/${contentId}/`, {
+    useEngine: true,
+  }),
+
+  updateGeneratedContent: (contentId: number, data: any) => apiRequest(`/api/content/${contentId}/update/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+    useEngine: true,
+  }),
+
+  deleteGeneratedContent: (contentId: number) => apiRequest(`/api/content/${contentId}/delete/`, {
+    method: 'DELETE',
+    useEngine: true,
+  }),
 };
 
 // Also export as 'api' for flexibility

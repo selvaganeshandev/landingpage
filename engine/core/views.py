@@ -1,9 +1,10 @@
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, renderer_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
+from rest_framework.renderers import JSONRenderer
 from django.shortcuts import get_object_or_404
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.utils import timezone
 from django.db import transaction
 from django.conf import settings
@@ -18,7 +19,8 @@ from .processing_tasks import process_domain_task, process_prompt_analytics_task
 from .serializers import (
     DomainSerializer, ProcessingStatusSerializer,
     CompetitorSerializer, CompetitorPromptAnalyticsSerializer,
-    CompetitorAnalyticsSerializer, ShareOfVoiceAnalyticsSerializer
+    CompetitorAnalyticsSerializer, ShareOfVoiceAnalyticsSerializer,
+    GeneratedContentSerializer, ContentGenerationRequestSerializer
 )
 from django.db.models import Avg, Count, Q, Sum, Max, Min
 from .prompt_analytics_processor import PromptAnalyticsProcessor
@@ -1137,38 +1139,93 @@ def competitor_analytics(request, competitor_id):
 @permission_classes([AllowAny])
 def competitor_prompt_analytics_list(request):
     """
-    List competitor-prompt analytics
+    List competitor-prompt analytics, including domain's own mentions
     """
     competitor_id = request.query_params.get('competitor_id')
     domain_id = request.query_params.get('domain_id')
     is_mentioned = request.query_params.get('is_mentioned')
-    page_size = request.query_params.get('page_size', '100')
-    
+    page_size = request.query_params.get('page_size', '500')  # Default to 500 for optimal performance
+
+    # Support pagination with page_size
+    try:
+        limit = min(int(page_size), 2000)  # Max 2000 records for optimal performance
+    except (ValueError, TypeError):
+        limit = 500  # Default limit
+
+    results = []
+
+    # Part 1: Get competitor mentions
     queryset = CompetitorPromptAnalytics.objects.all()
-    
+
     if competitor_id:
         queryset = queryset.filter(competitor_id=competitor_id)
-    
+
     if domain_id:
         queryset = queryset.filter(competitor__domain_id=domain_id)
-    
+
     # Filter by is_mentioned if provided
     if is_mentioned is not None:
         if is_mentioned.lower() == 'true':
             queryset = queryset.filter(is_mentioned=True)
         elif is_mentioned.lower() == 'false':
             queryset = queryset.filter(is_mentioned=False)
-    
+
     queryset = queryset.select_related('competitor', 'prompt').order_by('-tracked_at')
-    
-    # Support pagination with page_size
-    try:
-        limit = min(int(page_size), 1000)  # Max 1000 records
-    except (ValueError, TypeError):
-        limit = 100
-    
-    serializer = CompetitorPromptAnalyticsSerializer(queryset[:limit], many=True)
-    return Response(serializer.data)
+    # Don't limit here - we'll limit after merging with PromptAnalytics and sorting
+    competitor_data = CompetitorPromptAnalyticsSerializer(queryset, many=True).data
+    results.extend(competitor_data)
+
+    # Part 2: Get domain's own mentions (from PromptAnalytics)
+    if domain_id and not competitor_id:
+        from shared_models.models import PromptAnalytics, Domain
+
+        # Get PromptAnalytics for this domain
+        prompt_analytics_qs = PromptAnalytics.objects.filter(
+            prompt__group__domain_id=domain_id
+        ).select_related('prompt', 'prompt__group', 'prompt__group__domain').order_by('-tracked_at')
+
+        # Apply is_mentioned filter if provided
+        if is_mentioned is not None:
+            if is_mentioned.lower() == 'true':
+                prompt_analytics_qs = prompt_analytics_qs.filter(is_mention=True)
+            elif is_mentioned.lower() == 'false':
+                prompt_analytics_qs = prompt_analytics_qs.filter(is_mention=False)
+
+        # Transform PromptAnalytics to match CompetitorPromptAnalytics format
+        # Don't limit here - we'll limit after merging and sorting
+        for pa in prompt_analytics_qs:
+            try:
+                # Map PromptAnalytics fields to CompetitorPromptAnalytics format
+                results.append({
+                'id': pa.id,
+                'competitor': None,  # No competitor - this is the domain's own mention
+                'competitor_name': None,  # Will be handled by frontend as "You"
+                'prompt': pa.prompt.id,
+                'prompt_text': pa.prompt.prompt,
+                'domain_name': pa.prompt.group.domain.name,
+                'track_status': pa.track_status,
+                'track_message': pa.track_message,
+                'tracked_at': pa.tracked_at.isoformat() if pa.tracked_at else None,
+                'is_mentioned': pa.is_mention,
+                'position': float(pa.position) if pa.position else None,
+                'mention_count': pa.total_mentions,
+                'sentiment_category': pa.sentiment_category,
+                'sentiment_score': float(pa.sentiment_score) if pa.sentiment_score else 0.0,
+                'platform': pa.platform,
+                'response_text': '',  # PromptAnalytics doesn't store full response
+                'citation_list': pa.citation_list if pa.citation_list else [],
+                'created_at': pa.created_at.isoformat() if pa.created_at else None,
+                'modified_at': pa.modified_at.isoformat() if pa.modified_at else None,
+                })
+            except Exception as e:
+                # Log error but continue processing other rows
+                pass
+
+    # Sort all results by tracked_at
+    results.sort(key=lambda x: x.get('tracked_at') or '', reverse=True)
+
+    # Use JsonResponse instead of DRF Response to bypass automatic pagination
+    return JsonResponse(results[:limit], safe=False)
 
 
 @api_view(['GET'])
@@ -1384,4 +1441,285 @@ def reset_track_status(request):
         return Response({
             "status": "error",
             "message": f"Error resetting track_status: {str(e)}"
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Content Generation Endpoints
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def generate_content(request):
+    """
+    Generate content using Claude API
+
+    Expected request body:
+    {
+        "domain_id": int,
+        "title": str,
+        "keywords": str,
+        "article_type": str,
+        "tone": str,
+        "style": str,
+        "goal": str,
+        "audience": str,
+        "depth": str,
+        "word_count": int,
+        "source_type": str,
+        "source_id": int (optional),
+        "source_reference": str (optional),
+        "priority": str (optional),
+        "scheduled_date": str (optional)
+    }
+    """
+    try:
+        # Validate request data
+        serializer = ContentGenerationRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'status': 'error',
+                'message': 'Invalid request data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        validated_data = serializer.validated_data
+
+        # Get domain
+        domain = get_object_or_404(Domain, id=validated_data['domain_id'])
+
+        # Import and initialize Claude content generator
+        from .claude_content_generator import ClaudeContentGenerator
+        generator = ClaudeContentGenerator()
+
+        # Prepare generation parameters
+        generation_params = {
+            'title': validated_data['title'],
+            'keywords': validated_data['keywords'],
+            'article_type': validated_data.get('article_type', 'blog'),
+            'tone': validated_data.get('tone', 'professional'),
+            'style': validated_data.get('style', 'informative'),
+            'goal': validated_data.get('goal', 'educate'),
+            'audience': validated_data.get('audience', 'general'),
+            'depth': validated_data.get('depth', 'comprehensive'),
+            'word_count': validated_data.get('word_count', 1500),
+            'source_reference': validated_data.get('source_reference', '')
+        }
+
+        # Generate content using Claude
+        logger.info(f"Generating content for domain {domain.id}: {validated_data['title']}")
+        generation_result = generator.generate_content(generation_params)
+
+        # Create GeneratedContent record
+        from .models import GeneratedContent
+        generated_content = GeneratedContent.objects.create(
+            domain=domain,
+            title=validated_data['title'],
+            content_html=generation_result['content_html'],
+            source_type=validated_data.get('source_type', 'manual'),
+            source_id=validated_data.get('source_id'),
+            source_reference=validated_data.get('source_reference', ''),
+            article_type=validated_data.get('article_type', 'blog'),
+            keywords=validated_data['keywords'],
+            tone=validated_data.get('tone', 'professional'),
+            style=validated_data.get('style', 'informative'),
+            goal=validated_data.get('goal', 'educate'),
+            audience=validated_data.get('audience', 'general'),
+            depth=validated_data.get('depth', 'comprehensive'),
+            word_count=validated_data.get('word_count', 1500),
+            actual_word_count=generation_result['actual_word_count'],
+            status='generated',
+            priority=validated_data.get('priority', 'medium'),
+            scheduled_date=validated_data.get('scheduled_date'),
+            model_used=generation_result['model_used'],
+            generation_time_seconds=generation_result['generation_time_seconds'],
+            prompt_tokens=generation_result['prompt_tokens'],
+            completion_tokens=generation_result['completion_tokens']
+        )
+
+        # Return response with generated content
+        response_serializer = GeneratedContentSerializer(generated_content)
+        logger.info(f"Successfully generated content ID {generated_content.id}")
+
+        return Response({
+            'status': 'success',
+            'message': 'Content generated successfully',
+            'data': response_serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        logger.error(f"Error generating content: {str(e)}")
+        return Response({
+            'status': 'error',
+            'message': f'Error generating content: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_generated_contents(request):
+    """
+    Get generated contents with optional filtering
+
+    Query parameters:
+    - domain_id: Filter by domain
+    - status: Filter by status (draft, generated, published)
+    - source_type: Filter by source type (topic, content_gap, manual)
+    - page: Page number for pagination
+    - page_size: Number of items per page
+    """
+    try:
+        from .models import GeneratedContent
+
+        # Get query parameters
+        domain_id = request.GET.get('domain_id')
+        status_filter = request.GET.get('status')
+        source_type = request.GET.get('source_type')
+        page = int(request.GET.get('page', 1))
+        page_size = int(request.GET.get('page_size', 20))
+
+        # Build query
+        queryset = GeneratedContent.objects.all()
+
+        if domain_id:
+            queryset = queryset.filter(domain_id=domain_id)
+
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        if source_type:
+            queryset = queryset.filter(source_type=source_type)
+
+        # Order by created_at descending
+        queryset = queryset.order_by('-created_at')
+
+        # Apply pagination
+        total_count = queryset.count()
+        total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 1
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
+
+        paginated_contents = queryset[start_index:end_index]
+
+        # Serialize data
+        serializer = GeneratedContentSerializer(paginated_contents, many=True)
+
+        return Response({
+            'status': 'success',
+            'results': serializer.data,
+            'count': total_count,
+            'total_pages': total_pages,
+            'current_page': page,
+            'page_size': page_size,
+            'has_next': page < total_pages,
+            'has_previous': page > 1
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.error(f"Error fetching generated contents: {str(e)}")
+        return Response({
+            'status': 'error',
+            'message': f'Error fetching generated contents: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_generated_content(request, content_id):
+    """
+    Get a specific generated content by ID
+    """
+    try:
+        from .models import GeneratedContent
+
+        content = get_object_or_404(GeneratedContent, id=content_id)
+        serializer = GeneratedContentSerializer(content)
+
+        return Response({
+            'status': 'success',
+            'data': serializer.data
+        }, status=status.HTTP_200_OK)
+
+    except Http404:
+        return Response({
+            'status': 'error',
+            'message': 'Generated content not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error fetching generated content: {str(e)}")
+        return Response({
+            'status': 'error',
+            'message': f'Error fetching generated content: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([AllowAny])
+def update_generated_content(request, content_id):
+    """
+    Update a generated content
+    Allows updating content_html, status, scheduled_date, etc.
+    """
+    try:
+        from .models import GeneratedContent
+
+        content = get_object_or_404(GeneratedContent, id=content_id)
+
+        # Partial update for PATCH, full update for PUT
+        partial = request.method == 'PATCH'
+        serializer = GeneratedContentSerializer(content, data=request.data, partial=partial)
+
+        if not serializer.is_valid():
+            return Response({
+                'status': 'error',
+                'message': 'Invalid data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer.save()
+
+        return Response({
+            'status': 'success',
+            'message': 'Content updated successfully',
+            'data': serializer.data
+        }, status=status.HTTP_200_OK)
+
+    except Http404:
+        return Response({
+            'status': 'error',
+            'message': 'Generated content not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error updating generated content: {str(e)}")
+        return Response({
+            'status': 'error',
+            'message': f'Error updating generated content: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@permission_classes([AllowAny])
+def delete_generated_content(request, content_id):
+    """
+    Delete a generated content
+    """
+    try:
+        from .models import GeneratedContent
+
+        content = get_object_or_404(GeneratedContent, id=content_id)
+        content.delete()
+
+        return Response({
+            'status': 'success',
+            'message': 'Content deleted successfully'
+        }, status=status.HTTP_200_OK)
+
+    except Http404:
+        return Response({
+            'status': 'error',
+            'message': 'Generated content not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error deleting generated content: {str(e)}")
+        return Response({
+            'status': 'error',
+            'message': f'Error deleting generated content: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

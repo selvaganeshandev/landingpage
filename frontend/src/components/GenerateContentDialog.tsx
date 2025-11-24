@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useDomainStore } from "@/stores/domainStore";
+import apiClient from "@/services/api";
 import {
   Dialog,
   DialogContent,
@@ -36,15 +38,18 @@ interface GenerateContentDialogProps {
   existingContent?: any;
 }
 
-export const GenerateContentDialog = ({ 
-  open, 
+export const GenerateContentDialog = ({
+  open,
   onOpenChange,
-  existingContent 
+  existingContent
 }: GenerateContentDialogProps) => {
   const { toast } = useToast();
+  const { selectedDomain } = useDomainStore();
   const [step, setStep] = useState(1);
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [generatedContent, setGeneratedContent] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
     articleType: existingContent?.type || "blog",
@@ -58,6 +63,31 @@ export const GenerateContentDialog = ({
     wordCount: existingContent?.wordCount || 1500,
     scheduledDate: existingContent?.scheduledDate || new Date(),
   });
+
+  // Update form data when existingContent changes
+  useEffect(() => {
+    if (existingContent && open) {
+      setFormData({
+        articleType: existingContent?.type || "blog",
+        title: existingContent?.title || "",
+        keywords: Array.isArray(existingContent?.targetKeywords)
+          ? existingContent.targetKeywords.join(", ")
+          : (existingContent?.targetKeywords || ""),
+        tone: "professional",
+        style: "informative",
+        goal: "educate",
+        audience: "general",
+        depth: "comprehensive",
+        wordCount: existingContent?.wordCount || 1500,
+        scheduledDate: existingContent?.scheduledDate || new Date(),
+      });
+      // Reset step and states when new content is loaded
+      setStep(1);
+      setProgress(0);
+      setIsGenerating(false);
+      setError(null);
+    }
+  }, [existingContent, open]);
 
   const articleTypes = [
     {
@@ -98,35 +128,94 @@ export const GenerateContentDialog = ({
   ];
 
   const handleGenerate = async () => {
+    if (!selectedDomain) {
+      toast({
+        title: "Error",
+        description: "Please select a domain first",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsGenerating(true);
     setProgress(0);
+    setError(null);
+    setGeneratedContent(null);
 
-    // Simulate progress
-    const interval = setInterval(() => {
+    // Simulate progress for UX
+    const progressInterval = setInterval(() => {
       setProgress(prev => {
         if (prev >= 90) {
-          clearInterval(interval);
+          clearInterval(progressInterval);
           return 90;
         }
-        return prev + 10;
+        return prev + 5;
       });
-    }, 500);
+    }, 1000);
 
-    // Simulate generation
-    setTimeout(() => {
-      clearInterval(interval);
+    try {
+      // Use enriched source reference if already built, otherwise use default
+      const sourceReference = existingContent?.sourceReference || formData.title;
+
+      // Prepare generation request
+      const generationData = {
+        domain_id: selectedDomain.id,
+        title: formData.title,
+        keywords: formData.keywords,
+        article_type: formData.articleType,
+        tone: formData.tone,
+        style: formData.style,
+        goal: formData.goal,
+        audience: formData.audience,
+        depth: formData.depth,
+        word_count: formData.wordCount,
+        source_type: existingContent?.sourceType || 'manual',
+        source_id: existingContent?.sourceId,
+        source_reference: sourceReference,
+        priority: existingContent?.priority || 'medium',
+        scheduled_date: formData.scheduledDate
+      };
+
+      // Call the API to generate content
+      const response = await apiClient.generateContent(generationData);
+
+      clearInterval(progressInterval);
       setProgress(100);
+
+      if (response.status === 'success') {
+        setGeneratedContent(response.data);
+
+        toast({
+          title: "Content Generated Successfully!",
+          description: `Generated ${response.data.actual_word_count} words in ${response.data.generation_time_seconds}s`,
+        });
+
+        // Wait a moment to show success before closing
+        setTimeout(() => {
+          setIsGenerating(false);
+          onOpenChange(false);
+          setStep(1);
+          setProgress(0);
+          setGeneratedContent(null);
+        }, 2000);
+      } else {
+        throw new Error(response.message || 'Generation failed');
+      }
+
+    } catch (err: any) {
+      clearInterval(progressInterval);
       setIsGenerating(false);
-      
-      toast({
-        title: "Content Generated Successfully!",
-        description: "Your content has been added to the calendar",
-      });
-      
-      onOpenChange(false);
-      setStep(1);
       setProgress(0);
-    }, 5000);
+
+      const errorMessage = err.message || 'Failed to generate content. Please try again.';
+      setError(errorMessage);
+
+      toast({
+        title: "Generation Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    }
   };
 
   const renderStepContent = () => {
@@ -149,26 +238,20 @@ export const GenerateContentDialog = ({
                 return (
                   <Card
                     key={type.id}
-                    className={`p-5 cursor-pointer transition-all hover:shadow-md ${
+                    className={`p-3 cursor-pointer transition-all hover:shadow-md ${
                       isSelected ? 'ring-2 ring-primary' : ''
                     }`}
                     onClick={() => setFormData({ ...formData, articleType: type.id })}
                   >
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 rounded-xl gradient-primary flex items-center justify-center flex-shrink-0">
-                        <Icon className="h-6 w-6 text-white" />
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg gradient-primary flex items-center justify-center flex-shrink-0">
+                        <Icon className="h-5 w-5 text-white" />
                       </div>
                       <div className="flex-1">
-                        <h4 className="font-semibold mb-1">{type.title}</h4>
-                        <p className="text-sm text-muted-foreground mb-3">
+                        <h4 className="font-semibold text-sm mb-0.5">{type.title}</h4>
+                        <p className="text-xs text-muted-foreground">
                           {type.description}
                         </p>
-                        <div className="space-y-1">
-                          <p className="text-xs font-medium text-muted-foreground">EXAMPLES:</p>
-                          {type.examples.map((ex, idx) => (
-                            <p key={idx} className="text-xs text-muted-foreground">• {ex}</p>
-                          ))}
-                        </div>
                       </div>
                     </div>
                   </Card>
@@ -418,7 +501,7 @@ export const GenerateContentDialog = ({
         {renderStepContent()}
 
         {/* Navigation */}
-        <div className="flex items-center justify-between pt-6 border-t border border-border">
+        <div className="flex items-center justify-between pt-6 border-t border-border">
           <Button
             variant="outline"
             onClick={() => step > 1 ? setStep(step - 1) : onOpenChange(false)}

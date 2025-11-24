@@ -27,6 +27,7 @@ import Multilingual from "./pages/Multilingual";
 // import AICrawler from "./pages/AICrawler";
 import AICopilot from "./pages/AICopilot";
 import ContentCalendar from "./pages/ContentCalendar";
+import ContentEditor from "./pages/ContentEditor";
 import AutomationSettings from "./pages/AutomationSettings";
 import TrafficAttribution from "./pages/TrafficAttribution";
 import SignIn from "./pages/Auth";
@@ -192,6 +193,7 @@ const App = () => (
               
               {/* Other routes */}
               <Route path="/content-calendar" element={<ContentCalendar />} />
+              <Route path="/content-editor/:id" element={<ContentEditor />} />
               <Route path="/automation" element={<AutomationSettings />} />
               <Route 
                 path="/settings" 

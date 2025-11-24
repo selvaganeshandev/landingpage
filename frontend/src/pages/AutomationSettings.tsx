@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -12,12 +13,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, Zap, Clock, Tag, FileText, Sparkles } from "lucide-react";
+import { Settings, Zap, Clock, Tag, FileText, Sparkles, ArrowLeft } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 
 const AutomationSettings = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
-  
+
   const [settings, setSettings] = useState({
     automationEnabled: true,
     autoGenerateTopics: true,
@@ -52,14 +54,24 @@ const AutomationSettings = () => {
   };
 
   return (
-    <div className="p-8 space-y-6 max-w-5xl bg-background animate-fade-in">
+    <div className="p-8 space-y-6 bg-background animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight font-inter">Automation Settings</h1>
-          <p className="text-muted-foreground mt-1">
-            Configure automation behavior for generated articles
-          </p>
+        <div className="flex items-center gap-4">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => navigate(-1)}
+            className="border-border"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight font-inter">Automation Settings</h1>
+            <p className="text-muted-foreground mt-1">
+              Configure automation behavior for generated articles
+            </p>
+          </div>
         </div>
         <Button onClick={handleSave} className="gradient-primary shadow-md shadow-primary/20">
           <Settings className="h-4 w-4 mr-2" />

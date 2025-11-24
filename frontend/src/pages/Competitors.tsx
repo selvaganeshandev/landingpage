@@ -152,6 +152,9 @@ const Competitors = () => {
   const [topBrands, setTopBrands] = useState<any[]>([]);
   const [promptRows, setPromptRows] = useState<any[]>([]);
   const [promptCompetitorFilter, setPromptCompetitorFilter] = useState<string>("all");
+  const [promptsCurrentPage, setPromptsCurrentPage] = useState(1);
+  const [promptsTotalPages, setPromptsTotalPages] = useState(0);
+  const [promptsTotalCount, setPromptsTotalCount] = useState(0);
   const [competitiveMetrics, setCompetitiveMetrics] = useState<any[]>([]);
   const [competitiveInsights, setCompetitiveInsights] = useState<any[]>([]);
   const [answerGapData, setAnswerGapData] = useState<any[]>([]);
@@ -160,7 +163,6 @@ const Competitors = () => {
   const [hasLoadedData, setHasLoadedData] = useState(false);
   const [disabledBrands, setDisabledBrands] = useState<string[]>([]);
   const [strengthDisabledBrands, setStrengthDisabledBrands] = useState<string[]>([]);
-  const [promptsDisplayLimit, setPromptsDisplayLimit] = useState<number>(10);
   const loadAbortRef = useRef<AbortController | null>(null);
   const domainProcessingStatus = selectedDomain?.processing_status || null;
   const isDomainProcessing = Boolean(selectedDomain && domainProcessingStatus && domainProcessingStatus !== 'COMP');
@@ -169,6 +171,7 @@ const Competitors = () => {
   const [isAnalysisInProgress, setIsAnalysisInProgress] = useState<boolean>(false);
   const [analysisStartTime, setAnalysisStartTime] = useState<number>(0);
   const [isStarting, setIsStarting] = useState<boolean>(false);
+  const [analysisProgress, setAnalysisProgress] = useState<{ completed: number; total: number }>({ completed: 0, total: 0 });
 
   // Load analysis state from localStorage when domainId changes
   useEffect(() => {
@@ -218,22 +221,28 @@ const Competitors = () => {
         // Check if we have real competitors (not just "You") with data
         const realCompetitors = competitorList.filter((c: any) => !c.is_you);
 
-        // Log current status of competitors
         const competitorStatus = realCompetitors.map((c: any) => ({
           name: c.name,
-          status: c.status,
+          track_status: c.track_status,
           mentions: c.total_mentions || 0,
           citations: c.total_citations || 0
         }));
         console.log('📈 [COMPETITOR ANALYSIS] Current status:', competitorStatus);
 
-        const hasCompetitorsWithData = realCompetitors.some((c: any) =>
-          c.total_mentions > 0 || c.total_citations > 0
-        );
+        // Check if ALL competitors have reached COMP status
+        const allCompetitorsCompleted = realCompetitors.length > 0 && realCompetitors.every((c: any) => c.track_status === 'COMP');
 
-        if (hasCompetitorsWithData) {
+        // Count how many are in each status
+        const statusCounts = realCompetitors.reduce((acc: any, c: any) => {
+          const status = c.track_status || 'UNKNOWN';
+          acc[status] = (acc[status] || 0) + 1;
+          return acc;
+        }, {});
+        console.log('📊 [COMPETITOR ANALYSIS] Status summary:', statusCounts);
+
+        if (allCompetitorsCompleted) {
           const elapsedTime = ((Date.now() - analysisStartTime) / 1000).toFixed(0);
-          console.log(`✅ [COMPETITOR ANALYSIS] Analysis complete! At least one competitor has data. Time elapsed: ${elapsedTime}s`);
+          console.log(`✅ [COMPETITOR ANALYSIS] All ${realCompetitors.length} competitors completed! Time elapsed: ${elapsedTime}s`);
           console.log('🔄 [COMPETITOR ANALYSIS] Reloading page to display results...');
 
           // Analysis complete - clear localStorage and stop polling
@@ -241,12 +250,19 @@ const Competitors = () => {
           localStorage.removeItem(`competitor_analysis_start_${domainId}`);
           setIsAnalysisInProgress(false);
           setAnalysisStartTime(0);
+          setAnalysisProgress({ completed: 0, total: 0 });
 
           // Reload the page data to show the results
           setHasLoadedData(false);
           setIsPageLoading(true);
         } else {
-          console.log('⏳ [COMPETITOR ANALYSIS] Still processing - no competitor data yet');
+          const completedCount = statusCounts['COMP'] || 0;
+          const totalCount = realCompetitors.length;
+
+          // Update progress state for UI display
+          setAnalysisProgress({ completed: completedCount, total: totalCount });
+
+          console.log(`⏳ [COMPETITOR ANALYSIS] Still processing - ${completedCount}/${totalCount} completed. Waiting for all to reach COMP status...`);
         }
       } catch (error) {
         console.error('❌ [COMPETITOR ANALYSIS] Error checking status:', error);
@@ -288,23 +304,8 @@ const Competitors = () => {
   const promptCards = useMemo(() => {
     if (!promptRows.length) return [];
 
-    const windowDays = Number(timePeriod) || 7;
-    const windowMs = windowDays * 24 * 60 * 60 * 1000;
-    const now = Date.now();
-    const platformFilter = selectedLLM?.toLowerCase() || 'all';
-    const competitorFilter = promptCompetitorFilter;
-
-    // Filter rows by competitor, platform, and time - but keep rows with 0 mentions
-    // so all competitors appear in the aggregation
-    const filteredRows = promptRows.filter((row) => {
-      if (competitorFilter !== 'all' && String(row.competitorId) !== competitorFilter) return false;
-      if (platformFilter !== 'all' && (row.platform || '').toLowerCase() !== platformFilter) return false;
-      if (row.trackedAt) {
-        const rowTime = new Date(row.trackedAt).getTime();
-        if (!Number.isNaN(rowTime) && windowMs > 0 && now - rowTime > windowMs) return false;
-      }
-      return true;
-    });
+    // Use all rows without filtering by competitor, platform, or time
+    const filteredRows = promptRows;
 
     if (!filteredRows.length) {
       return [];
@@ -378,7 +379,7 @@ const Competitors = () => {
 
     // Filter out prompts where no competitor has any mentions (total is 0)
     const promptsWithMentions = Array.from(promptMap.entries()).filter(([_, aggregate]) => aggregate.total > 0);
-    
+
     if (!promptsWithMentions.length) return [];
 
     const sortedBrandNames = Array.from(brandTotals.entries())
@@ -437,33 +438,62 @@ const Competitors = () => {
       .map(([_, aggregate]) => aggregate)
       .sort((a, b) => b.total - a.total)
       .map((aggregate, idx) => {
-        const winnerEntry = Object.entries(aggregate.brandCounts).sort((a, b) => b[1] - a[1])[0];
-        const winner = winnerEntry ? winnerEntry[0] : 'N/A';
+        // Find winner - only consider brands with mentions > 0
+        const brandsWithMentions = Object.entries(aggregate.brandCounts).filter(([_, count]) => count > 0);
+        const winnerEntry = brandsWithMentions.sort((a, b) => b[1] - a[1])[0];
+
+        // Add winner's citation count to the winner display
+        let winner = 'N/A';
+        let isYouWinner = false;
+        if (winnerEntry) {
+          const winnerBrand = winnerEntry[0];
+          const winnerMentions = winnerEntry[1];
+          const winnerCitations = aggregate.brandCitationCounts[winnerBrand] || 0;
+
+          // Check if the winner is "You" brand
+          isYouWinner = youBrand && winnerBrand === youBrand.name;
+
+          winner = winnerCitations > 0
+            ? `${winnerBrand} (${winnerMentions} mentions, ${winnerCitations} citations)`
+            : `${winnerBrand} (${winnerMentions} mentions)`;
+        }
 
         const topPlatformEntry = Object.entries(aggregate.platformCounts).sort((a, b) => b[1] - a[1])[0];
         const topPlatform = topPlatformEntry ? `${topPlatformEntry[0]} (${topPlatformEntry[1]} mentions)` : null;
 
-        // Map brands to their colors
-        const brandColors = brandsToDisplay.map((brand) => 
-          competitorColorMap.get(brand) || competitorColors[brandsToDisplay.indexOf(brand) % competitorColors.length]
-        );
+        // Use the actual brands from the aggregate data (not forced from competitors list)
+        // This ensures we display all brands that have data, with correct counts
+        const aggregateBrands = Object.keys(aggregate.brandCounts);
+
+        // Sort brands: "You" brand first, then by mention count
+        const sortedAggregateBrands = aggregateBrands.sort((a, b) => {
+          const aIsYou = youBrand && a === youBrand.name;
+          const bIsYou = youBrand && b === youBrand.name;
+          if (aIsYou && !bIsYou) return -1;
+          if (!aIsYou && bIsYou) return 1;
+          return (aggregate.brandCounts[b] || 0) - (aggregate.brandCounts[a] || 0);
+        });
+
+        // Use a single theme color for all brands instead of multiple colors
+        const brandColors = sortedAggregateBrands.map(() => 'hsl(var(--primary))');
 
         return {
           id: idx + 1,
           prompt: aggregate.prompt,
-          brands: brandsToDisplay,
-          counts: brandsToDisplay.map((brand) => aggregate.brandCounts[brand] || 0),
-          citationCounts: brandsToDisplay.map((brand) => aggregate.brandCitationCounts[brand] || 0),
+          brands: sortedAggregateBrands,
+          counts: sortedAggregateBrands.map((brand) => aggregate.brandCounts[brand] || 0),
+          citationCounts: sortedAggregateBrands.map((brand) => aggregate.brandCitationCounts[brand] || 0),
           colors: brandColors,
           total: aggregate.total,
           winner,
+          isYouWinner,
           topPlatform,
           citationTotal: aggregate.citationTotal,
         };
       });
 
     return cards;
-  }, [promptRows, promptCompetitorFilter, selectedLLM, timePeriod, competitors]);
+  }, [promptRows, competitors]);
 
   const sortHeatmapRows = (rows: any[], platformKeys: string[]) => {
     if (!Array.isArray(rows) || rows.length === 0) return rows;
@@ -560,16 +590,24 @@ const Competitors = () => {
         setAnswerGapData([]);
         return;
       }
-      // Don't set loading state when just filtering by LLM - keep existing data visible
-      // Only set loading if domain changed or initial load
+      // Clear data immediately when platform filter changes to show empty state faster
       if (loadedDomainId !== domainId || !hasLoadedData) {
         setHasLoadedData(false);
         setIsPageLoading(true);
       } else {
-        // Keep existing data visible while filtering - just show analysis loading indicator
+        // When just filtering by platform, clear data immediately so empty state shows instantly
         setIsLoadingAnalysis(true);
-        // Keep hasLoadedData true so panel doesn't disappear
-        setHasLoadedData(true);
+        setCompetitors([]);
+        setTopBrands([]);
+        setPromptRows([]);
+        setCompetitiveMetrics([]);
+        setCompetitiveInsights([]);
+        setAnswerGapData([]);
+        setHeatmap([]);
+        setHeatmapPlatforms([]);
+        setSovSeries([]);
+        // Reset pagination when filtering
+        setPromptsCurrentPage(1);
       }
 
       const startTime = performance.now();
@@ -578,14 +616,15 @@ const Competitors = () => {
         // Load main competitor data first (in parallel)
         const batchStartTime = performance.now();
         const platformParam = selectedLLM !== 'all' ? selectedLLM : undefined;
-        const [list, latest, byDomain, compPromptAnalytics, snapshotHistory, heatmapResponse] = await Promise.all([
+        const [list, latest, byDomain, snapshotHistory, heatmapResponse] = await Promise.all([
           apiClient.getEngineCompetitors({ domain_id: domainId, platform: platformParam }, { signal: controller.signal }),
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }, { signal: controller.signal }),
           apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }, { signal: controller.signal }),
-          apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId, page_size: '1000' }, { signal: controller.signal }),
           apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
           apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
         ] as any);
+
+        // Prompts are now loaded separately by the pagination useEffect
 
         // Load competitive analysis APIs IN PARALLEL with better error handling
         setIsLoadingAnalysis(true);
@@ -689,10 +728,19 @@ const Competitors = () => {
         // Prepare Share of Voice rows for fallback/platform data
         const rows = Array.isArray(byDomain) ? byDomain : byDomain?.results || [];
         const groupedRows: Record<string, Record<string, number>> = {};
+
+        // Get user's brand name for consistent naming
+        const userBrandForSeries = mapped.find((c: any) => c.isYou);
+        const userBrandName = userBrandForSeries?.name || (selectedDomain?.name ? `${selectedDomain.name} (You)` : 'Your Brand');
+
         rows.forEach((r: any) => {
           const month = r.timestamp || r.date || '';
           if (!groupedRows[month]) groupedRows[month] = {};
-          const brand = r.competitor?.name || 'Your Brand';
+          // Use consistent brand naming - map "You" to the actual brand name
+          let brand = r.competitor?.name || 'Your Brand';
+          if (r.is_you || brand === 'You' || brand === 'Your Brand') {
+            brand = userBrandName;
+          }
           groupedRows[month][brand] = (groupedRows[month][brand] || 0) + (Number(r.mention_count || 0));
         });
         const months = Object.keys(groupedRows).sort();
@@ -711,13 +759,38 @@ const Competitors = () => {
           snapshotRows.forEach((snap: any) => {
             const timestamp = snap.timestamp || snap.created_at || '';
             const label = timestamp ? new Date(timestamp).toISOString().split('T')[0] : `Snapshot ${snap.id}`;
-            const brand = snap.competitor_name || snap.competitor?.name || 'Unknown';
+            // Use consistent brand naming - map to the actual brand name
+            let brand = snap.competitor_name || snap.competitor?.name || 'Unknown';
+            const snapCompetitorId = snap.competitor_id || snap.competitor?.id;
+
+            // Map brand name to the display name from mapped competitors
+            if (brand === 'You' || brand === 'Your Brand' || brand === yourBrandLabel) {
+              brand = userBrandName;
+            } else {
+              // Try to find the competitor in mapped list by ID or name
+              const matchedCompetitor = mapped.find((c: any) =>
+                c.id === snapCompetitorId ||
+                c.originalName === brand ||
+                c.domainName === brand ||
+                c.name === brand
+              );
+              if (matchedCompetitor) {
+                brand = matchedCompetitor.name;
+              }
+            }
+
             brandNames.add(brand);
             if (!groupedSnapshots[label]) groupedSnapshots[label] = {};
             groupedSnapshots[label][brand] = Number(snap.total_mentions || 0);
           });
           const sortedLabels = Object.keys(groupedSnapshots).sort();
           const brands = Array.from(brandNames);
+
+          // Always ensure user's brand is included in the series
+          if (!brands.includes(userBrandName)) {
+            brands.unshift(userBrandName);
+          }
+
           let series = sortedLabels.map((label) => {
             const entry: Record<string, number | string> = { month: label };
             brands.forEach((brand) => {
@@ -725,26 +798,25 @@ const Competitors = () => {
             });
             return entry;
           });
-          let effectiveBrands = [...brands];
-          if (!brands.includes(yourBrandLabel) && fallbackBrands.includes(yourBrandLabel)) {
-            series = series.map((entry) => ({
-              ...entry,
-              [yourBrandLabel]: groupedRows[String(entry.month)]?.[yourBrandLabel] || 0,
-            }));
-            effectiveBrands.push(yourBrandLabel);
-          }
+
           setSovSeries(series);
-          setDisabledBrands((prev) => prev.filter((brand) => effectiveBrands.includes(brand)));
+          setDisabledBrands((prev) => prev.filter((brand) => brands.includes(brand)));
         } else {
+          // Always ensure user's brand is included in fallback series
+          const effectiveBrands = [...fallbackBrands];
+          if (!effectiveBrands.includes(userBrandName)) {
+            effectiveBrands.unshift(userBrandName);
+          }
+
           const fallbackSeries = months.map(m => {
             const entry: any = { month: m };
-            fallbackBrands.forEach(brand => {
+            effectiveBrands.forEach(brand => {
               entry[brand] = groupedRows[m]?.[brand] || 0;
             });
             return entry;
           });
           setSovSeries(fallbackSeries);
-          setDisabledBrands((prev) => prev.filter((brand) => fallbackBrands.includes(brand)));
+          setDisabledBrands((prev) => prev.filter((brand) => effectiveBrands.includes(brand)));
         }
 
         // Platform-specific share for latest month using byDomain rows
@@ -753,15 +825,10 @@ const Competitors = () => {
         const platMap: Record<string, Record<string, number>> = {};
         latestRows.forEach((r: any) => {
           const plat = r.platform || 'Overall';
-          // Format brand name: "Brand Name (You)" for your brand
-          let brand = r.brand_name || r.competitor?.name || (r.is_you ? 'You' : 'Your Brand');
-          if (r.is_you && r.domain_name) {
-            brand = `${r.domain_name} (You)`;
-          } else if (r.is_you && !r.competitor) {
-            const youCompetitor = mapped.find(c => c.isYou);
-            if (youCompetitor?.domainName) {
-              brand = `${youCompetitor.domainName} (You)`;
-            }
+          // Use consistent brand naming
+          let brand = r.brand_name || r.competitor?.name || 'Your Brand';
+          if (r.is_you || brand === 'You' || brand === 'Your Brand') {
+            brand = userBrandName;
           }
           if (!platMap[plat]) platMap[plat] = {};
           platMap[plat][brand] = (platMap[plat][brand] || 0) + (Number(r.mention_count || 0));
@@ -785,12 +852,21 @@ const Competitors = () => {
         if (selectedDomain?.name && selectedDomain?.url) {
           competitorUrlMap[selectedDomain.name] = selectedDomain.url;
         }
+        // Map user brand name to URL
         competitorUrlMap[yourBrandLabel] = selectedDomain?.url || competitorUrlMap[yourBrandLabel] || '';
+        competitorUrlMap[userBrandName] = selectedDomain?.url || '';
 
         // Heatmap: competitor (row) vs platform percentage
         const fallbackPlatforms = Object.keys(platOut);
         const brandsSet = new Set<string>();
         Object.values(platOut).forEach(arr => arr.forEach(e => brandsSet.add(e.brand)));
+
+        // Always ensure user's brand is included, even with zero mentions
+        const userBrand = mapped.find((c: any) => c.isYou);
+        if (userBrand && !brandsSet.has(userBrand.name)) {
+          brandsSet.add(userBrand.name);
+        }
+
         const brands = Array.from(brandsSet);
         const fallbackHeatmap = brands.map((brand) => ({
           competitor: brand,
@@ -800,8 +876,8 @@ const Competitors = () => {
             acc[p] = item ? Number(((item.mentions / total) * 100).toFixed(1)) : 0;
             return acc;
           }, {}),
-          isYou: brand.toLowerCase().includes('your'),
-          url: competitorUrlMap[brand] || '',
+          isYou: brand === userBrand?.name || brand.toLowerCase().includes('your'),
+          url: competitorUrlMap[brand] || (brand === userBrand?.name ? userBrand.url : ''),
         }));
 
         if (apiHeatmapRows.length && apiHeatmapPlatforms.length) {
@@ -814,6 +890,22 @@ const Competitors = () => {
             isYou: Boolean(row.isYou),
             url: row.url || competitorUrlMap[row.name] || (row.isYou ? competitorUrlMap[yourBrandLabel] : ''),
           }));
+
+          // Always ensure user's brand is included in API heatmap
+          const hasUserBrand = formattedHeatmap.some((row: any) => row.isYou);
+          if (!hasUserBrand && userBrand) {
+            const userHeatmapRow = {
+              competitor: userBrand.name,
+              platforms: apiHeatmapPlatforms.reduce((acc: any, platform: string) => {
+                acc[platform] = 0;
+                return acc;
+              }, {}),
+              isYou: true,
+              url: userBrand.url,
+            };
+            formattedHeatmap.unshift(userHeatmapRow); // Add at the beginning
+          }
+
           setHeatmap(sortHeatmapRows(formattedHeatmap, apiHeatmapPlatforms));
           setHeatmapPlatforms(apiHeatmapPlatforms);
         } else {
@@ -853,40 +945,7 @@ const Competitors = () => {
           brandNameMap.set(c.domainName || c.name, c.name);
         });
 
-        const compPromptRows = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
-        
-        // Create mapping for "You" brand name before normalizing rows
-        const youBrandName = mapped.find((c: any) => c.isYou)?.name || (selectedDomain?.name ? `${selectedDomain.name} (You)` : 'Your Brand');
-        
-        const normalizedPromptRows = compPromptRows.map((row: any, idx: number) => {
-          // Map competitor name: if competitor is null, it's "You" brand
-          let competitorName = row?.competitor?.name;
-          if (!competitorName) {
-            // This is "You" brand - use the proper name from competitors list
-            competitorName = youBrandName;
-          } else {
-            // Map competitor name to display name from competitors list
-            const competitor = mapped.find((c: any) => c.originalName === competitorName || c.name === competitorName);
-            competitorName = competitor?.name || competitorName;
-          }
-          
-          return {
-            id: row?.id || idx + 1,
-            promptId: row?.prompt || row?.prompt_id || idx + 1,
-            promptText: row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`,
-            competitorId: row?.competitor?.id || null,
-            competitorName: competitorName,
-            mentionCount: row?.mention_count !== null && row?.mention_count !== undefined 
-              ? Number(row.mention_count) 
-              : (row?.is_mentioned ? 1 : 0),
-            platform: row?.platform || 'unknown',
-            trackedAt: row?.tracked_at || row?.created_at,
-            sentiment: row?.sentiment_category || 'neutral',
-            citationCount: Array.isArray(row?.citation_list) ? row.citation_list.length : Number(row?.total_citations || 0),
-          };
-        });
-
-        setPromptRows(normalizedPromptRows);
+        // Prompts are now loaded by separate pagination useEffect
 
         // Set competitive strength analysis data - ALWAYS use API response (even if empty)
         if (strengthAnalysis !== undefined && strengthAnalysis !== null) {
@@ -964,6 +1023,96 @@ const Competitors = () => {
       controller.abort();
     };
   }, [domainId, timePeriod, selectedLLM, promptCompetitorFilter, domainProcessingStatus, toast, isAnalysisInProgress]);
+
+  // Separate useEffect for prompt pagination - only reload prompts when page changes
+  useEffect(() => {
+    const controller = new AbortController();
+    let didAbort = false;
+
+    const loadPrompts = async () => {
+      if (!domainId || !hasLoadedData) return; // Only run if initial data is loaded
+
+      try {
+        const platformParam = selectedLLM !== 'all' ? selectedLLM : undefined;
+        const compPromptAnalytics = await apiClient.getCompetitorPromptAnalyticsEngine({
+          domain_id: domainId,
+          page_size: '20',
+          page: promptsCurrentPage,
+          platform: platformParam
+        }, { signal: controller.signal });
+
+        if (didAbort || controller.signal.aborted) return;
+
+        // Handle new grouped response structure
+        // Each result is a prompt with nested analytics array
+        const promptGroups = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
+        const paginationInfo = !Array.isArray(compPromptAnalytics) ? compPromptAnalytics : null;
+
+        // Store pagination info
+        if (paginationInfo) {
+          setPromptsTotalPages(paginationInfo.total_pages || 0);
+          setPromptsTotalCount(paginationInfo.count || 0);
+        }
+
+        // Get current competitors for name mapping
+        const youBrandName = competitors.find((c: any) => c.isYou)?.name || (selectedDomain?.name ? `${selectedDomain.name} (You)` : 'Your Brand');
+
+        // Flatten grouped structure: each prompt has multiple analytics (one per competitor)
+        // Transform to flat array of rows for existing UI logic
+        const normalizedPromptRows: any[] = [];
+
+        promptGroups.forEach((promptGroup: any) => {
+          const promptId = promptGroup.prompt_id;
+          const promptText = promptGroup.prompt_text;
+
+          // Each analytics entry in the group becomes a separate row
+          promptGroup.analytics.forEach((analytics: any) => {
+            let competitorName = analytics.competitor_name;
+
+            if (!competitorName) {
+              competitorName = youBrandName;
+            } else {
+              const competitor = competitors.find((c: any) =>
+                c.originalName === competitorName ||
+                c.name === competitorName ||
+                c.domainName === competitorName
+              );
+              competitorName = competitor?.name || competitorName;
+            }
+
+            normalizedPromptRows.push({
+              id: analytics.id,
+              promptId: promptId,
+              promptText: promptText,
+              competitorId: analytics.competitor_id,
+              competitorName: competitorName,
+              mentionCount: analytics.mention_count !== null && analytics.mention_count !== undefined
+                ? Number(analytics.mention_count)
+                : (analytics.is_mentioned ? 1 : 0),
+              platform: analytics.platform || 'unknown',
+              trackedAt: analytics.tracked_at,
+              sentiment: analytics.sentiment_category || 'neutral',
+              citationCount: Array.isArray(analytics.citation_list) ? analytics.citation_list.length : 0,
+            });
+          });
+        });
+
+        setPromptRows(normalizedPromptRows);
+      } catch (e: any) {
+        if (controller.signal.aborted || didAbort || e?.name === 'AbortError') {
+          return;
+        }
+        console.error('Failed to load prompts page:', e);
+      }
+    };
+
+    void loadPrompts();
+
+    return () => {
+      didAbort = true;
+      controller.abort();
+    };
+  }, [promptsCurrentPage, domainId, hasLoadedData, selectedLLM, competitors, selectedDomain]);
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
@@ -1073,7 +1222,8 @@ const Competitors = () => {
   // Show loading during initial load or when switching domains
   // Keep showing loader until we've loaded data for the current domain
   // BUT if analysis is in progress, show the progress card instead
-  if ((isPageLoading || !hasLoadedData || loadedDomainId !== domainId) && !isAnalysisInProgress) {
+  // ALSO show loader when filtering by platform (isLoadingAnalysis but competitors exist)
+  if ((isPageLoading || !hasLoadedData || loadedDomainId !== domainId || (isLoadingAnalysis && competitors.length === 0)) && !isAnalysisInProgress) {
     return <PageLoader sidebarOpen />;
   }
 
@@ -1090,10 +1240,10 @@ const Competitors = () => {
               </p>
             </div>
             <div className="flex gap-3">
-              <Button variant="outline" onClick={handleExportReport}>
+              {/* <Button variant="outline" onClick={handleExportReport}>
                 <FileText className="h-4 w-4 mr-2" />
                 Export Report
-              </Button>
+              </Button> */}
               <Button onClick={handleAddCompetitor} className="gradient-primary shadow-md shadow-primary/20">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Competitor
@@ -1200,6 +1350,7 @@ const Competitors = () => {
                     const startTime = Date.now();
                     setIsAnalysisInProgress(true);
                     setAnalysisStartTime(startTime);
+                    setAnalysisProgress({ completed: 0, total: response.created_count || 5 });
                     localStorage.setItem(`competitor_analysis_progress_${domainId}`, 'true');
                     localStorage.setItem(`competitor_analysis_start_${domainId}`, String(startTime));
 
@@ -1265,20 +1416,21 @@ const Competitors = () => {
     c.sentiment === 0
   );
 
-  // Check if filtering by platform returns no data or only zero values
-  const hasNoDataForPlatform = selectedLLM !== 'all' && (
-    (competitors.length === 0 || competitors.every(c => c.mentions === 0 && c.citations === 0)) &&
-    competitiveMetrics.length === 0 &&
-    heatmap.length === 0 &&
-    answerGapData.length === 0
-  );
+  // Empty state logic is now handled at the tab level (Overview, Prompts, Answer Gap)
+  // Each tab checks if data exists for the selected platform and shows appropriate empty state
 
   // Calculate elapsed time for progress card
   const elapsedMinutes = analysisStartTime > 0 ? Math.floor((Date.now() - analysisStartTime) / 60000) : 0;
 
   // Show processing state when competitors exist but have no data yet OR when analysis is in progress
-  if ((allCompetitorsHaveZeroData && !hasNoDataForPlatform) || isAnalysisInProgress) {
+  // Don't show processing state when filtering by specific platform (let tabs show their empty states)
+  if ((allCompetitorsHaveZeroData && selectedLLM === 'all') || isAnalysisInProgress) {
     console.log('📊 [COMPETITOR ANALYSIS] Progress card is now visible - showing processing status');
+
+    // Use analysisProgress state for dynamic count
+    const { completed, total } = analysisProgress;
+    const displayTotal = total || competitors.filter(c => !c.isYou).length;
+
     return (
       <div className="p-8 space-y-6 bg-background animate-fade-in">
         <div className="flex items-center justify-between">
@@ -1305,7 +1457,7 @@ const Competitors = () => {
             </div>
             <div className="flex-1 space-y-2">
               <h3 className="text-lg font-semibold">
-                Processing {competitors.length} Competitor{competitors.length !== 1 ? 's' : ''}
+                {total > 0 ? `Processing: Analysed ${completed}/${total} competitors` : `Processing competitors...`}
               </h3>
               <p className="text-sm text-muted-foreground">
                 Competitors have been discovered and are currently being analyzed. Analytics data will appear here once processing is complete.
@@ -1358,41 +1510,8 @@ const Competitors = () => {
     );
   }
 
-  // Show empty state when filtering by platform returns no data
-  if (hasNoDataForPlatform) {
-    return (
-      <div className="p-8 space-y-6 bg-background animate-fade-in">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground tracking-tight">Competitors</h1>
-            <p className="text-muted-foreground mt-1">
-              Track and analyze competitor performance across AI platforms
-            </p>
-          </div>
-        </div>
-
-        {/* Empty state for filtered platform with no data */}
-        <div className="flex flex-col items-center justify-center py-32 space-y-6">
-          <div className="w-24 h-24 rounded-full bg-muted/30 flex items-center justify-center mb-4">
-            <Search className="h-12 w-12 text-muted-foreground" />
-          </div>
-          <h3 className="text-2xl font-semibold text-foreground">No Data for {selectedLLM !== 'all' ? selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1) : 'Competitors'}</h3>
-          <p className="text-sm text-muted-foreground max-w-md text-center">
-            There is no competitor data available for the selected LLM platform. This could mean competitors haven't been analyzed on this platform yet, or no mentions were found.
-          </p>
-          <div className="flex gap-3 mt-6">
-            <Button
-              onClick={() => setSelectedLLM('all')}
-              className="gradient-primary"
-              size="lg"
-            >
-              Clear Filter & View All LLMs
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Note: Empty states for platform filtering are now handled at the tab level, not page level
+  // This allows users to switch between tabs and see per-tab empty states with clear filter buttons
 
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
@@ -1406,10 +1525,10 @@ const Competitors = () => {
             </p>
           </div>
           <div className="flex gap-3">
-            <Button variant="outline" onClick={handleExportReport}>
+            {/* <Button variant="outline" onClick={handleExportReport}>
               <FileText className="h-4 w-4 mr-2" />
               Export Report
-            </Button>
+            </Button> */}
             <Button onClick={handleAddCompetitor} className="gradient-primary shadow-md shadow-primary/20">
               <Plus className="h-4 w-4 mr-2" />
               Add Competitor
@@ -1427,7 +1546,7 @@ const Competitors = () => {
               </TabsList>
 
               <div className="flex items-center gap-3">
-                <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
+                {/* <TimeFilter selected={timePeriod} onSelect={setTimePeriod} /> */}
                 <Select value={selectedLLM} onValueChange={setSelectedLLM}>
                   <SelectTrigger className="w-[200px]">
                     <SelectValue placeholder="All LLMs" />
@@ -1448,7 +1567,7 @@ const Competitors = () => {
 
             {/* Competitor Cards - Show top 5 competitors, 3 per row, exclude "You" */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {realCompetitors.length > 0 ? (
+              {realCompetitors.length > 0 && (selectedLLM === 'all' || !realCompetitors.every(c => c.mentions === 0 && c.citations === 0)) ? (
                 realCompetitors.slice(0, 5).map((competitor, idx) => (
                 <Card
                   key={competitor.id}
@@ -1522,27 +1641,50 @@ const Competitors = () => {
                 ))
               ) : (
                 <div className="col-span-full flex flex-col items-center justify-center py-32 space-y-4">
-                  <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
-                    <Target className="h-10 w-10 text-muted-foreground" />
-                  </div>
-                  <h3 className="text-xl font-semibold text-foreground">No Competitors Added Yet</h3>
-                  <p className="text-sm text-muted-foreground max-w-md text-center">
-                    Track your competitors to see how your brand performs against them in AI search results.
-                  </p>
-                  <Button
-                    onClick={() => setAddCompetitorDialogOpen(true)}
-                    className="mt-4 gradient-primary"
-                    size="lg"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Your Competitor
-                  </Button>
+                  {selectedLLM !== 'all' && realCompetitors.length > 0 ? (
+                    <>
+                      <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                        <Search className="h-10 w-10 text-muted-foreground" />
+                      </div>
+                      <h3 className="text-xl font-semibold text-foreground">
+                        No Data for {selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1)}
+                      </h3>
+                      <p className="text-sm text-muted-foreground max-w-md text-center">
+                        There is no competitor data available for the selected LLM platform. This could mean competitors haven't been analyzed on this platform yet, or no mentions were found.
+                      </p>
+                      <Button
+                        onClick={() => setSelectedLLM('all')}
+                        className="mt-4 gradient-primary"
+                        size="lg"
+                      >
+                        Clear Filter & View All LLMs
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                        <Target className="h-10 w-10 text-muted-foreground" />
+                      </div>
+                      <h3 className="text-xl font-semibold text-foreground">No Competitors Added Yet</h3>
+                      <p className="text-sm text-muted-foreground max-w-md text-center">
+                        Track your competitors to see how your brand performs against them in AI search results.
+                      </p>
+                      <Button
+                        onClick={() => setAddCompetitorDialogOpen(true)}
+                        className="mt-4 gradient-primary"
+                        size="lg"
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Your Competitor
+                      </Button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* Show rest of content only if there are real competitors */}
-            {realCompetitors.length > 0 && (
+            {/* Show rest of content only if there are real competitors and data for the selected platform */}
+            {realCompetitors.length > 0 && (selectedLLM === 'all' || !realCompetitors.every(c => c.mentions === 0 && c.citations === 0)) && (
               <>
             {/* Brand Visibility Over Time */}
             <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
@@ -1794,49 +1936,21 @@ const Competitors = () => {
           <TabsContent value="prompts" className="space-y-6 mt-6">
             <Card className="p-6">
               <div className="space-y-6">
-                <div className="flex flex-col gap-4 pb-4 border-b border-border">
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <h3 className="text-lg font-semibold font-inter">Prompt Performance Analysis</h3>
-                        <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
-                      </div>
-                      <Badge variant="secondary">
-                        <MessageSquare className="h-3 w-3 mr-1" />
-                        {promptCards.length} Prompts Tracked
-                      </Badge>
-                    </div>
+                <div className="flex items-center justify-between pb-4 border-b border-border">
+                  <div>
+                    <h3 className="text-lg font-semibold font-inter">Prompt Performance Analysis</h3>
+                    <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
                   </div>
-                  <div className="flex flex-col md:flex-row gap-3">
-                    <Select value={promptCompetitorFilter} onValueChange={setPromptCompetitorFilter}>
-                      <SelectTrigger className="w-full md:w-64">
-                        <SelectValue placeholder="All competitors" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All competitors</SelectItem>
-                        {competitors.map((comp) => (
-                          <SelectItem key={comp.id} value={String(comp.id)}>
-                            {comp.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <div className="flex-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span>Filters:</span>
-                      <Badge variant="outline" className="text-xs">
-                        {timePeriod} day window
-                      </Badge>
-                      <Badge variant="outline" className="text-xs capitalize">
-                        {selectedLLM === 'all' ? 'All platforms' : selectedLLM}
-                      </Badge>
-                    </div>
-                  </div>
+                  <Badge variant="secondary">
+                    <MessageSquare className="h-3 w-3 mr-1" />
+                    {promptCards.length} Prompts Tracked
+                  </Badge>
                 </div>
 
                 <div className="space-y-4">
                   {promptCards.length > 0 ? (
                     <>
-                      {promptCards.slice(0, promptsDisplayLimit).map((prompt: any) => (
+                      {promptCards.map((prompt: any) => (
                     <Card key={prompt.id} className="p-5 transition-all duration-300 border border-border hover:border-primary">
                       <div className="space-y-4">
                         <div className="flex items-start justify-between">
@@ -1854,12 +1968,11 @@ const Competitors = () => {
                                 </>
                               )}
                               <span>•</span>
-                              <Badge variant="secondary" className="text-[11px]">
+                              <Badge
+                                variant={prompt.isYouWinner ? "default" : "destructive"}
+                                className={`text-[11px] ${prompt.isYouWinner ? 'bg-green-500 hover:bg-green-600' : ''}`}
+                              >
                                 Winner: {prompt.winner}
-                              </Badge>
-                              <span>•</span>
-                              <Badge variant="outline" className="text-[11px]">
-                                {prompt.citationTotal} citations
                               </Badge>
                             </div>
                           </div>
@@ -1871,7 +1984,7 @@ const Competitors = () => {
                             const citationCount = (prompt.citationCounts && prompt.citationCounts[idx]) || 0;
                             const brandColor = (prompt.colors && prompt.colors[idx]) || 'hsl(var(--muted))';
                             const percentage = prompt.total > 0 ? (mentionCount / prompt.total) * 100 : 0;
-                            
+
                             return (
                               <div key={brand} className="space-y-2">
                                 <div className="flex items-center justify-between text-sm">
@@ -1886,7 +1999,7 @@ const Competitors = () => {
                                     )}
                                   </div>
                                 </div>
-                                <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
+                                <div className="relative h-2 w-full overflow-hidden rounded-full bg-primary/20">
                                   <div
                                     className="h-full transition-all"
                                     style={{
@@ -1902,24 +2015,104 @@ const Competitors = () => {
                       </div>
                     </Card>
                       ))}
-                      {promptCards.length > promptsDisplayLimit && (
-                        <div className="flex justify-center pt-4">
-                          <Button 
-                            variant="outline" 
-                            onClick={() => setPromptsDisplayLimit(prev => prev + 10)}
-                            className="w-full max-w-md"
-                          >
-                            Load More ({promptCards.length - promptsDisplayLimit} remaining)
-                          </Button>
+
+                      {/* Pagination Controls */}
+                      {promptsTotalPages > 1 && (
+                        <div className="flex items-center justify-between pt-6 border-t border-border">
+                          <div className="text-sm text-muted-foreground">
+                            Showing page {promptsCurrentPage} of {promptsTotalPages} ({promptsTotalCount} total results)
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setPromptsCurrentPage(1)}
+                              disabled={promptsCurrentPage === 1}
+                            >
+                              First
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setPromptsCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={promptsCurrentPage === 1}
+                            >
+                              Previous
+                            </Button>
+                            <div className="flex items-center gap-1">
+                              {Array.from({ length: Math.min(5, promptsTotalPages) }, (_, i) => {
+                                let pageNum;
+                                if (promptsTotalPages <= 5) {
+                                  pageNum = i + 1;
+                                } else if (promptsCurrentPage <= 3) {
+                                  pageNum = i + 1;
+                                } else if (promptsCurrentPage >= promptsTotalPages - 2) {
+                                  pageNum = promptsTotalPages - 4 + i;
+                                } else {
+                                  pageNum = promptsCurrentPage - 2 + i;
+                                }
+                                return (
+                                  <Button
+                                    key={pageNum}
+                                    variant={promptsCurrentPage === pageNum ? "default" : "outline"}
+                                    size="sm"
+                                    onClick={() => setPromptsCurrentPage(pageNum)}
+                                    className="w-10"
+                                  >
+                                    {pageNum}
+                                  </Button>
+                                );
+                              })}
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setPromptsCurrentPage(prev => Math.min(promptsTotalPages, prev + 1))}
+                              disabled={promptsCurrentPage === promptsTotalPages}
+                            >
+                              Next
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setPromptsCurrentPage(promptsTotalPages)}
+                              disabled={promptsCurrentPage === promptsTotalPages}
+                            >
+                              Last
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </>
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-8 space-y-2">
-                      <p className="text-sm text-muted-foreground text-center">
-                        No prompt performance data for the current filters.
-                      </p>
-                      <p className="text-xs text-muted-foreground">Check console for API response details.</p>
+                    <div className="flex flex-col items-center justify-center py-16 space-y-4">
+                      {selectedLLM !== 'all' ? (
+                        <>
+                          <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                            <Search className="h-10 w-10 text-muted-foreground" />
+                          </div>
+                          <h3 className="text-xl font-semibold text-foreground">
+                            No Data for {selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1)}
+                          </h3>
+                          <p className="text-sm text-muted-foreground max-w-md text-center">
+                            There is no prompt data available for the selected LLM platform. This could mean prompts haven't been analyzed on this platform yet, or no mentions were found.
+                          </p>
+                          <Button
+                            onClick={() => setSelectedLLM('all')}
+                            className="mt-4 gradient-primary"
+                            size="lg"
+                          >
+                            Clear Filter & View All LLMs
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-muted-foreground text-center">
+                            No prompt performance data available.
+                          </p>
+                          <p className="text-xs text-muted-foreground">Start analyzing prompts to see data here.</p>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1993,9 +2186,32 @@ const Competitors = () => {
                       </Card>
                     ))
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-8 space-y-2">
-                      <p className="text-sm text-muted-foreground">No answer gaps identified yet.</p>
-                      <p className="text-xs text-muted-foreground">Check console for API response details.</p>
+                    <div className="flex flex-col items-center justify-center py-16 space-y-4">
+                      {selectedLLM !== 'all' ? (
+                        <>
+                          <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                            <Search className="h-10 w-10 text-muted-foreground" />
+                          </div>
+                          <h3 className="text-xl font-semibold text-foreground">
+                            No Data for {selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1)}
+                          </h3>
+                          <p className="text-sm text-muted-foreground max-w-md text-center">
+                            There are no answer gaps identified for the selected LLM platform. This could mean no gaps exist on this platform, or the analysis hasn't been completed yet.
+                          </p>
+                          <Button
+                            onClick={() => setSelectedLLM('all')}
+                            className="mt-4 gradient-primary"
+                            size="lg"
+                          >
+                            Clear Filter & View All LLMs
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-muted-foreground">No answer gaps identified yet.</p>
+                          <p className="text-xs text-muted-foreground">Start analyzing competitors to identify gaps.</p>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
