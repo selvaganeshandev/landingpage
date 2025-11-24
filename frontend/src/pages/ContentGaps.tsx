@@ -174,7 +174,7 @@ const ContentGaps = () => {
         </div>
         <Button onClick={handleGenerateContentPlan} className="gradient-primary shadow-md shadow-primary/20">
           <FileText className="h-4 w-4 mr-2" />
-          Generate Content Plan
+          Content Planner
         </Button>
       </div>
 
