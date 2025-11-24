@@ -703,10 +703,19 @@ const Competitors = () => {
         // Prepare Share of Voice rows for fallback/platform data
         const rows = Array.isArray(byDomain) ? byDomain : byDomain?.results || [];
         const groupedRows: Record<string, Record<string, number>> = {};
+
+        // Get user's brand name for consistent naming
+        const userBrandForSeries = mapped.find((c: any) => c.isYou);
+        const userBrandName = userBrandForSeries?.name || (selectedDomain?.name ? `${selectedDomain.name} (You)` : 'Your Brand');
+
         rows.forEach((r: any) => {
           const month = r.timestamp || r.date || '';
           if (!groupedRows[month]) groupedRows[month] = {};
-          const brand = r.competitor?.name || 'Your Brand';
+          // Use consistent brand naming - map "You" to the actual brand name
+          let brand = r.competitor?.name || 'Your Brand';
+          if (r.is_you || brand === 'You' || brand === 'Your Brand') {
+            brand = userBrandName;
+          }
           groupedRows[month][brand] = (groupedRows[month][brand] || 0) + (Number(r.mention_count || 0));
         });
         const months = Object.keys(groupedRows).sort();
@@ -725,13 +734,38 @@ const Competitors = () => {
           snapshotRows.forEach((snap: any) => {
             const timestamp = snap.timestamp || snap.created_at || '';
             const label = timestamp ? new Date(timestamp).toISOString().split('T')[0] : `Snapshot ${snap.id}`;
-            const brand = snap.competitor_name || snap.competitor?.name || 'Unknown';
+            // Use consistent brand naming - map to the actual brand name
+            let brand = snap.competitor_name || snap.competitor?.name || 'Unknown';
+            const snapCompetitorId = snap.competitor_id || snap.competitor?.id;
+
+            // Map brand name to the display name from mapped competitors
+            if (brand === 'You' || brand === 'Your Brand' || brand === yourBrandLabel) {
+              brand = userBrandName;
+            } else {
+              // Try to find the competitor in mapped list by ID or name
+              const matchedCompetitor = mapped.find((c: any) =>
+                c.id === snapCompetitorId ||
+                c.originalName === brand ||
+                c.domainName === brand ||
+                c.name === brand
+              );
+              if (matchedCompetitor) {
+                brand = matchedCompetitor.name;
+              }
+            }
+
             brandNames.add(brand);
             if (!groupedSnapshots[label]) groupedSnapshots[label] = {};
             groupedSnapshots[label][brand] = Number(snap.total_mentions || 0);
           });
           const sortedLabels = Object.keys(groupedSnapshots).sort();
           const brands = Array.from(brandNames);
+
+          // Always ensure user's brand is included in the series
+          if (!brands.includes(userBrandName)) {
+            brands.unshift(userBrandName);
+          }
+
           let series = sortedLabels.map((label) => {
             const entry: Record<string, number | string> = { month: label };
             brands.forEach((brand) => {
@@ -739,26 +773,25 @@ const Competitors = () => {
             });
             return entry;
           });
-          let effectiveBrands = [...brands];
-          if (!brands.includes(yourBrandLabel) && fallbackBrands.includes(yourBrandLabel)) {
-            series = series.map((entry) => ({
-              ...entry,
-              [yourBrandLabel]: groupedRows[String(entry.month)]?.[yourBrandLabel] || 0,
-            }));
-            effectiveBrands.push(yourBrandLabel);
-          }
+
           setSovSeries(series);
-          setDisabledBrands((prev) => prev.filter((brand) => effectiveBrands.includes(brand)));
+          setDisabledBrands((prev) => prev.filter((brand) => brands.includes(brand)));
         } else {
+          // Always ensure user's brand is included in fallback series
+          const effectiveBrands = [...fallbackBrands];
+          if (!effectiveBrands.includes(userBrandName)) {
+            effectiveBrands.unshift(userBrandName);
+          }
+
           const fallbackSeries = months.map(m => {
             const entry: any = { month: m };
-            fallbackBrands.forEach(brand => {
+            effectiveBrands.forEach(brand => {
               entry[brand] = groupedRows[m]?.[brand] || 0;
             });
             return entry;
           });
           setSovSeries(fallbackSeries);
-          setDisabledBrands((prev) => prev.filter((brand) => fallbackBrands.includes(brand)));
+          setDisabledBrands((prev) => prev.filter((brand) => effectiveBrands.includes(brand)));
         }
 
         // Platform-specific share for latest month using byDomain rows
@@ -767,15 +800,10 @@ const Competitors = () => {
         const platMap: Record<string, Record<string, number>> = {};
         latestRows.forEach((r: any) => {
           const plat = r.platform || 'Overall';
-          // Format brand name: "Brand Name (You)" for your brand
-          let brand = r.brand_name || r.competitor?.name || (r.is_you ? 'You' : 'Your Brand');
-          if (r.is_you && r.domain_name) {
-            brand = `${r.domain_name} (You)`;
-          } else if (r.is_you && !r.competitor) {
-            const youCompetitor = mapped.find(c => c.isYou);
-            if (youCompetitor?.domainName) {
-              brand = `${youCompetitor.domainName} (You)`;
-            }
+          // Use consistent brand naming
+          let brand = r.brand_name || r.competitor?.name || 'Your Brand';
+          if (r.is_you || brand === 'You' || brand === 'Your Brand') {
+            brand = userBrandName;
           }
           if (!platMap[plat]) platMap[plat] = {};
           platMap[plat][brand] = (platMap[plat][brand] || 0) + (Number(r.mention_count || 0));
@@ -799,12 +827,21 @@ const Competitors = () => {
         if (selectedDomain?.name && selectedDomain?.url) {
           competitorUrlMap[selectedDomain.name] = selectedDomain.url;
         }
+        // Map user brand name to URL
         competitorUrlMap[yourBrandLabel] = selectedDomain?.url || competitorUrlMap[yourBrandLabel] || '';
+        competitorUrlMap[userBrandName] = selectedDomain?.url || '';
 
         // Heatmap: competitor (row) vs platform percentage
         const fallbackPlatforms = Object.keys(platOut);
         const brandsSet = new Set<string>();
         Object.values(platOut).forEach(arr => arr.forEach(e => brandsSet.add(e.brand)));
+
+        // Always ensure user's brand is included, even with zero mentions
+        const userBrand = mapped.find((c: any) => c.isYou);
+        if (userBrand && !brandsSet.has(userBrand.name)) {
+          brandsSet.add(userBrand.name);
+        }
+
         const brands = Array.from(brandsSet);
         const fallbackHeatmap = brands.map((brand) => ({
           competitor: brand,
@@ -814,8 +851,8 @@ const Competitors = () => {
             acc[p] = item ? Number(((item.mentions / total) * 100).toFixed(1)) : 0;
             return acc;
           }, {}),
-          isYou: brand.toLowerCase().includes('your'),
-          url: competitorUrlMap[brand] || '',
+          isYou: brand === userBrand?.name || brand.toLowerCase().includes('your'),
+          url: competitorUrlMap[brand] || (brand === userBrand?.name ? userBrand.url : ''),
         }));
 
         if (apiHeatmapRows.length && apiHeatmapPlatforms.length) {
@@ -828,6 +865,22 @@ const Competitors = () => {
             isYou: Boolean(row.isYou),
             url: row.url || competitorUrlMap[row.name] || (row.isYou ? competitorUrlMap[yourBrandLabel] : ''),
           }));
+
+          // Always ensure user's brand is included in API heatmap
+          const hasUserBrand = formattedHeatmap.some((row: any) => row.isYou);
+          if (!hasUserBrand && userBrand) {
+            const userHeatmapRow = {
+              competitor: userBrand.name,
+              platforms: apiHeatmapPlatforms.reduce((acc: any, platform: string) => {
+                acc[platform] = 0;
+                return acc;
+              }, {}),
+              isYou: true,
+              url: userBrand.url,
+            };
+            formattedHeatmap.unshift(userHeatmapRow); // Add at the beginning
+          }
+
           setHeatmap(sortHeatmapRows(formattedHeatmap, apiHeatmapPlatforms));
           setHeatmapPlatforms(apiHeatmapPlatforms);
         } else {
