@@ -164,6 +164,22 @@ const Competitors = () => {
   const loadAbortRef = useRef<AbortController | null>(null);
   const domainProcessingStatus = selectedDomain?.processing_status || null;
   const isDomainProcessing = Boolean(selectedDomain && domainProcessingStatus && domainProcessingStatus !== 'COMP');
+
+  // Persistent analysis state - stored in localStorage
+  const [isAnalysisInProgress, setIsAnalysisInProgress] = useState<boolean>(false);
+  const [analysisStartTime, setAnalysisStartTime] = useState<number>(0);
+  const [isStarting, setIsStarting] = useState<boolean>(false);
+
+  // Load analysis state from localStorage when domainId changes
+  useEffect(() => {
+    if (!domainId) return;
+
+    const storedProgress = localStorage.getItem(`competitor_analysis_progress_${domainId}`);
+    const storedStartTime = localStorage.getItem(`competitor_analysis_start_${domainId}`);
+
+    setIsAnalysisInProgress(storedProgress === 'true');
+    setAnalysisStartTime(storedStartTime ? parseInt(storedStartTime) : 0);
+  }, [domainId]);
   
   // Competitor colors for consistent styling
   const competitorColors = [
@@ -187,6 +203,64 @@ const Competitors = () => {
 
     return () => clearInterval(interval);
   }, [isDomainProcessing, loadDomains]);
+
+  // Poll for competitor analysis completion when analysis is in progress
+  useEffect(() => {
+    if (!isAnalysisInProgress || !domainId) return;
+
+    const checkAnalysisStatus = async () => {
+      try {
+        console.log('🔄 [COMPETITOR ANALYSIS] Polling for completion status...');
+
+        const list: any = await apiClient.getEngineCompetitors({ domain_id: domainId });
+        const competitorList = Array.isArray(list) ? list : list?.results || [];
+
+        // Check if we have real competitors (not just "You") with data
+        const realCompetitors = competitorList.filter((c: any) => !c.is_you);
+
+        // Log current status of competitors
+        const competitorStatus = realCompetitors.map((c: any) => ({
+          name: c.name,
+          status: c.status,
+          mentions: c.total_mentions || 0,
+          citations: c.total_citations || 0
+        }));
+        console.log('📈 [COMPETITOR ANALYSIS] Current status:', competitorStatus);
+
+        const hasCompetitorsWithData = realCompetitors.some((c: any) =>
+          c.total_mentions > 0 || c.total_citations > 0
+        );
+
+        if (hasCompetitorsWithData) {
+          const elapsedTime = ((Date.now() - analysisStartTime) / 1000).toFixed(0);
+          console.log(`✅ [COMPETITOR ANALYSIS] Analysis complete! At least one competitor has data. Time elapsed: ${elapsedTime}s`);
+          console.log('🔄 [COMPETITOR ANALYSIS] Reloading page to display results...');
+
+          // Analysis complete - clear localStorage and stop polling
+          localStorage.removeItem(`competitor_analysis_progress_${domainId}`);
+          localStorage.removeItem(`competitor_analysis_start_${domainId}`);
+          setIsAnalysisInProgress(false);
+          setAnalysisStartTime(0);
+
+          // Reload the page data to show the results
+          setHasLoadedData(false);
+          setIsPageLoading(true);
+        } else {
+          console.log('⏳ [COMPETITOR ANALYSIS] Still processing - no competitor data yet');
+        }
+      } catch (error) {
+        console.error('❌ [COMPETITOR ANALYSIS] Error checking status:', error);
+      }
+    };
+
+    // Poll every 10 seconds
+    const interval = setInterval(checkAnalysisStatus, 10000);
+
+    // Also check immediately
+    checkAnalysisStatus();
+
+    return () => clearInterval(interval);
+  }, [isAnalysisInProgress, domainId, toast]);
 
   // Auto-refresh competitors data when competitors exist but have no data (processing state)
   useEffect(() => {
@@ -463,6 +537,14 @@ const Competitors = () => {
         return;
       }
 
+      // Don't load data if analysis is in progress - show progress card instead
+      if (isAnalysisInProgress) {
+        setHasLoadedData(true);
+        setIsPageLoading(false);
+        setLoadedDomainId(domainId);
+        return;
+      }
+
       if (domainProcessingStatus && domainProcessingStatus !== 'COMP') {
         setHasLoadedData(true);
         setLoadedDomainId(domainId);
@@ -491,7 +573,6 @@ const Competitors = () => {
       }
 
       const startTime = performance.now();
-      console.log('⏱️ Starting Competitors page load...');
 
       try {
         // Load main competitor data first (in parallel)
@@ -505,7 +586,6 @@ const Competitors = () => {
           apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
           apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
         ] as any);
-        console.log(`⏱️ Main data loaded in ${((performance.now() - batchStartTime) / 1000).toFixed(2)}s`);
 
         // Load competitive analysis APIs IN PARALLEL with better error handling
         setIsLoadingAnalysis(true);
@@ -538,7 +618,6 @@ const Competitors = () => {
           }),
         ]);
 
-        console.log(`⏱️ AI analysis loaded in ${((performance.now() - analysisStartTime) / 1000).toFixed(2)}s (parallel)`);
         setHasLoadedData(true);
         setLoadedDomainId(domainId); // Mark this domain as loaded
         // Normalize competitor list
@@ -759,12 +838,7 @@ const Competitors = () => {
             return b.mentions - a.mentions;
           })
           .slice(0, 5); // Top 5 brands
-        
-        console.log('🏆 Top Brands by Visibility:', {
-          totalBrands: tb.length,
-          brands: tb.map(b => ({ name: b.name, mentions: b.mentions, percentage: b.percentage, isYou: b.isYou })),
-        });
-        
+
         if (tb.length) setTopBrands(tb);
 
         // Build dynamic prompt performance cards
@@ -811,34 +885,13 @@ const Competitors = () => {
             citationCount: Array.isArray(row?.citation_list) ? row.citation_list.length : Number(row?.total_citations || 0),
           };
         });
-        
-        // Debug: Log the normalized rows to verify data
-        console.log('📊 Competitor Prompt Analytics - Normalized rows:', normalizedPromptRows.length);
-        if (normalizedPromptRows.length > 0) {
-          const sampleRows = normalizedPromptRows.slice(0, 5);
-          console.log('📊 Sample rows:', sampleRows.map(r => ({
-            prompt: r.promptText?.substring(0, 50),
-            competitor: r.competitorName,
-            mentionCount: r.mentionCount,
-            citationCount: r.citationCount
-          })));
-          
-          // Group by competitor to see mention counts
-          const byCompetitor = normalizedPromptRows.reduce((acc: any, row: any) => {
-            const name = row.competitorName || 'Unknown';
-            acc[name] = (acc[name] || 0) + row.mentionCount;
-            return acc;
-          }, {});
-          console.log('📊 Mentions by competitor:', byCompetitor);
-        }
-        
+
         setPromptRows(normalizedPromptRows);
 
         // Set competitive strength analysis data - ALWAYS use API response (even if empty)
         if (strengthAnalysis !== undefined && strengthAnalysis !== null) {
           if (Array.isArray(strengthAnalysis)) {
             setCompetitiveMetrics(strengthAnalysis);
-            console.log('✅ Competitive strength analysis loaded:', strengthAnalysis.length, 'metrics', strengthAnalysis);
           } else {
             console.warn('⚠️ Competitive strength analysis API returned non-array data:', strengthAnalysis);
             setCompetitiveMetrics([]);
@@ -853,7 +906,6 @@ const Competitors = () => {
         if (insights !== undefined && insights !== null) {
           if (Array.isArray(insights)) {
             setCompetitiveInsights(insights);
-            console.log('✅ Competitive insights loaded:', insights.length, 'insights', insights);
           } else {
             console.warn('⚠️ Competitive insights API returned non-array data:', insights);
             setCompetitiveInsights([]);
@@ -868,7 +920,6 @@ const Competitors = () => {
         if (gaps !== undefined && gaps !== null) {
           if (Array.isArray(gaps)) {
             setAnswerGapData(gaps);
-            console.log('✅ Answer gap analysis loaded:', gaps.length, 'gaps', gaps);
           } else {
             console.warn('⚠️ Answer gap analysis API returned non-array data:', gaps);
             setAnswerGapData([]);
@@ -893,7 +944,8 @@ const Competitors = () => {
       } finally {
         if (!controller.signal.aborted && !didAbort) {
           const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
-          console.log(`✅ Competitors page fully loaded in ${totalTime}s`);
+          console.log(`🎉 [COMPETITOR ANALYSIS] All data loaded in ${totalTime}s - Page ready to display`);
+
           // Always set loading to false after data loads, even when filtering
           setIsPageLoading(false);
           setIsLoadingAnalysis(false);
@@ -911,7 +963,7 @@ const Competitors = () => {
       didAbort = true;
       controller.abort();
     };
-  }, [domainId, timePeriod, selectedLLM, promptCompetitorFilter, domainProcessingStatus, toast]);
+  }, [domainId, timePeriod, selectedLLM, promptCompetitorFilter, domainProcessingStatus, toast, isAnalysisInProgress]);
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
@@ -1020,7 +1072,8 @@ const Competitors = () => {
 
   // Show loading during initial load or when switching domains
   // Keep showing loader until we've loaded data for the current domain
-  if (isPageLoading || !hasLoadedData || loadedDomainId !== domainId) {
+  // BUT if analysis is in progress, show the progress card instead
+  if ((isPageLoading || !hasLoadedData || loadedDomainId !== domainId) && !isAnalysisInProgress) {
     return <PageLoader sidebarOpen />;
   }
 
@@ -1094,7 +1147,8 @@ const Competitors = () => {
     youCompetitor.mentions === 0 && youCompetitor.citations === 0;
 
   // Show "Start Analysis" state when there are no real competitors (excluding "You")
-  if ((realCompetitors.length === 0 || hasOnlyYouWithNoData) && !isPageLoading && hasLoadedData) {
+  // BUT NOT if analysis is currently in progress
+  if ((realCompetitors.length === 0 || hasOnlyYouWithNoData) && !isPageLoading && hasLoadedData && !isAnalysisInProgress) {
     const isDomainCompleted = domainProcessingStatus === 'COMP';
     const isDomainProcessing = domainProcessingStatus && domainProcessingStatus !== 'COMP';
 
@@ -1121,25 +1175,70 @@ const Competitors = () => {
             </div>
 
             <Button
-              onClick={() => {
-                toast({
-                  title: "Starting Competitor Analysis",
-                  description: "This may take a few minutes while we analyze your brand and discover competitors...",
-                });
-                // TODO: Trigger actual competitor discovery API call
-                // For now, just reload to check if competitors were found
-                setTimeout(() => {
-                  setHasLoadedData(false);
-                  setIsPageLoading(true);
-                  if (domainId) {
-                    setDomainId(domainId);
+              onClick={async () => {
+                if (!domainId) {
+                  toast({
+                    title: "Error",
+                    description: "No domain selected. Please select a domain first.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+
+                setIsStarting(true);
+
+                try {
+                  console.log('🚀 [COMPETITOR ANALYSIS] Starting competitor discovery...');
+
+                  // Call the API to start competitor analysis
+                  const response: any = await apiClient.startCompetitorAnalysis(parseInt(domainId));
+
+                  if (response.success) {
+                    console.log(`✅ [COMPETITOR ANALYSIS] Discovery initiated - ${response.created_count || 5} competitors found`);
+
+                    // Set analysis in progress state and save to localStorage
+                    const startTime = Date.now();
+                    setIsAnalysisInProgress(true);
+                    setAnalysisStartTime(startTime);
+                    localStorage.setItem(`competitor_analysis_progress_${domainId}`, 'true');
+                    localStorage.setItem(`competitor_analysis_start_${domainId}`, String(startTime));
+
+                    console.log('📊 [COMPETITOR ANALYSIS] Progress card will be displayed - polling every 10s for completion');
+
+                    toast({
+                      title: "Competitor Discovery Started",
+                      description: `We found your top ${response.created_count || 5} competitors! Processing their data now...`,
+                    });
+                  } else {
+                    toast({
+                      title: "Analysis Failed",
+                      description: response.error || "Failed to start competitor analysis",
+                      variant: "destructive",
+                    });
                   }
-                }, 1500);
+                } catch (error: any) {
+                  console.error('Error starting competitor analysis:', error);
+                  toast({
+                    title: "Error",
+                    description: error?.message || "Failed to start competitor analysis. Please try again.",
+                    variant: "destructive",
+                  });
+                } finally {
+                  setIsStarting(false);
+                }
               }}
+              disabled={isStarting}
               size="lg"
               className="gradient-primary"
             >
-              Start Analysis
+              {isStarting ? (
+                <>
+                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                  Starting Analysis...
+                </>
+              ) : (
+                'Start Analysis'
+              )}
             </Button>
 
             <p className="text-sm text-muted-foreground">
@@ -1174,8 +1273,12 @@ const Competitors = () => {
     answerGapData.length === 0
   );
 
-  // Show processing state when competitors exist but have no data yet
-  if (allCompetitorsHaveZeroData && !hasNoDataForPlatform) {
+  // Calculate elapsed time for progress card
+  const elapsedMinutes = analysisStartTime > 0 ? Math.floor((Date.now() - analysisStartTime) / 60000) : 0;
+
+  // Show processing state when competitors exist but have no data yet OR when analysis is in progress
+  if ((allCompetitorsHaveZeroData && !hasNoDataForPlatform) || isAnalysisInProgress) {
+    console.log('📊 [COMPETITOR ANALYSIS] Progress card is now visible - showing processing status');
     return (
       <div className="p-8 space-y-6 bg-background animate-fade-in">
         <div className="flex items-center justify-between">
@@ -1195,60 +1298,62 @@ const Competitors = () => {
           </Button>
         </div>
 
-        <Card className="p-12 border-0 bg-transparent shadow-none">
-          <div className="flex flex-col items-center text-center space-y-6 max-w-2xl mx-auto">
-            <div className="p-4 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 text-primary">
-              <Loader2 className="h-12 w-12 animate-spin" />
+        <Card className="p-6 border-dashed border-primary/40 bg-card/70">
+          <div className="flex flex-col md:flex-row gap-4 items-start">
+            <div className="p-3 rounded-full bg-primary/10 text-primary">
+              <Loader2 className="h-6 w-6 animate-spin" />
             </div>
-
-            <div className="space-y-2">
-              <h2 className="text-2xl font-bold">Processing Competitors</h2>
-              <p className="text-muted-foreground text-base">
-                {competitors.length} competitor{competitors.length !== 1 ? 's' : ''} found and being analyzed
+            <div className="flex-1 space-y-2">
+              <h3 className="text-lg font-semibold">
+                Processing {competitors.length} Competitor{competitors.length !== 1 ? 's' : ''}
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Competitors have been discovered and are currently being analyzed. Analytics data will appear here once processing is complete.
               </p>
-            </div>
-
-            <p className="text-sm text-muted-foreground max-w-md">
-              Competitors have been extracted and are currently being processed. Analytics data will appear here once processing is complete. This may take a few moments.
-            </p>
-
-            <div className="flex gap-3 mt-4">
-              <Button
-                onClick={() => {
-                  setHasLoadedData(false);
-                  setIsPageLoading(true);
-                  // Trigger reload by updating domainId (which will trigger useEffect)
-                  if (domainId) {
-                    setDomainId(domainId);
-                  }
-                }}
-                variant="outline"
-                size="lg"
-              >
-                <Loader2 className="h-5 w-5 mr-2" />
-                Refresh to Check Status
-              </Button>
-            </div>
-
-            {/* Show list of competitors being processed */}
-            {competitors.length > 0 && (
-              <div className="mt-6 w-full max-w-md">
-                <p className="text-sm font-medium mb-3">Competitors being processed:</p>
-                <div className="space-y-2">
-                  {competitors.map((comp: any) => (
-                    <div key={comp.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border">
-                      <span className="font-medium">{comp.name}</span>
-                      <Badge variant="outline" className="gap-1">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        Processing
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
+              <p className="text-xs text-muted-foreground">
+                This can take 2-5 minutes while we gather mentions, calculate visibility scores, and generate competitive insights across AI platforms.
+                {elapsedMinutes > 0 && ` Time elapsed: ${elapsedMinutes} minute${elapsedMinutes > 1 ? 's' : ''}.`}
+              </p>
+              <div className="flex flex-wrap gap-3 pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setHasLoadedData(false);
+                    setIsPageLoading(true);
+                    if (domainId) {
+                      setDomainId(domainId);
+                    }
+                  }}
+                >
+                  Refresh Status
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
+                  Go to Dashboard
+                </Button>
               </div>
-            )}
+            </div>
           </div>
         </Card>
+
+        {competitors.length > 0 && (
+          <Card className="p-6 mt-6">
+            <div className="w-full max-w-md">
+              <p className="text-sm font-medium mb-3">Competitors being processed:</p>
+              <div className="space-y-2">
+                {competitors.map((comp: any) => (
+                  <div key={comp.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border">
+                    <span className="font-medium">{comp.name}</span>
+                    <Badge variant="outline" className="gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Processing
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+        )}
       </div>
     );
   }
@@ -1341,10 +1446,10 @@ const Competitors = () => {
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6 mt-0">
 
-            {/* Competitor Cards - Limited to 3 in overview, exclude "You" */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Competitor Cards - Show top 5 competitors, 3 per row, exclude "You" */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {realCompetitors.length > 0 ? (
-                realCompetitors.slice(0, 3).map((competitor, idx) => (
+                realCompetitors.slice(0, 5).map((competitor, idx) => (
                 <Card
                   key={competitor.id}
                   className={`p-6 transition-all duration-300 backdrop-blur-sm bg-card/80 ${
@@ -1362,8 +1467,7 @@ const Competitors = () => {
                         <p className="text-sm text-muted-foreground">{competitor.url}</p>
                       </div>
                       <div
-                        className="w-12 h-12 rounded-xl shadow-glow flex items-center justify-center font-bold text-white text-lg font-inter"
-                        style={{ backgroundColor: competitor.color }}
+                        className="w-12 h-12 rounded-xl shadow-glow flex items-center justify-center font-bold text-white text-lg font-inter bg-primary"
                       >
                         #{idx + 1}
                       </div>

@@ -107,22 +107,7 @@ const allNavGroups: NavGroup[] = [
     icon: Clock,
     separator: true,
     scrollable: true,
-    items: [
-      { name: "Analyze sentiment trends for my domain", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Compare my share of voice with competitors", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Identify content gaps in AI responses", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Review top performing prompts this month", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Generate new prompt suggestions", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Analyze competitor mention frequency", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Create content strategy based on gaps", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Review misinformation alerts", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Track historical trends for visibility", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Optimize prompts for better coverage", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Generate weekly analytics report", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Identify emerging topics in my niche", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Analyze traffic attribution from AI platforms", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-      { name: "Review multilingual mention distribution", path: "/chat", icon: MessageSquare, module: MODULES.DASHBOARD },
-    ],
+    items: [],
   },
 ];
 
@@ -132,14 +117,14 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   filterByPermissions: (checkPermission) => {
     const { navGroups } = get();
-    
+
     const filteredGroups = navGroups
       .map(group => ({
         ...group,
         items: group.items.filter(item => checkPermission(item.module, item.requiredLevel))
       }))
-      .filter(group => group.items.length > 0); // Only show groups that have accessible items
-    
+      .filter(group => group.items.length > 0 || group.name === "Recents"); // Keep Recents visible even when empty
+
     set({ filteredNavGroups: filteredGroups });
   },
 
