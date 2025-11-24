@@ -1187,10 +1187,10 @@ const Competitors = () => {
               </p>
             </div>
             <div className="flex gap-3">
-              <Button variant="outline" onClick={handleExportReport}>
+              {/* <Button variant="outline" onClick={handleExportReport}>
                 <FileText className="h-4 w-4 mr-2" />
                 Export Report
-              </Button>
+              </Button> */}
               <Button onClick={handleAddCompetitor} className="gradient-primary shadow-md shadow-primary/20">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Competitor
@@ -1472,10 +1472,10 @@ const Competitors = () => {
             </p>
           </div>
           <div className="flex gap-3">
-            <Button variant="outline" onClick={handleExportReport}>
+            {/* <Button variant="outline" onClick={handleExportReport}>
               <FileText className="h-4 w-4 mr-2" />
               Export Report
-            </Button>
+            </Button> */}
             <Button onClick={handleAddCompetitor} className="gradient-primary shadow-md shadow-primary/20">
               <Plus className="h-4 w-4 mr-2" />
               Add Competitor
@@ -1493,7 +1493,7 @@ const Competitors = () => {
               </TabsList>
 
               <div className="flex items-center gap-3">
-                <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
+                {/* <TimeFilter selected={timePeriod} onSelect={setTimePeriod} /> */}
                 <Select value={selectedLLM} onValueChange={setSelectedLLM}>
                   <SelectTrigger className="w-[200px]">
                     <SelectValue placeholder="All LLMs" />
