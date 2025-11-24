@@ -149,3 +149,71 @@ def process_single_competitor_task(self, competitor_id: int):
         return {'error': str(e)}
 
 
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_topics_for_domain_task(self, domain_id: int):
+    """
+    Process topics for a domain by grouping keywords using NLP
+    Triggered when domain processing_status becomes COMP
+    
+    Args:
+        domain_id: ID of domain to process topics for
+    """
+    from shared_models.models import Domain
+    from core.topic_processor import TopicProcessor
+    from core.topic_analytics_processor import TopicAnalyticsProcessor
+    
+    try:
+        domain = Domain.objects.get(id=domain_id)
+        
+        # Step 1: Group keywords into topics
+        logger.info(f"Starting topic processing for domain {domain_id}")
+        topic_processor = TopicProcessor()
+        result = topic_processor.process_topics_for_domain(domain)
+        
+        if not result.get('success'):
+            logger.error(f"Topic processing failed for domain {domain_id}: {result.get('message')}")
+            return result
+        
+        # Step 2: Process topic analytics
+        logger.info(f"Starting topic analytics processing for domain {domain_id}")
+        analytics_processor = TopicAnalyticsProcessor()
+        analytics_result = analytics_processor.process_analytics_for_domain(domain)
+        
+        if not analytics_result.get('success'):
+            logger.error(f"Topic analytics processing failed for domain {domain_id}: {analytics_result.get('message')}")
+            return analytics_result
+        
+        logger.info(f"Successfully completed topic processing for domain {domain_id}")
+        return {
+            'success': True,
+            'topics_created': result.get('topics_created', 0),
+            'keywords_processed': analytics_result.get('keywords_processed', 0),
+            'topics_processed': analytics_result.get('topics_processed', 0)
+        }
+        
+    except Domain.DoesNotExist:
+        logger.error(f"Domain {domain_id} not found")
+        return {'error': 'domain_not_found'}
+    except Exception as e:
+        logger.error(f"Error processing topics for domain {domain_id}: {str(e)}", exc_info=True)
+        return {'error': str(e)}
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_topic_analytics_scheduler(self):
+    """
+    Periodic scheduler for topic analytics updates.
+    Runs via Celery Beat to continuously update topic analytics when new prompts are processed.
+    """
+    from core.topic_analytics_processor import TopicAnalyticsProcessor
+    
+    try:
+        processor = TopicAnalyticsProcessor()
+        result = processor.schedule_tick()
+        logger.debug(f"Topic analytics scheduler tick: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error in topic analytics scheduler: {str(e)}", exc_info=True)
+        return {'scheduled': False, 'error': str(e)}
+
+

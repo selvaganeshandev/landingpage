@@ -10,16 +10,17 @@ from django.conf import settings
 import logging
 from shared_models.models import (
     Domain, Prompt, PromptAnalytics, PromptGroup,
-    Competitor, CompetitorPromptAnalytics, CompetitorAnalytics, ShareOfVoiceAnalytics
+    Competitor, CompetitorPromptAnalytics, CompetitorAnalytics, ShareOfVoiceAnalytics,
+    Topic, TopicKeyword, KeywordAnalytics, TopicAnalytics
 )
 from .domain_processor import DomainProcessor
-from .processing_tasks import process_domain_task, process_prompt_analytics_task, process_single_competitor_task
+from .processing_tasks import process_domain_task, process_prompt_analytics_task, process_single_competitor_task, process_topics_for_domain_task
 from .serializers import (
     DomainSerializer, ProcessingStatusSerializer,
     CompetitorSerializer, CompetitorPromptAnalyticsSerializer,
     CompetitorAnalyticsSerializer, ShareOfVoiceAnalyticsSerializer
 )
-from django.db.models import Avg, Count, Q, Sum
+from django.db.models import Avg, Count, Q, Sum, Max, Min
 from .prompt_analytics_processor import PromptAnalyticsProcessor
 
 logger = logging.getLogger(__name__)
@@ -598,6 +599,266 @@ def start_prompt_processing(request):
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def start_topic_processing(request):
+    """
+    Start topic processing for a specific domain (sync or async).
+    This manually triggers topic processing, which normally happens automatically when domain completes.
+    
+    Body:
+        - domain_id (required): ID of domain to process topics for
+        - sync (optional, default=False): If true, run synchronously without Celery
+    """
+    try:
+        domain_id = request.data.get('domain_id')
+        # Properly handle sync parameter - can be boolean or string "true"/"false"
+        sync_param = request.data.get('sync')
+        if isinstance(sync_param, str):
+            sync = sync_param.lower() in ('true', '1', 'yes')
+        else:
+            sync = bool(sync_param)
+        
+        if not domain_id:
+            return Response({
+                'success': False,
+                'error': 'domain_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Ensure domain exists
+        domain = get_object_or_404(Domain, id=domain_id)
+
+        if sync:
+            # Run inline without Celery
+            from core.topic_processor import TopicProcessor
+            from core.topic_analytics_processor import TopicAnalyticsProcessor
+            
+            # Step 1: Group keywords into topics
+            logger.info(f"Starting topic processing (sync) for domain {domain_id}")
+            topic_processor = TopicProcessor()
+            result = topic_processor.process_topics_for_domain(domain)
+            
+            if not result.get('success'):
+                return Response({
+                    'success': False,
+                    'mode': 'sync',
+                    'error': result.get('message', 'Topic processing failed')
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            # Step 2: Process topic analytics
+            logger.info(f"Starting topic analytics processing (sync) for domain {domain_id}")
+            analytics_processor = TopicAnalyticsProcessor()
+            analytics_result = analytics_processor.process_analytics_for_domain(domain)
+            
+            if not analytics_result.get('success'):
+                return Response({
+                    'success': False,
+                    'mode': 'sync',
+                    'error': analytics_result.get('message', 'Topic analytics processing failed'),
+                    'topics_created': result.get('topics_created', 0)
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            return Response({
+                'success': True,
+                'mode': 'sync',
+                'domain_id': int(domain_id),
+                'topics_created': result.get('topics_created', 0),
+                'keywords_processed': analytics_result.get('keywords_processed', 0),
+                'topics_processed': analytics_result.get('topics_processed', 0)
+            }, status=status.HTTP_200_OK)
+
+        # Default: enqueue via Celery
+        task = process_topics_for_domain_task.delay(int(domain_id))
+        return Response({
+            'success': True,
+            'mode': 'async',
+            'task_id': task.id,
+            'domain_id': int(domain_id),
+            'message': 'Topic processing scheduled'
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.error(f"Error in start_topic_processing: {str(e)}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def topic_analytics_status(request, domain_id):
+    """
+    Get topic analytics processing status for a domain
+    """
+    try:
+        domain = get_object_or_404(Domain, id=domain_id)
+        
+        # Get topic processing statistics
+        topics = Topic.objects.filter(domain=domain)
+        total_topics = topics.count()
+        
+        status_counts = {
+            'INIT': topics.filter(track_status='INIT').count(),
+            'SCHD': topics.filter(track_status='SCHD').count(),
+            'PROC': topics.filter(track_status='PROC').count(),
+            'COMP': topics.filter(track_status='COMP').count(),
+            'FAIL': topics.filter(track_status='FAIL').count(),
+        }
+        
+        # Get topic keyword processing statistics
+        topic_keywords = TopicKeyword.objects.filter(topic__domain=domain)
+        total_topic_keywords = topic_keywords.count()
+        
+        keyword_status_counts = {
+            'INIT': topic_keywords.filter(track_status='INIT').count(),
+            'COMP': topic_keywords.filter(track_status='COMP').count(),
+        }
+        
+        # Get keyword analytics statistics
+        keyword_analytics = KeywordAnalytics.objects.filter(keyword__domain=domain)
+        total_keyword_analytics = keyword_analytics.count()
+        
+        # Get platform-wise keyword analytics status
+        platform_status = {}
+        for platform in ['ChatGPT', 'Google Gemini', 'Perplexity']:
+            platform_analytics = keyword_analytics.filter(platform=platform)
+            platform_status[platform.lower().replace(' ', '_')] = {
+                'total': platform_analytics.count(),
+                'completed': platform_analytics.filter(track_status='COMP').count(),
+                'processing': platform_analytics.filter(track_status='PROC').count(),
+                'failed': platform_analytics.filter(track_status='FAIL').count(),
+            }
+        
+        # Calculate overall progress
+        completed_topics = status_counts['COMP']
+        completed_keywords = keyword_status_counts['COMP']
+        progress_percentage = (
+            (completed_topics / total_topics * 100) if total_topics > 0 else 0
+        )
+        keyword_progress_percentage = (
+            (completed_keywords / total_topic_keywords * 100) if total_topic_keywords > 0 else 0
+        )
+        
+        return Response({
+            'success': True,
+            'data': {
+                'domain': {
+                    'id': domain.id,
+                    'name': domain.name,
+                    'processing_status': domain.processing_status
+                },
+                'topics': {
+                    'total': total_topics,
+                    'status_counts': status_counts,
+                    'progress_percentage': round(progress_percentage, 2)
+                },
+                'topic_keywords': {
+                    'total': total_topic_keywords,
+                    'status_counts': keyword_status_counts,
+                    'progress_percentage': round(keyword_progress_percentage, 2)
+                },
+                'keyword_analytics': {
+                    'total': total_keyword_analytics,
+                    'platform_status': platform_status
+                }
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in topic_analytics_status: {str(e)}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def topic_analytics_summary(request, domain_id):
+    """
+    Get aggregated topic analytics summary for a domain
+    """
+    try:
+        domain = get_object_or_404(Domain, id=domain_id)
+        
+        # Get all topics for the domain
+        topics = Topic.objects.filter(domain=domain)
+        
+        # Calculate aggregated metrics across all topics
+        aggregated_metrics = topics.aggregate(
+            total_topics=Count('id'),
+            total_mentions=Sum('total_mentions'),
+            avg_visibility_score=Avg('visibility_score'),
+            avg_sentiment_score=Avg('sentiment_score'),
+            avg_trend_percentage=Avg('trend_percentage')
+        )
+        
+        # Get metrics by platform (from keyword analytics)
+        platform_metrics = {}
+        keyword_analytics = KeywordAnalytics.objects.filter(keyword__domain=domain, track_status='COMP')
+        
+        for platform in ['ChatGPT', 'Google Gemini', 'Perplexity']:
+            platform_analytics = keyword_analytics.filter(platform=platform)
+            platform_metrics[platform] = platform_analytics.aggregate(
+                total_mentions=Sum('mentions'),
+                avg_position=Avg('avg_position'),
+                avg_visibility_score=Avg('visibility_score'),
+                avg_sentiment_score=Avg('sentiment_score')
+            )
+        
+        # Get topic summaries
+        topic_summaries = []
+        for topic in topics:
+            # Get keyword analytics for this topic
+            topic_keywords = TopicKeyword.objects.filter(topic=topic)
+            keyword_ids = [tk.keyword_id for tk in topic_keywords]
+            topic_keyword_analytics = keyword_analytics.filter(keyword_id__in=keyword_ids)
+            
+            topic_summary = {
+                'topic_id': topic.id,
+                'topic_name': topic.name,
+                'keyword_count': topic_keywords.count(),
+                'keywords_completed': topic_keywords.filter(track_status='COMP').count(),
+                'total_mentions': topic.total_mentions,
+                'visibility_score': float(topic.visibility_score) if topic.visibility_score else 0.0,
+                'sentiment_score': float(topic.sentiment_score) if topic.sentiment_score else 0.0,
+                'trend_percentage': float(topic.trend_percentage) if topic.trend_percentage else 0.0,
+                'platform_list': topic.platform_list or [],
+                'track_status': topic.track_status,
+                'keyword_analytics': {
+                    'total': topic_keyword_analytics.count(),
+                    'total_mentions': topic_keyword_analytics.aggregate(Sum('mentions'))['mentions__sum'] or 0,
+                    'avg_visibility': float(topic_keyword_analytics.aggregate(Avg('visibility_score'))['visibility_score__avg'] or 0.0),
+                    'avg_sentiment': float(topic_keyword_analytics.aggregate(Avg('sentiment_score'))['sentiment_score__avg'] or 0.0)
+                }
+            }
+            topic_summaries.append(topic_summary)
+        
+        # Sort by total mentions
+        topic_summaries.sort(key=lambda x: x['total_mentions'], reverse=True)
+        
+        return Response({
+            'success': True,
+            'data': {
+                'domain': {
+                    'id': domain.id,
+                    'name': domain.name
+                },
+                'aggregated_metrics': aggregated_metrics,
+                'platform_metrics': platform_metrics,
+                'topic_summaries': topic_summaries
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in topic_analytics_summary: {str(e)}", exc_info=True)
         return Response({
             'success': False,
             'error': str(e)

@@ -761,6 +761,11 @@ class PromptAnalyticsProcessor:
                         domain_fresh.tracked_at = timezone.now()
                         domain_fresh.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
                         
+                        # Trigger topic processing when domain completes
+                        from core.processing_tasks import process_topics_for_domain_task
+                        process_topics_for_domain_task.delay(domain.id)
+                        logger.info(f"Scheduled topic processing for domain {domain.id}")
+                        
                         # Competitor extraction is now manual-only (removed auto-extraction)
                         # Users can manually extract competitors via the frontend or API
                     else:

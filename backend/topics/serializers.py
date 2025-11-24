@@ -11,9 +11,10 @@ class TopicSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'domain', 'domain_name', 'name', 'keyword_list', 'total_mentions',
             'visibility_score', 'sentiment_score', 'trend_percentage', 'platform_list',
+            'track_status', 'track_message', 'tracked_at',
             'created_by', 'created_by_email', 'created_at', 'modified_at'
         ]
-        read_only_fields = ['id', 'created_at', 'modified_at']
+        read_only_fields = ['id', 'created_at', 'modified_at', 'track_status', 'track_message', 'tracked_at']
 
 
 class TopicAnalyticsSerializer(serializers.ModelSerializer):
@@ -22,7 +23,7 @@ class TopicAnalyticsSerializer(serializers.ModelSerializer):
     class Meta:
         model = TopicAnalytics
         fields = [
-            'id', 'topic', 'topic_name', 'total_mentions', 'visibility_score',
+            'id', 'topic', 'topic_name', 'platform', 'total_mentions', 'visibility_score',
             'sentiment_score', 'timestamp', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']

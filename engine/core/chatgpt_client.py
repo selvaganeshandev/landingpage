@@ -569,7 +569,7 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         if not meaningful_words:
             return 'General'
         
-        # Capitalize first letter of each word
+            # Capitalize first letter of each word
         capitalized = [word.capitalize() for word in meaningful_words]
         
         # Join with "&" if 2 words, otherwise return single word

@@ -25,6 +25,11 @@ class Keyword(models.Model):
         blank=True,
         help_text="When this keyword was last used to generate prompts"
     )
+    last_used_for_topic_generation = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this keyword was last used for topic generation (can be used multiple times)"
+    )
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the keyword was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the keyword was last modified")
     
@@ -38,6 +43,7 @@ class Keyword(models.Model):
             models.Index(fields=['domain', 'created_at']),
             models.Index(fields=['domain', 'auto_generate_prompts', 'priority']),
             models.Index(fields=['domain', 'last_used_for_generation']),
+            models.Index(fields=['domain', 'last_used_for_topic_generation']),
         ]
     
     def __str__(self):

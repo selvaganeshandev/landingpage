@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,7 +25,9 @@ import {
   Pie,
   Cell,
 } from "recharts";
-import { TrendingUp, TrendingDown, MessageSquare, ThumbsUp, ThumbsDown } from "lucide-react";
+import { TrendingUp, TrendingDown, MessageSquare, ThumbsUp, ThumbsDown, Loader2 } from "lucide-react";
+import { apiClient } from "@/services/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface TopicDetailDialogProps {
   open: boolean;
@@ -42,42 +45,146 @@ interface TopicDetailDialogProps {
   } | null;
 }
 
-const mentionTimeline = [
-  { date: "Nov 1", mentions: 12, visibility: 88 },
-  { date: "Nov 5", mentions: 15, visibility: 90 },
-  { date: "Nov 10", mentions: 18, visibility: 91 },
-  { date: "Nov 15", mentions: 22, visibility: 89 },
-  { date: "Nov 20", mentions: 19, visibility: 92 },
-  { date: "Nov 25", mentions: 24, visibility: 94 },
-];
-
-const platformBreakdown = [
-  { platform: "ChatGPT", mentions: 45, color: "hsl(var(--chart-1))" },
-  { platform: "Claude", mentions: 28, color: "hsl(var(--chart-2))" },
-  { platform: "Perplexity", mentions: 16, color: "hsl(var(--chart-3))" },
-];
-
-const keywordVariations = [
-  { keyword: "muscle building", mentions: 34, position: 1.2, visibility: 95 },
-  { keyword: "post-workout", mentions: 28, position: 1.5, visibility: 91 },
-  { keyword: "athletic performance", mentions: 18, position: 1.8, visibility: 87 },
-  { keyword: "strength training", mentions: 9, position: 2.1, visibility: 83 },
-];
-
-const sentimentBreakdown = [
-  { name: "Positive", value: 78, color: "hsl(var(--success))" },
-  { name: "Neutral", value: 18, color: "hsl(var(--muted))" },
-  { name: "Negative", value: 4, color: "hsl(var(--destructive))" },
-];
-
-const relatedPrompts = [
-  { prompt: "best vegan protein for muscle gain", mentions: 18, relevance: 95 },
-  { prompt: "plant-based protein for athletes", mentions: 15, relevance: 92 },
-  { prompt: "post-workout vegan protein", mentions: 12, relevance: 89 },
-  { prompt: "muscle building plant protein", mentions: 8, relevance: 87 },
+// Chart color palette
+const CHART_COLORS = [
+  "hsl(var(--chart-1))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-3))",
+  "hsl(var(--chart-4))",
+  "hsl(var(--chart-5))",
 ];
 
 export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDialogProps) => {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
+  const [mentionTimeline, setMentionTimeline] = useState<any[]>([]);
+  const [platformBreakdown, setPlatformBreakdown] = useState<any[]>([]);
+  const [keywordVariations, setKeywordVariations] = useState<any[]>([]);
+  const [sentimentBreakdown, setSentimentBreakdown] = useState<any[]>([]);
+  const [relatedPrompts, setRelatedPrompts] = useState<any[]>([]);
+
+  // Fetch dynamic data when dialog opens and topic changes
+  useEffect(() => {
+    if (!open || !topic) return;
+
+    const fetchTopicDetails = async () => {
+      try {
+        setLoading(true);
+
+        // Fetch timeline data (topic analytics over time)
+        try {
+          const trendsData = await apiClient.getTopicTrends(topic.id, 30);
+          // Ensure trendsData is an array
+          const dataArray = Array.isArray(trendsData) ? trendsData : (trendsData?.results || []);
+          const timeline = dataArray.map((item: any) => {
+            const date = new Date(item.timestamp);
+            return {
+              date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+              mentions: item.total_mentions || 0,
+              visibility: parseFloat(item.visibility_score || 0)
+            };
+          });
+          setMentionTimeline(timeline);
+        } catch (err) {
+          console.error("Error fetching timeline:", err);
+          setMentionTimeline([]);
+        }
+
+        // Fetch platform breakdown (from topic analytics)
+        try {
+          const analyticsData = await apiClient.getTopicAnalytics({ topic_id: topic.id });
+          // Ensure analyticsData is an array
+          const dataArray = Array.isArray(analyticsData) ? analyticsData : (analyticsData?.results || []);
+          const platformMap = new Map<string, number>();
+          
+          dataArray.forEach((item: any) => {
+            const platform = item.platform || 'Unknown';
+            const mentions = item.total_mentions || 0;
+            platformMap.set(platform, (platformMap.get(platform) || 0) + mentions);
+          });
+
+          const platforms = Array.from(platformMap.entries())
+            .map(([platform, mentions], index) => ({
+              platform,
+              mentions,
+              color: CHART_COLORS[index % CHART_COLORS.length]
+            }))
+            .sort((a, b) => b.mentions - a.mentions);
+
+          setPlatformBreakdown(platforms.length > 0 ? platforms : []);
+        } catch (err) {
+          console.error("Error fetching platform breakdown:", err);
+          setPlatformBreakdown([]);
+        }
+
+        // Fetch keyword analytics
+        try {
+          const keywordData = await apiClient.getTopicKeywordAnalytics(topic.id);
+          // Ensure keywordData is an array
+          const dataArray = Array.isArray(keywordData) ? keywordData : (keywordData?.results || []);
+          const keywords = dataArray
+            .map((item: any) => ({
+              keyword: item.keyword || '',
+              mentions: item.mentions || 0,
+              position: parseFloat(item.avg_position || 0),
+              visibility: parseFloat(item.visibility_score || 0)
+            }))
+            .sort((a: any, b: any) => b.mentions - a.mentions)
+            .slice(0, 10);
+
+          setKeywordVariations(keywords);
+        } catch (err) {
+          console.error("Error fetching keyword analytics:", err);
+          setKeywordVariations([]);
+        }
+
+        // Calculate sentiment breakdown from topic data
+        const sentimentScore = topic.sentiment; // Already normalized to 0-100
+        const positive = Math.max(0, sentimentScore);
+        const negative = Math.max(0, 100 - sentimentScore);
+        const neutral = Math.max(0, 100 - positive - negative);
+        
+        setSentimentBreakdown([
+          { name: "Positive", value: Math.round(positive), color: "hsl(var(--success))" },
+          { name: "Neutral", value: Math.round(neutral), color: "hsl(var(--muted))" },
+          { name: "Negative", value: Math.round(negative), color: "hsl(var(--destructive))" },
+        ]);
+
+        // Fetch related prompts
+        try {
+          const promptsData = await apiClient.getTopicRelatedPrompts(topic.id);
+          // Ensure promptsData is an array
+          const dataArray = Array.isArray(promptsData) ? promptsData : (promptsData?.results || []);
+          const prompts = dataArray
+            .map((item: any) => ({
+              prompt: item.prompt_text || item.prompt || '',
+              mentions: item.mentions || 0,
+              relevance: item.relevance_score || 0
+            }))
+            .sort((a: any, b: any) => b.relevance - a.relevance)
+            .slice(0, 10);
+
+          setRelatedPrompts(prompts);
+        } catch (err) {
+          console.error("Error fetching related prompts:", err);
+          setRelatedPrompts([]);
+        }
+
+      } catch (err: any) {
+        console.error("Error fetching topic details:", err);
+        toast({
+          title: "Error",
+          description: "Failed to load topic details. Please try again.",
+          variant: "destructive"
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTopicDetails();
+  }, [open, topic, toast]);
+
   if (!topic) return null;
 
   return (
@@ -149,99 +256,129 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
             <TabsContent value="timeline" className="space-y-4">
               <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Mention Trend (Last 30 Days)</h4>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={mentionTimeline}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "var(--radius)",
-                      }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="mentions" 
-                      stroke={topic.color} 
-                      strokeWidth={3}
-                      dot={{ fill: topic.color, r: 4 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                {loading ? (
+                  <div className="flex items-center justify-center h-[300px]">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  </div>
+                ) : mentionTimeline.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={mentionTimeline}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "var(--radius)",
+                        }}
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="mentions" 
+                        stroke={topic.color} 
+                        strokeWidth={3}
+                        dot={{ fill: topic.color, r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                    <p>No timeline data available</p>
+                  </div>
+                )}
               </Card>
             </TabsContent>
 
             {/* Platform Breakdown */}
             <TabsContent value="platforms" className="space-y-4">
-              <div className="grid grid-cols-2 gap-6">
-                <Card className="p-6 border border-border">
-                  <h4 className="font-semibold mb-4">Platform Distribution</h4>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <PieChart>
-                      <Pie
-                        data={platformBreakdown}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={90}
-                        paddingAngle={2}
-                        dataKey="mentions"
-                      >
-                        {platformBreakdown.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </Card>
+              {loading ? (
+                <div className="flex items-center justify-center h-[300px]">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                </div>
+              ) : platformBreakdown.length > 0 ? (
+                <div className="grid grid-cols-2 gap-6">
+                  <Card className="p-6 border border-border">
+                    <h4 className="font-semibold mb-4">Platform Distribution</h4>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <PieChart>
+                        <Pie
+                          data={platformBreakdown}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={90}
+                          paddingAngle={2}
+                          dataKey="mentions"
+                        >
+                          {platformBreakdown.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </Card>
 
-                <Card className="p-6 border border-border">
-                  <h4 className="font-semibold mb-4">Mentions by Platform</h4>
-                  <div className="space-y-4 mt-8">
-                    {platformBreakdown.map((platform) => (
-                      <div key={platform.platform}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium">{platform.platform}</span>
-                          <span className="text-sm font-bold">{platform.mentions}</span>
+                  <Card className="p-6 border border-border">
+                    <h4 className="font-semibold mb-4">Mentions by Platform</h4>
+                    <div className="space-y-4 mt-8">
+                      {platformBreakdown.map((platform) => (
+                        <div key={platform.platform}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium">{platform.platform}</span>
+                            <span className="text-sm font-bold">{platform.mentions}</span>
+                          </div>
+                          <Progress 
+                            value={topic.mentions > 0 ? (platform.mentions / topic.mentions) * 100 : 0} 
+                            className="h-2"
+                          />
                         </div>
-                        <Progress 
-                          value={(platform.mentions / topic.mentions) * 100} 
-                          className="h-2"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              </div>
+                      ))}
+                    </div>
+                  </Card>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                  <p>No platform data available</p>
+                </div>
+              )}
             </TabsContent>
 
             {/* Keyword Variations */}
             <TabsContent value="keywords" className="space-y-4">
               <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Keyword Performance</h4>
-                <div className="space-y-4">
-                  {keywordVariations.map((kw) => (
-                    <div key={kw.keyword} className="p-4 rounded-lg border border-border">
-                      <div className="flex items-center justify-between mb-3">
-                        <Badge variant="secondary" className="font-mono">{kw.keyword}</Badge>
-                        <span className="text-sm font-bold">{kw.mentions} mentions</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-1">Avg Position</p>
-                          <p className="text-lg font-bold">{kw.position}</p>
+                {loading ? (
+                  <div className="flex items-center justify-center h-[300px]">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  </div>
+                ) : keywordVariations.length > 0 ? (
+                  <div className="space-y-4">
+                    {keywordVariations.map((kw, idx) => (
+                      <div key={kw.keyword || idx} className="p-4 rounded-lg border border-border">
+                        <div className="flex items-center justify-between mb-3">
+                          <Badge variant="secondary" className="font-mono">{kw.keyword}</Badge>
+                          <span className="text-sm font-bold">{kw.mentions} mentions</span>
                         </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-1">Visibility</p>
-                          <p className="text-lg font-bold">{kw.visibility}%</p>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1">Avg Position</p>
+                            <p className="text-lg font-bold">{kw.position.toFixed(1)}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1">Visibility</p>
+                            <p className="text-lg font-bold">{kw.visibility.toFixed(1)}%</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                    <p>No keyword data available</p>
+                  </div>
+                )}
               </Card>
             </TabsContent>
 
@@ -280,7 +417,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
                       </div>
                       <div className="flex-1">
                         <p className="text-sm font-medium">Positive</p>
-                        <p className="text-2xl font-bold text-success">{sentimentBreakdown[0].value}%</p>
+                        <p className="text-2xl font-bold text-success">{sentimentBreakdown[0]?.value || 0}%</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
@@ -289,7 +426,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
                       </div>
                       <div className="flex-1">
                         <p className="text-sm font-medium">Neutral</p>
-                        <p className="text-2xl font-bold">{sentimentBreakdown[1].value}%</p>
+                        <p className="text-2xl font-bold">{sentimentBreakdown[1]?.value || 0}%</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
@@ -298,7 +435,7 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
                       </div>
                       <div className="flex-1">
                         <p className="text-sm font-medium">Negative</p>
-                        <p className="text-2xl font-bold text-destructive">{sentimentBreakdown[2].value}%</p>
+                        <p className="text-2xl font-bold text-destructive">{sentimentBreakdown[2]?.value || 0}%</p>
                       </div>
                     </div>
                   </div>
@@ -310,25 +447,35 @@ export const TopicDetailDialog = ({ open, onOpenChange, topic }: TopicDetailDial
             <TabsContent value="prompts" className="space-y-4">
               <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Related Prompts ({relatedPrompts.length})</h4>
-                <div className="space-y-3">
-                  {relatedPrompts.map((prompt, idx) => (
-                    <div key={idx} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="font-mono text-sm flex-1">{prompt.prompt}</p>
-                        <div className="flex items-center gap-4 ml-4">
-                          <div className="text-right">
-                            <p className="text-xs text-muted-foreground">Relevance</p>
-                            <p className="text-sm font-bold text-primary">{prompt.relevance}%</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-muted-foreground">Mentions</p>
-                            <p className="text-sm font-bold">{prompt.mentions}</p>
+                {loading ? (
+                  <div className="flex items-center justify-center h-[300px]">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  </div>
+                ) : relatedPrompts.length > 0 ? (
+                  <div className="space-y-3">
+                    {relatedPrompts.map((prompt, idx) => (
+                      <div key={idx} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="font-mono text-sm flex-1">{prompt.prompt}</p>
+                          <div className="flex items-center gap-4 ml-4">
+                            <div className="text-right">
+                              <p className="text-xs text-muted-foreground">Relevance</p>
+                              <p className="text-sm font-bold text-primary">{prompt.relevance}%</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs text-muted-foreground">Mentions</p>
+                              <p className="text-sm font-bold">{prompt.mentions}</p>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                    <p>No related prompts available</p>
+                  </div>
+                )}
               </Card>
             </TabsContent>
           </Tabs>

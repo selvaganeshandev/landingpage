@@ -6,7 +6,7 @@ import re
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
-from shared_models.models import Domain, Keyword, PromptGroup, Prompt, PromptAnalytics, Organisation, SentimentAnalytics
+from shared_models.models import Domain, Keyword, PromptGroup, Prompt, PromptAnalytics, Organisation, SentimentAnalytics, PromptKeyword
 from .chatgpt_client import ChatGPTClient
 import numpy as np
 try:
@@ -338,6 +338,8 @@ class DomainProcessor:
                         )
                         print(f"Created primary prompt: {prompt_text[:50]}...")
                         self._create_default_analytics_for_prompt(prompt, domain)
+                        # Link prompt to keywords
+                        self._link_prompt_to_keywords(prompt, group_data)
                 
                 # Create secondary prompts
                 secondary_prompts = group_data.get('secondary_prompts', [])
@@ -351,6 +353,8 @@ class DomainProcessor:
                         )
                         print(f"Created secondary prompt: {prompt_text[:50]}...")
                         self._create_default_analytics_for_prompt(prompt, domain)
+                        # Link prompt to keywords
+                        self._link_prompt_to_keywords(prompt, group_data)
                 
                 # Ensure at least one primary prompt exists
                 if not primary_prompts and secondary_prompts:
@@ -406,6 +410,63 @@ class DomainProcessor:
                     'position_history_list': []
                 }
             )
+
+    def _link_prompt_to_keywords(self, prompt: Prompt, group_data: Dict[str, Any]) -> None:
+        """
+        Link a prompt to keywords by creating PromptKeyword records
+        Extracts keywords from the prompt's original data or from the group's prompts
+        
+        Args:
+            prompt: Prompt instance to link
+            group_data: Dictionary containing prompt group data with prompts and keywords
+        """
+        try:
+            from decimal import Decimal
+            
+            # Try to find the keyword from the original prompt data
+            # The prompt text should match one of the prompts in the group data
+            prompt_text = prompt.prompt.strip()
+            
+            # Look for the keyword in the original prompts list
+            # Prompts are generated with a 'keyword' field
+            keyword_text = None
+            
+            # Check primary prompts
+            for p in group_data.get('primary_prompts', []):
+                if isinstance(p, dict) and p.get('prompt_text', '').strip() == prompt_text:
+                    keyword_text = p.get('keyword', '').strip()
+                    break
+                elif isinstance(p, str) and p.strip() == prompt_text:
+                    # If it's just a string, we need to find the keyword from the original prompts
+                    # This happens when prompts are grouped
+                    pass
+            
+            # Check secondary prompts
+            if not keyword_text:
+                for p in group_data.get('secondary_prompts', []):
+                    if isinstance(p, dict) and p.get('prompt_text', '').strip() == prompt_text:
+                        keyword_text = p.get('keyword', '').strip()
+                        break
+            
+            # If we found a keyword, link it
+            if keyword_text:
+                try:
+                    keyword = Keyword.objects.get(keyword=keyword_text.lower(), domain=prompt.group.domain)
+                    if not PromptKeyword.objects.filter(prompt=prompt, keyword=keyword).exists():
+                        PromptKeyword.objects.create(
+                            prompt=prompt,
+                            keyword=keyword,
+                            relevance_score=Decimal('100.00')
+                        )
+                        print(f"Linked prompt to keyword: {keyword_text}")
+                except Keyword.DoesNotExist:
+                    # Keyword not found, skip
+                    pass
+                except Exception as e:
+                    print(f"Error linking prompt to keyword {keyword_text}: {str(e)}")
+            
+        except Exception as e:
+            print(f"Error in _link_prompt_to_keywords: {str(e)}")
 
     def _normalize_to_term(self, text: str, max_words: int = 2) -> str:
         """
@@ -656,7 +717,7 @@ class DomainProcessor:
         # Only combine if both words are substantial, similar length, and neither is a verb/descriptive/temporal word
         # This means they're likely both nouns or both adjectives
         return True
-    
+
     def _unique_group_id_for_domain(self, domain: Domain, base_id: str) -> str:
         # Normalize base_id to term format (max 2 words with &)
         normalized_base = self._normalize_to_term(base_id, max_words=2)
@@ -973,7 +1034,7 @@ class DomainProcessor:
                     if words[0] in domain_nouns and words[1] in domain_nouns:
                         score += 20
                 scored_bigrams.append((score, bg, count))
-            
+
             # Sort by score (highest first)
             scored_bigrams.sort(reverse=True, key=lambda x: x[0])
             

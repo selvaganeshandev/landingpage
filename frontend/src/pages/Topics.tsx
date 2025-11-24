@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,20 +7,16 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { useContentGeneration } from "@/hooks/useContentGeneration";
+import { useDomainStore } from "@/stores/domainStore";
+import { apiClient } from "@/services/api";
 import { 
-  Brain,
-  Plus,
   Search,
   TrendingUp,
   TrendingDown,
   Sparkles,
-  FileText,
-  Target
+  Loader2
 } from "lucide-react";
 import { TopicDetailDialog } from "@/components/TopicDetailDialog";
-import { TopicOptimizeDialog } from "@/components/TopicOptimizeDialog";
-import { GenerateTopicsDialog } from "@/components/GenerateTopicsDialog";
-import { AddTopicDialog } from "@/components/AddTopicDialog";
 import { 
   PieChart,
   Pie,
@@ -37,119 +33,42 @@ import {
   Legend 
 } from "recharts";
 
-const topics = [
-  {
-    id: 1,
-    name: "Muscle Building & Performance",
-    keywords: ["muscle building", "post-workout", "athletic performance", "strength training"],
-    mentions: 89,
-    visibility: 92,
-    sentiment: 78,
-    trend: 15,
-    platforms: ["ChatGPT", "Claude", "Perplexity"],
-    color: "hsl(var(--chart-1))"
-  },
-  {
-    id: 2,
-    name: "Weight Loss & Nutrition",
-    keywords: ["weight loss", "calorie control", "fat loss", "diet"],
-    mentions: 67,
-    visibility: 68,
-    sentiment: 71,
-    trend: 22,
-    platforms: ["ChatGPT", "Gemini"],
-    color: "hsl(var(--chart-2))"
-  },
-  {
-    id: 3,
-    name: "Ingredient Quality & Safety",
-    keywords: ["organic", "clean ingredients", "non-GMO", "quality"],
-    mentions: 54,
-    visibility: 88,
-    sentiment: 85,
-    trend: 8,
-    platforms: ["Claude", "Perplexity"],
-    color: "hsl(var(--chart-3))"
-  },
-  {
-    id: 4,
-    name: "Taste & Mixability",
-    keywords: ["taste", "flavor", "texture", "mixability"],
-    mentions: 42,
-    visibility: 75,
-    sentiment: 72,
-    trend: -3,
-    platforms: ["ChatGPT", "Claude", "Gemini"],
-    color: "hsl(var(--chart-4))"
-  },
-  {
-    id: 5,
-    name: "Price & Value",
-    keywords: ["affordable", "price", "value", "budget"],
-    mentions: 38,
-    visibility: 65,
-    sentiment: 64,
-    trend: 5,
-    platforms: ["Perplexity", "Gemini"],
-    color: "hsl(var(--chart-5))"
-  },
-  {
-    id: 6,
-    name: "Sustainability & Ethics",
-    keywords: ["sustainable", "eco-friendly", "ethical", "vegan"],
-    mentions: 31,
-    visibility: 82,
-    sentiment: 88,
-    trend: 18,
-    platforms: ["Claude", "Perplexity"],
-    color: "hsl(var(--success))"
-  },
+// Chart color palette
+const CHART_COLORS = [
+  "hsl(var(--chart-1))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-3))",
+  "hsl(var(--chart-4))",
+  "hsl(var(--chart-5))",
+  "hsl(var(--success))"
 ];
 
-const topicDistribution = topics.map(t => ({
-  name: t.name,
-  value: t.mentions,
-  color: t.color
-}));
-
-const topicTrends = [
-  { month: "Jul", muscle: 75, weight: 52, ingredients: 48, taste: 41, price: 35, sustainability: 25 },
-  { month: "Aug", muscle: 78, weight: 55, ingredients: 50, taste: 42, price: 36, sustainability: 27 },
-  { month: "Sep", muscle: 82, weight: 58, ingredients: 51, taste: 42, price: 37, sustainability: 28 },
-  { month: "Oct", muscle: 85, weight: 62, ingredients: 52, taste: 41, price: 38, sustainability: 29 },
-  { month: "Nov", muscle: 89, weight: 67, ingredients: 54, taste: 42, price: 38, sustainability: 31 },
-];
-
-const promptSuggestions = [
-  { prompt: "best vegan protein for muscle gain", relevance: 95, volume: "high", topics: ["Muscle Building", "Performance"] },
-  { prompt: "plant-based protein for weight loss", relevance: 88, volume: "high", topics: ["Weight Loss", "Nutrition"] },
-  { prompt: "organic vegan protein powder", relevance: 92, volume: "medium", topics: ["Ingredient Quality"] },
-  { prompt: "affordable vegan protein", relevance: 78, volume: "medium", topics: ["Price & Value"] },
-  { prompt: "sustainable plant protein brands", relevance: 85, volume: "medium", topics: ["Sustainability"] },
-  { prompt: "best tasting vegan protein powder", relevance: 82, volume: "high", topics: ["Taste & Mixability"] },
-];
-
-const keywordPerformance = [
-  { keyword: "vegan protein powder", mentions: 156, position: 1.2, visibility: 95 },
-  { keyword: "plant-based protein", mentions: 124, position: 1.5, visibility: 91 },
-  { keyword: "best vegan protein", mentions: 98, position: 1.4, visibility: 93 },
-  { keyword: "organic protein powder", mentions: 67, position: 1.8, visibility: 86 },
-  { keyword: "muscle building protein", mentions: 54, position: 1.6, visibility: 89 },
-];
+interface Topic {
+  id: number;
+  name: string;
+  keywords: string[];
+  mentions: number;
+  visibility: number;
+  sentiment: number;
+  trend: number;
+  platforms: string[];
+  color: string;
+}
 
 const Topics = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { navigateToContentGeneration } = useContentGeneration();
+  const { selectedDomain } = useDomainStore();
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
-  const [optimizeDialogOpen, setOptimizeDialogOpen] = useState(false);
-  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [selectedTopic, setSelectedTopic] = useState<typeof topics[0] | null>(null);
-
-  const handleGenerateTopics = () => {
-    setGenerateDialogOpen(true);
-  };
+  const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [topicTrends, setTopicTrends] = useState<any[]>([]);
+  const [keywordPerformance, setKeywordPerformance] = useState<any[]>([]);
+  const [promptSuggestions, setPromptSuggestions] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const handleGenerateContent = (topic: typeof topics[0]) => {
     navigateToContentGeneration({
@@ -161,26 +80,238 @@ const Topics = () => {
     });
   };
 
-  const handleAddTopic = () => {
-    setAddDialogOpen(true);
-  };
-
   const handleViewDetails = (topic: typeof topics[0]) => {
     setSelectedTopic(topic);
     setDetailDialogOpen(true);
   };
 
-  const handleOptimize = (topic: typeof topics[0]) => {
-    setSelectedTopic(topic);
-    setOptimizeDialogOpen(true);
+
+  const handleGenerateMore = async () => {
+    if (!selectedDomain?.id || topics.length === 0) {
+      toast({
+        title: "No Topics Available",
+        description: "Please create topics first to generate prompt suggestions.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Fetch more prompts from different topics
+      const allPrompts: any[] = [];
+      for (const topic of topics.slice(0, 3)) { // Get from top 3 topics
+        try {
+          const promptsData = await apiClient.getTopicPrompts({ topic_id: topic.id });
+          // Ensure promptsData is an array
+          const dataArray = Array.isArray(promptsData) ? promptsData : (promptsData?.results || []);
+          allPrompts.push(...dataArray.map((prompt: any) => ({
+            prompt: prompt.prompt_text,
+            relevance: prompt.relevance_score || 0,
+            volume: prompt.search_volume || "medium",
+            topics: [topic.name]
+          })));
+        } catch (err) {
+          console.error(`Error fetching prompts for topic ${topic.id}:`, err);
+        }
+      }
+
+      // Sort by relevance and get top 10
+      const topPrompts = allPrompts
+        .sort((a, b) => b.relevance - a.relevance)
+        .slice(0, 10);
+
+      setPromptSuggestions(topPrompts);
+      
+      toast({
+        title: "Prompts Updated",
+        description: `Generated ${topPrompts.length} new prompt suggestions.`,
+      });
+    } catch (err) {
+      console.error("Error generating more prompts:", err);
+      toast({
+        title: "Error",
+        description: "Failed to generate more prompts. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleGenerateMore = () => {
-    toast({
-      title: "Generating Prompts",
-      description: "AI is creating new prompt suggestions...",
-    });
-  };
+  // Fetch topics data
+  useEffect(() => {
+    const fetchTopics = async () => {
+      if (!selectedDomain?.id) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Fetch topics for the selected domain
+        const topicsData = await apiClient.getTopicsByDomain(selectedDomain.id);
+        
+        // Transform API data to match UI format
+        const transformedTopics: Topic[] = topicsData.map((topic: any, index: number) => {
+          // Convert sentiment from -1 to 1 range to 0-100 percentage
+          const sentimentScore = parseFloat(topic.sentiment_score || 0);
+          const sentimentPercentage = ((sentimentScore + 1) / 2) * 100; // Normalize to 0-100
+          
+          return {
+            id: topic.id,
+            name: topic.name,
+            keywords: topic.keyword_list || [],
+            mentions: topic.total_mentions || 0,
+            visibility: parseFloat(topic.visibility_score || 0),
+            sentiment: Math.round(sentimentPercentage),
+            trend: parseFloat(topic.trend_percentage || 0),
+            platforms: topic.platform_list || [],
+            color: CHART_COLORS[index % CHART_COLORS.length]
+          };
+        });
+
+        setTopics(transformedTopics);
+
+        // Fetch topic trends (time-series data)
+        if (transformedTopics.length > 0) {
+          try {
+            const trendsData = await apiClient.getTopicTrends(undefined, 90);
+            // Ensure trendsData is an array
+            const dataArray = Array.isArray(trendsData) ? trendsData : (trendsData?.results || []);
+            
+            // Group by date and aggregate by topic
+            const trendsByDate = new Map<string, Map<number, number>>();
+            
+            dataArray.forEach((item: any) => {
+              const date = new Date(item.timestamp);
+              const monthKey = date.toLocaleDateString('en-US', { month: 'short' });
+              
+              if (!trendsByDate.has(monthKey)) {
+                trendsByDate.set(monthKey, new Map());
+              }
+              
+              const monthData = trendsByDate.get(monthKey)!;
+              monthData.set(item.topic, item.total_mentions || 0);
+            });
+            
+            // Transform to chart format - show top 3 topics
+            const topTopics = transformedTopics.slice(0, 3);
+            const chartData = Array.from(trendsByDate.entries()).map(([month, topicData]) => {
+              const dataPoint: any = { month };
+              topTopics.forEach((topic, idx) => {
+                const key = `topic${idx + 1}`;
+                dataPoint[key] = topicData.get(topic.id) || 0;
+              });
+              return dataPoint;
+            });
+            
+            setTopicTrends(chartData);
+          } catch (err) {
+            console.error("Error fetching trends:", err);
+            // Set empty array on error
+            setTopicTrends([]);
+          }
+
+          // Fetch keyword performance (aggregate from all topics)
+          try {
+            const allKeywordData: any[] = [];
+            for (const topic of transformedTopics.slice(0, 5)) { // Limit to first 5 topics
+              try {
+                const keywordData = await apiClient.getTopicKeywordAnalytics(topic.id);
+                // Ensure keywordData is an array
+                const dataArray = Array.isArray(keywordData) ? keywordData : (keywordData?.results || []);
+                allKeywordData.push(...dataArray);
+              } catch (err) {
+                console.error(`Error fetching keywords for topic ${topic.id}:`, err);
+              }
+            }
+            
+            // Aggregate and sort by mentions
+            const keywordMap = new Map<string, any>();
+            allKeywordData.forEach((item: any) => {
+              const keyword = item.keyword;
+              if (!keywordMap.has(keyword)) {
+                keywordMap.set(keyword, {
+                  keyword,
+                  mentions: 0,
+                  position: 0,
+                  visibility: 0
+                });
+              }
+              const existing = keywordMap.get(keyword)!;
+              existing.mentions += item.mentions || 0;
+            });
+            
+            const sortedKeywords = Array.from(keywordMap.values())
+              .sort((a, b) => b.mentions - a.mentions)
+              .slice(0, 10)
+              .map(item => ({
+                ...item,
+                position: item.position || 0,
+                visibility: item.visibility || 0
+              }));
+            
+            setKeywordPerformance(sortedKeywords);
+          } catch (err) {
+            console.error("Error fetching keyword performance:", err);
+          }
+
+          // Fetch prompt suggestions
+          try {
+            const promptsData = await apiClient.getTopicPrompts({ topic_id: transformedTopics[0]?.id });
+            // Ensure promptsData is an array (handle both direct array and paginated response)
+            const dataArray = Array.isArray(promptsData) ? promptsData : (promptsData?.results || []);
+            const suggestions = dataArray.slice(0, 6).map((prompt: any) => ({
+              prompt: prompt.prompt_text,
+              relevance: prompt.relevance_score || 0,
+              volume: prompt.search_volume || "medium",
+              topics: [prompt.topic_name || "General"]
+            }));
+            setPromptSuggestions(suggestions);
+          } catch (err) {
+            console.error("Error fetching prompt suggestions:", err);
+            setPromptSuggestions([]);
+          }
+        }
+
+      } catch (err: any) {
+        console.error("Error fetching topics:", err);
+        setError(err.message || "Failed to load topics");
+        toast({
+          title: "Error",
+          description: "Failed to load topics. Please try again.",
+          variant: "destructive"
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTopics();
+  }, [selectedDomain?.id, toast]);
+
+  // Filter topics based on search query
+  const filteredTopics = useMemo(() => {
+    if (!searchQuery.trim()) return topics;
+    const query = searchQuery.toLowerCase();
+    return topics.filter(topic =>
+      topic.name.toLowerCase().includes(query) ||
+      topic.keywords.some(kw => kw.toLowerCase().includes(query))
+    );
+  }, [topics, searchQuery]);
+
+  // Topic distribution for pie chart
+  const topicDistribution = useMemo(() => {
+    return filteredTopics.map((t, index) => ({
+      name: t.name,
+      value: t.mentions,
+      color: t.color
+    }));
+  }, [filteredTopics]);
 
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
@@ -191,25 +322,58 @@ const Topics = () => {
             Monitor performance across key topics and categories
           </p>
         </div>
-        <div className="flex gap-3">
-          <Button variant="outline" onClick={handleGenerateTopics}>
-            <Sparkles className="h-4 w-4 mr-2" />
-            Generate Topics
-          </Button>
-          <Button onClick={handleAddTopic} className="gradient-primary shadow-md shadow-primary/20">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Topic
-          </Button>
-        </div>
+        {/* Generate Topics and Add Topic buttons hidden as per requirements */}
       </div>
 
       {/* Search Bar */}
       <Card className="p-6 border border-border">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search topics, keywords, or prompts..." className="pl-10" />
+          <Input 
+            placeholder="Search topics, keywords, or prompts..." 
+            className="pl-10"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
         </div>
       </Card>
+
+      {/* Loading State */}
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <span className="ml-2 text-muted-foreground">Loading topics...</span>
+        </div>
+      )}
+
+      {/* Error State */}
+      {error && !loading && (
+        <Card className="p-6 border-destructive">
+          <p className="text-destructive">{error}</p>
+        </Card>
+      )}
+
+      {/* No Domain Selected */}
+      {!selectedDomain && !loading && (
+        <Card className="p-6 border border-border">
+          <p className="text-muted-foreground text-center">
+            Please select a domain to view topics.
+          </p>
+        </Card>
+      )}
+
+      {/* No Topics */}
+      {!loading && !error && selectedDomain && filteredTopics.length === 0 && (
+        <Card className="p-6 border border-border">
+          <p className="text-muted-foreground text-center">
+            {searchQuery ? "No topics found matching your search." : "No topics found for this domain. Topics will be created automatically when domain processing completes."}
+          </p>
+        </Card>
+      )}
+
+      {/* Content - Only show if not loading and has data */}
+      {!loading && !error && filteredTopics.length > 0 && (
+        <>
 
       {/* Overview */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -237,45 +401,64 @@ const Topics = () => {
 
         <Card className="p-6 lg:col-span-2">
           <h3 className="text-lg font-semibold mb-6">Topic Trends Over Time</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={topicTrends}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-              <Tooltip 
-                contentStyle={{
-                  backgroundColor: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border))",
-                  borderRadius: "var(--radius)",
-                }}
-              />
-              <Legend />
-              <Line type="monotone" dataKey="muscle" name="Muscle Building" stroke="hsl(var(--chart-1))" strokeWidth={2} />
-              <Line type="monotone" dataKey="weight" name="Weight Loss" stroke="hsl(var(--chart-2))" strokeWidth={2} />
-              <Line type="monotone" dataKey="ingredients" name="Ingredients" stroke="hsl(var(--chart-3))" strokeWidth={2} />
-            </LineChart>
-          </ResponsiveContainer>
+          {topicTrends.length > 0 ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={topicTrends}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                <Tooltip 
+                  contentStyle={{
+                    backgroundColor: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: "var(--radius)",
+                  }}
+                />
+                <Legend />
+                {filteredTopics.slice(0, 3).map((topic, idx) => (
+                  <Line 
+                    key={topic.id}
+                    type="monotone" 
+                    dataKey={`topic${idx + 1}`} 
+                    name={topic.name} 
+                    stroke={topic.color} 
+                    strokeWidth={2} 
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[250px] text-muted-foreground">
+              <p>No trend data available yet</p>
+            </div>
+          )}
         </Card>
       </div>
 
       {/* Topics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {topics.map((topic) => (
+        {filteredTopics.map((topic) => (
           <Card key={topic.id} className="p-6 transition-all duration-300 border border-border hover:border-primary">
             <div className="space-y-4">
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-xl font-semibold mb-2">{topic.name}</h3>
                   <div className="flex flex-wrap gap-2 mb-3">
-                    {topic.keywords.slice(0, 3).map((keyword) => (
-                      <Badge key={keyword} variant="secondary" className="text-xs">
-                        {keyword}
-                      </Badge>
-                    ))}
-                    {topic.keywords.length > 3 && (
-                      <Badge variant="secondary" className="text-xs">
-                        +{topic.keywords.length - 3}
-                      </Badge>
+                    {topic.keywords && topic.keywords.length > 0 ? (
+                      <>
+                        {topic.keywords.slice(0, 3).map((keyword) => (
+                          <Badge key={keyword} variant="secondary" className="text-xs">
+                            {keyword}
+                          </Badge>
+                        ))}
+                        {topic.keywords.length > 3 && (
+                          <Badge variant="secondary" className="text-xs">
+                            +{topic.keywords.length - 3}
+                          </Badge>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-xs text-muted-foreground italic">No keywords</span>
                     )}
                   </div>
                 </div>
@@ -314,11 +497,15 @@ const Topics = () => {
               <div className="pt-2 border-t border-border">
                 <p className="text-xs text-muted-foreground mb-2">Active Platforms:</p>
                 <div className="flex flex-wrap gap-2">
-                  {topic.platforms.map((platform) => (
-                    <Badge key={platform} variant="outline" className="text-xs">
-                      {platform}
-                    </Badge>
-                  ))}
+                  {topic.platforms && topic.platforms.length > 0 ? (
+                    topic.platforms.map((platform) => (
+                      <Badge key={platform} variant="outline" className="text-xs">
+                        {platform}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">No platform data available</span>
+                  )}
                 </div>
               </div>
 
@@ -333,10 +520,7 @@ const Topics = () => {
                   Generate Content
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => handleViewDetails(topic)}>View Details</Button>
-                <Button size="sm" variant="outline" onClick={() => handleOptimize(topic)}>
-                  <Target className="h-3 w-3 mr-1" />
-                  Optimize
-                </Button>
+                {/* Optimize button hidden as per requirements */}
               </div>
             </div>
           </Card>
@@ -347,82 +531,88 @@ const Topics = () => {
       <Card className="p-6 border border-border">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold">AI-Generated Prompt Suggestions</h3>
-          <Button variant="outline" size="sm" onClick={handleGenerateMore}>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleGenerateMore}
+            disabled={loading || promptSuggestions.length === 0}
+          >
             <Sparkles className="h-3 w-3 mr-1" />
             Generate More
           </Button>
         </div>
-        <div className="space-y-3">
-          {promptSuggestions.map((suggestion, idx) => (
-            <div key={idx} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
-              <div className="flex items-start justify-between mb-2">
-                <p className="font-mono text-sm font-medium flex-1">{suggestion.prompt}</p>
-                <div className="flex items-center gap-3 ml-4">
-                  <Badge variant={suggestion.volume === "high" ? "default" : "secondary"}>
-                    {suggestion.volume} volume
-                  </Badge>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-primary">{suggestion.relevance}%</p>
-                    <p className="text-xs text-muted-foreground">relevance</p>
+        {promptSuggestions.length > 0 ? (
+          <div className="space-y-3">
+            {promptSuggestions.map((suggestion, idx) => (
+              <div key={idx} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
+                <div className="flex items-start justify-between mb-2">
+                  <p className="font-mono text-sm font-medium flex-1">{suggestion.prompt}</p>
+                  <div className="flex items-center gap-3 ml-4">
+                    <Badge variant={suggestion.volume === "high" ? "default" : "secondary"}>
+                      {suggestion.volume} volume
+                    </Badge>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-primary">{suggestion.relevance}%</p>
+                      <p className="text-xs text-muted-foreground">relevance</p>
+                    </div>
                   </div>
                 </div>
+                <div className="flex items-center gap-2">
+                  {suggestion.topics.map((topic) => (
+                    <Badge key={topic} variant="outline" className="text-xs">
+                      {topic}
+                    </Badge>
+                  ))}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {suggestion.topics.map((topic) => (
-                  <Badge key={topic} variant="outline" className="text-xs">
-                    {topic}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center justify-center h-[200px] text-muted-foreground">
+            <p>No prompt suggestions available yet</p>
+          </div>
+        )}
       </Card>
 
       {/* Keyword Performance */}
       <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Top Keyword Performance</h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={keywordPerformance} layout="vertical">
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-            <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-            <YAxis 
-              dataKey="keyword" 
-              type="category" 
-              stroke="hsl(var(--muted-foreground))" 
-              fontSize={12}
-              width={150}
-            />
-            <Tooltip 
-              contentStyle={{
-                backgroundColor: "hsl(var(--card))",
-                border: "1px solid hsl(var(--border))",
-                borderRadius: "var(--radius)",
-              }}
-            />
-            <Bar dataKey="mentions" fill="hsl(var(--primary))" radius={[0, 8, 8, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
+        {keywordPerformance.length > 0 ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={keywordPerformance} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <YAxis 
+                dataKey="keyword" 
+                type="category" 
+                stroke="hsl(var(--muted-foreground))" 
+                fontSize={12}
+                width={150}
+              />
+              <Tooltip 
+                contentStyle={{
+                  backgroundColor: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "var(--radius)",
+                }}
+              />
+              <Bar dataKey="mentions" fill="hsl(var(--primary))" radius={[0, 8, 8, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+            <p>No keyword performance data available yet</p>
+          </div>
+        )}
       </Card>
+        </>
+      )}
 
       {/* Dialogs */}
       <TopicDetailDialog 
         open={detailDialogOpen}
         onOpenChange={setDetailDialogOpen}
         topic={selectedTopic}
-      />
-      <TopicOptimizeDialog
-        open={optimizeDialogOpen}
-        onOpenChange={setOptimizeDialogOpen}
-        topic={selectedTopic}
-      />
-      <GenerateTopicsDialog
-        open={generateDialogOpen}
-        onOpenChange={setGenerateDialogOpen}
-      />
-      <AddTopicDialog
-        open={addDialogOpen}
-        onOpenChange={setAddDialogOpen}
       />
     </div>
   );

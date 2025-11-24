@@ -187,6 +187,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'core.processing_tasks.process_prompt_analytics_scheduler',
         'schedule': config('CELERY_BEAT_SCHEDULE_PROMPT_ANALYTICS', default=15.0, cast=float),
     },
+    'topic-analytics-scheduler-every-15s': {
+        'task': 'core.processing_tasks.process_topic_analytics_scheduler',
+        'schedule': config('CELERY_BEAT_SCHEDULE_TOPIC_ANALYTICS', default=15.0, cast=float),
+    },
     # Competitor processing is now manual-only (removed automatic scheduler)
     # Users can trigger processing via POST /api/competitors/{id}/process/
 }

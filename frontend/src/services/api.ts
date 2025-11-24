@@ -700,6 +700,29 @@ export const apiClient = {
     return apiRequest(`/topics/topic-prompts/${queryParams}`);
   },
 
+  getTopicsByDomain: (domainId: number) => {
+    return apiRequest(`/topics/topics/by_domain/?domain_id=${domainId}`);
+  },
+
+  getTrendingTopics: (domainId?: number) => {
+    const params = domainId ? `?domain_id=${domainId}` : '';
+    return apiRequest(`/topics/topics/trending/${params}`);
+  },
+
+  getTopicKeywordAnalytics: (topicId: number) => {
+    return apiRequest(`/topics/topics/${topicId}/keyword_analytics/`);
+  },
+
+  getTopicRelatedPrompts: (topicId: number) => {
+    return apiRequest(`/topics/topics/${topicId}/related_prompts/`);
+  },
+
+  getTopicTrends: (topicId?: number, days: number = 30) => {
+    const params = new URLSearchParams({ days: String(days) });
+    if (topicId) params.append('topic_id', String(topicId));
+    return apiRequest(`/topics/topic-analytics/trends/?${params.toString()}`);
+  },
+
   // ===== Analytics =====
   getSentimentAnalytics: (params?: any) => {
     const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';

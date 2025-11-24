@@ -21,6 +21,11 @@ urlpatterns = [
     path('prompts/status/<int:domain_id>/', views.prompt_analytics_status, name='prompt_analytics_status'),
     path('prompts/summary/<int:domain_id>/', views.prompt_analytics_summary, name='prompt_analytics_summary'),
     
+    # Topic processing
+    path('topics/start/', views.start_topic_processing, name='start_topic_processing'),
+    path('topics/status/<int:domain_id>/', views.topic_analytics_status, name='topic_analytics_status'),
+    path('topics/analytics/<int:domain_id>/', views.topic_analytics_summary, name='topic_analytics_summary'),
+    
     # Competitor management
     path('competitors/', views.competitor_list, name='competitor_list'),
     path('competitors/<int:competitor_id>/', views.competitor_detail, name='competitor_detail'),
