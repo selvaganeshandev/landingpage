@@ -1396,18 +1396,189 @@ def content_gap_detail(request, gap_id):
         month_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
         trend_data.sort(key=lambda x: month_order.index(x['month']) if x['month'] in month_order else 99)
 
+        # Determine priority based on frequency and coverage
+        if total_mentions >= 100 and coverage < 40:
+            priority = 'high'
+        elif total_mentions >= 50 and coverage < 60:
+            priority = 'medium'
+        else:
+            priority = 'low'
+
+        # Generate dynamic content recommendations
+        content_recommendations = []
+
+        # Comprehensive Guide recommendation
+        if priority == 'high':
+            guide_sections = [
+                f"Complete answer to '{prompt_text}'",
+                "In-depth analysis with data and statistics",
+                "Step-by-step implementation guide",
+                "Real-world examples and case studies",
+                "Common mistakes and how to avoid them",
+                "Expert tips and best practices",
+                "Comprehensive FAQ section"
+            ]
+            estimated_words = "3000-4000"
+            impact = "high"
+        elif priority == 'medium':
+            guide_sections = [
+                f"Clear explanation of '{prompt_text}'",
+                "Key points and important considerations",
+                "Practical examples",
+                "Comparison with alternatives",
+                "Tips and recommendations",
+                "FAQ addressing common concerns"
+            ]
+            estimated_words = "2000-2500"
+            impact = "medium"
+        else:
+            guide_sections = [
+                f"Overview of '{prompt_text}'",
+                "Key information and facts",
+                "Basic examples",
+                "Quick tips",
+                "Related resources"
+            ]
+            estimated_words = "1500-2000"
+            impact = "medium"
+
+        content_recommendations.append({
+            'type': 'Comprehensive Guide',
+            'title': f"Complete Guide: {prompt_text}",
+            'sections': guide_sections,
+            'estimatedWords': estimated_words,
+            'impact': impact
+        })
+
+        # Video content recommendation (if high priority)
+        if priority in ['high', 'medium']:
+            video_sections = [
+                f"Visual explanation of {prompt_text[:50]}...",
+                "Expert interview or demonstration",
+                "Side-by-side comparisons" if priority == 'high' else "Key examples",
+                "Real-world applications",
+                "Viewer Q&A addressing common questions"
+            ]
+            content_recommendations.append({
+                'type': 'Video Content',
+                'title': f"Video: {prompt_text[:60]}...",
+                'sections': video_sections,
+                'estimatedWords': "Script: 1500-2000" if priority == 'high' else "Script: 1000-1500",
+                'impact': 'high' if priority == 'high' else 'medium'
+            })
+
+        # Interactive tool recommendation (if very high frequency)
+        if total_mentions >= 80:
+            content_recommendations.append({
+                'type': 'Interactive Tool',
+                'title': f"Interactive Tool: {prompt_text[:50]}...",
+                'sections': [
+                    "User-friendly interface for the query",
+                    "Real-time calculations or recommendations",
+                    "Personalized results based on user input",
+                    "Export or save functionality",
+                    "Supporting documentation"
+                ],
+                'estimatedWords': "Support content: 800-1200",
+                'impact': 'high' if priority == 'high' else 'medium'
+            })
+
+        # Generate dynamic SEO suggestions
+        keywords = [word.lower() for word in prompt_text.split() if len(word) > 3]
+        main_keywords = ' '.join(keywords[:3]) if len(keywords) >= 3 else prompt_text.lower()
+
+        seo_suggestions = [
+            {
+                'suggestion': f"Target long-tail keyword: '{prompt_text.lower()}'",
+                'priority': priority
+            },
+            {
+                'suggestion': f"Add FAQ schema markup for '{prompt_text}' and related questions",
+                'priority': 'high'
+            },
+            {
+                'suggestion': f"Create comprehensive pillar page covering '{main_keywords}' topic cluster",
+                'priority': 'high' if priority == 'high' else 'medium'
+            },
+            {
+                'suggestion': f"Optimize meta title and description with '{main_keywords}'",
+                'priority': 'high'
+            },
+            {
+                'suggestion': f"Build internal links from related pages to this content",
+                'priority': 'medium'
+            }
+        ]
+
+        # Add competitor-specific SEO suggestions
+        if len(competitor_mentions_list) > 0:
+            top_competitor = competitor_mentions_list[0]['brand']
+            seo_suggestions.append({
+                'suggestion': f"Analyze and improve upon {top_competitor}'s content approach",
+                'priority': 'medium'
+            })
+
+        # Generate dynamic action plan based on priority
+        if priority == 'high':
+            action_plan = [
+                {'step': 'Conduct comprehensive research and competitive analysis', 'timeline': 'Week 1', 'owner': 'Content Team'},
+                {'step': 'Interview subject matter experts and gather insights', 'timeline': 'Week 1-2', 'owner': 'Content Team'},
+                {'step': 'Create detailed content outline and get stakeholder approval', 'timeline': 'Week 2', 'owner': 'Content Team'},
+                {'step': 'Write comprehensive content with data and examples', 'timeline': 'Week 3-4', 'owner': 'Content Team'},
+                {'step': 'Create supporting visuals, infographics, and video', 'timeline': 'Week 4-5', 'owner': 'Design/Video Team'},
+                {'step': 'SEO optimization, schema markup, and technical review', 'timeline': 'Week 5', 'owner': 'SEO Team'},
+                {'step': 'Publish content and execute promotion strategy', 'timeline': 'Week 6', 'owner': 'Marketing Team'},
+                {'step': 'Monitor performance and iterate based on data', 'timeline': 'Week 7+', 'owner': 'Analytics Team'}
+            ]
+            estimated_timeline = '6-7 weeks'
+        elif priority == 'medium':
+            action_plan = [
+                {'step': 'Research topic and analyze competitor content', 'timeline': 'Week 1', 'owner': 'Content Team'},
+                {'step': 'Create content outline and gather resources', 'timeline': 'Week 1-2', 'owner': 'Content Team'},
+                {'step': 'Write and refine content', 'timeline': 'Week 2-3', 'owner': 'Content Team'},
+                {'step': 'Create supporting visuals', 'timeline': 'Week 3-4', 'owner': 'Design Team'},
+                {'step': 'SEO optimization and review', 'timeline': 'Week 4', 'owner': 'SEO Team'},
+                {'step': 'Publish and promote content', 'timeline': 'Week 5', 'owner': 'Marketing Team'}
+            ]
+            estimated_timeline = '4-5 weeks'
+        else:
+            action_plan = [
+                {'step': 'Quick research and content outline', 'timeline': 'Week 1', 'owner': 'Content Team'},
+                {'step': 'Write content draft', 'timeline': 'Week 1-2', 'owner': 'Content Team'},
+                {'step': 'Review and optimize for SEO', 'timeline': 'Week 2', 'owner': 'SEO Team'},
+                {'step': 'Publish content', 'timeline': 'Week 3', 'owner': 'Marketing Team'}
+            ]
+            estimated_timeline = '2-3 weeks'
+
+        # Generate dynamic opportunity analysis text
+        coverage_gap = 100 - coverage
+        estimated_mentions_increase = round((coverage_gap / 100) * total_mentions * 0.6)
+        estimated_visibility_increase = round(coverage_gap * 0.2)
+
+        opportunity_analysis = {
+            'gapOpportunity': f"With {round(coverage_gap, 1)}% uncovered mentions ({round(coverage_gap * total_mentions / 100)} mentions), there's significant opportunity to capture market share from competitors by creating authoritative content.",
+            'estimatedImpact': f"Addressing this gap could increase your monthly mentions by {estimated_mentions_increase}-{estimated_mentions_increase + 10} and improve visibility score by {estimated_visibility_increase}-{estimated_visibility_increase + 5} percentage points.",
+            'urgency': 'High urgency - competitors dominating this space' if priority == 'high' else 'Moderate opportunity for growth' if priority == 'medium' else 'Low-hanging fruit opportunity'
+        }
+
         return Response({
             'id': prompt_id,
             'question': prompt_text,
             'frequency': total_mentions,
             'currentCoverage': round(coverage, 1),
+            'priority': priority,
             'yourMentions': your_total_mentions,
             'competitorMentions': competitor_mentions_list,
             'competitorBreakdown': competitor_mentions_list,  # Alias for frontend compatibility
             'platforms': list(platforms_set),
             'relatedQuestions': related_questions,
             'estimatedImpact': f"+{round((100 - coverage) * 0.4, 0)}%",
-            'trendData': trend_data  # Historical trend data
+            'trendData': trend_data,
+            'contentRecommendations': content_recommendations,
+            'seoSuggestions': seo_suggestions,
+            'actionPlan': action_plan,
+            'estimatedTimeline': estimated_timeline,
+            'opportunityAnalysis': opportunity_analysis
         })
 
     except Exception as e:

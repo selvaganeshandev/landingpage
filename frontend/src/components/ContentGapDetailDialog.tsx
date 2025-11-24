@@ -108,53 +108,12 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap, domainId }: Co
   const trendData = detailData?.trendData || [];
   const hasTrendData = trendData.length > 0;
 
-  // Mock data for features not yet in API
-  const contentRecommendations = [
-    {
-      type: "Comprehensive Guide",
-      title: `Complete Guide: ${gap.question}`,
-      sections: [
-        "In-depth analysis and explanation",
-        "Real-world examples and case studies",
-        "Step-by-step implementation guide",
-        "Common pitfalls and how to avoid them",
-        "Expert tips and best practices",
-        "Frequently asked questions"
-      ],
-      estimatedWords: "2500-3000",
-      impact: gap.priority === "high" ? "high" : "medium"
-    },
-    {
-      type: "Video Content",
-      title: `Video Guide: ${gap.question}`,
-      sections: [
-        "Visual demonstration",
-        "Expert interviews",
-        "Side-by-side comparisons",
-        "Real user testimonials",
-        "Q&A segment"
-      ],
-      estimatedWords: "Script: 1200-1500",
-      impact: gap.priority === "high" ? "high" : "medium"
-    }
-  ];
-
-  const seoSuggestions = [
-    { suggestion: `Target long-tail keyword variations of "${gap.question}"`, priority: gap.priority },
-    { suggestion: "Add FAQ schema markup for related questions", priority: "high" },
-    { suggestion: "Create comprehensive pillar page covering the topic", priority: gap.priority === "high" ? "high" : "medium" },
-    { suggestion: "Optimize images with relevant alt text", priority: "medium" },
-    { suggestion: "Build internal links from related content", priority: "low" },
-  ];
-
-  const actionPlan = [
-    { step: "Research and outline content", timeline: "Week 1", owner: "Content Team" },
-    { step: "Interview subject matter experts", timeline: "Week 1-2", owner: "Content Team" },
-    { step: "Write and design content", timeline: "Week 2-3", owner: "Content Team" },
-    { step: "Create supporting visuals/video", timeline: "Week 3-4", owner: "Design/Video Team" },
-    { step: "SEO optimization and review", timeline: "Week 4", owner: "SEO Team" },
-    { step: "Publish and promote content", timeline: "Week 5", owner: "Marketing Team" },
-  ];
+  // Dynamic data from API
+  const contentRecommendations = detailData?.contentRecommendations || [];
+  const seoSuggestions = detailData?.seoSuggestions || [];
+  const actionPlan = detailData?.actionPlan || [];
+  const estimatedTimeline = detailData?.estimatedTimeline || '';
+  const opportunityAnalysis = detailData?.opportunityAnalysis || null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -343,17 +302,23 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap, domainId }: Co
                   <div className="p-4 rounded-lg bg-warning/10 border border-warning/20">
                     <p className="font-medium text-warning mb-2">Gap Opportunity</p>
                     <p className="text-sm text-muted-foreground">
-                      With {100 - gap.currentCoverage}% uncovered mentions, there's significant opportunity 
-                      to capture market share from competitors by creating authoritative content.
+                      {opportunityAnalysis?.gapOpportunity || `With ${100 - gap.currentCoverage}% uncovered mentions, there's significant opportunity to capture market share from competitors by creating authoritative content.`}
                     </p>
                   </div>
                   <div className="p-4 rounded-lg bg-success/10 border border-success/20">
                     <p className="font-medium text-success mb-2">Estimated Impact</p>
                     <p className="text-sm text-muted-foreground">
-                      Addressing this gap could increase your monthly mentions by 35-45 and improve 
-                      visibility score by 15-20 percentage points.
+                      {opportunityAnalysis?.estimatedImpact || "Addressing this gap could increase your monthly mentions and improve visibility score."}
                     </p>
                   </div>
+                  {opportunityAnalysis?.urgency && (
+                    <div className="p-4 rounded-lg bg-primary/10 border border-primary/20">
+                      <p className="font-medium text-primary mb-2">Priority Assessment</p>
+                      <p className="text-sm text-muted-foreground">
+                        {opportunityAnalysis.urgency}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </Card>
             </TabsContent>
@@ -392,114 +357,151 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap, domainId }: Co
 
             {/* Content Recommendations */}
             <TabsContent value="content" className="space-y-4">
-              {contentRecommendations.map((rec, idx) => (
-                <Card key={idx} className="p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <Badge variant="outline" className="mb-2">{rec.type}</Badge>
-                      <h4 className="font-semibold text-lg">{rec.title}</h4>
+              {contentRecommendations.length > 0 ? (
+                contentRecommendations.map((rec: any, idx: number) => (
+                  <Card key={idx} className="p-6">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <Badge variant="outline" className="mb-2">{rec.type}</Badge>
+                        <h4 className="font-semibold text-lg">{rec.title}</h4>
+                      </div>
+                      <Badge className={rec.impact === "high" ? "bg-success" : ""}>{rec.impact} impact</Badge>
                     </div>
-                    <Badge className={rec.impact === "high" ? "bg-success" : ""}>{rec.impact} impact</Badge>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground mb-2">Recommended Sections:</p>
-                      <ul className="space-y-1">
-                        {rec.sections.map((section, i) => (
-                          <li key={i} className="text-sm flex items-start gap-2">
-                            <CheckCircle2 className="h-4 w-4 text-success mt-0.5 flex-shrink-0" />
-                            <span>{section}</span>
-                          </li>
-                        ))}
-                      </ul>
+
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground mb-2">Recommended Sections:</p>
+                        <ul className="space-y-1">
+                          {rec.sections.map((section: string, i: number) => (
+                            <li key={i} className="text-sm flex items-start gap-2">
+                              <CheckCircle2 className="h-4 w-4 text-success mt-0.5 flex-shrink-0" />
+                              <span>{section}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="pt-3 border-t border-border">
+                        <p className="text-xs text-muted-foreground">
+                          <strong>Estimated Length:</strong> {rec.estimatedWords} words
+                        </p>
+                      </div>
                     </div>
-                    <div className="pt-3 border-t border-border">
-                      <p className="text-xs text-muted-foreground">
-                        <strong>Estimated Length:</strong> {rec.estimatedWords} words
-                      </p>
-                    </div>
+                  </Card>
+                ))
+              ) : (
+                <Card className="p-6 border border-border">
+                  <div className="flex flex-col items-center justify-center py-12 space-y-3">
+                    <Lightbulb className="h-12 w-12 text-muted-foreground opacity-50" />
+                    <p className="text-sm text-muted-foreground text-center">
+                      No content recommendations available
+                    </p>
                   </div>
                 </Card>
-              ))}
+              )}
             </TabsContent>
 
             {/* SEO Suggestions */}
             <TabsContent value="seo" className="space-y-4">
-              <Card className="p-6 border border-border">
-                <h4 className="font-semibold mb-4">SEO Optimization Checklist</h4>
-                <div className="space-y-3">
-                  {seoSuggestions.map((sug, idx) => (
-                    <div key={idx} className="p-4 rounded-lg border border-border">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-start gap-3 flex-1">
-                          <CheckCircle2 className="h-5 w-5 text-muted-foreground mt-0.5" />
-                          <p className="text-sm">{sug.suggestion}</p>
+              {seoSuggestions.length > 0 ? (
+                <Card className="p-6 border border-border">
+                  <h4 className="font-semibold mb-4">SEO Optimization Checklist</h4>
+                  <div className="space-y-3">
+                    {seoSuggestions.map((sug: any, idx: number) => (
+                      <div key={idx} className="p-4 rounded-lg border border-border">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-start gap-3 flex-1">
+                            <CheckCircle2 className="h-5 w-5 text-muted-foreground mt-0.5" />
+                            <p className="text-sm">{sug.suggestion}</p>
+                          </div>
+                          <Badge
+                            variant={sug.priority === "high" ? "destructive" : "secondary"}
+                            className="ml-4"
+                          >
+                            {sug.priority}
+                          </Badge>
                         </div>
-                        <Badge 
-                          variant={sug.priority === "high" ? "destructive" : "secondary"}
-                          className="ml-4"
-                        >
-                          {sug.priority}
-                        </Badge>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
+                    ))}
+                  </div>
+                </Card>
+              ) : (
+                <Card className="p-6 border border-border">
+                  <div className="flex flex-col items-center justify-center py-12 space-y-3">
+                    <Search className="h-12 w-12 text-muted-foreground opacity-50" />
+                    <p className="text-sm text-muted-foreground text-center">
+                      No SEO suggestions available
+                    </p>
+                  </div>
+                </Card>
+              )}
             </TabsContent>
 
             {/* Action Plan */}
             <TabsContent value="action" className="space-y-4">
-              <Card className="p-6 border border-border">
-                <h4 className="font-semibold mb-4">7-Week Implementation Plan</h4>
-                <div className="space-y-3">
-                  {actionPlan.map((action, idx) => (
-                    <div key={idx} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
-                      <div className="flex items-start gap-4">
-                        <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-bold flex-shrink-0">
-                          {idx + 1}
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-medium mb-1">{action.step}</p>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span>{action.timeline}</span>
-                            <span>•</span>
-                            <span>{action.owner}</span>
+              {actionPlan.length > 0 ? (
+                <>
+                  <Card className="p-6 border border-border">
+                    <h4 className="font-semibold mb-4">
+                      {estimatedTimeline ? `${estimatedTimeline} Implementation Plan` : 'Implementation Plan'}
+                    </h4>
+                    <div className="space-y-3">
+                      {actionPlan.map((action: any, idx: number) => (
+                        <div key={idx} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
+                          <div className="flex items-start gap-4">
+                            <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-bold flex-shrink-0">
+                              {idx + 1}
+                            </div>
+                            <div className="flex-1">
+                              <p className="font-medium mb-1">{action.step}</p>
+                              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                                <span>{action.timeline}</span>
+                                <span>•</span>
+                                <span>{action.owner}</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
+                      ))}
+                    </div>
+                  </Card>
+
+                  <Card className="p-6 bg-gradient-to-br from-success/5 to-success/10 border-success/20">
+                    <div className="flex items-start gap-3">
+                      <Target className="h-6 w-6 text-success flex-shrink-0" />
+                      <div>
+                        <h4 className="font-semibold mb-2 text-success">Expected Outcomes</h4>
+                        <ul className="space-y-2 text-sm">
+                          <li className="flex items-start gap-2">
+                            <span className="text-success">•</span>
+                            <span>Increase coverage from {gap.currentCoverage}% to 75%+</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <span className="text-success">•</span>
+                            <span>Capture significant share of {100 - gap.currentCoverage}% uncovered mentions</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <span className="text-success">•</span>
+                            <span>Establish authority on '{gap.question}' topic</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <span className="text-success">•</span>
+                            <span>Improve overall brand visibility and search rankings</span>
+                          </li>
+                        </ul>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </Card>
-
-              <Card className="p-6 bg-gradient-to-br from-success/5 to-success/10 border-success/20">
-                <div className="flex items-start gap-3">
-                  <Target className="h-6 w-6 text-success flex-shrink-0" />
-                  <div>
-                    <h4 className="font-semibold mb-2 text-success">Expected Outcomes</h4>
-                    <ul className="space-y-2 text-sm">
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span>Increase coverage from {gap.currentCoverage}% to 75%+ within 3 months</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span>Capture additional 40-50 monthly mentions</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span>Establish authority on muscle building + plant protein topic</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span>Improve overall brand visibility score by 12-15%</span>
-                      </li>
-                    </ul>
+                  </Card>
+                </>
+              ) : (
+                <Card className="p-6 border border-border">
+                  <div className="flex flex-col items-center justify-center py-12 space-y-3">
+                    <Target className="h-12 w-12 text-muted-foreground opacity-50" />
+                    <p className="text-sm text-muted-foreground text-center">
+                      No action plan available
+                    </p>
                   </div>
-                </div>
-              </Card>
+                </Card>
+              )}
             </TabsContent>
           </Tabs>
         </div>
