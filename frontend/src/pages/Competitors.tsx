@@ -588,16 +588,22 @@ const Competitors = () => {
         setAnswerGapData([]);
         return;
       }
-      // Don't set loading state when just filtering by LLM - keep existing data visible
-      // Only set loading if domain changed or initial load
+      // Clear data immediately when platform filter changes to show empty state faster
       if (loadedDomainId !== domainId || !hasLoadedData) {
         setHasLoadedData(false);
         setIsPageLoading(true);
       } else {
-        // Keep existing data visible while filtering - just show analysis loading indicator
+        // When just filtering by platform, clear data immediately so empty state shows instantly
         setIsLoadingAnalysis(true);
-        // Keep hasLoadedData true so panel doesn't disappear
-        setHasLoadedData(true);
+        setCompetitors([]);
+        setTopBrands([]);
+        setPromptRows([]);
+        setCompetitiveMetrics([]);
+        setCompetitiveInsights([]);
+        setAnswerGapData([]);
+        setHeatmap([]);
+        setHeatmapPlatforms([]);
+        setSovSeries([]);
       }
 
       const startTime = performance.now();
@@ -610,7 +616,11 @@ const Competitors = () => {
           apiClient.getEngineCompetitors({ domain_id: domainId, platform: platformParam }, { signal: controller.signal }),
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }, { signal: controller.signal }),
           apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }, { signal: controller.signal }),
-          apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId, page_size: '1000' }, { signal: controller.signal }),
+          apiClient.getCompetitorPromptAnalyticsEngine({
+            domain_id: domainId,
+            page_size: '200',  // Optimal: typically 10-20 prompts × 5-10 competitors/platforms
+            platform: platformParam
+          }, { signal: controller.signal }),
           apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
           apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
         ] as any);
@@ -1159,7 +1169,8 @@ const Competitors = () => {
   // Show loading during initial load or when switching domains
   // Keep showing loader until we've loaded data for the current domain
   // BUT if analysis is in progress, show the progress card instead
-  if ((isPageLoading || !hasLoadedData || loadedDomainId !== domainId) && !isAnalysisInProgress) {
+  // ALSO show loader when filtering by platform (isLoadingAnalysis but competitors exist)
+  if ((isPageLoading || !hasLoadedData || loadedDomainId !== domainId || (isLoadingAnalysis && competitors.length === 0)) && !isAnalysisInProgress) {
     return <PageLoader sidebarOpen />;
   }
 
@@ -1352,19 +1363,15 @@ const Competitors = () => {
     c.sentiment === 0
   );
 
-  // Check if filtering by platform returns no data or only zero values
-  const hasNoDataForPlatform = selectedLLM !== 'all' && (
-    (competitors.length === 0 || competitors.every(c => c.mentions === 0 && c.citations === 0)) &&
-    competitiveMetrics.length === 0 &&
-    heatmap.length === 0 &&
-    answerGapData.length === 0
-  );
+  // Empty state logic is now handled at the tab level (Overview, Prompts, Answer Gap)
+  // Each tab checks if data exists for the selected platform and shows appropriate empty state
 
   // Calculate elapsed time for progress card
   const elapsedMinutes = analysisStartTime > 0 ? Math.floor((Date.now() - analysisStartTime) / 60000) : 0;
 
   // Show processing state when competitors exist but have no data yet OR when analysis is in progress
-  if ((allCompetitorsHaveZeroData && !hasNoDataForPlatform) || isAnalysisInProgress) {
+  // Don't show processing state when filtering by specific platform (let tabs show their empty states)
+  if ((allCompetitorsHaveZeroData && selectedLLM === 'all') || isAnalysisInProgress) {
     console.log('📊 [COMPETITOR ANALYSIS] Progress card is now visible - showing processing status');
 
     // Use analysisProgress state for dynamic count
@@ -1450,41 +1457,8 @@ const Competitors = () => {
     );
   }
 
-  // Show empty state when filtering by platform returns no data
-  if (hasNoDataForPlatform) {
-    return (
-      <div className="p-8 space-y-6 bg-background animate-fade-in">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground tracking-tight">Competitors</h1>
-            <p className="text-muted-foreground mt-1">
-              Track and analyze competitor performance across AI platforms
-            </p>
-          </div>
-        </div>
-
-        {/* Empty state for filtered platform with no data */}
-        <div className="flex flex-col items-center justify-center py-32 space-y-6">
-          <div className="w-24 h-24 rounded-full bg-muted/30 flex items-center justify-center mb-4">
-            <Search className="h-12 w-12 text-muted-foreground" />
-          </div>
-          <h3 className="text-2xl font-semibold text-foreground">No Data for {selectedLLM !== 'all' ? selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1) : 'Competitors'}</h3>
-          <p className="text-sm text-muted-foreground max-w-md text-center">
-            There is no competitor data available for the selected LLM platform. This could mean competitors haven't been analyzed on this platform yet, or no mentions were found.
-          </p>
-          <div className="flex gap-3 mt-6">
-            <Button
-              onClick={() => setSelectedLLM('all')}
-              className="gradient-primary"
-              size="lg"
-            >
-              Clear Filter & View All LLMs
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Note: Empty states for platform filtering are now handled at the tab level, not page level
+  // This allows users to switch between tabs and see per-tab empty states with clear filter buttons
 
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
@@ -1540,7 +1514,7 @@ const Competitors = () => {
 
             {/* Competitor Cards - Show top 5 competitors, 3 per row, exclude "You" */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {realCompetitors.length > 0 ? (
+              {realCompetitors.length > 0 && (selectedLLM === 'all' || !realCompetitors.every(c => c.mentions === 0 && c.citations === 0)) ? (
                 realCompetitors.slice(0, 5).map((competitor, idx) => (
                 <Card
                   key={competitor.id}
@@ -1614,27 +1588,50 @@ const Competitors = () => {
                 ))
               ) : (
                 <div className="col-span-full flex flex-col items-center justify-center py-32 space-y-4">
-                  <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
-                    <Target className="h-10 w-10 text-muted-foreground" />
-                  </div>
-                  <h3 className="text-xl font-semibold text-foreground">No Competitors Added Yet</h3>
-                  <p className="text-sm text-muted-foreground max-w-md text-center">
-                    Track your competitors to see how your brand performs against them in AI search results.
-                  </p>
-                  <Button
-                    onClick={() => setAddCompetitorDialogOpen(true)}
-                    className="mt-4 gradient-primary"
-                    size="lg"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Your Competitor
-                  </Button>
+                  {selectedLLM !== 'all' && realCompetitors.length > 0 ? (
+                    <>
+                      <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                        <Search className="h-10 w-10 text-muted-foreground" />
+                      </div>
+                      <h3 className="text-xl font-semibold text-foreground">
+                        No Data for {selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1)}
+                      </h3>
+                      <p className="text-sm text-muted-foreground max-w-md text-center">
+                        There is no competitor data available for the selected LLM platform. This could mean competitors haven't been analyzed on this platform yet, or no mentions were found.
+                      </p>
+                      <Button
+                        onClick={() => setSelectedLLM('all')}
+                        className="mt-4 gradient-primary"
+                        size="lg"
+                      >
+                        Clear Filter & View All LLMs
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                        <Target className="h-10 w-10 text-muted-foreground" />
+                      </div>
+                      <h3 className="text-xl font-semibold text-foreground">No Competitors Added Yet</h3>
+                      <p className="text-sm text-muted-foreground max-w-md text-center">
+                        Track your competitors to see how your brand performs against them in AI search results.
+                      </p>
+                      <Button
+                        onClick={() => setAddCompetitorDialogOpen(true)}
+                        className="mt-4 gradient-primary"
+                        size="lg"
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Your Competitor
+                      </Button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* Show rest of content only if there are real competitors */}
-            {realCompetitors.length > 0 && (
+            {/* Show rest of content only if there are real competitors and data for the selected platform */}
+            {realCompetitors.length > 0 && (selectedLLM === 'all' || !realCompetitors.every(c => c.mentions === 0 && c.citations === 0)) && (
               <>
             {/* Brand Visibility Over Time */}
             <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
@@ -1978,11 +1975,34 @@ const Competitors = () => {
                       )}
                     </>
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-8 space-y-2">
-                      <p className="text-sm text-muted-foreground text-center">
-                        No prompt performance data for the current filters.
-                      </p>
-                      <p className="text-xs text-muted-foreground">Check console for API response details.</p>
+                    <div className="flex flex-col items-center justify-center py-16 space-y-4">
+                      {selectedLLM !== 'all' ? (
+                        <>
+                          <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                            <Search className="h-10 w-10 text-muted-foreground" />
+                          </div>
+                          <h3 className="text-xl font-semibold text-foreground">
+                            No Data for {selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1)}
+                          </h3>
+                          <p className="text-sm text-muted-foreground max-w-md text-center">
+                            There is no prompt data available for the selected LLM platform. This could mean prompts haven't been analyzed on this platform yet, or no mentions were found.
+                          </p>
+                          <Button
+                            onClick={() => setSelectedLLM('all')}
+                            className="mt-4 gradient-primary"
+                            size="lg"
+                          >
+                            Clear Filter & View All LLMs
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-muted-foreground text-center">
+                            No prompt performance data available.
+                          </p>
+                          <p className="text-xs text-muted-foreground">Start analyzing prompts to see data here.</p>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2056,9 +2076,32 @@ const Competitors = () => {
                       </Card>
                     ))
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-8 space-y-2">
-                      <p className="text-sm text-muted-foreground">No answer gaps identified yet.</p>
-                      <p className="text-xs text-muted-foreground">Check console for API response details.</p>
+                    <div className="flex flex-col items-center justify-center py-16 space-y-4">
+                      {selectedLLM !== 'all' ? (
+                        <>
+                          <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                            <Search className="h-10 w-10 text-muted-foreground" />
+                          </div>
+                          <h3 className="text-xl font-semibold text-foreground">
+                            No Data for {selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1)}
+                          </h3>
+                          <p className="text-sm text-muted-foreground max-w-md text-center">
+                            There are no answer gaps identified for the selected LLM platform. This could mean no gaps exist on this platform, or the analysis hasn't been completed yet.
+                          </p>
+                          <Button
+                            onClick={() => setSelectedLLM('all')}
+                            className="mt-4 gradient-primary"
+                            size="lg"
+                          >
+                            Clear Filter & View All LLMs
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-muted-foreground">No answer gaps identified yet.</p>
+                          <p className="text-xs text-muted-foreground">Start analyzing competitors to identify gaps.</p>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>

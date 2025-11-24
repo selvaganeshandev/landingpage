@@ -339,12 +339,16 @@ class CompetitorPromptAnalyticsViewSet(viewsets.ReadOnlyModelViewSet):
         domain_id = self.request.query_params.get('domain_id')
         competitor_id = self.request.query_params.get('competitor_id')
         is_mentioned = self.request.query_params.get('is_mentioned')
+        platform = self.request.query_params.get('platform')
 
         if domain_id:
             queryset = queryset.filter(competitor__domain_id=domain_id)
 
         if competitor_id:
             queryset = queryset.filter(competitor_id=competitor_id)
+
+        if platform:
+            queryset = queryset.filter(platform__iexact=platform)
 
         # Filter to only mentioned rows (most important for performance!)
         if is_mentioned and is_mentioned.lower() == 'true':
@@ -364,6 +368,7 @@ class CompetitorPromptAnalyticsViewSet(viewsets.ReadOnlyModelViewSet):
         domain_id = request.query_params.get('domain_id')
         competitor_id = request.query_params.get('competitor_id')
         is_mentioned = request.query_params.get('is_mentioned')
+        platform = request.query_params.get('platform')
 
         # Get competitor data
         queryset = self.filter_queryset(self.get_queryset())
@@ -384,6 +389,10 @@ class CompetitorPromptAnalyticsViewSet(viewsets.ReadOnlyModelViewSet):
                     prompt__group__domain_id=domain_id,
                     prompt__group__domain__organisation=user.organisation
                 )
+
+            # Apply platform filter if provided
+            if platform:
+                pa_queryset = pa_queryset.filter(platform__iexact=platform)
 
             # Apply is_mentioned filter if provided
             if is_mentioned:
