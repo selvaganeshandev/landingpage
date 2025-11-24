@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { useContentGeneration } from "@/hooks/useContentGeneration";
 import {
   Target,
   Sparkles,
@@ -18,6 +17,7 @@ import {
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { ContentGapDetailDialog } from "@/components/ContentGapDetailDialog";
+import { GenerateContentDialog } from "@/components/GenerateContentDialog";
 import { useDomainStore } from "@/stores/domainStore";
 import { PageLoader } from "@/components/PageLoader";
 import apiClient from "@/services/api";
@@ -38,11 +38,12 @@ const getPriorityColor = (priority: string) => {
 const ContentGaps = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { navigateToContentGeneration } = useContentGeneration();
   const { selectedDomain } = useDomainStore();
 
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [selectedGap, setSelectedGap] = useState<any | null>(null);
+  const [selectedContentForGeneration, setSelectedContentForGeneration] = useState<any | null>(null);
   const [contentGaps, setContentGaps] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -157,22 +158,25 @@ const ContentGaps = () => {
       wordCount = 1200;
     }
 
-    navigateToContentGeneration({
-      topic: gap.question,
-      keywords: keywords,
-      source: "Content Gap Analysis",
+    // Set the content data for the dialog
+    setSelectedContentForGeneration({
+      title: gap.question,
+      type: articleType,
+      targetKeywords: keywords.split(', '),
+      priority: gap.priority,
+      wordCount: wordCount,
       sourceType: "content_gap",
       sourceId: gap.id,
       sourceReference: gap.question,
-      priority: gap.priority as any,
-      articleType: articleType,
-      wordCount: wordCount,
       // Additional context for better generation
       competitorMentions: gap.competitorMentions,
       recommendation: gap.recommendation,
       frequency: gap.frequency,
       platforms: gap.platforms
     });
+
+    // Open the dialog
+    setGenerateDialogOpen(true);
   };
 
   const handleViewDetails = (gap: any) => {
@@ -424,6 +428,13 @@ const ContentGaps = () => {
         onOpenChange={setDetailDialogOpen}
         gap={selectedGap}
         domainId={domainId}
+      />
+
+      {/* Generate Content Dialog */}
+      <GenerateContentDialog
+        open={generateDialogOpen}
+        onOpenChange={setGenerateDialogOpen}
+        existingContent={selectedContentForGeneration}
       />
     </div>
   );
