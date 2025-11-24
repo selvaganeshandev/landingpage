@@ -129,6 +129,22 @@ export const GenerateContentDialog = ({
     }, 1000);
 
     try {
+      // Build source reference with additional context
+      let sourceReference = existingContent?.sourceReference || formData.title;
+      if (existingContent?.recommendation) {
+        sourceReference = `Question: ${existingContent.sourceReference}\n\nContext: ${existingContent.recommendation}`;
+        if (existingContent?.frequency) {
+          sourceReference += `\n\nMention Frequency: ${existingContent.frequency} times across platforms`;
+        }
+        if (existingContent?.competitorMentions && existingContent.competitorMentions.length > 0) {
+          const topCompetitors = existingContent.competitorMentions
+            .slice(0, 3)
+            .map((comp: any) => `${comp.brand} (${comp.share}%)`)
+            .join(', ');
+          sourceReference += `\n\nTop Competitors: ${topCompetitors}`;
+        }
+      }
+
       // Prepare generation request
       const generationData = {
         domain_id: selectedDomain.id,
@@ -143,7 +159,7 @@ export const GenerateContentDialog = ({
         word_count: formData.wordCount,
         source_type: existingContent?.sourceType || 'manual',
         source_id: existingContent?.sourceId,
-        source_reference: existingContent?.sourceReference || formData.title,
+        source_reference: sourceReference,
         priority: existingContent?.priority || 'medium',
         scheduled_date: formData.scheduledDate
       };

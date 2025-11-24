@@ -135,10 +135,19 @@ const ContentCalendar = () => {
           status: "draft",
           priority: params.priority || "medium",
           scheduledDate: new Date(),
-          targetKeywords: params.keywords || [],
+          targetKeywords: typeof params.keywords === 'string' ? params.keywords.split(', ') : (params.keywords || []),
           opportunitySource: params.source || "Manual",
           estimatedImpact: 75,
-          wordCount: 1500
+          wordCount: params.wordCount || 1500,
+          // Pass through source tracking
+          sourceType: params.sourceType,
+          sourceId: params.sourceId,
+          sourceReference: params.sourceReference,
+          // Additional context
+          competitorMentions: params.competitorMentions,
+          recommendation: params.recommendation,
+          frequency: params.frequency,
+          platforms: params.platforms
         });
       }
       setGenerateDialogOpen(true);

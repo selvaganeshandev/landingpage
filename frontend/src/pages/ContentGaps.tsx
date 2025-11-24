@@ -124,12 +124,54 @@ const ContentGaps = () => {
   };
 
   const handleGenerateContentBrief = (gap: any) => {
+    // Extract meaningful keywords from the question (remove common words)
+    const commonWords = ['what', 'how', 'why', 'when', 'where', 'is', 'are', 'the', 'a', 'an', 'to', 'for', 'of', 'in', 'on', 'with'];
+    const keywords = gap.question
+      .toLowerCase()
+      .replace(/[?.,!]/g, '')
+      .split(' ')
+      .filter((word: string) => word.length > 3 && !commonWords.includes(word))
+      .slice(0, 5) // Take top 5 keywords
+      .join(', ');
+
+    // Determine article type based on question
+    let articleType = "guide";
+    const questionLower = gap.question.toLowerCase();
+    if (questionLower.includes('vs') || questionLower.includes('versus') || questionLower.includes('or')) {
+      articleType = "comparison";
+    } else if (questionLower.includes('how to') || questionLower.includes('how do')) {
+      articleType = "guide";
+    } else if (questionLower.match(/best|top \d+|list of/)) {
+      articleType = "listicle";
+    } else if (questionLower.includes('what is') || questionLower.includes('definition')) {
+      articleType = "blog";
+    }
+
+    // Determine word count based on priority and frequency
+    let wordCount = 1500;
+    if (gap.priority === 'high') {
+      wordCount = gap.frequency > 50 ? 2500 : 2000;
+    } else if (gap.priority === 'medium') {
+      wordCount = 1500;
+    } else {
+      wordCount = 1200;
+    }
+
     navigateToContentGeneration({
       topic: gap.question,
-      keywords: gap.question.toLowerCase().split(' '),
-      source: "Content Gap - " + gap.question,
+      keywords: keywords,
+      source: "Content Gap Analysis",
+      sourceType: "content_gap",
+      sourceId: gap.id,
+      sourceReference: gap.question,
       priority: gap.priority as any,
-      articleType: "guide"
+      articleType: articleType,
+      wordCount: wordCount,
+      // Additional context for better generation
+      competitorMentions: gap.competitorMentions,
+      recommendation: gap.recommendation,
+      frequency: gap.frequency,
+      platforms: gap.platforms
     });
   };
 
