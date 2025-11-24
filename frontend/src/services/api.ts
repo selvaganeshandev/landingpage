@@ -988,11 +988,9 @@ export const apiClient = {
   },
 
   // Content Generation (Engine API)
-  generateContent: (data: any) => apiRequest('/engine/core/content/generate/', {
+  generateContent: (data: any) => apiRequest('/api/content/generate/', {
     method: 'POST',
     body: JSON.stringify(data),
-  }, {
-    baseURL: 'engine'
   }),
 
   getGeneratedContents: (params?: { domain_id?: string; status?: string; source_type?: string; page?: number; page_size?: string }, options?: RequestOptions) => {
@@ -1003,26 +1001,18 @@ export const apiClient = {
       ...(params.page ? { page: String(params.page) } : {}),
       ...(params.page_size ? { page_size: params.page_size } : {}),
     }).toString()}` : '';
-    return apiRequest(`/engine/core/content/${queryParams}`, options, {
-      baseURL: 'engine'
-    });
+    return apiRequest(`/api/content/${queryParams}`, options);
   },
 
-  getGeneratedContent: (contentId: number) => apiRequest(`/engine/core/content/${contentId}/`, undefined, {
-    baseURL: 'engine'
-  }),
+  getGeneratedContent: (contentId: number) => apiRequest(`/api/content/${contentId}/`, undefined),
 
-  updateGeneratedContent: (contentId: number, data: any) => apiRequest(`/engine/core/content/${contentId}/update/`, {
+  updateGeneratedContent: (contentId: number, data: any) => apiRequest(`/api/content/${contentId}/update/`, {
     method: 'PATCH',
     body: JSON.stringify(data),
-  }, {
-    baseURL: 'engine'
   }),
 
-  deleteGeneratedContent: (contentId: number) => apiRequest(`/engine/core/content/${contentId}/delete/`, {
+  deleteGeneratedContent: (contentId: number) => apiRequest(`/api/content/${contentId}/delete/`, {
     method: 'DELETE',
-  }, {
-    baseURL: 'engine'
   }),
 };
 
