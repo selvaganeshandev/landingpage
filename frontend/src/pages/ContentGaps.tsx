@@ -11,7 +11,7 @@ import {
   Sparkles,
   Search,
   TrendingUp,
-  FileText,
+  Calendar,
   Lightbulb,
   AlertCircle,
   CheckCircle2
@@ -173,7 +173,7 @@ const ContentGaps = () => {
           </p>
         </div>
         <Button onClick={handleGenerateContentPlan} className="gradient-primary shadow-md shadow-primary/20">
-          <FileText className="h-4 w-4 mr-2" />
+          <Calendar className="h-4 w-4 mr-2" />
           Content Planner
         </Button>
       </div>
