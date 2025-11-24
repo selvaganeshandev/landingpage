@@ -120,10 +120,7 @@ const ContentGaps = () => {
   }, [domainId, currentPage, toast]);
 
   const handleGenerateContentPlan = () => {
-    navigateToContentGeneration({
-      source: "Content Gap Analysis",
-      priority: "high"
-    });
+    navigate('/content-calendar');
   };
 
   const handleGenerateContentBrief = (gap: any) => {
