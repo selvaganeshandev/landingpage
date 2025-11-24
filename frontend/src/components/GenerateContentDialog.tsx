@@ -479,7 +479,7 @@ export const GenerateContentDialog = ({
         {renderStepContent()}
 
         {/* Navigation */}
-        <div className="flex items-center justify-between pt-6 border-t border border-border">
+        <div className="flex items-center justify-between pt-6 border-t border-border">
           <Button
             variant="outline"
             onClick={() => step > 1 ? setStep(step - 1) : onOpenChange(false)}
