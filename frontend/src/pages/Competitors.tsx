@@ -169,6 +169,7 @@ const Competitors = () => {
   const [isAnalysisInProgress, setIsAnalysisInProgress] = useState<boolean>(false);
   const [analysisStartTime, setAnalysisStartTime] = useState<number>(0);
   const [isStarting, setIsStarting] = useState<boolean>(false);
+  const [analysisProgress, setAnalysisProgress] = useState<{ completed: number; total: number }>({ completed: 0, total: 0 });
 
   // Load analysis state from localStorage when domainId changes
   useEffect(() => {
@@ -218,22 +219,28 @@ const Competitors = () => {
         // Check if we have real competitors (not just "You") with data
         const realCompetitors = competitorList.filter((c: any) => !c.is_you);
 
-        // Log current status of competitors
         const competitorStatus = realCompetitors.map((c: any) => ({
           name: c.name,
-          status: c.status,
+          track_status: c.track_status,
           mentions: c.total_mentions || 0,
           citations: c.total_citations || 0
         }));
         console.log('📈 [COMPETITOR ANALYSIS] Current status:', competitorStatus);
 
-        const hasCompetitorsWithData = realCompetitors.some((c: any) =>
-          c.total_mentions > 0 || c.total_citations > 0
-        );
+        // Check if ALL competitors have reached COMP status
+        const allCompetitorsCompleted = realCompetitors.length > 0 && realCompetitors.every((c: any) => c.track_status === 'COMP');
 
-        if (hasCompetitorsWithData) {
+        // Count how many are in each status
+        const statusCounts = realCompetitors.reduce((acc: any, c: any) => {
+          const status = c.track_status || 'UNKNOWN';
+          acc[status] = (acc[status] || 0) + 1;
+          return acc;
+        }, {});
+        console.log('📊 [COMPETITOR ANALYSIS] Status summary:', statusCounts);
+
+        if (allCompetitorsCompleted) {
           const elapsedTime = ((Date.now() - analysisStartTime) / 1000).toFixed(0);
-          console.log(`✅ [COMPETITOR ANALYSIS] Analysis complete! At least one competitor has data. Time elapsed: ${elapsedTime}s`);
+          console.log(`✅ [COMPETITOR ANALYSIS] All ${realCompetitors.length} competitors completed! Time elapsed: ${elapsedTime}s`);
           console.log('🔄 [COMPETITOR ANALYSIS] Reloading page to display results...');
 
           // Analysis complete - clear localStorage and stop polling
@@ -241,12 +248,19 @@ const Competitors = () => {
           localStorage.removeItem(`competitor_analysis_start_${domainId}`);
           setIsAnalysisInProgress(false);
           setAnalysisStartTime(0);
+          setAnalysisProgress({ completed: 0, total: 0 });
 
           // Reload the page data to show the results
           setHasLoadedData(false);
           setIsPageLoading(true);
         } else {
-          console.log('⏳ [COMPETITOR ANALYSIS] Still processing - no competitor data yet');
+          const completedCount = statusCounts['COMP'] || 0;
+          const totalCount = realCompetitors.length;
+
+          // Update progress state for UI display
+          setAnalysisProgress({ completed: completedCount, total: totalCount });
+
+          console.log(`⏳ [COMPETITOR ANALYSIS] Still processing - ${completedCount}/${totalCount} completed. Waiting for all to reach COMP status...`);
         }
       } catch (error) {
         console.error('❌ [COMPETITOR ANALYSIS] Error checking status:', error);
@@ -1200,6 +1214,7 @@ const Competitors = () => {
                     const startTime = Date.now();
                     setIsAnalysisInProgress(true);
                     setAnalysisStartTime(startTime);
+                    setAnalysisProgress({ completed: 0, total: response.created_count || 5 });
                     localStorage.setItem(`competitor_analysis_progress_${domainId}`, 'true');
                     localStorage.setItem(`competitor_analysis_start_${domainId}`, String(startTime));
 
@@ -1279,6 +1294,11 @@ const Competitors = () => {
   // Show processing state when competitors exist but have no data yet OR when analysis is in progress
   if ((allCompetitorsHaveZeroData && !hasNoDataForPlatform) || isAnalysisInProgress) {
     console.log('📊 [COMPETITOR ANALYSIS] Progress card is now visible - showing processing status');
+
+    // Use analysisProgress state for dynamic count
+    const { completed, total } = analysisProgress;
+    const displayTotal = total || competitors.filter(c => !c.isYou).length;
+
     return (
       <div className="p-8 space-y-6 bg-background animate-fade-in">
         <div className="flex items-center justify-between">
@@ -1305,7 +1325,7 @@ const Competitors = () => {
             </div>
             <div className="flex-1 space-y-2">
               <h3 className="text-lg font-semibold">
-                Processing {competitors.length} Competitor{competitors.length !== 1 ? 's' : ''}
+                {total > 0 ? `Processing: Analysed ${completed}/${total} competitors` : `Processing competitors...`}
               </h3>
               <p className="text-sm text-muted-foreground">
                 Competitors have been discovered and are currently being analyzed. Analytics data will appear here once processing is complete.
