@@ -1,9 +1,10 @@
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, renderer_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
+from rest_framework.renderers import JSONRenderer
 from django.shortcuts import get_object_or_404
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.utils import timezone
 from django.db import transaction
 from django.conf import settings
@@ -876,38 +877,93 @@ def competitor_analytics(request, competitor_id):
 @permission_classes([AllowAny])
 def competitor_prompt_analytics_list(request):
     """
-    List competitor-prompt analytics
+    List competitor-prompt analytics, including domain's own mentions
     """
     competitor_id = request.query_params.get('competitor_id')
     domain_id = request.query_params.get('domain_id')
     is_mentioned = request.query_params.get('is_mentioned')
-    page_size = request.query_params.get('page_size', '100')
-    
+    page_size = request.query_params.get('page_size', '500')  # Default to 500 for optimal performance
+
+    # Support pagination with page_size
+    try:
+        limit = min(int(page_size), 2000)  # Max 2000 records for optimal performance
+    except (ValueError, TypeError):
+        limit = 500  # Default limit
+
+    results = []
+
+    # Part 1: Get competitor mentions
     queryset = CompetitorPromptAnalytics.objects.all()
-    
+
     if competitor_id:
         queryset = queryset.filter(competitor_id=competitor_id)
-    
+
     if domain_id:
         queryset = queryset.filter(competitor__domain_id=domain_id)
-    
+
     # Filter by is_mentioned if provided
     if is_mentioned is not None:
         if is_mentioned.lower() == 'true':
             queryset = queryset.filter(is_mentioned=True)
         elif is_mentioned.lower() == 'false':
             queryset = queryset.filter(is_mentioned=False)
-    
+
     queryset = queryset.select_related('competitor', 'prompt').order_by('-tracked_at')
-    
-    # Support pagination with page_size
-    try:
-        limit = min(int(page_size), 1000)  # Max 1000 records
-    except (ValueError, TypeError):
-        limit = 100
-    
-    serializer = CompetitorPromptAnalyticsSerializer(queryset[:limit], many=True)
-    return Response(serializer.data)
+    # Don't limit here - we'll limit after merging with PromptAnalytics and sorting
+    competitor_data = CompetitorPromptAnalyticsSerializer(queryset, many=True).data
+    results.extend(competitor_data)
+
+    # Part 2: Get domain's own mentions (from PromptAnalytics)
+    if domain_id and not competitor_id:
+        from shared_models.models import PromptAnalytics, Domain
+
+        # Get PromptAnalytics for this domain
+        prompt_analytics_qs = PromptAnalytics.objects.filter(
+            prompt__group__domain_id=domain_id
+        ).select_related('prompt', 'prompt__group', 'prompt__group__domain').order_by('-tracked_at')
+
+        # Apply is_mentioned filter if provided
+        if is_mentioned is not None:
+            if is_mentioned.lower() == 'true':
+                prompt_analytics_qs = prompt_analytics_qs.filter(is_mention=True)
+            elif is_mentioned.lower() == 'false':
+                prompt_analytics_qs = prompt_analytics_qs.filter(is_mention=False)
+
+        # Transform PromptAnalytics to match CompetitorPromptAnalytics format
+        # Don't limit here - we'll limit after merging and sorting
+        for pa in prompt_analytics_qs:
+            try:
+                # Map PromptAnalytics fields to CompetitorPromptAnalytics format
+                results.append({
+                'id': pa.id,
+                'competitor': None,  # No competitor - this is the domain's own mention
+                'competitor_name': None,  # Will be handled by frontend as "You"
+                'prompt': pa.prompt.id,
+                'prompt_text': pa.prompt.prompt,
+                'domain_name': pa.prompt.group.domain.name,
+                'track_status': pa.track_status,
+                'track_message': pa.track_message,
+                'tracked_at': pa.tracked_at.isoformat() if pa.tracked_at else None,
+                'is_mentioned': pa.is_mention,
+                'position': float(pa.position) if pa.position else None,
+                'mention_count': pa.total_mentions,
+                'sentiment_category': pa.sentiment_category,
+                'sentiment_score': float(pa.sentiment_score) if pa.sentiment_score else 0.0,
+                'platform': pa.platform,
+                'response_text': '',  # PromptAnalytics doesn't store full response
+                'citation_list': pa.citation_list if pa.citation_list else [],
+                'created_at': pa.created_at.isoformat() if pa.created_at else None,
+                'modified_at': pa.modified_at.isoformat() if pa.modified_at else None,
+                })
+            except Exception as e:
+                # Log error but continue processing other rows
+                pass
+
+    # Sort all results by tracked_at
+    results.sort(key=lambda x: x.get('tracked_at') or '', reverse=True)
+
+    # Use JsonResponse instead of DRF Response to bypass automatic pagination
+    return JsonResponse(results[:limit], safe=False)
 
 
 @api_view(['GET'])

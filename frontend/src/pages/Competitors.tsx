@@ -377,7 +377,7 @@ const Competitors = () => {
 
     // Filter out prompts where no competitor has any mentions (total is 0)
     const promptsWithMentions = Array.from(promptMap.entries()).filter(([_, aggregate]) => aggregate.total > 0);
-    
+
     if (!promptsWithMentions.length) return [];
 
     const sortedBrandNames = Array.from(brandTotals.entries())
@@ -439,25 +439,52 @@ const Competitors = () => {
         // Find winner - only consider brands with mentions > 0
         const brandsWithMentions = Object.entries(aggregate.brandCounts).filter(([_, count]) => count > 0);
         const winnerEntry = brandsWithMentions.sort((a, b) => b[1] - a[1])[0];
-        const winner = winnerEntry ? `${winnerEntry[0]} (${winnerEntry[1]} mentions)` : 'N/A';
+
+        // Add winner's citation count to the winner display
+        let winner = 'N/A';
+        let isYouWinner = false;
+        if (winnerEntry) {
+          const winnerBrand = winnerEntry[0];
+          const winnerMentions = winnerEntry[1];
+          const winnerCitations = aggregate.brandCitationCounts[winnerBrand] || 0;
+
+          // Check if the winner is "You" brand
+          isYouWinner = youBrand && winnerBrand === youBrand.name;
+
+          winner = winnerCitations > 0
+            ? `${winnerBrand} (${winnerMentions} mentions, ${winnerCitations} citations)`
+            : `${winnerBrand} (${winnerMentions} mentions)`;
+        }
 
         const topPlatformEntry = Object.entries(aggregate.platformCounts).sort((a, b) => b[1] - a[1])[0];
         const topPlatform = topPlatformEntry ? `${topPlatformEntry[0]} (${topPlatformEntry[1]} mentions)` : null;
 
-        // Map brands to their colors
-        const brandColors = brandsToDisplay.map((brand) => 
-          competitorColorMap.get(brand) || competitorColors[brandsToDisplay.indexOf(brand) % competitorColors.length]
-        );
+        // Use the actual brands from the aggregate data (not forced from competitors list)
+        // This ensures we display all brands that have data, with correct counts
+        const aggregateBrands = Object.keys(aggregate.brandCounts);
+
+        // Sort brands: "You" brand first, then by mention count
+        const sortedAggregateBrands = aggregateBrands.sort((a, b) => {
+          const aIsYou = youBrand && a === youBrand.name;
+          const bIsYou = youBrand && b === youBrand.name;
+          if (aIsYou && !bIsYou) return -1;
+          if (!aIsYou && bIsYou) return 1;
+          return (aggregate.brandCounts[b] || 0) - (aggregate.brandCounts[a] || 0);
+        });
+
+        // Use a single theme color for all brands instead of multiple colors
+        const brandColors = sortedAggregateBrands.map(() => 'hsl(var(--primary))');
 
         return {
           id: idx + 1,
           prompt: aggregate.prompt,
-          brands: brandsToDisplay,
-          counts: brandsToDisplay.map((brand) => aggregate.brandCounts[brand] || 0),
-          citationCounts: brandsToDisplay.map((brand) => aggregate.brandCitationCounts[brand] || 0),
+          brands: sortedAggregateBrands,
+          counts: sortedAggregateBrands.map((brand) => aggregate.brandCounts[brand] || 0),
+          citationCounts: sortedAggregateBrands.map((brand) => aggregate.brandCitationCounts[brand] || 0),
           colors: brandColors,
           total: aggregate.total,
           winner,
+          isYouWinner,
           topPlatform,
           citationTotal: aggregate.citationTotal,
         };
@@ -908,30 +935,35 @@ const Competitors = () => {
         });
 
         const compPromptRows = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
-        
+
         // Create mapping for "You" brand name before normalizing rows
         const youBrandName = mapped.find((c: any) => c.isYou)?.name || (selectedDomain?.name ? `${selectedDomain.name} (You)` : 'Your Brand');
-        
+
         const normalizedPromptRows = compPromptRows.map((row: any, idx: number) => {
-          // Map competitor name: if competitor is null, it's "You" brand
-          let competitorName = row?.competitor?.name;
+          // The API returns competitor_name directly (not as row.competitor.name)
+          let competitorName = row?.competitor_name;
+
           if (!competitorName) {
-            // This is "You" brand - use the proper name from competitors list
+            // No competitor_name means this is "You" brand
             competitorName = youBrandName;
           } else {
             // Map competitor name to display name from competitors list
-            const competitor = mapped.find((c: any) => c.originalName === competitorName || c.name === competitorName);
+            const competitor = mapped.find((c: any) =>
+              c.originalName === competitorName ||
+              c.name === competitorName ||
+              c.domainName === competitorName
+            );
             competitorName = competitor?.name || competitorName;
           }
           
           return {
             id: row?.id || idx + 1,
             promptId: row?.prompt || row?.prompt_id || idx + 1,
-            promptText: row?.prompt?.prompt || row?.prompt_text || `Prompt #${row?.prompt_id || ''}`,
-            competitorId: row?.competitor?.id || null,
+            promptText: row?.prompt_text || row?.prompt?.prompt || `Prompt #${row?.prompt_id || ''}`,
+            competitorId: row?.competitor || null,
             competitorName: competitorName,
-            mentionCount: row?.mention_count !== null && row?.mention_count !== undefined 
-              ? Number(row.mention_count) 
+            mentionCount: row?.mention_count !== null && row?.mention_count !== undefined
+              ? Number(row.mention_count)
               : (row?.is_mentioned ? 1 : 0),
             platform: row?.platform || 'unknown',
             trackedAt: row?.tracked_at || row?.created_at,
@@ -1886,12 +1918,11 @@ const Competitors = () => {
                                 </>
                               )}
                               <span>•</span>
-                              <Badge variant="secondary" className="text-[11px]">
+                              <Badge
+                                variant={prompt.isYouWinner ? "default" : "destructive"}
+                                className={`text-[11px] ${prompt.isYouWinner ? 'bg-green-500 hover:bg-green-600' : ''}`}
+                              >
                                 Winner: {prompt.winner}
-                              </Badge>
-                              <span>•</span>
-                              <Badge variant="outline" className="text-[11px]">
-                                {prompt.citationTotal} citations
                               </Badge>
                             </div>
                           </div>
@@ -1903,7 +1934,7 @@ const Competitors = () => {
                             const citationCount = (prompt.citationCounts && prompt.citationCounts[idx]) || 0;
                             const brandColor = (prompt.colors && prompt.colors[idx]) || 'hsl(var(--muted))';
                             const percentage = prompt.total > 0 ? (mentionCount / prompt.total) * 100 : 0;
-                            
+
                             return (
                               <div key={brand} className="space-y-2">
                                 <div className="flex items-center justify-between text-sm">
@@ -1918,7 +1949,7 @@ const Competitors = () => {
                                     )}
                                   </div>
                                 </div>
-                                <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
+                                <div className="relative h-2 w-full overflow-hidden rounded-full bg-primary/20">
                                   <div
                                     className="h-full transition-all"
                                     style={{

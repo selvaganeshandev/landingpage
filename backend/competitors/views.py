@@ -354,6 +354,77 @@ class CompetitorPromptAnalyticsViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = queryset.select_related('competitor', 'prompt')
 
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        """
+        Override list to include domain's own mentions from PromptAnalytics
+        """
+        from prompts.models import PromptAnalytics
+
+        domain_id = request.query_params.get('domain_id')
+        competitor_id = request.query_params.get('competitor_id')
+        is_mentioned = request.query_params.get('is_mentioned')
+
+        # Get competitor data
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        results = list(serializer.data)
+
+        # Add domain's own mentions (from PromptAnalytics) if domain_id is specified and no competitor_id filter
+        if domain_id and not competitor_id:
+            user = request.user
+
+            # Filter PromptAnalytics by organization and domain
+            if user.role == 'super_admin':
+                pa_queryset = PromptAnalytics.objects.filter(
+                    prompt__group__domain_id=domain_id
+                )
+            else:
+                pa_queryset = PromptAnalytics.objects.filter(
+                    prompt__group__domain_id=domain_id,
+                    prompt__group__domain__organisation=user.organisation
+                )
+
+            # Apply is_mentioned filter if provided
+            if is_mentioned:
+                if is_mentioned.lower() == 'true':
+                    pa_queryset = pa_queryset.filter(is_mention=True)
+                elif is_mentioned.lower() == 'false':
+                    pa_queryset = pa_queryset.filter(is_mention=False)
+
+            pa_queryset = pa_queryset.select_related('prompt', 'prompt__group', 'prompt__group__domain')
+
+            # Transform PromptAnalytics to match CompetitorPromptAnalytics format
+            for pa in pa_queryset:
+                try:
+                    results.append({
+                        'id': pa.id,
+                        'competitor': None,
+                        'competitor_name': None,  # Frontend will handle as "You"
+                        'prompt': pa.prompt.id,
+                        'prompt_text': pa.prompt.prompt,
+                        'domain_name': pa.prompt.group.domain.name,
+                        'track_status': pa.track_status,
+                        'track_message': pa.track_message,
+                        'tracked_at': pa.tracked_at.isoformat() if pa.tracked_at else None,
+                        'is_mentioned': pa.is_mention,
+                        'position': float(pa.position) if pa.position else None,
+                        'mention_count': pa.total_mentions,
+                        'sentiment_category': pa.sentiment_category,
+                        'sentiment_score': float(pa.sentiment_score) if pa.sentiment_score else 0.0,
+                        'platform': pa.platform,
+                        'response_text': '',
+                        'citation_list': pa.citation_list if pa.citation_list else [],
+                        'created_at': pa.created_at.isoformat() if pa.created_at else None,
+                        'modified_at': pa.modified_at.isoformat() if pa.modified_at else None,
+                    })
+                except Exception:
+                    pass  # Skip rows with errors
+
+        # Sort by tracked_at
+        results.sort(key=lambda x: x.get('tracked_at') or '', reverse=True)
+
+        return Response(results)
     
     @action(detail=False, methods=['get'])
     def by_competitor(self, request):
