@@ -68,16 +68,6 @@ const getPriorityColor = (priority: string) => {
   }
 };
 
-// Mock trend data - will be replaced when backend provides historical data
-const mockTrendData = [
-  { month: "Jun", mentions: 98, coverage: 28 },
-  { month: "Jul", mentions: 105, coverage: 30 },
-  { month: "Aug", mentions: 115, coverage: 32 },
-  { month: "Sep", mentions: 120, coverage: 33 },
-  { month: "Oct", mentions: 122, coverage: 34 },
-  { month: "Nov", mentions: 127, coverage: 35 },
-];
-
 export const ContentGapDetailDialog = ({ open, onOpenChange, gap, domainId }: ContentGapDetailDialogProps) => {
   const { toast } = useToast();
   const [detailData, setDetailData] = useState<any>(null);
@@ -115,6 +105,8 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap, domainId }: Co
   const relatedQuestions = detailData?.relatedQuestions || [];
   const competitorBreakdown = detailData?.competitorBreakdown || gap.competitorMentions;
   const estimatedImpact = detailData?.estimatedImpact || `+${Math.round((100 - gap.currentCoverage) * 0.3)}%`;
+  const trendData = detailData?.trendData || [];
+  const hasTrendData = trendData.length > 0;
 
   // Mock data for features not yet in API
   const contentRecommendations = [
@@ -234,57 +226,70 @@ export const ContentGapDetailDialog = ({ open, onOpenChange, gap, domainId }: Co
 
             {/* Overview */}
             <TabsContent value="overview" className="space-y-4">
-              <div className="grid grid-cols-2 gap-6">
-                <Card className="p-6 border border-border">
-                  <h4 className="font-semibold mb-4">Mention Trend</h4>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={mockTrendData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                      <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "var(--radius)",
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="mentions"
-                        stroke="hsl(var(--primary))"
-                        strokeWidth={3}
-                        name="Monthly Mentions"
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </Card>
+              {hasTrendData ? (
+                <div className="grid grid-cols-2 gap-6">
+                  <Card className="p-6 border border-border">
+                    <h4 className="font-semibold mb-4">Mention Trend</h4>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <LineChart data={trendData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                        <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "hsl(var(--card))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: "var(--radius)",
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="mentions"
+                          stroke="hsl(var(--primary))"
+                          strokeWidth={3}
+                          name="Monthly Mentions"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </Card>
 
+                  <Card className="p-6 border border-border">
+                    <h4 className="font-semibold mb-4">Coverage Trend</h4>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <LineChart data={trendData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                        <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "hsl(var(--card))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: "var(--radius)",
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="coverage"
+                          stroke="hsl(var(--warning))"
+                          strokeWidth={3}
+                          name="Coverage %"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </Card>
+                </div>
+              ) : (
                 <Card className="p-6 border border-border">
-                  <h4 className="font-semibold mb-4">Coverage Trend</h4>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={mockTrendData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                      <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "var(--radius)",
-                        }}
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="coverage" 
-                        stroke="hsl(var(--warning))" 
-                        strokeWidth={3}
-                        name="Coverage %"
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <div className="flex flex-col items-center justify-center py-12 space-y-3">
+                    <TrendingUp className="h-12 w-12 text-muted-foreground opacity-50" />
+                    <p className="text-sm text-muted-foreground text-center">
+                      No historical trend data available yet.
+                      <br />
+                      Trends will appear as more data is collected over time.
+                    </p>
+                  </div>
                 </Card>
-              </div>
+              )}
 
               <Card className="p-6 border border-border">
                 <h4 className="font-semibold mb-4">Platform Distribution</h4>

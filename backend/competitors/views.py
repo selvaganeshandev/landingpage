@@ -1345,6 +1345,57 @@ def content_gap_detail(request, gap_id):
                 if len(related_questions) >= 5:
                     break
 
+        # Generate historical trend data
+        from datetime import datetime, timedelta
+        from django.db.models.functions import TruncMonth
+
+        trend_data = []
+
+        # Get data grouped by month for both your analytics and competitor analytics
+        your_monthly = your_analytics.filter(
+            tracked_at__isnull=False
+        ).annotate(
+            month=TruncMonth('tracked_at')
+        ).values('month').annotate(
+            mentions=models.Sum('total_mentions')
+        ).order_by('month')
+
+        comp_monthly = comp_analytics.filter(
+            tracked_at__isnull=False
+        ).annotate(
+            month=TruncMonth('tracked_at')
+        ).values('month').annotate(
+            mentions=models.Sum('mention_count')
+        ).order_by('month')
+
+        # Combine data by month
+        monthly_data = {}
+        for item in your_monthly:
+            month_key = item['month'].strftime('%b')
+            if month_key not in monthly_data:
+                monthly_data[month_key] = {'month': month_key, 'your_mentions': 0, 'comp_mentions': 0}
+            monthly_data[month_key]['your_mentions'] = item['mentions'] or 0
+
+        for item in comp_monthly:
+            month_key = item['month'].strftime('%b')
+            if month_key not in monthly_data:
+                monthly_data[month_key] = {'month': month_key, 'your_mentions': 0, 'comp_mentions': 0}
+            monthly_data[month_key]['comp_mentions'] = item['mentions'] or 0
+
+        # Calculate coverage for each month
+        for month_key, data in monthly_data.items():
+            total = data['your_mentions'] + data['comp_mentions']
+            coverage_pct = (data['your_mentions'] / total * 100) if total > 0 else 0
+            trend_data.append({
+                'month': month_key,
+                'mentions': total,
+                'coverage': round(coverage_pct, 1)
+            })
+
+        # Sort by month order (chronologically)
+        month_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        trend_data.sort(key=lambda x: month_order.index(x['month']) if x['month'] in month_order else 99)
+
         return Response({
             'id': prompt_id,
             'question': prompt_text,
@@ -1352,9 +1403,11 @@ def content_gap_detail(request, gap_id):
             'currentCoverage': round(coverage, 1),
             'yourMentions': your_total_mentions,
             'competitorMentions': competitor_mentions_list,
+            'competitorBreakdown': competitor_mentions_list,  # Alias for frontend compatibility
             'platforms': list(platforms_set),
             'relatedQuestions': related_questions,
-            'estimatedImpact': f"+{round((100 - coverage) * 0.4, 0)}%"
+            'estimatedImpact': f"+{round((100 - coverage) * 0.4, 0)}%",
+            'trendData': trend_data  # Historical trend data
         })
 
     except Exception as e:
