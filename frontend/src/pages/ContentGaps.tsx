@@ -14,12 +14,12 @@ import {
   FileText,
   Lightbulb,
   AlertCircle,
-  CheckCircle2,
-  Loader2
+  CheckCircle2
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { ContentGapDetailDialog } from "@/components/ContentGapDetailDialog";
 import { useDomainStore } from "@/stores/domainStore";
+import { PageLoader } from "@/components/PageLoader";
 import apiClient from "@/services/api";
 
 const getPriorityColor = (priority: string) => {
@@ -122,14 +122,7 @@ const ContentGaps = () => {
   }
 
   if (isLoading) {
-    return (
-      <div className="p-8 space-y-8 bg-background animate-fade-in">
-        <div className="flex flex-col items-center justify-center py-32 space-y-4">
-          <Loader2 className="h-16 w-16 text-primary animate-spin" />
-          <p className="text-muted-foreground">Loading content gap analysis...</p>
-        </div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   return (
