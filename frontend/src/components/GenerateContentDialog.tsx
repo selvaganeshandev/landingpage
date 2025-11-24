@@ -210,26 +210,20 @@ export const GenerateContentDialog = ({
                 return (
                   <Card
                     key={type.id}
-                    className={`p-5 cursor-pointer transition-all hover:shadow-md ${
+                    className={`p-3 cursor-pointer transition-all hover:shadow-md ${
                       isSelected ? 'ring-2 ring-primary' : ''
                     }`}
                     onClick={() => setFormData({ ...formData, articleType: type.id })}
                   >
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 rounded-xl gradient-primary flex items-center justify-center flex-shrink-0">
-                        <Icon className="h-6 w-6 text-white" />
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg gradient-primary flex items-center justify-center flex-shrink-0">
+                        <Icon className="h-5 w-5 text-white" />
                       </div>
                       <div className="flex-1">
-                        <h4 className="font-semibold mb-1">{type.title}</h4>
-                        <p className="text-sm text-muted-foreground mb-3">
+                        <h4 className="font-semibold text-sm mb-0.5">{type.title}</h4>
+                        <p className="text-xs text-muted-foreground">
                           {type.description}
                         </p>
-                        <div className="space-y-1">
-                          <p className="text-xs font-medium text-muted-foreground">EXAMPLES:</p>
-                          {type.examples.map((ex, idx) => (
-                            <p key={idx} className="text-xs text-muted-foreground">• {ex}</p>
-                          ))}
-                        </div>
                       </div>
                     </div>
                   </Card>
