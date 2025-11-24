@@ -152,6 +152,9 @@ const Competitors = () => {
   const [topBrands, setTopBrands] = useState<any[]>([]);
   const [promptRows, setPromptRows] = useState<any[]>([]);
   const [promptCompetitorFilter, setPromptCompetitorFilter] = useState<string>("all");
+  const [promptsCurrentPage, setPromptsCurrentPage] = useState(1);
+  const [promptsTotalPages, setPromptsTotalPages] = useState(0);
+  const [promptsTotalCount, setPromptsTotalCount] = useState(0);
   const [competitiveMetrics, setCompetitiveMetrics] = useState<any[]>([]);
   const [competitiveInsights, setCompetitiveInsights] = useState<any[]>([]);
   const [answerGapData, setAnswerGapData] = useState<any[]>([]);
@@ -160,7 +163,6 @@ const Competitors = () => {
   const [hasLoadedData, setHasLoadedData] = useState(false);
   const [disabledBrands, setDisabledBrands] = useState<string[]>([]);
   const [strengthDisabledBrands, setStrengthDisabledBrands] = useState<string[]>([]);
-  const [promptsDisplayLimit, setPromptsDisplayLimit] = useState<number>(10);
   const loadAbortRef = useRef<AbortController | null>(null);
   const domainProcessingStatus = selectedDomain?.processing_status || null;
   const isDomainProcessing = Boolean(selectedDomain && domainProcessingStatus && domainProcessingStatus !== 'COMP');
@@ -604,6 +606,8 @@ const Competitors = () => {
         setHeatmap([]);
         setHeatmapPlatforms([]);
         setSovSeries([]);
+        // Reset pagination when filtering
+        setPromptsCurrentPage(1);
       }
 
       const startTime = performance.now();
@@ -612,18 +616,15 @@ const Competitors = () => {
         // Load main competitor data first (in parallel)
         const batchStartTime = performance.now();
         const platformParam = selectedLLM !== 'all' ? selectedLLM : undefined;
-        const [list, latest, byDomain, compPromptAnalytics, snapshotHistory, heatmapResponse] = await Promise.all([
+        const [list, latest, byDomain, snapshotHistory, heatmapResponse] = await Promise.all([
           apiClient.getEngineCompetitors({ domain_id: domainId, platform: platformParam }, { signal: controller.signal }),
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }, { signal: controller.signal }),
           apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }, { signal: controller.signal }),
-          apiClient.getCompetitorPromptAnalyticsEngine({
-            domain_id: domainId,
-            page_size: '200',  // Optimal: typically 10-20 prompts × 5-10 competitors/platforms
-            platform: platformParam
-          }, { signal: controller.signal }),
           apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
           apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
         ] as any);
+
+        // Prompts are now loaded separately by the pagination useEffect
 
         // Load competitive analysis APIs IN PARALLEL with better error handling
         setIsLoadingAnalysis(true);
@@ -944,45 +945,7 @@ const Competitors = () => {
           brandNameMap.set(c.domainName || c.name, c.name);
         });
 
-        const compPromptRows = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
-
-        // Create mapping for "You" brand name before normalizing rows
-        const youBrandName = mapped.find((c: any) => c.isYou)?.name || (selectedDomain?.name ? `${selectedDomain.name} (You)` : 'Your Brand');
-
-        const normalizedPromptRows = compPromptRows.map((row: any, idx: number) => {
-          // The API returns competitor_name directly (not as row.competitor.name)
-          let competitorName = row?.competitor_name;
-
-          if (!competitorName) {
-            // No competitor_name means this is "You" brand
-            competitorName = youBrandName;
-          } else {
-            // Map competitor name to display name from competitors list
-            const competitor = mapped.find((c: any) =>
-              c.originalName === competitorName ||
-              c.name === competitorName ||
-              c.domainName === competitorName
-            );
-            competitorName = competitor?.name || competitorName;
-          }
-          
-          return {
-            id: row?.id || idx + 1,
-            promptId: row?.prompt || row?.prompt_id || idx + 1,
-            promptText: row?.prompt_text || row?.prompt?.prompt || `Prompt #${row?.prompt_id || ''}`,
-            competitorId: row?.competitor || null,
-            competitorName: competitorName,
-            mentionCount: row?.mention_count !== null && row?.mention_count !== undefined
-              ? Number(row.mention_count)
-              : (row?.is_mentioned ? 1 : 0),
-            platform: row?.platform || 'unknown',
-            trackedAt: row?.tracked_at || row?.created_at,
-            sentiment: row?.sentiment_category || 'neutral',
-            citationCount: Array.isArray(row?.citation_list) ? row.citation_list.length : Number(row?.total_citations || 0),
-          };
-        });
-
-        setPromptRows(normalizedPromptRows);
+        // Prompts are now loaded by separate pagination useEffect
 
         // Set competitive strength analysis data - ALWAYS use API response (even if empty)
         if (strengthAnalysis !== undefined && strengthAnalysis !== null) {
@@ -1060,6 +1023,96 @@ const Competitors = () => {
       controller.abort();
     };
   }, [domainId, timePeriod, selectedLLM, promptCompetitorFilter, domainProcessingStatus, toast, isAnalysisInProgress]);
+
+  // Separate useEffect for prompt pagination - only reload prompts when page changes
+  useEffect(() => {
+    const controller = new AbortController();
+    let didAbort = false;
+
+    const loadPrompts = async () => {
+      if (!domainId || !hasLoadedData) return; // Only run if initial data is loaded
+
+      try {
+        const platformParam = selectedLLM !== 'all' ? selectedLLM : undefined;
+        const compPromptAnalytics = await apiClient.getCompetitorPromptAnalyticsEngine({
+          domain_id: domainId,
+          page_size: '20',
+          page: promptsCurrentPage,
+          platform: platformParam
+        }, { signal: controller.signal });
+
+        if (didAbort || controller.signal.aborted) return;
+
+        // Handle new grouped response structure
+        // Each result is a prompt with nested analytics array
+        const promptGroups = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
+        const paginationInfo = !Array.isArray(compPromptAnalytics) ? compPromptAnalytics : null;
+
+        // Store pagination info
+        if (paginationInfo) {
+          setPromptsTotalPages(paginationInfo.total_pages || 0);
+          setPromptsTotalCount(paginationInfo.count || 0);
+        }
+
+        // Get current competitors for name mapping
+        const youBrandName = competitors.find((c: any) => c.isYou)?.name || (selectedDomain?.name ? `${selectedDomain.name} (You)` : 'Your Brand');
+
+        // Flatten grouped structure: each prompt has multiple analytics (one per competitor)
+        // Transform to flat array of rows for existing UI logic
+        const normalizedPromptRows: any[] = [];
+
+        promptGroups.forEach((promptGroup: any) => {
+          const promptId = promptGroup.prompt_id;
+          const promptText = promptGroup.prompt_text;
+
+          // Each analytics entry in the group becomes a separate row
+          promptGroup.analytics.forEach((analytics: any) => {
+            let competitorName = analytics.competitor_name;
+
+            if (!competitorName) {
+              competitorName = youBrandName;
+            } else {
+              const competitor = competitors.find((c: any) =>
+                c.originalName === competitorName ||
+                c.name === competitorName ||
+                c.domainName === competitorName
+              );
+              competitorName = competitor?.name || competitorName;
+            }
+
+            normalizedPromptRows.push({
+              id: analytics.id,
+              promptId: promptId,
+              promptText: promptText,
+              competitorId: analytics.competitor_id,
+              competitorName: competitorName,
+              mentionCount: analytics.mention_count !== null && analytics.mention_count !== undefined
+                ? Number(analytics.mention_count)
+                : (analytics.is_mentioned ? 1 : 0),
+              platform: analytics.platform || 'unknown',
+              trackedAt: analytics.tracked_at,
+              sentiment: analytics.sentiment_category || 'neutral',
+              citationCount: Array.isArray(analytics.citation_list) ? analytics.citation_list.length : 0,
+            });
+          });
+        });
+
+        setPromptRows(normalizedPromptRows);
+      } catch (e: any) {
+        if (controller.signal.aborted || didAbort || e?.name === 'AbortError') {
+          return;
+        }
+        console.error('Failed to load prompts page:', e);
+      }
+    };
+
+    void loadPrompts();
+
+    return () => {
+      didAbort = true;
+      controller.abort();
+    };
+  }, [promptsCurrentPage, domainId, hasLoadedData, selectedLLM, competitors, selectedDomain]);
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
@@ -1897,7 +1950,7 @@ const Competitors = () => {
                 <div className="space-y-4">
                   {promptCards.length > 0 ? (
                     <>
-                      {promptCards.slice(0, promptsDisplayLimit).map((prompt: any) => (
+                      {promptCards.map((prompt: any) => (
                     <Card key={prompt.id} className="p-5 transition-all duration-300 border border-border hover:border-primary">
                       <div className="space-y-4">
                         <div className="flex items-start justify-between">
@@ -1962,15 +2015,72 @@ const Competitors = () => {
                       </div>
                     </Card>
                       ))}
-                      {promptCards.length > promptsDisplayLimit && (
-                        <div className="flex justify-center pt-4">
-                          <Button 
-                            variant="outline" 
-                            onClick={() => setPromptsDisplayLimit(prev => prev + 10)}
-                            className="w-full max-w-md"
-                          >
-                            Load More ({promptCards.length - promptsDisplayLimit} remaining)
-                          </Button>
+
+                      {/* Pagination Controls */}
+                      {promptsTotalPages > 1 && (
+                        <div className="flex items-center justify-between pt-6 border-t border-border">
+                          <div className="text-sm text-muted-foreground">
+                            Showing page {promptsCurrentPage} of {promptsTotalPages} ({promptsTotalCount} total results)
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setPromptsCurrentPage(1)}
+                              disabled={promptsCurrentPage === 1}
+                            >
+                              First
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setPromptsCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={promptsCurrentPage === 1}
+                            >
+                              Previous
+                            </Button>
+                            <div className="flex items-center gap-1">
+                              {Array.from({ length: Math.min(5, promptsTotalPages) }, (_, i) => {
+                                let pageNum;
+                                if (promptsTotalPages <= 5) {
+                                  pageNum = i + 1;
+                                } else if (promptsCurrentPage <= 3) {
+                                  pageNum = i + 1;
+                                } else if (promptsCurrentPage >= promptsTotalPages - 2) {
+                                  pageNum = promptsTotalPages - 4 + i;
+                                } else {
+                                  pageNum = promptsCurrentPage - 2 + i;
+                                }
+                                return (
+                                  <Button
+                                    key={pageNum}
+                                    variant={promptsCurrentPage === pageNum ? "default" : "outline"}
+                                    size="sm"
+                                    onClick={() => setPromptsCurrentPage(pageNum)}
+                                    className="w-10"
+                                  >
+                                    {pageNum}
+                                  </Button>
+                                );
+                              })}
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setPromptsCurrentPage(prev => Math.min(promptsTotalPages, prev + 1))}
+                              disabled={promptsCurrentPage === promptsTotalPages}
+                            >
+                              Next
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setPromptsCurrentPage(promptsTotalPages)}
+                              disabled={promptsCurrentPage === promptsTotalPages}
+                            >
+                              Last
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </>

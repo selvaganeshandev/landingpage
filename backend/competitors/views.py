@@ -361,79 +361,141 @@ class CompetitorPromptAnalyticsViewSet(viewsets.ReadOnlyModelViewSet):
 
     def list(self, request, *args, **kwargs):
         """
-        Override list to include domain's own mentions from PromptAnalytics
+        Override list to group by prompt and include domain's own mentions from PromptAnalytics.
+        Returns prompts with nested analytics array containing all competitors + user's brand.
         """
-        from prompts.models import PromptAnalytics
+        from prompts.models import PromptAnalytics, Prompt
+        from collections import defaultdict
 
         domain_id = request.query_params.get('domain_id')
         competitor_id = request.query_params.get('competitor_id')
         is_mentioned = request.query_params.get('is_mentioned')
         platform = request.query_params.get('platform')
 
+        if not domain_id:
+            return Response({'error': 'domain_id is required'}, status=400)
+
+        user = request.user
+
         # Get competitor data
         queryset = self.filter_queryset(self.get_queryset())
-        serializer = self.get_serializer(queryset, many=True)
-        results = list(serializer.data)
+        competitor_analytics = queryset.select_related('prompt', 'competitor')
 
-        # Add domain's own mentions (from PromptAnalytics) if domain_id is specified and no competitor_id filter
-        if domain_id and not competitor_id:
-            user = request.user
+        # Get user's brand data from PromptAnalytics
+        if user.role == 'super_admin':
+            pa_queryset = PromptAnalytics.objects.filter(
+                prompt__group__domain_id=domain_id
+            )
+        else:
+            pa_queryset = PromptAnalytics.objects.filter(
+                prompt__group__domain_id=domain_id,
+                prompt__group__domain__organisation=user.organisation
+            )
 
-            # Filter PromptAnalytics by organization and domain
-            if user.role == 'super_admin':
-                pa_queryset = PromptAnalytics.objects.filter(
-                    prompt__group__domain_id=domain_id
-                )
-            else:
-                pa_queryset = PromptAnalytics.objects.filter(
-                    prompt__group__domain_id=domain_id,
-                    prompt__group__domain__organisation=user.organisation
-                )
+        # Apply platform filter if provided
+        if platform:
+            pa_queryset = pa_queryset.filter(platform__iexact=platform)
 
-            # Apply platform filter if provided
-            if platform:
-                pa_queryset = pa_queryset.filter(platform__iexact=platform)
+        # Apply is_mentioned filter if provided
+        if is_mentioned:
+            if is_mentioned.lower() == 'true':
+                pa_queryset = pa_queryset.filter(is_mention=True)
+            elif is_mentioned.lower() == 'false':
+                pa_queryset = pa_queryset.filter(is_mention=False)
 
-            # Apply is_mentioned filter if provided
-            if is_mentioned:
-                if is_mentioned.lower() == 'true':
-                    pa_queryset = pa_queryset.filter(is_mention=True)
-                elif is_mentioned.lower() == 'false':
-                    pa_queryset = pa_queryset.filter(is_mention=False)
+        pa_queryset = pa_queryset.select_related('prompt', 'prompt__group', 'prompt__group__domain')
 
-            pa_queryset = pa_queryset.select_related('prompt', 'prompt__group', 'prompt__group__domain')
+        # Group all analytics by prompt_id
+        prompt_groups = defaultdict(lambda: {
+            'prompt_id': None,
+            'prompt_text': '',
+            'domain_name': '',
+            'analytics': []
+        })
 
-            # Transform PromptAnalytics to match CompetitorPromptAnalytics format
+        # Add competitor analytics to groups
+        for cpa in competitor_analytics:
+            prompt_id = cpa.prompt.id
+            if not prompt_groups[prompt_id]['prompt_id']:
+                prompt_groups[prompt_id]['prompt_id'] = prompt_id
+                prompt_groups[prompt_id]['prompt_text'] = cpa.prompt.prompt
+                prompt_groups[prompt_id]['domain_name'] = cpa.competitor.domain.name
+
+            prompt_groups[prompt_id]['analytics'].append({
+                'id': cpa.id,
+                'competitor_id': cpa.competitor.id,
+                'competitor_name': cpa.competitor.name,
+                'track_status': cpa.track_status,
+                'track_message': cpa.track_message,
+                'tracked_at': cpa.tracked_at.isoformat() if cpa.tracked_at else None,
+                'is_mentioned': cpa.is_mentioned,
+                'position': float(cpa.position) if cpa.position else None,
+                'mention_count': cpa.mention_count,
+                'sentiment_category': cpa.sentiment_category,
+                'sentiment_score': float(cpa.sentiment_score) if cpa.sentiment_score else 0.0,
+                'platform': cpa.platform,
+                'citation_list': cpa.citation_list if cpa.citation_list else [],
+                'created_at': cpa.created_at.isoformat() if cpa.created_at else None,
+                'modified_at': cpa.modified_at.isoformat() if cpa.modified_at else None,
+            })
+
+        # Add user's brand analytics to groups (if not filtering by specific competitor)
+        if not competitor_id:
             for pa in pa_queryset:
-                try:
-                    results.append({
-                        'id': pa.id,
-                        'competitor': None,
-                        'competitor_name': None,  # Frontend will handle as "You"
-                        'prompt': pa.prompt.id,
-                        'prompt_text': pa.prompt.prompt,
-                        'domain_name': pa.prompt.group.domain.name,
-                        'track_status': pa.track_status,
-                        'track_message': pa.track_message,
-                        'tracked_at': pa.tracked_at.isoformat() if pa.tracked_at else None,
-                        'is_mentioned': pa.is_mention,
-                        'position': float(pa.position) if pa.position else None,
-                        'mention_count': pa.total_mentions,
-                        'sentiment_category': pa.sentiment_category,
-                        'sentiment_score': float(pa.sentiment_score) if pa.sentiment_score else 0.0,
-                        'platform': pa.platform,
-                        'response_text': '',
-                        'citation_list': pa.citation_list if pa.citation_list else [],
-                        'created_at': pa.created_at.isoformat() if pa.created_at else None,
-                        'modified_at': pa.modified_at.isoformat() if pa.modified_at else None,
-                    })
-                except Exception:
-                    pass  # Skip rows with errors
+                prompt_id = pa.prompt.id
+                if not prompt_groups[prompt_id]['prompt_id']:
+                    prompt_groups[prompt_id]['prompt_id'] = prompt_id
+                    prompt_groups[prompt_id]['prompt_text'] = pa.prompt.prompt
+                    prompt_groups[prompt_id]['domain_name'] = pa.prompt.group.domain.name
 
-        # Sort by tracked_at
-        results.sort(key=lambda x: x.get('tracked_at') or '', reverse=True)
+                prompt_groups[prompt_id]['analytics'].append({
+                    'id': pa.id,
+                    'competitor_id': None,
+                    'competitor_name': None,  # Frontend will handle as "You"
+                    'track_status': pa.track_status,
+                    'track_message': pa.track_message,
+                    'tracked_at': pa.tracked_at.isoformat() if pa.tracked_at else None,
+                    'is_mentioned': pa.is_mention,
+                    'position': float(pa.position) if pa.position else None,
+                    'mention_count': pa.total_mentions,
+                    'sentiment_category': pa.sentiment_category,
+                    'sentiment_score': float(pa.sentiment_score) if pa.sentiment_score else 0.0,
+                    'platform': pa.platform,
+                    'citation_list': pa.citation_list if pa.citation_list else [],
+                    'created_at': pa.created_at.isoformat() if pa.created_at else None,
+                    'modified_at': pa.modified_at.isoformat() if pa.modified_at else None,
+                })
 
-        return Response(results)
+        # Convert to list and sort by most recent tracked_at
+        grouped_prompts = list(prompt_groups.values())
+
+        # Sort by the most recent tracked_at in the analytics array
+        def get_latest_tracked_at(prompt_group):
+            tracked_dates = [a['tracked_at'] for a in prompt_group['analytics'] if a['tracked_at']]
+            return max(tracked_dates) if tracked_dates else ''
+
+        grouped_prompts.sort(key=get_latest_tracked_at, reverse=True)
+
+        # Apply pagination at the PROMPT level
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 20))
+
+        total_count = len(grouped_prompts)
+        total_pages = (total_count + page_size - 1) // page_size
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
+
+        paginated_prompts = grouped_prompts[start_index:end_index]
+
+        return Response({
+            'results': paginated_prompts,
+            'count': total_count,
+            'total_pages': total_pages,
+            'current_page': page,
+            'page_size': page_size,
+            'has_next': page < total_pages,
+            'has_previous': page > 1,
+        })
     
     @action(detail=False, methods=['get'])
     def by_competitor(self, request):

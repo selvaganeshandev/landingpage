@@ -774,13 +774,14 @@ export const apiClient = {
     });
   },
 
-  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string; competitor_id?: string; page_size?: string; is_mentioned?: string; platform?: string }, options?: RequestOptions) => {
+  getCompetitorPromptAnalyticsEngine: (params: { domain_id: string; competitor_id?: string; page_size?: string; is_mentioned?: string; platform?: string; page?: number }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.competitor_id ? { competitor_id: params.competitor_id } : {}),
       ...(params.page_size ? { page_size: params.page_size } : {}),
       ...(params.is_mentioned ? { is_mentioned: params.is_mentioned } : {}),
       ...(params.platform ? { platform: params.platform } : {}),
+      ...(params.page ? { page: params.page.toString() } : {}),
     }).toString()}`;
     return apiRequest(`/competitors/competitor-prompt-analytics/${queryParams}`, options);
   },
