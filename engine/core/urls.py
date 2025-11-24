@@ -38,4 +38,11 @@ urlpatterns = [
     
     # Reset track status (for testing)
     path('reset-track-status/', views.reset_track_status, name='reset_track_status'),
+
+    # Content Generation
+    path('content/generate/', views.generate_content, name='generate_content'),
+    path('content/', views.get_generated_contents, name='get_generated_contents'),
+    path('content/<int:content_id>/', views.get_generated_content, name='get_generated_content'),
+    path('content/<int:content_id>/update/', views.update_generated_content, name='update_generated_content'),
+    path('content/<int:content_id>/delete/', views.delete_generated_content, name='delete_generated_content'),
 ]
