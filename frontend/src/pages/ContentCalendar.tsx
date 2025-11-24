@@ -100,8 +100,8 @@ const ContentCalendar = () => {
   };
 
   const handleEditContent = (item: ContentItem) => {
-    setSelectedContent(item);
-    setGenerateDialogOpen(true);
+    // Navigate to the content editor page
+    navigate(`/content-editor/${item.id}`);
   };
 
   // Listen for content generation requests from other pages
