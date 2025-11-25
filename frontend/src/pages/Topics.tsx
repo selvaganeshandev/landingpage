@@ -12,9 +12,11 @@ import { PageLoader } from "@/components/PageLoader";
 import {
   TrendingUp,
   TrendingDown,
-  Sparkles
+  Sparkles,
+  Target
 } from "lucide-react";
 import { TopicDetailDialog } from "@/components/TopicDetailDialog";
+import { TopicOptimizeDialog } from "@/components/TopicOptimizeDialog";
 import { 
   PieChart,
   Pie,
@@ -59,11 +61,13 @@ const Topics = () => {
   const { navigateToContentGeneration } = useContentGeneration();
   const { selectedDomain } = useDomainStore();
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [optimizeDialogOpen, setOptimizeDialogOpen] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [topicTrends, setTopicTrends] = useState<any[]>([]);
+  const [topicDistributionData, setTopicDistributionData] = useState<any[]>([]);
   const [keywordPerformance, setKeywordPerformance] = useState<any[]>([]);
   const [promptSuggestions, setPromptSuggestions] = useState<any[]>([]);
 
@@ -82,12 +86,17 @@ const Topics = () => {
     setDetailDialogOpen(true);
   };
 
+  const handleOptimize = (topic: typeof topics[0]) => {
+    setSelectedTopic(topic);
+    setOptimizeDialogOpen(true);
+  };
+
 
   const handleGenerateMore = async () => {
-    if (!selectedDomain?.id || topics.length === 0) {
+    if (!selectedDomain?.id) {
       toast({
-        title: "No Topics Available",
-        description: "Please create topics first to generate prompt suggestions.",
+        title: "No Domain Selected",
+        description: "Please select a domain to generate prompt suggestions.",
         variant: "destructive"
       });
       return;
@@ -96,40 +105,36 @@ const Topics = () => {
     try {
       setLoading(true);
       
-      // Fetch more prompts from different topics
-      const allPrompts: any[] = [];
-      for (const topic of topics.slice(0, 3)) { // Get from top 3 topics
-        try {
-          const promptsData = await apiClient.getTopicPrompts({ topic_id: topic.id });
-          // Ensure promptsData is an array
-          const dataArray = Array.isArray(promptsData) ? promptsData : (promptsData?.results || []);
-          allPrompts.push(...dataArray.map((prompt: any) => ({
-            prompt: prompt.prompt_text,
-            relevance: prompt.relevance_score || 0,
-            volume: prompt.search_volume || "medium",
-            topics: [topic.name]
-          })));
-        } catch (err) {
-          console.error(`Error fetching prompts for topic ${topic.id}:`, err);
-        }
+      // Generate new prompts using ChatGPT via the API (with higher limit and generateNew=true)
+      const promptsData: any = await apiClient.getTopicPromptSuggestions(selectedDomain.id, 12, true);
+      const promptsArray = Array.isArray(promptsData) ? promptsData : (promptsData?.results || []);
+      
+      const suggestions = promptsArray.map((prompt: any) => ({
+        prompt: prompt.prompt_text || prompt.prompt || "",
+        topics: prompt.topic_name ? [prompt.topic_name] : ["General"],
+        keyword: prompt.keyword || ""
+      }));
+
+      if (suggestions.length === 0) {
+        toast({
+          title: "No Suggestions Available",
+          description: "No prompt suggestions generated. Make sure topics and keywords exist for this domain.",
+          variant: "destructive"
+        });
+        return;
       }
 
-      // Sort by relevance and get top 10
-      const topPrompts = allPrompts
-        .sort((a, b) => b.relevance - a.relevance)
-        .slice(0, 10);
-
-      setPromptSuggestions(topPrompts);
+      setPromptSuggestions(suggestions);
       
       toast({
-        title: "Prompts Updated",
-        description: `Generated ${topPrompts.length} new prompt suggestions.`,
+        title: "Prompts Generated",
+        description: `Generated ${suggestions.length} new AI-powered prompt suggestions.`,
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error generating more prompts:", err);
       toast({
         title: "Error",
-        description: "Failed to generate more prompts. Please try again.",
+        description: err.message || "Failed to generate more prompts. Please try again.",
         variant: "destructive"
       });
     } finally {
@@ -150,10 +155,11 @@ const Topics = () => {
         setError(null);
 
         // Fetch topics for the selected domain
-        const topicsData = await apiClient.getTopicsByDomain(selectedDomain.id);
+        const topicsData: any = await apiClient.getTopicsByDomain(selectedDomain.id);
+        const topicsArray = Array.isArray(topicsData) ? topicsData : (topicsData?.results || []);
         
         // Transform API data to match UI format
-        const transformedTopics: Topic[] = topicsData.map((topic: any, index: number) => {
+        const transformedTopics: Topic[] = topicsArray.map((topic: any, index: number) => {
           // Convert sentiment from -1 to 1 range to 0-100 percentage
           const sentimentScore = parseFloat(topic.sentiment_score || 0);
           const sentimentPercentage = ((sentimentScore + 1) / 2) * 100; // Normalize to 0-100
@@ -173,10 +179,25 @@ const Topics = () => {
 
         setTopics(transformedTopics);
 
+        // Fetch topic distribution using new dedicated endpoint
+        try {
+          const distributionData: any = await apiClient.getTopicDistribution(selectedDomain.id);
+          const distributionArray = Array.isArray(distributionData) ? distributionData : (distributionData?.results || []);
+          // Add colors to match the topics
+          const distributionWithColors = distributionArray.map((item: any, index: number) => ({
+            ...item,
+            color: CHART_COLORS[index % CHART_COLORS.length]
+          }));
+          setTopicDistributionData(distributionWithColors);
+        } catch (err) {
+          console.error("Error fetching topic distribution:", err);
+          setTopicDistributionData([]);
+        }
+
         // Fetch topic trends (time-series data)
         if (transformedTopics.length > 0) {
           try {
-            const trendsData = await apiClient.getTopicTrends(undefined, 90);
+            const trendsData: any = await apiClient.getTopicTrends(undefined, 90);
             // Ensure trendsData is an array
             const dataArray = Array.isArray(trendsData) ? trendsData : (trendsData?.results || []);
             
@@ -213,65 +234,37 @@ const Topics = () => {
             setTopicTrends([]);
           }
 
-          // Fetch keyword performance (aggregate from all topics)
+          // Fetch keyword performance using new dedicated endpoint
           try {
-            const allKeywordData: any[] = [];
-            for (const topic of transformedTopics.slice(0, 5)) { // Limit to first 5 topics
-              try {
-                const keywordData = await apiClient.getTopicKeywordAnalytics(topic.id);
-                // Ensure keywordData is an array
-                const dataArray = Array.isArray(keywordData) ? keywordData : (keywordData?.results || []);
-                allKeywordData.push(...dataArray);
-              } catch (err) {
-                console.error(`Error fetching keywords for topic ${topic.id}:`, err);
-              }
-            }
-            
-            // Aggregate and sort by mentions
-            const keywordMap = new Map<string, any>();
-            allKeywordData.forEach((item: any) => {
-              const keyword = item.keyword;
-              if (!keywordMap.has(keyword)) {
-                keywordMap.set(keyword, {
-                  keyword,
-                  mentions: 0,
-                  position: 0,
-                  visibility: 0
-                });
-              }
-              const existing = keywordMap.get(keyword)!;
-              existing.mentions += item.mentions || 0;
-            });
-            
-            const sortedKeywords = Array.from(keywordMap.values())
-              .sort((a, b) => b.mentions - a.mentions)
-              .slice(0, 10)
-              .map(item => ({
-                ...item,
-                position: item.position || 0,
-                visibility: item.visibility || 0
-              }));
-            
-            setKeywordPerformance(sortedKeywords);
+            const keywordData: any = await apiClient.getTopicKeywordPerformance(selectedDomain.id, 10);
+            const keywordArray = Array.isArray(keywordData) ? keywordData : (keywordData?.results || []);
+            // Format data for chart (already aggregated by backend)
+            const formattedKeywords = keywordArray.map((item: any) => ({
+              keyword: item.keyword,
+              mentions: item.total_mentions || 0,
+              position: item.avg_position || 0,
+              visibility: item.visibility_score || 0
+            }));
+            setKeywordPerformance(formattedKeywords);
           } catch (err) {
             console.error("Error fetching keyword performance:", err);
+            setKeywordPerformance([]);
           }
 
-          // Fetch prompt suggestions
+          // Fetch existing prompt suggestions from database (on load)
           try {
-            const promptsData = await apiClient.getTopicPrompts({ topic_id: transformedTopics[0]?.id });
-            // Ensure promptsData is an array (handle both direct array and paginated response)
-            const dataArray = Array.isArray(promptsData) ? promptsData : (promptsData?.results || []);
-            const suggestions = dataArray.slice(0, 6).map((prompt: any) => ({
-              prompt: prompt.prompt_text,
-              relevance: prompt.relevance_score || 0,
-              volume: prompt.search_volume || "medium",
-              topics: [prompt.topic_name || "General"]
+            const promptsData: any = await apiClient.getTopicPromptSuggestions(selectedDomain.id, 6, false);
+            const promptsArray = Array.isArray(promptsData) ? promptsData : (promptsData?.results || []);
+            const suggestions = promptsArray.map((prompt: any) => ({
+              prompt: prompt.prompt_text || prompt.prompt || "",
+              topics: prompt.topic_name ? [prompt.topic_name] : ["General"],
+              keyword: prompt.keyword || ""
             }));
             setPromptSuggestions(suggestions);
-          } catch (err) {
+          } catch (err: any) {
             console.error("Error fetching prompt suggestions:", err);
             setPromptSuggestions([]);
+            // Don't show error toast here as it's not critical - just log it
           }
         }
 
@@ -293,15 +286,6 @@ const Topics = () => {
 
   // Use topics directly (search removed)
   const filteredTopics = topics;
-
-  // Topic distribution for pie chart
-  const topicDistribution = useMemo(() => {
-    return filteredTopics.map((t, index) => ({
-      name: t.name,
-      value: t.mentions,
-      color: t.color
-    }));
-  }, [filteredTopics]);
 
   // Show PageLoader while loading
   if (loading) {
@@ -353,24 +337,36 @@ const Topics = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="p-6 border border-border">
           <h3 className="text-lg font-semibold mb-6">Topic Distribution</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie
-                data={topicDistribution}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={90}
-                paddingAngle={2}
-                dataKey="value"
-              >
-                {topicDistribution.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+          {topicDistributionData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={topicDistributionData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={2}
+                  dataKey="value"
+                >
+                  {topicDistributionData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip 
+                  contentStyle={{
+                    backgroundColor: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: "var(--radius)",
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[250px] text-muted-foreground">
+              <p>No distribution data available yet</p>
+            </div>
+          )}
         </Card>
 
         <Card className="p-6 lg:col-span-2">
@@ -494,7 +490,14 @@ const Topics = () => {
                   Generate Content
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => handleViewDetails(topic)}>View Details</Button>
-                {/* Optimize button hidden as per requirements */}
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={() => handleOptimize(topic)}
+                >
+                  <Target className="h-3 w-3 mr-1" />
+                  Optimize
+                </Button>
               </div>
             </div>
           </Card>
@@ -509,10 +512,10 @@ const Topics = () => {
             variant="outline" 
             size="sm" 
             onClick={handleGenerateMore}
-            disabled={loading || promptSuggestions.length === 0}
+            disabled={loading || !selectedDomain?.id}
           >
             <Sparkles className="h-3 w-3 mr-1" />
-            Generate More
+            {loading ? "Loading..." : "Generate More"}
           </Button>
         </div>
         {promptSuggestions.length > 0 ? (
@@ -521,22 +524,18 @@ const Topics = () => {
               <div key={idx} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
                 <div className="flex items-start justify-between mb-2">
                   <p className="font-mono text-sm font-medium flex-1">{suggestion.prompt}</p>
-                  <div className="flex items-center gap-3 ml-4">
-                    <Badge variant={suggestion.volume === "high" ? "default" : "secondary"}>
-                      {suggestion.volume} volume
-                    </Badge>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-primary">{suggestion.relevance}%</p>
-                      <p className="text-xs text-muted-foreground">relevance</p>
-                    </div>
-                  </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   {suggestion.topics.map((topic) => (
                     <Badge key={topic} variant="outline" className="text-xs">
                       {topic}
                     </Badge>
                   ))}
+                  {suggestion.keyword && (
+                    <Badge variant="secondary" className="text-xs">
+                      {suggestion.keyword}
+                    </Badge>
+                  )}
                 </div>
               </div>
             ))}
@@ -586,6 +585,11 @@ const Topics = () => {
       <TopicDetailDialog 
         open={detailDialogOpen}
         onOpenChange={setDetailDialogOpen}
+        topic={selectedTopic}
+      />
+      <TopicOptimizeDialog
+        open={optimizeDialogOpen}
+        onOpenChange={setOptimizeDialogOpen}
         topic={selectedTopic}
       />
     </div>

@@ -3,6 +3,7 @@ import time
 import uuid
 from typing import List, Dict, Any, Tuple
 import re
+from decimal import Decimal
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -183,6 +184,63 @@ class DomainProcessor:
             domain.tracked_at = timezone.now()
             domain.save(update_fields=['track_message', 'tracked_at', 'modified_at'])
 
+            # Build prompt-to-keyword mapping AFTER sanitization (using sanitized prompt text)
+            # This ensures the mapping keys match the actual prompt text used for storage
+            prompt_to_keyword_map = {}
+            
+            # First pass: collect keywords from prompt dicts
+            for p in prompts:
+                prompt_text = (p.get('prompt_text') or p.get('prompt') or '').strip()
+                keyword = (p.get('keyword') or '').strip()
+                if prompt_text and keyword:
+                    prompt_to_keyword_map[prompt_text] = keyword
+                    # Also ensure the dict has the keyword
+                    p['keyword'] = keyword
+            
+            # Second pass: for prompts without keywords, try to match against original keywords
+            # This handles cases where ChatGPT didn't include the keyword in the response
+            prompts_fixed = 0
+            for p in prompts:
+                prompt_text = (p.get('prompt_text') or p.get('prompt') or '').strip()
+                keyword = (p.get('keyword') or '').strip()
+                
+                if prompt_text and not keyword:
+                    # Try to find matching keyword by checking if keyword appears in prompt text
+                    prompt_lower = prompt_text.lower()
+                    for kw in keywords:
+                        kw_lower = kw.lower().strip()
+                        # Check if keyword appears in prompt (as whole word or phrase)
+                        if kw_lower in prompt_lower:
+                            keyword = kw
+                            p['keyword'] = keyword
+                            prompt_to_keyword_map[prompt_text] = keyword
+                            prompts_fixed += 1
+                            print(f"✅ Auto-assigned keyword '{kw}' to prompt: '{prompt_text[:50]}...'")
+                            break
+                    
+                    # If still no keyword, assign the first available keyword as fallback
+                    if not keyword and keywords:
+                        keyword = keywords[0]
+                        p['keyword'] = keyword
+                        prompt_to_keyword_map[prompt_text] = keyword
+                        prompts_fixed += 1
+                        print(f"⚠️ Fallback: assigned keyword '{keyword}' to prompt: '{prompt_text[:50]}...'")
+            
+            print(f"Built prompt-to-keyword mapping with {len(prompt_to_keyword_map)} entries after sanitization")
+            if prompts_fixed > 0:
+                print(f"✅ Auto-assigned keywords to {prompts_fixed} prompts that were missing keywords")
+            
+            # Debug: Show first 5 mappings
+            if prompt_to_keyword_map:
+                print("Sample prompt-to-keyword mappings:")
+                for i, (prompt, kw) in enumerate(list(prompt_to_keyword_map.items())[:5]):
+                    print(f"  {i+1}. '{prompt[:60]}...' → '{kw}'")
+            else:
+                print("❌ ERROR: No prompt-to-keyword mappings found! This will cause linking to fail.")
+            
+            # Store the mapping in domain for later use
+            self._prompt_keyword_map = prompt_to_keyword_map
+            
             grouped_prompts = self._group_prompts_with_sentence_transformers(prompts)
             
             if not grouped_prompts:
@@ -194,7 +252,13 @@ class DomainProcessor:
             
             # Step 7: Store prompts and groups in database
             print(f"Storing {len(grouped_prompts)} prompt groups for {domain.name}")
-            self._store_prompt_groups(domain, grouped_prompts)
+            self._store_prompt_groups(domain, grouped_prompts, self._prompt_keyword_map)
+            
+            # Step 7.5: Phase 2 - Safety net: Link any prompts that weren't linked during storage
+            # This ensures all prompts from ChatGPT JSON are linked, even if Phase 1 missed some
+            safety_stats = self._link_prompts_from_chatgpt_json(domain, prompts)
+            if safety_stats['created'] > 0:
+                print(f"✅ Phase 2 safety net created {safety_stats['created']} additional links")
             
             # Step 8: Mark keywords as used after successful prompt generation
             # This prevents reuse of keywords in the next cycle
@@ -267,19 +331,314 @@ class DomainProcessor:
                     print(f"Created unique keyword: {normalized_keyword}")
             print(f"Stored {created_count} new unique keywords (out of {len(keywords)} total) for domain {domain.name}")
     
-    def _store_prompt_groups(self, domain: Domain, grouped_prompts: List[Dict[str, Any]]):
+    def _link_prompt_to_keyword_immediate(self, prompt: Prompt, keyword_text: str, domain: Domain) -> bool:
+        """
+        Phase 1: Immediately link a prompt to a keyword right after prompt creation.
+        This is the PRIMARY linking method - most reliable.
+        
+        Args:
+            prompt: The Prompt object just created
+            keyword_text: The keyword text from ChatGPT response
+            domain: Domain instance
+            
+        Returns:
+            True if linked successfully, False otherwise
+        """
+        from shared_models.models import Keyword, PromptKeyword
+        from decimal import Decimal
+        
+        if not keyword_text or not keyword_text.strip():
+            return False
+        
+        keyword_text = keyword_text.strip()
+        
+        try:
+            # Find keyword in database - sorted by priority desc, then created_at desc
+            keyword = Keyword.objects.filter(
+                domain=domain,
+                keyword__iexact=keyword_text
+            ).order_by('-priority', '-created_at').first()
+            
+            if not keyword:
+                # Try to find by partial match (keyword contains the text)
+                keyword = Keyword.objects.filter(
+                    domain=domain
+                ).filter(
+                    keyword__icontains=keyword_text
+                ).order_by('-priority', '-created_at').first()
+            
+            if not keyword:
+                print(f"❌ Keyword '{keyword_text}' not found for domain {domain.name}")
+                # Show available keywords for debugging
+                available = list(Keyword.objects.filter(domain=domain).values_list('keyword', flat=True)[:5])
+                print(f"   Available keywords: {available}")
+                return False
+            
+            # Create link
+            prompt_keyword, created = PromptKeyword.objects.get_or_create(
+                prompt=prompt,
+                keyword=keyword,
+                defaults={'relevance_score': Decimal('100.00')}
+            )
+            
+            if created:
+                print(f"✅ Phase 1: Linked prompt (ID:{prompt.id}) → keyword '{keyword.keyword}' (ID:{keyword.id})")
+            else:
+                print(f"⚠️ Phase 1: Link already exists: prompt (ID:{prompt.id}) → keyword '{keyword.keyword}'")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error in immediate linking: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _link_prompts_from_chatgpt_json(self, domain: Domain, chatgpt_prompts: List[Dict[str, Any]]) -> dict:
+        """
+        Phase 2: Safety net - Loop through ChatGPT JSON and link any prompts that weren't linked.
+        This catches any prompts that failed during the primary linking phase.
+        
+        Args:
+            domain: Domain instance
+            chatgpt_prompts: Original ChatGPT response with keyword info
+            
+        Returns:
+            Statistics dict with counts
+        """
+        from shared_models.models import Prompt, Keyword, PromptKeyword
+        from decimal import Decimal
+        
+        stats = {'created': 0, 'exists': 0, 'failed': 0, 'not_found': 0}
+        
+        print(f"\n🔗 Phase 2 (Safety Net): Linking prompts from ChatGPT JSON for {domain.name}")
+        
+        # Get all keywords sorted desc
+        keywords_qs = Keyword.objects.filter(domain=domain).order_by('-priority', '-created_at')
+        keyword_cache = {}  # Cache for faster lookup
+        
+        # Get all prompts for this domain (create lookup dict)
+        domain_prompts = {}
+        for p in Prompt.objects.filter(group__domain=domain):
+            # Use multiple keys for lookup (original, sanitized, lowercase)
+            key1 = p.prompt.lower().strip()
+            key2 = self._sanitize_prompt_text(p.prompt).lower().strip()
+            domain_prompts[key1] = p
+            if key2 != key1:
+                domain_prompts[key2] = p
+        
+        print(f"   Found {len(domain_prompts)} prompts in database")
+        print(f"   Processing {len(chatgpt_prompts)} prompts from ChatGPT JSON")
+        
+        for prompt_data in chatgpt_prompts:
+            prompt_text = (prompt_data.get('prompt_text') or prompt_data.get('prompt') or '').strip()
+            keyword_text = (prompt_data.get('keyword') or '').strip()
+            
+            if not prompt_text or not keyword_text:
+                stats['failed'] += 1
+                continue
+            
+            # Find prompt (case-insensitive, try multiple variations)
+            prompt = None
+            lookup_keys = [
+                prompt_text.lower().strip(),
+                self._sanitize_prompt_text(prompt_text).lower().strip(),
+                prompt_text.strip()
+            ]
+            
+            for key in lookup_keys:
+                if key in domain_prompts:
+                    prompt = domain_prompts[key]
+                    break
+            
+            if not prompt:
+                stats['not_found'] += 1
+                print(f"   ⚠️ Prompt not found: '{prompt_text[:50]}...'")
+                continue
+            
+            # Check if already linked
+            if PromptKeyword.objects.filter(prompt=prompt).exists():
+                stats['exists'] += 1
+                continue
+            
+            # Find keyword (use cache for performance)
+            keyword_lower = keyword_text.lower().strip()
+            if keyword_lower not in keyword_cache:
+                keyword = keywords_qs.filter(keyword__iexact=keyword_text).first()
+                if not keyword:
+                    keyword = keywords_qs.filter(keyword__icontains=keyword_text).first()
+                keyword_cache[keyword_lower] = keyword
+            else:
+                keyword = keyword_cache[keyword_lower]
+            
+            if not keyword:
+                stats['failed'] += 1
+                print(f"   ❌ Keyword not found: '{keyword_text}'")
+                continue
+            
+            # Create link
+            try:
+                PromptKeyword.objects.create(
+                    prompt=prompt,
+                    keyword=keyword,
+                    relevance_score=Decimal('100.00')
+                )
+                stats['created'] += 1
+                print(f"   ✅ Phase 2: Linked prompt (ID:{prompt.id}) → keyword '{keyword.keyword}'")
+            except Exception as e:
+                stats['failed'] += 1
+                print(f"   ❌ Error creating link: {str(e)}")
+        
+        print(f"\n📊 Phase 2 Summary:")
+        print(f"   ✅ Created: {stats['created']} links")
+        print(f"   ⚠️  Already exists: {stats['exists']} links")
+        print(f"   ❌ Failed: {stats['failed']} links")
+        print(f"   ⚠️  Not found: {stats['not_found']} prompts")
+        
+        return stats
+    
+    def _link_prompt_to_keyword_direct(self, prompt: Prompt, prompt_text: str, 
+                                        prompt_to_keyword_map: Dict[str, str], domain: Domain,
+                                        direct_keyword: str = None) -> str:
+        """
+        Link prompt to keyword using the pre-built mapping or direct keyword.
+        This is called immediately when a prompt is created from a keyword.
+        
+        Args:
+            prompt: Prompt instance to link
+            prompt_text: The prompt text
+            prompt_to_keyword_map: Mapping dictionary from prompt text to keyword
+            domain: Domain instance
+            direct_keyword: Optional direct keyword (takes precedence over mapping)
+            
+        Returns:
+            'created' if link was created, 'exists' if already exists, 'failed' if failed
+        """
+        from shared_models.models import PromptKeyword
+        
+        try:
+            # Use direct keyword if provided, otherwise try mapping
+            keyword_text = None
+            
+            if direct_keyword:
+                keyword_text = direct_keyword.strip()
+            else:
+                # Get keyword from mapping - try exact match first, then case-insensitive
+                keyword_text = prompt_to_keyword_map.get(prompt_text, '').strip()
+                
+                # If not found with exact match, try case-insensitive search
+                if not keyword_text:
+                    for map_prompt, map_keyword in prompt_to_keyword_map.items():
+                        if map_prompt.strip().lower() == prompt_text.strip().lower():
+                            keyword_text = map_keyword.strip()
+                            break
+            
+            if not keyword_text:
+                print(f"⚠️ No keyword found in mapping for prompt: {prompt_text[:50]}...")
+                print(f"   Mapping has {len(prompt_to_keyword_map)} entries")
+                if len(prompt_to_keyword_map) <= 10:
+                    print(f"   Available mappings: {list(prompt_to_keyword_map.keys())}")
+                return 'failed'
+            
+            # Find the keyword in database (case-insensitive)
+            try:
+                keyword = Keyword.objects.get(keyword__iexact=keyword_text.strip(), domain=domain)
+                
+                # Create PromptKeyword link if it doesn't exist
+                prompt_keyword, created = PromptKeyword.objects.get_or_create(
+                    prompt=prompt,
+                    keyword=keyword,
+                    defaults={'relevance_score': Decimal('100.00')}
+                )
+                
+                if created:
+                    print(f"✅ Linked prompt (ID:{prompt.id}) to keyword: '{keyword_text}'")
+                    return 'created'
+                else:
+                    print(f"⚠️ Link already exists for prompt (ID:{prompt.id}) and keyword: '{keyword_text}'")
+                    return 'exists'
+                    
+            except Keyword.DoesNotExist:
+                print(f"⚠️ Keyword '{keyword_text}' not found in database for domain {domain.name}")
+                print(f"   Looking for: '{keyword_text.lower()}'")
+                # Show available keywords
+                available_keywords = list(Keyword.objects.filter(domain=domain).values_list('keyword', flat=True)[:10])
+                print(f"   Available keywords: {available_keywords}")
+                
+                # Create the keyword if it doesn't exist (it should exist, but create it as fallback)
+                try:
+                    keyword = Keyword.objects.create(
+                        keyword=keyword_text.lower().strip(),
+                        domain=domain,
+                        auto_generate_prompts=True,
+                        priority=0
+                    )
+                    print(f"✅ Created missing keyword '{keyword_text}' for domain {domain.name}")
+                    
+                    # Now create the PromptKeyword link
+                    prompt_keyword, created = PromptKeyword.objects.get_or_create(
+                        prompt=prompt,
+                        keyword=keyword,
+                        defaults={'relevance_score': Decimal('100.00')}
+                    )
+                    
+                    if created:
+                        print(f"✅ Linked prompt (ID:{prompt.id}) to newly created keyword: '{keyword_text}'")
+                        return 'created'
+                    else:
+                        print(f"⚠️ Link already exists for prompt (ID:{prompt.id}) and keyword: '{keyword_text}'")
+                        return 'exists'
+                except Exception as e:
+                    print(f"❌ Error creating keyword '{keyword_text}': {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    return 'failed'
+                
+        except Exception as e:
+            print(f"❌ Error linking prompt to keyword: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return 'failed'
+    
+    def _store_prompt_groups(self, domain: Domain, grouped_prompts: List[Dict[str, Any]], 
+                             prompt_to_keyword_map: Dict[str, str]):
         """
         Store prompt groups and prompts in the database
+        
+        Args:
+            domain: Domain instance
+            grouped_prompts: List of grouped prompt dictionaries
+            prompt_to_keyword_map: Mapping of prompt_text to keyword (built after sanitization)
         """
+        from shared_models.models import PromptKeyword
+        
+        # Track linking statistics
+        links_created = 0
+        links_failed = 0
+        
         with transaction.atomic():
             # Track used titles in this batch to ensure uniqueness
             used_titles_in_batch = set()
             
             for group_data in grouped_prompts:
                 # Create prompt group with interpretable group_id (title)
-                desired_group_id = group_data.get('title', 'Untitled').strip() or 'Untitled'
+                # First, extract theme from primary prompt (ensures 2+ words and closer to prompt)
+                extracted_theme = self._extract_theme_from_group(group_data)
+                
+                # Use the extracted theme as the base title (already normalized to 2+ words)
+                desired_group_id = extracted_theme if extracted_theme and extracted_theme != "General Topic" else group_data.get('title', 'Untitled').strip() or 'Untitled'
+                
+                # If still using the original title, normalize it to ensure 2+ words
+                if desired_group_id == group_data.get('title', '').strip():
+                    desired_group_id = self._normalize_to_term(desired_group_id, min_words=2, max_words=4)
+                
                 # Remove numbers from desired group_id before processing
                 desired_group_id = self._remove_numbers_from_text(desired_group_id)
+                
+                # Ensure we have at least 2 words (fallback if normalization failed)
+                words = desired_group_id.split()
+                if len(words) < 2:
+                    desired_group_id = f"{desired_group_id} Topic"
                 
                 # Ensure uniqueness within this batch first
                 base_title = desired_group_id
@@ -302,8 +661,8 @@ class DomainProcessor:
                 # Now ensure uniqueness in database
                 group_id = self._unique_group_id_for_domain(domain, candidate_title)
                 
-                # Extract theme from the group
-                theme = self._extract_theme_from_group(group_data)
+                # Use the theme we already extracted earlier
+                theme = extracted_theme
                 # Remove numbers from theme
                 theme = self._remove_numbers_from_text(theme)
                 
@@ -328,33 +687,88 @@ class DomainProcessor:
                     primary_prompts = primary_prompts[:1]
                     # Merge extras into secondary list
                     group_data['secondary_prompts'] = extra_primaries + group_data.get('secondary_prompts', [])
-                for prompt_text in primary_prompts:
-                    if prompt_text.strip():
+                
+                for prompt_item in primary_prompts:
+                    # Handle both dict and string formats
+                    if isinstance(prompt_item, dict):
+                        prompt_text = (prompt_item.get('prompt_text') or prompt_item.get('prompt') or '').strip()
+                        keyword_text = (prompt_item.get('keyword') or '').strip()
+                    else:
+                        # Backward compatibility: treat as string
+                        prompt_text = str(prompt_item).strip()
+                        keyword_text = None
+                    
+                    if prompt_text:
                         prompt = Prompt.objects.create(
-                            prompt=prompt_text.strip(),
+                            prompt=prompt_text,
                             group=prompt_group,
                             type='primary',
                             track_status='INIT'
                         )
                         print(f"Created primary prompt: {prompt_text[:50]}...")
                         self._create_default_analytics_for_prompt(prompt, domain)
-                        # Link prompt to keywords
-                        self._link_prompt_to_keywords(prompt, group_data)
+                        
+                        # Phase 1: Immediate linking - use keyword from dict directly
+                        if keyword_text:
+                            linked = self._link_prompt_to_keyword_immediate(prompt, keyword_text, domain)
+                            if linked:
+                                links_created += 1
+                            else:
+                                links_failed += 1
+                        else:
+                            # Fallback: try to get keyword from mapping
+                            keyword_from_map = prompt_to_keyword_map.get(prompt_text, '').strip()
+                            if keyword_from_map:
+                                linked = self._link_prompt_to_keyword_immediate(prompt, keyword_from_map, domain)
+                                if linked:
+                                    links_created += 1
+                                else:
+                                    links_failed += 1
+                            else:
+                                print(f"⚠️ No keyword available for prompt: '{prompt_text[:50]}...'")
+                                links_failed += 1
                 
                 # Create secondary prompts
                 secondary_prompts = group_data.get('secondary_prompts', [])
-                for prompt_text in secondary_prompts:
-                    if prompt_text.strip():
+                for prompt_item in secondary_prompts:
+                    # Handle both dict and string formats
+                    if isinstance(prompt_item, dict):
+                        prompt_text = (prompt_item.get('prompt_text') or prompt_item.get('prompt') or '').strip()
+                        keyword_text = (prompt_item.get('keyword') or '').strip()
+                    else:
+                        # Backward compatibility: treat as string
+                        prompt_text = str(prompt_item).strip()
+                        keyword_text = None
+                    
+                    if prompt_text:
                         prompt = Prompt.objects.create(
-                            prompt=prompt_text.strip(),
+                            prompt=prompt_text,
                             group=prompt_group,
                             type='secondary',
                             track_status='INIT'
                         )
                         print(f"Created secondary prompt: {prompt_text[:50]}...")
                         self._create_default_analytics_for_prompt(prompt, domain)
-                        # Link prompt to keywords
-                        self._link_prompt_to_keywords(prompt, group_data)
+                        
+                        # Phase 1: Immediate linking - use keyword from dict directly
+                        if keyword_text:
+                            linked = self._link_prompt_to_keyword_immediate(prompt, keyword_text, domain)
+                            if linked:
+                                links_created += 1
+                            else:
+                                links_failed += 1
+                        else:
+                            # Fallback: try to get keyword from mapping
+                            keyword_from_map = prompt_to_keyword_map.get(prompt_text, '').strip()
+                            if keyword_from_map:
+                                linked = self._link_prompt_to_keyword_immediate(prompt, keyword_from_map, domain)
+                                if linked:
+                                    links_created += 1
+                                else:
+                                    links_failed += 1
+                            else:
+                                print(f"⚠️ No keyword available for prompt: '{prompt_text[:50]}...'")
+                                links_failed += 1
                 
                 # Ensure at least one primary prompt exists
                 if not primary_prompts and secondary_prompts:
@@ -369,6 +783,13 @@ class DomainProcessor:
                         print("Converted first secondary prompt to primary")
                 
                 print(f"Created prompt group: {group_data.get('title', 'Untitled')} with {len(primary_prompts)} primary and {len(secondary_prompts)} secondary prompts")
+            
+            # Print summary of Phase 1 keyword linking
+            print(f"\n📊 Phase 1 (Immediate) Linking Summary:")
+            print(f"   ✅ Created: {links_created} links")
+            print(f"   ❌ Failed: {links_failed} links")
+            if links_failed > 0:
+                print(f"   ⚠️  WARNING: {links_failed} prompts could not be linked in Phase 1. Phase 2 safety net will attempt to link them.")
 
     def _create_default_analytics_for_prompt(self, prompt: Prompt, domain: Domain) -> None:
         """
@@ -468,14 +889,15 @@ class DomainProcessor:
         except Exception as e:
             print(f"Error in _link_prompt_to_keywords: {str(e)}")
 
-    def _normalize_to_term(self, text: str, max_words: int = 2) -> str:
+    def _normalize_to_term(self, text: str, min_words: int = 2, max_words: int = 4) -> str:
         """
         Normalize text to a term format with better semantic extraction:
         - Prioritizes nouns and noun phrases
         - Looks for meaningful word pairs that appear together
         - Considers semantic relationships
-        - Limit to max_words (default 2)
-        - Join with "&" if 2 words, otherwise single word
+        - Minimum min_words (default 2) - ensures title is not one word
+        - Maximum max_words (default 4)
+        - Join multiple words with spaces (or "&" for 2-word pairs)
         """
         if not text or not text.strip():
             return "General"
@@ -543,7 +965,7 @@ class DomainProcessor:
                     meaningful_words.append((word_clean, i))
         
         if not meaningful_words:
-            return "General"
+            return "General Topic"
         
         # Strategy 1: Look for common noun phrases (adjacent meaningful words)
         # These are more likely to be meaningful concepts
@@ -602,43 +1024,30 @@ class DomainProcessor:
             phrase_scores.sort(reverse=True, key=lambda x: x[0])
             if phrase_scores:
                 _, word1, word2 = phrase_scores[0]
-                # Check if both words should be used together
-                # Only combine if they form a meaningful pair
-                if self._should_combine_words(word1, word2):
-                    capitalized = [word1.capitalize(), word2.capitalize()]
-                    return f"{capitalized[0]} & {capitalized[1]}"
-                else:
-                    # Prefer single-word title - use the more important word (higher score)
-                    # Prefer domain nouns if one is a domain noun
-                    word1_is_domain = word1 in domain_nouns
-                    word2_is_domain = word2 in domain_nouns
-                    if word1_is_domain and not word2_is_domain:
-                        return word1.capitalize()
-                    elif word2_is_domain and not word1_is_domain:
-                        return word2.capitalize()
-                    elif word_scores.get(word1, 0) >= word_scores.get(word2, 0):
-                        return word1.capitalize()
-                    else:
-                        return word2.capitalize()
+                # Always use both words (minimum 2 words requirement)
+                capitalized = [word1.capitalize(), word2.capitalize()]
+                # Use "&" for 2-word pairs, space for more words
+                return f"{capitalized[0]} & {capitalized[1]}"
         
-        # Strategy 4: If no good phrases, take top 2 words by score
+        # Strategy 4: If no good phrases, take top words by score (minimum min_words)
         sorted_words = sorted(word_scores.items(), key=lambda x: x[1], reverse=True)
         top_words = [word for word, _ in sorted_words[:max_words]]
         
-        if len(top_words) >= 2:
-            word1, word2 = top_words[0], top_words[1]
-            # Check if both words should be used together
-            # Only combine if they form a meaningful pair
-            if self._should_combine_words(word1, word2):
-                capitalized = [word1.capitalize(), word2.capitalize()]
+        if len(top_words) >= min_words:
+            # Always use at least min_words (default 2) words
+            words_to_use = top_words[:min_words] if len(top_words) >= min_words else top_words
+            capitalized = [word.capitalize() for word in words_to_use]
+            
+            # For 2 words, use "&" separator; for more words, use space
+            if len(capitalized) == 2:
                 return f"{capitalized[0]} & {capitalized[1]}"
             else:
-                # Prefer single-word title - use the most important word (first one has higher score)
-                return word1.capitalize()
+                return " ".join(capitalized)
         elif len(top_words) == 1:
-            return top_words[0].capitalize()
+            # If only one word found, add a generic second word to meet minimum requirement
+            return f"{top_words[0].capitalize()} Topic"
         
-        return "General"
+        return "General Topic"
     
     def _should_combine_words(self, word1: str, word2: str) -> bool:
         """
@@ -719,11 +1128,20 @@ class DomainProcessor:
         return True
 
     def _unique_group_id_for_domain(self, domain: Domain, base_id: str) -> str:
-        # Normalize base_id to term format (max 2 words with &)
-        normalized_base = self._normalize_to_term(base_id, max_words=2)
+        # Normalize base_id to term format (minimum 2 words, max 4 words)
+        normalized_base = self._normalize_to_term(base_id, min_words=2, max_words=4)
         
         # Remove any numbers from the base title
         normalized_base = self._remove_numbers_from_text(normalized_base)
+        
+        # Ensure we still have at least 2 words after number removal
+        words = normalized_base.split()
+        if len(words) < 2:
+            # If we lost words during number removal, add a generic word
+            if len(words) == 1:
+                normalized_base = f"{normalized_base} Topic"
+            else:
+                normalized_base = "General Topic"
         
         # truncate base to 90 chars to allow suffixes within 100-char field limit
         base = normalized_base[:90].rstrip()
@@ -885,9 +1303,9 @@ class DomainProcessor:
 
             # Use smart NLP-based title extraction
             smart_title = self._extract_smart_title_from_prompts(cluster_prompts)
-            # Normalize to term format (max 2 words with &)
+            # Normalize to term format (minimum 2 words, max 4 words)
             if smart_title:
-                normalized_title = self._normalize_to_term(smart_title, max_words=2)
+                normalized_title = self._normalize_to_term(smart_title, min_words=2, max_words=4)
                 # Remove any numbers from the title
                 normalized_title = self._remove_numbers_from_text(normalized_title)
             else:
@@ -905,8 +1323,10 @@ class DomainProcessor:
             primary_count = min(3, len(sorted_within))
             primary_indices = sorted_within[:primary_count]
             secondary_indices = sorted_within[primary_count:]
-            info['primary_prompts'] = [texts[i] for i in primary_indices]
-            info['secondary_prompts'] = [texts[i] for i in secondary_indices]
+            
+            # Preserve original prompt dictionaries (with keyword info) instead of just text
+            info['primary_prompts'] = [prompts[i] for i in primary_indices]
+            info['secondary_prompts'] = [prompts[i] for i in secondary_indices]
 
         # finalize structure
         result: List[Dict[str, Any]] = []
@@ -1043,27 +1463,15 @@ class DomainProcessor:
                 _, best_bigram, count = scored_bigrams[0]
                 words = best_bigram.split()
                 
-                # Ensure we have exactly 2 words
+                # Ensure we have exactly 2 words (always return at least 2 words)
                 if len(words) == 2:
                     # Additional validation: both words should be meaningful
                     if len(words[0]) > 2 and len(words[1]) > 2:
-                        # Check if both words should be combined
-                        if self._should_combine_words(words[0], words[1]):
-                            return f"{words[0].capitalize()} & {words[1].capitalize()}"
-                        else:
-                            # Use the more important word (prefer domain noun, then longer)
-                            word1_is_domain = words[0] in domain_nouns
-                            word2_is_domain = words[1] in domain_nouns
-                            if word1_is_domain and not word2_is_domain:
-                                return words[0].capitalize()
-                            elif word2_is_domain and not word1_is_domain:
-                                return words[1].capitalize()
-                            elif len(words[1]) >= len(words[0]):
-                                return words[1].capitalize()
-                            else:
-                                return words[0].capitalize()
+                        # Always use both words (minimum 2 words requirement)
+                        return f"{words[0].capitalize()} & {words[1].capitalize()}"
                 elif len(words) == 1:
-                    return words[0].capitalize()
+                    # If only one word, add a generic second word
+                    return f"{words[0].capitalize()} Topic"
 
         # Strategy 2: Use most common individual words that appear across prompts
         # Prioritize domain-specific nouns
@@ -1081,46 +1489,26 @@ class DomainProcessor:
                 word2, count2 = common_words[1]
                 # Ensure both words are different and meaningful
                 if word1 != word2 and len(word1) > 2 and len(word2) > 2:
-                    # Check if both words should be combined
-                    if self._should_combine_words(word1, word2):
-                        return f"{word1.capitalize()} & {word2.capitalize()}"
-                    else:
-                        # Use the more important word (domain noun or higher frequency)
-                        word1_is_domain = word1 in domain_nouns
-                        word2_is_domain = word2 in domain_nouns
-                        if word1_is_domain and not word2_is_domain:
-                            return word1.capitalize()
-                        elif word2_is_domain and not word1_is_domain:
-                            return word2.capitalize()
-                        elif count1 > count2 or (count1 == count2 and len(word1) >= len(word2)):
-                            return word1.capitalize()
-                        else:
-                            return word2.capitalize()
+                    # Always use both words (minimum 2 words requirement)
+                    return f"{word1.capitalize()} & {word2.capitalize()}"
             elif len(common_words) == 1:
                 word, count = common_words[0]
                 if len(word) > 2:
-                    return word.capitalize()
+                    # If only one word, add a generic second word
+                    return f"{word.capitalize()} Topic"
 
         # Strategy 3: Fallback - use most frequent words, prioritizing domain nouns
         if word_freq:
             # Sort by domain noun priority first, then frequency
             sorted_words = sorted(word_freq.items(), key=lambda x: (x[0] in domain_nouns, x[1]), reverse=True)
             top_words = [word for word, _ in sorted_words[:2] if len(word) > 2]
-            if len(top_words) == 2:
+            if len(top_words) >= 2:
                 word1, word2 = top_words[0], top_words[1]
-                # Check if both words should be combined
-                if self._should_combine_words(word1, word2):
-                    return f"{word1.capitalize()} & {word2.capitalize()}"
-                else:
-                    # Use the more important word (domain noun or first in sorted list)
-                    if word1 in domain_nouns:
-                        return word1.capitalize()
-                    elif word2 in domain_nouns:
-                        return word2.capitalize()
-                    else:
-                        return word1.capitalize()
+                # Always use both words (minimum 2 words requirement)
+                return f"{word1.capitalize()} & {word2.capitalize()}"
             elif len(top_words) == 1:
-                return top_words[0].capitalize()
+                # If only one word, add a generic second word
+                return f"{top_words[0].capitalize()} Topic"
 
         # Last resort: use first meaningful words from first prompt
         if prompts_texts:
@@ -1128,38 +1516,48 @@ class DomainProcessor:
             cleaned = re.sub(r'[^\w\s]', ' ', first_prompt.lower())
             words = cleaned.split()
             meaningful = [w for w in words if w not in stop_words and len(w) > 2 and w.isalpha() and not any(char.isdigit() for char in w)][:2]
-            if len(meaningful) == 2:
+            if len(meaningful) >= 2:
                 word1, word2 = meaningful[0], meaningful[1]
-                # Check if both words should be combined
-                if self._should_combine_words(word1, word2):
-                    return f"{word1.capitalize()} & {word2.capitalize()}"
-                else:
-                    # Use the longer/more important word
-                    if len(word2) >= len(word1):
-                        return word2.capitalize()
-                    else:
-                        return word1.capitalize()
+                # Always use both words (minimum 2 words requirement)
+                return f"{word1.capitalize()} & {word2.capitalize()}"
             elif len(meaningful) == 1:
-                return meaningful[0].capitalize()
+                # If only one word, add a generic second word
+                return f"{meaningful[0].capitalize()} Topic"
 
-        return "General"
+        return "General Topic"
 
     def _extract_theme_from_group(self, group_data: Dict[str, Any]) -> str:
         """
         Extract a concise theme from the prompt group using NLP
-        Uses the title and primary prompts to identify the common theme
-        Returns a normalized term (max 2 words joined with &)
+        Uses the primary prompt text to identify the common theme
+        Returns a normalized term (minimum 2 words, max 4 words)
         """
+        # Priority 1: Use primary prompt text (closest to actual prompt)
+        primary_prompts = group_data.get('primary_prompts', [])
+        if primary_prompts:
+            # Get the first primary prompt
+            prompt_item = primary_prompts[0]
+            if isinstance(prompt_item, dict):
+                prompt_text = (prompt_item.get('prompt_text') or prompt_item.get('prompt') or '').strip()
+            else:
+                prompt_text = str(prompt_item).strip()
+            
+            if prompt_text:
+                # Normalize to term format (minimum 2 words, max 4 words)
+                theme = self._normalize_to_term(prompt_text, min_words=2, max_words=4)
+                if theme and theme != "General":
+                    return theme
+        
+        # Priority 2: Fallback to title if no primary prompt available
         title = group_data.get('title', '').strip()
-
-        # Use the title as base (it's already derived from representative prompt)
         if title and title != 'Untitled':
-            # Normalize to term format (max 2 words with &)
-            theme = self._normalize_to_term(title, max_words=2)
-            return theme
+            # Normalize to term format (minimum 2 words, max 4 words)
+            theme = self._normalize_to_term(title, min_words=2, max_words=4)
+            if theme and theme != "General":
+                return theme
 
-        # Fallback: if no meaningful theme, use "General"
-        return "General"
+        # Fallback: if no meaningful theme, use "General Topic"
+        return "General Topic"
     
     def _build_expert_prompt_template(self, keyword: str, domain_name: str) -> str:
         return (

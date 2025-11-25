@@ -21,6 +21,7 @@ import {
   Plus,
   Loader2
 } from "lucide-react";
+import { apiClient } from "@/services/api";
 
 interface TopicOptimizeDialogProps {
   open: boolean;
@@ -46,45 +47,19 @@ export const TopicOptimizeDialog = ({ open, onOpenChange, topic }: TopicOptimize
     setIsGenerating(true);
 
     try {
-      // Simulate AI analysis
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Generate recommendations based on topic data
-      setRecommendations({
-        keywords: [
-          { keyword: "vegan athlete protein", impact: "high", difficulty: "low" },
-          { keyword: "plant protein for bodybuilding", impact: "high", difficulty: "medium" },
-          { keyword: "complete plant-based protein", impact: "medium", difficulty: "low" },
-          { keyword: "clean vegan protein supplement", impact: "medium", difficulty: "medium" },
-        ],
-        contentGaps: [
-          { gap: "Comparison with whey protein", priority: "high", potential: "+15% visibility" },
-          { gap: "Scientific backing and studies", priority: "high", potential: "+12% sentiment" },
-          { gap: "Recipe integration ideas", priority: "medium", potential: "+8% engagement" },
-        ],
-        prompts: [
-          "best complete protein vegan powder for athletes",
-          "plant-based protein vs whey for muscle building",
-          "scientifically proven vegan protein supplements",
-          "high protein vegan powder for strength training",
-        ],
-        competitive: [
-          { insight: "Emphasize complete amino acid profile", impact: "high" },
-          { insight: "Highlight third-party testing certifications", impact: "high" },
-          { insight: "Focus on clean ingredient list", impact: "medium" },
-        ],
-        actions: [
-          { action: "Add 'complete protein' to main positioning", priority: 1 },
-          { action: "Create comparison content vs traditional proteins", priority: 2 },
-          { action: "Showcase scientific research and certifications", priority: 3 },
-          { action: "Expand into recovery and performance keywords", priority: 4 },
-        ],
-      });
-
-      toast({
-        title: "Recommendations Generated",
-        description: "AI has analyzed your topic and created optimization strategies.",
-      });
+      // Call the backend API to generate recommendations
+      const response = await apiClient.getTopicOptimization(topic.id);
+      
+      if (response && response.recommendations) {
+        setRecommendations(response.recommendations);
+        
+        toast({
+          title: "Recommendations Generated",
+          description: "AI has analyzed your topic and created optimization strategies.",
+        });
+      } else {
+        throw new Error("Invalid response from server");
+      }
 
     } catch (error: any) {
       console.error("Error generating recommendations:", error);

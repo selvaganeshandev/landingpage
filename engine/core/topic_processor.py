@@ -4,6 +4,7 @@ Topic Processor: Groups keywords into topics using NLP when domain completes
 import logging
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
+from difflib import SequenceMatcher
 from django.db import transaction
 from django.utils import timezone
 from shared_models.models import Domain, Keyword, Topic, TopicKeyword
@@ -222,29 +223,102 @@ Return ONLY the JSON array, no markdown, no explanations."""
             'keywords': keywords
         }]
     
+    def _find_similar_topic(self, domain: Domain, topic_name: str, similarity_threshold: float = 0.8) -> Optional[Topic]:
+        """
+        Find an existing topic with a similar name in the same domain
+        
+        Args:
+            domain: Domain to search in
+            topic_name: Topic name to match
+            similarity_threshold: Minimum similarity ratio (0.0 to 1.0)
+            
+        Returns:
+            Similar Topic instance or None
+        """
+        try:
+            # Get all existing topics for this domain
+            existing_topics = Topic.objects.filter(domain=domain)
+            
+            if not existing_topics.exists():
+                return None
+            
+            topic_name_lower = topic_name.lower().strip()
+            best_match = None
+            best_ratio = 0.0
+            
+            for existing_topic in existing_topics:
+                existing_name_lower = existing_topic.name.lower().strip()
+                
+                # Check exact match (case-insensitive)
+                if topic_name_lower == existing_name_lower:
+                    logger.info(f"Found exact match for topic '{topic_name}': '{existing_topic.name}' (ID: {existing_topic.id})")
+                    return existing_topic
+                
+                # Calculate similarity ratio
+                ratio = SequenceMatcher(None, topic_name_lower, existing_name_lower).ratio()
+                
+                # Also check if one name contains the other (for partial matches)
+                if topic_name_lower in existing_name_lower or existing_name_lower in topic_name_lower:
+                    ratio = max(ratio, 0.85)  # Boost partial matches
+                
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_match = existing_topic
+            
+            # Return best match if it meets the threshold
+            if best_match and best_ratio >= similarity_threshold:
+                logger.info(f"Found similar topic '{topic_name}' → '{best_match.name}' (similarity: {best_ratio:.2f}, ID: {best_match.id})")
+                return best_match
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding similar topic for '{topic_name}': {str(e)}", exc_info=True)
+            return None
+    
     def _create_topic(self, domain: Domain, topic_data: Dict[str, Any]) -> Optional[Topic]:
         """
-        Create a Topic record
+        Create a Topic record or reuse existing similar topic
         
         Args:
             domain: Domain for the topic
             topic_data: Dictionary with topic_name and keywords
             
         Returns:
-            Created Topic instance or None
+            Created or existing Topic instance or None
         """
         try:
+            topic_name = topic_data['topic_name'].strip()
+            
+            # First, check if a similar topic already exists
+            existing_topic = self._find_similar_topic(domain, topic_name)
+            
+            if existing_topic:
+                # Update keyword_list to include new keywords (merge unique keywords)
+                existing_keywords = set(existing_topic.keyword_list or [])
+                new_keywords = set(topic_data['keywords'])
+                merged_keywords = sorted(list(existing_keywords | new_keywords))
+                
+                if merged_keywords != existing_topic.keyword_list:
+                    existing_topic.keyword_list = merged_keywords
+                    existing_topic.save(update_fields=['keyword_list', 'modified_at'])
+                    logger.info(f"Updated existing topic '{existing_topic.name}' (ID: {existing_topic.id}) with merged keywords: {len(merged_keywords)} total")
+                
+                return existing_topic
+            
+            # No similar topic found, create a new one
             with transaction.atomic():
                 topic = Topic.objects.create(
                     domain=domain,
-                    name=topic_data['topic_name'],
+                    name=topic_name,
                     keyword_list=topic_data['keywords'],
                     track_status='INIT',
                     track_message='Topic created, waiting for analytics processing',
                     tracked_at=timezone.now()
                 )
-                logger.info(f"Created topic: {topic.name} (ID: {topic.id})")
+                logger.info(f"Created new topic: {topic.name} (ID: {topic.id})")
                 return topic
+                
         except Exception as e:
             logger.error(f"Error creating topic {topic_data['topic_name']}: {str(e)}", exc_info=True)
             return None

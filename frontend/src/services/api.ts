@@ -722,10 +722,28 @@ export const apiClient = {
     return apiRequest(`/topics/topics/${topicId}/related_prompts/`);
   },
 
+  getTopicOptimization: (topicId: number) => {
+    return apiRequest(`/topics/topics/${topicId}/optimize/`);
+  },
+
   getTopicTrends: (topicId?: number, days: number = 30) => {
     const params = new URLSearchParams({ days: String(days) });
     if (topicId) params.append('topic_id', String(topicId));
     return apiRequest(`/topics/topic-analytics/trends/?${params.toString()}`);
+  },
+
+  // New dedicated analytics endpoints for Topics page
+  getTopicDistribution: (domainId: number) => {
+    return apiRequest(`/topics/topic-analytics/distribution/?domain_id=${domainId}`);
+  },
+
+  getTopicKeywordPerformance: (domainId: number, limit: number = 10) => {
+    return apiRequest(`/topics/topic-analytics/keyword-performance/?domain_id=${domainId}&limit=${limit}`);
+  },
+
+  getTopicPromptSuggestions: (domainId: number, limit: number = 6, generateNew: boolean = false) => {
+    const generateParam = generateNew ? '&generate_new=true' : '';
+    return apiRequest(`/topics/topic-analytics/prompt-suggestions/?domain_id=${domainId}&limit=${limit}${generateParam}`);
   },
 
   // ===== Analytics =====
