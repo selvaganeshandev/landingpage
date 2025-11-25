@@ -200,24 +200,6 @@ const ContentCalendar = () => {
           </div>
         </div>
         <div className="flex gap-3">
-          <Button 
-            variant="outline" 
-            onClick={() => navigate('/automation')}
-            className="border-border/50"
-          >
-            <Settings className="h-4 w-4 mr-2" />
-            Automation Settings
-          </Button>
-          <Select defaultValue="weekly">
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Frequency" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="daily">Daily</SelectItem>
-              <SelectItem value="weekly">Twice Weekly</SelectItem>
-              <SelectItem value="biweekly">Weekly</SelectItem>
-            </SelectContent>
-          </Select>
           <Button onClick={handleGenerateContent} className="gradient-primary shadow-md shadow-primary/20">
             <Sparkles className="h-4 w-4 mr-2" />
             Generate Content
@@ -437,15 +419,8 @@ const ContentCalendar = () => {
                 ) : (
                   <div className="text-center py-12 text-muted-foreground">
                     <CalendarIcon className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                    <p>No content scheduled for this date</p>
-                    <Button 
-                      variant="outline" 
-                      className="mt-4"
-                      onClick={handleGenerateContent}
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Content
-                    </Button>
+                    <p className="text-lg font-medium">Coming Soon</p>
+                    <p className="text-sm mt-1">Calendar scheduling feature is under development</p>
                   </div>
                 )}
               </Card>

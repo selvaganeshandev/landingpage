@@ -185,11 +185,12 @@ const ContentEditor = () => {
           setContent(htmlContent);
 
           // Extract keywords and count occurrences
+          let keywordStats: typeof keywords = [];
           if (contentRecord.keywords) {
             const keywordList = contentRecord.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
             const contentText = contentRecord.content_html?.replace(/<[^>]*>/g, ' ').toLowerCase() || '';
 
-            const keywordStats = keywordList.map((keyword: string) => {
+            keywordStats = keywordList.map((keyword: string) => {
               const count = countKeywordOccurrences(contentText, keyword);
               // Estimate target range based on word count (1-3 times per 500 words as baseline)
               const wordCount = contentText.split(/\s+/).filter((w: string) => w.length > 0).length;
@@ -208,8 +209,8 @@ const ContentEditor = () => {
             setKeywords(keywordStats);
           }
 
-          // Calculate initial metrics and content score
-          updateMetrics(contentRecord.content_html || "");
+          // Calculate initial metrics and content score with keywords
+          updateMetrics(contentRecord.content_html || "", keywordStats);
         }
       } catch (error) {
         console.error("Error loading content:", error);
@@ -242,7 +243,7 @@ const ContentEditor = () => {
   }, [content, loading]);
 
   // Update content metrics
-  const updateMetrics = (html: string) => {
+  const updateMetrics = (html: string, keywordsList?: typeof keywords) => {
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = html;
 
@@ -309,16 +310,20 @@ const ContentEditor = () => {
     }
 
     // Keyword usage score (25 points max)
-    if (keywords.length > 0) {
-      const keywordsMeetingTarget = keywords.filter(k =>
-        k.color === "bg-green-500/20 text-green-700 border-green-500"
+    // Use passed keywordsList if available, otherwise use state
+    const kw = keywordsList || keywords;
+    if (kw.length > 0) {
+      const keywordsMeetingTarget = kw.filter(k =>
+        k.color === "bg-success/10 text-success border-success/50"
       ).length;
-      const keywordScore = (keywordsMeetingTarget / keywords.length) * 25;
+      const keywordScore = (keywordsMeetingTarget / kw.length) * 25;
       score += Math.round(keywordScore);
+      console.log("Keywords meeting target:", keywordsMeetingTarget, "/", kw.length, "Score added:", Math.round(keywordScore));
     } else {
       score += 15; // Give some points if no keywords defined yet
     }
 
+    console.log("Final content score:", Math.min(100, Math.round(score)), "Word count:", wc, "Headings:", hc, "Paragraphs:", pCount, "Images:", imgCount);
     setContentScore(Math.min(100, Math.round(score)));
   };
 
@@ -327,7 +332,28 @@ const ContentEditor = () => {
     if (editorRef.current) {
       const html = editorRef.current.innerHTML;
       setContent(html);
-      updateMetrics(html);
+
+      // Recalculate keyword stats based on new content
+      const contentText = html.replace(/<[^>]*>/g, ' ').toLowerCase();
+      const wordCount = contentText.split(/\s+/).filter((w: string) => w.length > 0).length;
+
+      const updatedKeywords = keywords.map(kw => {
+        const count = countKeywordOccurrences(contentText, kw.term);
+        const targetMin = Math.max(1, Math.floor(wordCount / 500));
+        const targetMax = Math.max(3, Math.floor(wordCount / 250));
+        const target = `${targetMin}-${targetMax}`;
+
+        return {
+          ...kw,
+          current: count,
+          target: `${count}/${target}`,
+          color: getKeywordColor(count, target)
+        };
+      });
+
+      setKeywords(updatedKeywords);
+      updateMetrics(html, updatedKeywords);
+
       // Update original content ref when user edits (only if no keyword is selected)
       if (!selectedKeyword) {
         originalContentRef.current = html;

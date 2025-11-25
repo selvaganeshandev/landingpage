@@ -3,18 +3,16 @@ import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { useContentGeneration } from "@/hooks/useContentGeneration";
 import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
-import { 
-  Search,
+import { PageLoader } from "@/components/PageLoader";
+import {
   TrendingUp,
   TrendingDown,
-  Sparkles,
-  Loader2
+  Sparkles
 } from "lucide-react";
 import { TopicDetailDialog } from "@/components/TopicDetailDialog";
 import { 
@@ -68,7 +66,6 @@ const Topics = () => {
   const [topicTrends, setTopicTrends] = useState<any[]>([]);
   const [keywordPerformance, setKeywordPerformance] = useState<any[]>([]);
   const [promptSuggestions, setPromptSuggestions] = useState<any[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
 
   const handleGenerateContent = (topic: typeof topics[0]) => {
     navigateToContentGeneration({
@@ -294,15 +291,8 @@ const Topics = () => {
     fetchTopics();
   }, [selectedDomain?.id, toast]);
 
-  // Filter topics based on search query
-  const filteredTopics = useMemo(() => {
-    if (!searchQuery.trim()) return topics;
-    const query = searchQuery.toLowerCase();
-    return topics.filter(topic =>
-      topic.name.toLowerCase().includes(query) ||
-      topic.keywords.some(kw => kw.toLowerCase().includes(query))
-    );
-  }, [topics, searchQuery]);
+  // Use topics directly (search removed)
+  const filteredTopics = topics;
 
   // Topic distribution for pie chart
   const topicDistribution = useMemo(() => {
@@ -312,6 +302,11 @@ const Topics = () => {
       color: t.color
     }));
   }, [filteredTopics]);
+
+  // Show PageLoader while loading
+  if (loading) {
+    return <PageLoader />;
+  }
 
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
@@ -325,36 +320,15 @@ const Topics = () => {
         {/* Generate Topics and Add Topic buttons hidden as per requirements */}
       </div>
 
-      {/* Search Bar */}
-      <Card className="p-6 border border-border">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder="Search topics, keywords, or prompts..." 
-            className="pl-10"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-      </Card>
-
-      {/* Loading State */}
-      {loading && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <span className="ml-2 text-muted-foreground">Loading topics...</span>
-        </div>
-      )}
-
       {/* Error State */}
-      {error && !loading && (
+      {error && (
         <Card className="p-6 border-destructive">
           <p className="text-destructive">{error}</p>
         </Card>
       )}
 
       {/* No Domain Selected */}
-      {!selectedDomain && !loading && (
+      {!selectedDomain && (
         <Card className="p-6 border border-border">
           <p className="text-muted-foreground text-center">
             Please select a domain to view topics.
@@ -363,16 +337,16 @@ const Topics = () => {
       )}
 
       {/* No Topics */}
-      {!loading && !error && selectedDomain && filteredTopics.length === 0 && (
+      {!error && selectedDomain && filteredTopics.length === 0 && (
         <Card className="p-6 border border-border">
           <p className="text-muted-foreground text-center">
-            {searchQuery ? "No topics found matching your search." : "No topics found for this domain. Topics will be created automatically when domain processing completes."}
+            No topics found for this domain. Topics will be created automatically when domain processing completes.
           </p>
         </Card>
       )}
 
-      {/* Content - Only show if not loading and has data */}
-      {!loading && !error && filteredTopics.length > 0 && (
+      {/* Content - Only show if has data */}
+      {!error && filteredTopics.length > 0 && (
         <>
 
       {/* Overview */}
