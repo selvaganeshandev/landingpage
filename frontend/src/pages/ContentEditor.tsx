@@ -87,16 +87,22 @@ const ContentEditor = () => {
         const data = await apiClient.getGeneratedContent(parseInt(id));
 
         if (data) {
-          setContentData(data);
-          setTitle(data.title);
+          // API returns {status: 'success', data: {...}}
+          const contentRecord = data.data || data;
+          console.log("Loaded content data:", contentRecord);
+          console.log("content_html value:", contentRecord.content_html);
 
-          const htmlContent = data.content_html || "";
+          setContentData(contentRecord);
+          setTitle(contentRecord.title);
+
+          const htmlContent = contentRecord.content_html || "";
+          console.log("htmlContent to set:", htmlContent?.substring(0, 200));
           setContent(htmlContent);
 
           // Extract keywords and count occurrences
-          if (data.keywords) {
-            const keywordList = data.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
-            const contentText = data.content_html?.replace(/<[^>]*>/g, ' ').toLowerCase() || '';
+          if (contentRecord.keywords) {
+            const keywordList = contentRecord.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
+            const contentText = contentRecord.content_html?.replace(/<[^>]*>/g, ' ').toLowerCase() || '';
 
             const keywordStats = keywordList.map((keyword: string) => {
               const count = countKeywordOccurrences(contentText, keyword);
@@ -118,7 +124,7 @@ const ContentEditor = () => {
           }
 
           // Calculate initial metrics and content score
-          updateMetrics(data.content_html || "");
+          updateMetrics(contentRecord.content_html || "");
         }
       } catch (error) {
         console.error("Error loading content:", error);
@@ -135,12 +141,20 @@ const ContentEditor = () => {
     loadContent();
   }, [id, toast]);
 
-  // Set the HTML content when it changes
+  // Set the HTML content when it changes or loading completes
   useEffect(() => {
-    if (editorRef.current && content && editorRef.current.innerHTML !== content) {
-      editorRef.current.innerHTML = content;
+    console.log("useEffect triggered - content:", content?.substring(0, 100), "loading:", loading, "editorRef:", !!editorRef.current);
+    if (editorRef.current && content && !loading) {
+      // Use a small delay to ensure the contentEditable div is fully ready
+      const timeoutId = setTimeout(() => {
+        if (editorRef.current) {
+          console.log("Setting editor innerHTML with content length:", content.length);
+          editorRef.current.innerHTML = content;
+        }
+      }, 50);
+      return () => clearTimeout(timeoutId);
     }
-  }, [content]);
+  }, [content, loading]);
 
   // Update content metrics
   const updateMetrics = (html: string) => {
@@ -444,11 +458,112 @@ const ContentEditor = () => {
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-4xl mx-auto p-8">
               {/* Rich Text Editor */}
+              <style>{`
+                .content-editor h1 {
+                  font-size: 2.25rem;
+                  font-weight: 700;
+                  margin-top: 2rem;
+                  margin-bottom: 1rem;
+                  line-height: 1.2;
+                  color: hsl(var(--foreground));
+                }
+                .content-editor h2 {
+                  font-size: 1.75rem;
+                  font-weight: 600;
+                  margin-top: 1.75rem;
+                  margin-bottom: 0.75rem;
+                  line-height: 1.3;
+                  color: hsl(var(--foreground));
+                  border-bottom: 1px solid hsl(var(--border));
+                  padding-bottom: 0.5rem;
+                }
+                .content-editor h3 {
+                  font-size: 1.35rem;
+                  font-weight: 600;
+                  margin-top: 1.5rem;
+                  margin-bottom: 0.5rem;
+                  line-height: 1.4;
+                  color: hsl(var(--foreground));
+                }
+                .content-editor h4 {
+                  font-size: 1.15rem;
+                  font-weight: 600;
+                  margin-top: 1.25rem;
+                  margin-bottom: 0.5rem;
+                  color: hsl(var(--foreground));
+                }
+                .content-editor p {
+                  margin-bottom: 1rem;
+                  line-height: 1.75;
+                }
+                .content-editor strong, .content-editor b {
+                  font-weight: 700;
+                }
+                .content-editor em, .content-editor i {
+                  font-style: italic;
+                }
+                .content-editor u {
+                  text-decoration: underline;
+                }
+                .content-editor ul {
+                  list-style-type: disc;
+                  margin-left: 1.5rem;
+                  margin-bottom: 1rem;
+                }
+                .content-editor ol {
+                  list-style-type: decimal;
+                  margin-left: 1.5rem;
+                  margin-bottom: 1rem;
+                }
+                .content-editor li {
+                  margin-bottom: 0.5rem;
+                  line-height: 1.6;
+                }
+                .content-editor a {
+                  color: hsl(var(--primary));
+                  text-decoration: underline;
+                }
+                .content-editor blockquote {
+                  border-left: 4px solid hsl(var(--primary));
+                  padding-left: 1rem;
+                  margin: 1rem 0;
+                  font-style: italic;
+                  color: hsl(var(--muted-foreground));
+                }
+                .content-editor code {
+                  background: hsl(var(--muted));
+                  padding: 0.2rem 0.4rem;
+                  border-radius: 0.25rem;
+                  font-family: monospace;
+                  font-size: 0.9em;
+                }
+                .content-editor pre {
+                  background: hsl(var(--muted));
+                  padding: 1rem;
+                  border-radius: 0.5rem;
+                  overflow-x: auto;
+                  margin: 1rem 0;
+                }
+                .content-editor table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  margin: 1rem 0;
+                }
+                .content-editor th, .content-editor td {
+                  border: 1px solid hsl(var(--border));
+                  padding: 0.5rem;
+                  text-align: left;
+                }
+                .content-editor th {
+                  background: hsl(var(--muted));
+                  font-weight: 600;
+                }
+              `}</style>
               <div
                 ref={editorRef}
                 contentEditable
                 onInput={handleContentChange}
-                className="prose prose-lg prose-slate max-w-none min-h-[600px] focus:outline-none"
+                className="content-editor min-h-[600px] focus:outline-none"
                 style={{
                   fontFamily: 'system-ui, -apple-system, sans-serif',
                   fontSize: '16px',
