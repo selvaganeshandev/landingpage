@@ -6,6 +6,7 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from django.db import transaction
 from django.db import IntegrityError
+from django.conf import settings
 from .models import Domain, DomainAccess
 from .serializers import (
     DomainSerializer, DomainDetailSerializer,
@@ -13,6 +14,22 @@ from .serializers import (
 )
 from authentication.serializers import AccountSerializer
 from authentication.models import Account
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def get_openai_client():
+    """Return OpenAI client if configured in Django settings; else raise."""
+    api_key = getattr(settings, "OPENAI_API_KEY", None)
+    if not api_key:
+        raise Exception("OpenAI API key not configured")
+    try:
+        from openai import OpenAI
+        return OpenAI(api_key=api_key, timeout=60)
+    except Exception as e:
+        raise Exception(f"Failed to initialize OpenAI client: {e}")
 
 
 @api_view(['GET', 'POST'])
@@ -321,4 +338,97 @@ def available_users_for_domain(request, domain_id):
     # Domain Access Management views removed
 
 
-# DetectedModel endpoints removed
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def fetch_brand_info(request):
+    """
+    Fetch brand information from ChatGPT based on domain name and URL.
+    Returns: short_description, target_audience, brand_values, key_competitors,
+             tone_of_voice, content_style, key_messages, topics_to_avoid
+    """
+    domain_name = request.data.get('domain_name', '').strip()
+    domain_url = request.data.get('domain_url', '').strip()
+
+    if not domain_name and not domain_url:
+        return Response(
+            {'error': 'Either domain_name or domain_url is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Use domain_url if provided, otherwise construct from domain_name
+    website = domain_url if domain_url else f"https://{domain_name}"
+    brand_name = domain_name.replace('.com', '').replace('.io', '').replace('.org', '').replace('.net', '').replace('-', ' ').replace('_', ' ').title()
+
+    try:
+        client = get_openai_client()
+
+        prompt = f"""Analyze the brand/website "{brand_name}" ({website}) and provide the following information in JSON format.
+If you don't have specific information about this brand, make reasonable inferences based on the domain name and common patterns for similar businesses.
+
+Return ONLY a valid JSON object with these fields:
+{{
+    "short_description": "A brief 1-2 sentence description of what this brand/company does",
+    "target_audience": "Description of the primary target audience demographics, interests, and needs",
+    "brand_values": "Core values and principles the brand likely stands for (as a comma-separated list)",
+    "key_competitors": "List of 3-5 likely competitors in the same space (as a comma-separated list)",
+    "tone_of_voice": "Recommended tone of voice for content (e.g., professional, friendly, authoritative)",
+    "content_style": "Recommended content style guidelines (e.g., concise, detailed, technical)",
+    "key_messages": "Key messages or themes the brand should emphasize",
+    "topics_to_avoid": "Topics or themes the brand should avoid in content"
+}}
+
+Provide helpful, realistic information that would be useful for brand monitoring and content creation."""
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a brand analyst expert. Analyze brands and provide structured information about them. Always respond with valid JSON only, no additional text."
+                },
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+
+        result_text = response.choices[0].message.content.strip()
+
+        # Try to parse the JSON response
+        try:
+            # Remove markdown code blocks if present
+            if result_text.startswith('```'):
+                result_text = result_text.split('```')[1]
+                if result_text.startswith('json'):
+                    result_text = result_text[4:]
+                result_text = result_text.strip()
+
+            brand_info = json.loads(result_text)
+
+            return Response({
+                'success': True,
+                'brand_info': {
+                    'short_description': brand_info.get('short_description', ''),
+                    'target_audience': brand_info.get('target_audience', ''),
+                    'brand_values': brand_info.get('brand_values', ''),
+                    'key_competitors': brand_info.get('key_competitors', ''),
+                    'tone_of_voice': brand_info.get('tone_of_voice', ''),
+                    'content_style': brand_info.get('content_style', ''),
+                    'key_messages': brand_info.get('key_messages', ''),
+                    'topics_to_avoid': brand_info.get('topics_to_avoid', ''),
+                }
+            })
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse ChatGPT response as JSON: {result_text}")
+            return Response({
+                'success': False,
+                'error': 'Failed to parse AI response',
+                'raw_response': result_text
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"Error fetching brand info from ChatGPT: {str(e)}")
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

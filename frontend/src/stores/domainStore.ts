@@ -5,6 +5,15 @@ export interface Domain {
   id: number;
   name: string;
   url: string;
+  short_description?: string | null;
+  country?: string;
+  tone_of_voice?: string | null;
+  content_style?: string | null;
+  key_messages?: string | null;
+  topics_to_avoid?: string | null;
+  target_audience?: string | null;
+  brand_values?: string | null;
+  key_competitors?: string | null;
   organisation: number;
   total_mentions: number;
   total_citations: number;

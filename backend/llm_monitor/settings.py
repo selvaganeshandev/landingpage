@@ -206,6 +206,11 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 # OpenAI API Configuration
 OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 
+# Google OAuth Configuration
+GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default=None)
+GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default=None)
+GOOGLE_OAUTH_REDIRECT_URI = config('GOOGLE_OAUTH_REDIRECT_URI', default='http://localhost:8000/integrations/google/callback/')
+
 # JWT Configuration
 from datetime import timedelta
 

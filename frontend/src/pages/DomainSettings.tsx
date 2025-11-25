@@ -41,6 +41,15 @@ export default function DomainSettings() {
     id: number;
     name: string;
     url: string;
+    short_description?: string | null;
+    country?: string;
+    tone_of_voice?: string | null;
+    content_style?: string | null;
+    key_messages?: string | null;
+    topics_to_avoid?: string | null;
+    target_audience?: string | null;
+    brand_values?: string | null;
+    key_competitors?: string | null;
     organisation: number;
     total_mentions: number;
     total_citations: number;
@@ -54,6 +63,29 @@ export default function DomainSettings() {
     processing_status?: string;
     track_message?: string;
   } | null>(null);
+
+  // Basic Info edit state
+  const [domainName, setDomainName] = useState("");
+  const [shortDescription, setShortDescription] = useState("");
+  const [isSavingBasicInfo, setIsSavingBasicInfo] = useState(false);
+
+  // Content Guidelines state
+  const [toneOfVoice, setToneOfVoice] = useState("");
+  const [contentStyle, setContentStyle] = useState("");
+  const [keyMessages, setKeyMessages] = useState("");
+  const [topicsToAvoid, setTopicsToAvoid] = useState("");
+  const [isSavingGuidelines, setIsSavingGuidelines] = useState(false);
+
+  // Brand Identity state
+  const [targetAudience, setTargetAudience] = useState("");
+  const [brandValues, setBrandValues] = useState("");
+  const [keyCompetitors, setKeyCompetitors] = useState("");
+  const [isSavingBrandIdentity, setIsSavingBrandIdentity] = useState(false);
+
+  // Integrations state
+  const [integrations, setIntegrations] = useState<any[]>([]);
+  const [isLoadingIntegrations, setIsLoadingIntegrations] = useState(false);
+  const [isConnectingGA, setIsConnectingGA] = useState(false);
 
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
@@ -91,6 +123,15 @@ export default function DomainSettings() {
       }
 
       setDomain(foundDomain);
+      setShortDescription(foundDomain.short_description || "");
+      setDomainName(foundDomain.name || "");
+      setToneOfVoice(foundDomain.tone_of_voice || "");
+      setContentStyle(foundDomain.content_style || "");
+      setKeyMessages(foundDomain.key_messages || "");
+      setTopicsToAvoid(foundDomain.topics_to_avoid || "");
+      setTargetAudience(foundDomain.target_audience || "");
+      setBrandValues(foundDomain.brand_values || "");
+      setKeyCompetitors(foundDomain.key_competitors || "");
     } catch (error: any) {
       toast({
         title: "Error loading domain",
@@ -305,6 +346,229 @@ export default function DomainSettings() {
     }
   };
 
+  const handleSaveBasicInfo = async () => {
+    if (!domain || !domainName.trim()) return;
+
+    try {
+      setIsSavingBasicInfo(true);
+      await apiClient.updateDomain(domain.id, {
+        name: domainName.trim(),
+        short_description: shortDescription.trim() || null,
+      });
+
+      setDomain({
+        ...domain,
+        name: domainName.trim(),
+        short_description: shortDescription.trim() || null,
+      });
+
+      toast({
+        title: "Basic info saved",
+        description: "Domain information has been updated successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error saving",
+        description: error.message || "Failed to save domain information.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingBasicInfo(false);
+    }
+  };
+
+  const hasBasicInfoChanged = () => {
+    if (!domain) return false;
+    return (
+      domainName !== domain.name ||
+      shortDescription !== (domain.short_description || "")
+    );
+  };
+
+  const handleSaveGuidelines = async () => {
+    if (!domain) return;
+
+    try {
+      setIsSavingGuidelines(true);
+      await apiClient.updateDomain(domain.id, {
+        tone_of_voice: toneOfVoice.trim() || null,
+        content_style: contentStyle.trim() || null,
+        key_messages: keyMessages.trim() || null,
+        topics_to_avoid: topicsToAvoid.trim() || null,
+      });
+
+      setDomain({
+        ...domain,
+        tone_of_voice: toneOfVoice.trim() || null,
+        content_style: contentStyle.trim() || null,
+        key_messages: keyMessages.trim() || null,
+        topics_to_avoid: topicsToAvoid.trim() || null,
+      });
+
+      toast({
+        title: "Guidelines saved",
+        description: "Content guidelines have been updated successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error saving guidelines",
+        description: error.message || "Failed to save content guidelines.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingGuidelines(false);
+    }
+  };
+
+  const hasGuidelinesChanged = () => {
+    if (!domain) return false;
+    return (
+      toneOfVoice !== (domain.tone_of_voice || "") ||
+      contentStyle !== (domain.content_style || "") ||
+      keyMessages !== (domain.key_messages || "") ||
+      topicsToAvoid !== (domain.topics_to_avoid || "")
+    );
+  };
+
+  const handleSaveBrandIdentity = async () => {
+    if (!domain) return;
+
+    try {
+      setIsSavingBrandIdentity(true);
+      await apiClient.updateDomain(domain.id, {
+        target_audience: targetAudience.trim() || null,
+        brand_values: brandValues.trim() || null,
+        key_competitors: keyCompetitors.trim() || null,
+      });
+
+      setDomain({
+        ...domain,
+        target_audience: targetAudience.trim() || null,
+        brand_values: brandValues.trim() || null,
+        key_competitors: keyCompetitors.trim() || null,
+      });
+
+      toast({
+        title: "Brand identity saved",
+        description: "Brand identity has been updated successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error saving brand identity",
+        description: error.message || "Failed to save brand identity.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingBrandIdentity(false);
+    }
+  };
+
+  const hasBrandIdentityChanged = () => {
+    if (!domain) return false;
+    return (
+      targetAudience !== (domain.target_audience || "") ||
+      brandValues !== (domain.brand_values || "") ||
+      keyCompetitors !== (domain.key_competitors || "")
+    );
+  };
+
+  // Load integrations for this domain
+  const loadIntegrations = async () => {
+    if (!domain) return;
+    try {
+      setIsLoadingIntegrations(true);
+      const response = await apiClient.getIntegrationsByDomain(domain.id);
+      setIntegrations(response || []);
+    } catch (error) {
+      console.error('Failed to load integrations:', error);
+    } finally {
+      setIsLoadingIntegrations(false);
+    }
+  };
+
+  // Load integrations when domain changes
+  useEffect(() => {
+    if (domain) {
+      loadIntegrations();
+    }
+  }, [domain?.id]);
+
+  // Check for OAuth success/error in URL params
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const success = urlParams.get('success');
+    const error = urlParams.get('error');
+    const tab = urlParams.get('tab');
+
+    if (success === 'google_connected') {
+      toast({
+        title: "Google Analytics Connected",
+        description: "Your Google Analytics account has been successfully connected.",
+      });
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+      loadIntegrations();
+    }
+
+    if (error) {
+      const errorMessages: Record<string, string> = {
+        'google_auth_denied': 'Google authentication was denied.',
+        'missing_params': 'Missing required parameters.',
+        'invalid_state': 'Invalid authentication state.',
+        'domain_not_found': 'Domain not found.',
+        'oauth_failed': 'OAuth authentication failed.',
+      };
+      toast({
+        title: "Connection Failed",
+        description: errorMessages[error] || 'Failed to connect Google Analytics.',
+        variant: "destructive",
+      });
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  const handleConnectGoogleAnalytics = async () => {
+    if (!domain) return;
+    try {
+      setIsConnectingGA(true);
+      const response = await apiClient.getGoogleAuthUrl(domain.id, 'google_analytics');
+      if (response.authorization_url) {
+        // Redirect to Google OAuth
+        window.location.href = response.authorization_url;
+      }
+    } catch (error: any) {
+      toast({
+        title: "Connection Error",
+        description: error.message || "Failed to initiate Google Analytics connection.",
+        variant: "destructive",
+      });
+      setIsConnectingGA(false);
+    }
+  };
+
+  const handleDisconnectIntegration = async (integrationId: number) => {
+    try {
+      await apiClient.disconnectIntegration(integrationId);
+      toast({
+        title: "Disconnected",
+        description: "Integration has been disconnected successfully.",
+      });
+      loadIntegrations();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to disconnect integration.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Get integration by type
+  const getIntegration = (type: string) => {
+    return integrations.find(i => i.type === type && i.status === 'active');
+  };
+
   if (isLoading) {
     return <PageLoader />;
   }
@@ -504,9 +768,9 @@ export default function DomainSettings() {
                   <Label htmlFor="domain-name">Domain Name</Label>
                   <Input
                     id="domain-name"
-                    value={domain.name}
-                    disabled
-                    className="bg-muted"
+                    value={domainName}
+                    onChange={(e) => setDomainName(e.target.value)}
+                    placeholder="Enter domain name"
                   />
                 </div>
                 <div className="space-y-2">
@@ -519,21 +783,47 @@ export default function DomainSettings() {
                   />
                 </div>
               </div>
-              <Separator />
-              <div className="grid grid-cols-3 gap-4">
-                <div className="p-4 border rounded-lg text-center">
-                  <p className="text-2xl font-bold">{domain.total_mentions || 0}</p>
-                  <p className="text-sm text-muted-foreground">Total Mentions</p>
-                </div>
-                <div className="p-4 border rounded-lg text-center">
-                  <p className="text-2xl font-bold">{domain.total_citations || 0}</p>
-                  <p className="text-sm text-muted-foreground">Total Citations</p>
-                </div>
-                <div className="p-4 border rounded-lg text-center">
-                  <p className="text-2xl font-bold">{domain.visibility_score || '0'}%</p>
-                  <p className="text-sm text-muted-foreground">Visibility Score</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="country">Country</Label>
+                  <Input
+                    id="country"
+                    value={domain.country || "United States"}
+                    disabled
+                    className="bg-muted"
+                  />
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="short-description">Brand Description</Label>
+                <Textarea
+                  id="short-description"
+                  value={shortDescription}
+                  onChange={(e) => setShortDescription(e.target.value)}
+                  placeholder="Enter a brief description of your brand (e.g., Leading provider of cloud-based HR solutions for small businesses)"
+                  className="min-h-[80px]"
+                  maxLength={500}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {shortDescription.length}/500 characters
+                </p>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  onClick={handleSaveBasicInfo}
+                  disabled={isSavingBasicInfo || !hasBasicInfoChanged() || !domainName.trim()}
+                >
+                  {isSavingBasicInfo ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save"
+                  )}
+                </Button>
+              </div>
+              <Separator />
               <div className="text-sm text-muted-foreground">
                 <p>Created: {new Date(domain.created_at).toLocaleDateString()}</p>
                 <p>Last Modified: {new Date(domain.modified_at).toLocaleDateString()}</p>
@@ -556,6 +846,8 @@ export default function DomainSettings() {
                 <Label htmlFor="tone-of-voice">Tone of Voice</Label>
                 <Textarea
                   id="tone-of-voice"
+                  value={toneOfVoice}
+                  onChange={(e) => setToneOfVoice(e.target.value)}
                   placeholder="Describe your brand's tone of voice (e.g., professional, friendly, authoritative...)"
                   className="min-h-[100px]"
                 />
@@ -564,6 +856,8 @@ export default function DomainSettings() {
                 <Label htmlFor="content-style">Content Style</Label>
                 <Textarea
                   id="content-style"
+                  value={contentStyle}
+                  onChange={(e) => setContentStyle(e.target.value)}
                   placeholder="Describe your preferred content style (e.g., concise, detailed, technical...)"
                   className="min-h-[100px]"
                 />
@@ -572,6 +866,8 @@ export default function DomainSettings() {
                 <Label htmlFor="key-messages">Key Messages</Label>
                 <Textarea
                   id="key-messages"
+                  value={keyMessages}
+                  onChange={(e) => setKeyMessages(e.target.value)}
                   placeholder="List key messages or themes to emphasize in content..."
                   className="min-h-[100px]"
                 />
@@ -580,14 +876,25 @@ export default function DomainSettings() {
                 <Label htmlFor="avoid-topics">Topics to Avoid</Label>
                 <Textarea
                   id="avoid-topics"
+                  value={topicsToAvoid}
+                  onChange={(e) => setTopicsToAvoid(e.target.value)}
                   placeholder="List topics or themes to avoid in content..."
                   className="min-h-[100px]"
                 />
               </div>
               <div className="flex justify-end">
-                <Button disabled>
-                  <Loader2 className="h-4 w-4 mr-2 hidden" />
-                  Save Guidelines
+                <Button
+                  onClick={handleSaveGuidelines}
+                  disabled={isSavingGuidelines || !hasGuidelinesChanged()}
+                >
+                  {isSavingGuidelines ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Guidelines"
+                  )}
                 </Button>
               </div>
             </CardContent>
@@ -600,22 +907,16 @@ export default function DomainSettings() {
             <CardHeader>
               <CardTitle>Brand Identity</CardTitle>
               <CardDescription>
-                Configure your brand's visual identity and assets
+                Define your brand's identity and market positioning. These values are auto-populated using AI when you create a new brand.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="brand-description">Brand Description</Label>
-                <Textarea
-                  id="brand-description"
-                  placeholder="Provide a brief description of your brand..."
-                  className="min-h-[100px]"
-                />
-              </div>
-              <div className="space-y-2">
                 <Label htmlFor="target-audience">Target Audience</Label>
                 <Textarea
                   id="target-audience"
+                  value={targetAudience}
+                  onChange={(e) => setTargetAudience(e.target.value)}
                   placeholder="Describe your target audience demographics and preferences..."
                   className="min-h-[100px]"
                 />
@@ -624,6 +925,8 @@ export default function DomainSettings() {
                 <Label htmlFor="brand-values">Brand Values</Label>
                 <Textarea
                   id="brand-values"
+                  value={brandValues}
+                  onChange={(e) => setBrandValues(e.target.value)}
                   placeholder="List your brand's core values..."
                   className="min-h-[100px]"
                 />
@@ -632,13 +935,25 @@ export default function DomainSettings() {
                 <Label htmlFor="competitors-brand">Key Competitors</Label>
                 <Textarea
                   id="competitors-brand"
+                  value={keyCompetitors}
+                  onChange={(e) => setKeyCompetitors(e.target.value)}
                   placeholder="List your main competitors..."
                   className="min-h-[100px]"
                 />
               </div>
               <div className="flex justify-end">
-                <Button disabled>
-                  Save Brand Identity
+                <Button
+                  onClick={handleSaveBrandIdentity}
+                  disabled={isSavingBrandIdentity || !hasBrandIdentityChanged()}
+                >
+                  {isSavingBrandIdentity ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Brand Identity"
+                  )}
                 </Button>
               </div>
             </CardContent>
@@ -651,11 +966,12 @@ export default function DomainSettings() {
             <CardHeader>
               <CardTitle>Integrations</CardTitle>
               <CardDescription>
-                Connect external services and data sources
+                Connect external services to track traffic from AI platforms and analyze website performance
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="p-4 border rounded-lg">
+              {/* Google Analytics */}
+              <div className={`p-4 border rounded-lg ${getIntegration('google_analytics') ? 'border-green-500 bg-green-50' : ''}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center">
@@ -668,13 +984,45 @@ export default function DomainSettings() {
                     </div>
                     <div>
                       <p className="font-medium">Google Analytics</p>
-                      <p className="text-sm text-muted-foreground">Track website traffic and user behavior</p>
+                      <p className="text-sm text-muted-foreground">
+                        {getIntegration('google_analytics')
+                          ? 'Connected - Track AI referral traffic'
+                          : 'Track website traffic and AI platform referrals'}
+                      </p>
                     </div>
                   </div>
-                  <Button variant="outline" disabled>Connect</Button>
+                  {getIntegration('google_analytics') ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-green-600 font-medium">Connected</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDisconnectIntegration(getIntegration('google_analytics').id)}
+                      >
+                        Disconnect
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      onClick={handleConnectGoogleAnalytics}
+                      disabled={isConnectingGA}
+                    >
+                      {isConnectingGA ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Connecting...
+                        </>
+                      ) : (
+                        'Connect'
+                      )}
+                    </Button>
+                  )}
                 </div>
               </div>
-              <div className="p-4 border rounded-lg">
+
+              {/* Google Search Console */}
+              <div className="p-4 border rounded-lg opacity-60">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-lg bg-green-100 flex items-center justify-center">
@@ -690,11 +1038,12 @@ export default function DomainSettings() {
                       <p className="text-sm text-muted-foreground">Monitor search performance and queries</p>
                     </div>
                   </div>
-                  <Button variant="outline" disabled>Connect</Button>
+                  <Button variant="outline" disabled>Coming Soon</Button>
                 </div>
               </div>
+
               <div className="text-sm text-muted-foreground text-center py-4">
-                More integrations coming soon...
+                More integrations coming soon (Slack, Webhooks, etc.)
               </div>
             </CardContent>
           </Card>

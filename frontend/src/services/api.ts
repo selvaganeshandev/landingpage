@@ -410,6 +410,11 @@ export const apiClient = {
     method: 'DELETE',
   }),
 
+  fetchBrandInfo: (domainName: string, domainUrl?: string) => apiRequest('/domains/fetch-brand-info/', {
+    method: 'POST',
+    body: JSON.stringify({ domain_name: domainName, domain_url: domainUrl }),
+  }),
+
   // ===== Domain Access =====
   getDomainAccess: (domainId: number) => 
     apiRequest(`/domains/${domainId}/access/`),
@@ -957,6 +962,9 @@ export const apiClient = {
   // ===== Integrations =====
   getIntegrations: () => apiRequest('/integrations/integrations/'),
 
+  getIntegrationsByDomain: (domainId: number) =>
+    apiRequest(`/integrations/integrations/by_domain/?domain_id=${domainId}`),
+
   createIntegration: (data: any) => apiRequest('/integrations/integrations/', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -970,6 +978,41 @@ export const apiClient = {
   deleteIntegration: (id: number) => apiRequest(`/integrations/integrations/${id}/`, {
     method: 'DELETE',
   }),
+
+  disconnectIntegration: (id: number) => apiRequest(`/integrations/integrations/${id}/disconnect/`, {
+    method: 'POST',
+  }),
+
+  // Google OAuth
+  getGoogleAuthUrl: (domainId: number, integrationType: string = 'google_analytics') =>
+    apiRequest(`/integrations/google/auth-url/?domain_id=${domainId}&integration_type=${integrationType}`),
+
+  getGAProperties: (params: { integrationId?: number; domainId?: number }) => {
+    const queryParams = new URLSearchParams();
+    if (params.integrationId) queryParams.set('integration_id', String(params.integrationId));
+    if (params.domainId) queryParams.set('domain_id', String(params.domainId));
+    return apiRequest(`/integrations/google/properties/?${queryParams.toString()}`);
+  },
+
+  selectGAProperty: (integrationId: number, propertyId: string, propertyName: string) =>
+    apiRequest('/integrations/google/select-property/', {
+      method: 'POST',
+      body: JSON.stringify({ integration_id: integrationId, property_id: propertyId, property_name: propertyName }),
+    }),
+
+  getGAData: (domainId: number, startDate?: string, endDate?: string) => {
+    const queryParams = new URLSearchParams({ domain_id: String(domainId) });
+    if (startDate) queryParams.set('start_date', startDate);
+    if (endDate) queryParams.set('end_date', endDate);
+    return apiRequest(`/integrations/google/analytics-data/?${queryParams.toString()}`);
+  },
+
+  getAIReferralData: (domainId: number, startDate?: string, endDate?: string) => {
+    const queryParams = new URLSearchParams({ domain_id: String(domainId) });
+    if (startDate) queryParams.set('start_date', startDate);
+    if (endDate) queryParams.set('end_date', endDate);
+    return apiRequest(`/integrations/google/ai-referrals/?${queryParams.toString()}`);
+  },
 
   // ===== Reports =====
   // Report Templates

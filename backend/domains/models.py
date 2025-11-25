@@ -20,6 +20,19 @@ class Domain(models.Model):
     
     name = models.CharField(max_length=255, help_text="Name of the domain")
     url = models.URLField(help_text="URL of the domain")
+    short_description = models.CharField(max_length=500, blank=True, null=True, help_text="Brief description of the brand/domain")
+
+    # Content Guidelines fields
+    tone_of_voice = models.TextField(blank=True, null=True, help_text="Brand's tone of voice guidelines")
+    content_style = models.TextField(blank=True, null=True, help_text="Preferred content style guidelines")
+    key_messages = models.TextField(blank=True, null=True, help_text="Key messages or themes to emphasize")
+    topics_to_avoid = models.TextField(blank=True, null=True, help_text="Topics or themes to avoid in content")
+
+    # Brand Identity fields
+    target_audience = models.TextField(blank=True, null=True, help_text="Target audience demographics and preferences")
+    brand_values = models.TextField(blank=True, null=True, help_text="Brand's core values")
+    key_competitors = models.TextField(blank=True, null=True, help_text="Main competitors")
+
     country = models.CharField(max_length=100, default='United States', help_text="Country name for domain context")
     organisation = models.ForeignKey(
         'authentication.Organisation', 

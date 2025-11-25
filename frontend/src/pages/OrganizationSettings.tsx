@@ -840,6 +840,31 @@ export default function OrganizationSettings() {
         keywords: newDomainKeywords.join(','), // Keywords are now mandatory, always send
       });
 
+      const createdDomainId = response.domain?.id;
+
+      // Fetch brand info from ChatGPT in the background
+      if (createdDomainId) {
+        try {
+          const brandInfoResponse = await apiClient.fetchBrandInfo(domainName, domainUrl);
+          if (brandInfoResponse.success && brandInfoResponse.brand_info) {
+            // Update the domain with fetched brand info
+            await apiClient.updateDomain(createdDomainId, {
+              short_description: brandInfoResponse.brand_info.short_description,
+              target_audience: brandInfoResponse.brand_info.target_audience,
+              brand_values: brandInfoResponse.brand_info.brand_values,
+              key_competitors: brandInfoResponse.brand_info.key_competitors,
+              tone_of_voice: brandInfoResponse.brand_info.tone_of_voice,
+              content_style: brandInfoResponse.brand_info.content_style,
+              key_messages: brandInfoResponse.brand_info.key_messages,
+              topics_to_avoid: brandInfoResponse.brand_info.topics_to_avoid,
+            });
+          }
+        } catch (brandError) {
+          // Don't fail the domain creation if brand info fetch fails
+          console.error('Failed to fetch brand info:', brandError);
+        }
+      }
+
       // Reload domains to get the updated list (both local state and global store)
       await loadDomains(); // Update local state for this page
 
@@ -856,7 +881,7 @@ export default function OrganizationSettings() {
 
       toast({
         title: "Brand added successfully!",
-        description: `${domainName} is now being processed. We'll notify you when it's ready.`,
+        description: `${domainName} is now being processed. Brand info has been auto-populated.`,
         duration: 5000,
       });
     } catch (error: any) {
