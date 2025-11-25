@@ -17,10 +17,10 @@ interface MetricCardProps {
 export const MetricCard = ({ title, value, change, icon, trend, onClick, href }: MetricCardProps) => {
   const navigate = useNavigate();
   
-  // Clone the icon element and add white text color class
-  const whiteIcon = icon && isValidElement(icon)
+  // Clone the icon element and add primary text color class
+  const themedIcon = icon && isValidElement(icon)
     ? cloneElement(icon as React.ReactElement, {
-        className: cn((icon as React.ReactElement).props.className, "text-white")
+        className: cn((icon as React.ReactElement).props.className, "text-primary")
       })
     : icon;
 
@@ -69,8 +69,8 @@ export const MetricCard = ({ title, value, change, icon, trend, onClick, href }:
           )}
         </div>
         {icon && (
-          <div className="p-3 rounded-2xl gradient-primary shadow-glow flex-shrink-0">
-            {whiteIcon}
+          <div className="flex-shrink-0">
+            {themedIcon}
           </div>
         )}
       </div>

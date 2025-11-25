@@ -192,8 +192,8 @@ const Dashboard = () => {
                 ))}
               </SelectContent>
             </Select>
-            <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
-            <Button variant="outline" onClick={handleExportReport}>Export Report</Button>
+            {/* <TimeFilter selected={timePeriod} onSelect={setTimePeriod} /> */}
+            {/* <Button variant="outline" onClick={handleExportReport}>Export Report</Button> */}
             <Button onClick={handleRefreshData} className="gradient-primary shadow-md shadow-primary/20" disabled={loading}>
               {loading ? "Loading..." : "Refresh Data"}
             </Button>
@@ -206,7 +206,7 @@ const Dashboard = () => {
         <MetricCard
           title="Total Prompts"
           value={summary?.metrics?.total_prompts ?? "-"}
-          icon={<FileText className="h-6 w-6" />}
+          icon={<FileText className="h-4 w-4" />}
           href="/prompts"
         />
         <MetricCard
@@ -214,14 +214,14 @@ const Dashboard = () => {
           value={summary?.metrics?.total_citations ?? "-"}
           change={summary?.metrics?.citations_change ?? undefined}
           trend={summary?.metrics?.citations_change && summary.metrics.citations_change > 0 ? "up" : "down"}
-          icon={<Link2 className="h-6 w-6" />}
+          icon={<Link2 className="h-4 w-4" />}
         />
         <MetricCard
           title="Total Mentions"
           value={summary?.metrics?.total_mentions ?? "-"}
           change={summary?.metrics?.mentions_change ?? undefined}
           trend={summary?.metrics?.mentions_change && summary.metrics.mentions_change > 0 ? "up" : "down"}
-          icon={<Eye className="h-6 w-6" />}
+          icon={<Eye className="h-4 w-4" />}
           href="/mentions"
         />
         <MetricCard
@@ -229,14 +229,14 @@ const Dashboard = () => {
           value={summary?.metrics?.visibility_score ?? "-"}
           change={summary?.metrics?.visibility_change ?? undefined}
           trend={summary?.metrics?.visibility_change && summary.metrics.visibility_change > 0 ? "up" : "down"}
-          icon={<Target className="h-6 w-6" />}
+          icon={<Target className="h-4 w-4" />}
         />
         <MetricCard
           title="Avg Position"
           value={summary?.metrics?.avg_position ?? "-"}
           change={summary?.metrics?.position_change ?? undefined}
           trend={summary?.metrics?.position_change && summary.metrics.position_change < 0 ? "up" : "down"}
-          icon={<TrendingUp className="h-6 w-6" />}
+          icon={<TrendingUp className="h-4 w-4" />}
         />
       </div>
 
