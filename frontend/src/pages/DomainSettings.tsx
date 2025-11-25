@@ -8,12 +8,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
 import {
   ArrowLeft,
   Plus,
-  Globe,
   Loader2,
   X,
   Upload,
@@ -22,6 +29,7 @@ import {
   Link2,
   Info,
 } from "lucide-react";
+import { PageLoader } from "@/components/PageLoader";
 
 export default function DomainSettings() {
   const { domainId } = useParams();
@@ -298,14 +306,7 @@ export default function DomainSettings() {
   };
 
   if (isLoading) {
-    return (
-      <div className="p-8 flex items-center justify-center min-h-[400px]">
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-6 w-6 animate-spin" />
-          <span>Loading domain settings...</span>
-        </div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   if (!domain) {
@@ -356,26 +357,25 @@ export default function DomainSettings() {
         </Button>
       </div>
 
-      {/* Add Keywords Section (Collapsible) */}
-      {showAddKeywords && (
-        <Card className="border border-border">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Add Keywords</CardTitle>
-                <CardDescription>
-                  Add additional keywords to track for this domain
-                </CardDescription>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setShowAddKeywords(false)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      {/* Add Keywords Modal */}
+      <Dialog open={showAddKeywords} onOpenChange={(open) => {
+        setShowAddKeywords(open);
+        if (!open) {
+          setNewKeywordsList([]);
+          setNewKeywordsInput("");
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Add Keywords</DialogTitle>
+            <DialogDescription>
+              Add additional keywords to track for {domain.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
             <div className="space-y-2">
               <div
-                className="flex flex-wrap gap-2 min-h-[100px] max-h-[200px] overflow-y-auto p-3 border border-input rounded-md bg-background text-sm"
+                className="flex flex-wrap gap-2 min-h-[100px] max-h-[300px] overflow-y-auto p-3 border border-input rounded-md bg-background text-sm ring-offset-background focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
               >
                 {newKeywordsList.map((keyword, index) => (
                   <Badge
@@ -397,7 +397,7 @@ export default function DomainSettings() {
                 ))}
                 <Input
                   type="text"
-                  placeholder={newKeywordsList.length === 0 ? "Enter keywords and press Enter" : "Add more..."}
+                  placeholder={newKeywordsList.length === 0 ? "Enter keywords and press Enter (e.g., seo, digital marketing)" : "Add more keywords..."}
                   value={newKeywordsInput}
                   onChange={(e) => setNewKeywordsInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -426,52 +426,64 @@ export default function DomainSettings() {
                   <Upload className="h-4 w-4" />
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Type keywords and press Enter, or upload CSV/XLSX files.
-              </p>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => {
-                setShowAddKeywords(false);
-                setNewKeywordsList([]);
-                setNewKeywordsInput("");
-              }}>
-                Cancel
-              </Button>
-              <Button onClick={handleAddKeywordsToDomain} disabled={isAddingKeywords || newKeywordsList.length === 0}>
-                {isAddingKeywords ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Adding...
-                  </>
-                ) : (
-                  <>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Keywords
-                  </>
+              <div className="flex justify-between items-center">
+                <p className="text-xs text-muted-foreground">
+                  Type keywords and press Enter, or upload CSV/XLSX files. Max 100 keywords per upload.
+                </p>
+                {newKeywordsList.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setNewKeywordsList([]);
+                      setNewKeywordsInput("");
+                    }}
+                    className="h-8 text-xs"
+                  >
+                    Clear all
+                  </Button>
                 )}
-              </Button>
+              </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddKeywords(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddKeywordsToDomain} disabled={isAddingKeywords || newKeywordsList.length === 0}>
+              {isAddingKeywords ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Keywords
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Tabs */}
       <Tabs defaultValue="basic-info" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="basic-info" className="gap-2">
+        <TabsList className="bg-muted/50 p-1 border border-border">
+          <TabsTrigger value="basic-info" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
             <Info className="h-4 w-4" />
             Basic Info
           </TabsTrigger>
-          <TabsTrigger value="content-guidelines" className="gap-2">
+          <TabsTrigger value="content-guidelines" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
             <FileText className="h-4 w-4" />
             Content Guidelines
           </TabsTrigger>
-          <TabsTrigger value="brand-identity" className="gap-2">
+          <TabsTrigger value="brand-identity" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
             <Palette className="h-4 w-4" />
             Brand Identity
           </TabsTrigger>
-          <TabsTrigger value="integrations" className="gap-2">
+          <TabsTrigger value="integrations" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
             <Link2 className="h-4 w-4" />
             Integrations
           </TabsTrigger>

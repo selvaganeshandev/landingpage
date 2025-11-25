@@ -1187,16 +1187,6 @@ export default function OrganizationSettings() {
                       )}
 
                       <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleOpenAddKeywordsDialog(domain.id)}
-                        className="gap-2"
-                      >
-                        <Plus className="h-4 w-4" />
-                        Add Keywords
-                      </Button>
-
-                      <Button
                         variant="ghost"
                         size="icon"
                         onClick={() => navigate(`/organization-settings/domains/${domain.id}`)}
@@ -1217,108 +1207,6 @@ export default function OrganizationSettings() {
                 );
               })
             )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border border-border">
-        <CardHeader>
-          <CardTitle>Integrations</CardTitle>
-          <CardDescription>
-            Connect Google Analytics and Search Console for each domain to track traffic attribution
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Button onClick={() => setConnectIntegrationDialog(true)}>
-            <Link2 className="h-4 w-4 mr-2" />
-            Connect Integration
-          </Button>
-
-          <Separator />
-
-          <div className="space-y-4">
-            {/* {domains.map((domain) => {
-              const domainIntegrations: any[] = [];
-              return (
-                <div key={domain.id} className="p-4 border rounded-lg space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Globe className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{domain.domain}</span>
-                      <Badge variant={domain.verified ? "default" : "secondary"}>
-                        {domain.verified ? "Verified" : "Pending"}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  {domainIntegrations.length === 0 ? (
-                    <div className="text-sm text-muted-foreground bg-muted/30 rounded p-3">
-                      No integrations connected for this domain
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {domainIntegrations.map((integration) => (
-                        <div
-                          key={integration.id}
-                          className="flex items-center justify-between p-3 bg-muted/30 rounded"
-                        >
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm">
-                                {integration.type === "google_analytics"
-                                  ? "Google Analytics"
-                                  : "Google Search Console"}
-                              </span>
-                              {integration.status === "active" ? (
-                                <Badge variant="default" className="gap-1">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Active
-                                </Badge>
-                              ) : (
-                                <Badge variant="destructive" className="gap-1">
-                                  <AlertCircle className="h-3 w-3" />
-                                  Error
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              {integration.type === "google_analytics"
-                                ? `Property: ${integration.propertyId}`
-                                : `URL: ${integration.propertyUrl}`}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              Last sync: {new Date(integration.lastSync).toLocaleString()}
-                            </div>
-                            {integration.error && (
-                              <div className="text-xs text-destructive mt-1">
-                                Error: {integration.error}
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {integration.status === "error" && (
-                              <Button variant="outline" size="sm">
-                                Reconnect
-                              </Button>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDisconnectIntegration(integration.id)}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })} */}
-            <div className="text-sm text-muted-foreground bg-muted/30 rounded p-3">
-              No integrations connected for this domain
-            </div>
           </div>
         </CardContent>
       </Card>
