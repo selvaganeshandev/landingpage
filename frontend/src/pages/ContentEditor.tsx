@@ -14,10 +14,10 @@ import {
   Share2,
   Settings,
   MoreVertical,
-  Heading2,
   Bold,
   Italic,
   Underline,
+  Strikethrough,
   List,
   ListOrdered,
   Link,
@@ -26,8 +26,27 @@ import {
   Undo,
   Redo,
   AlignLeft,
-  Sparkles
+  AlignCenter,
+  AlignRight,
+  Quote,
+  Code,
+  Sparkles,
+  ChevronDown
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { apiClient } from "@/services/api";
 
 const ContentEditor = () => {
@@ -35,6 +54,7 @@ const ContentEditor = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const editorRef = useRef<HTMLDivElement>(null);
+  const isInitialLoad = useRef(true);
 
   const [content, setContent] = useState("");
   const [title, setTitle] = useState("");
@@ -42,6 +62,11 @@ const ContentEditor = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [contentData, setContentData] = useState<any>(null);
+
+  // Image modal state
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [imageUrl, setImageUrl] = useState("");
+  const [imageAlt, setImageAlt] = useState("");
 
   // Content metrics
   const [wordCount, setWordCount] = useState(0);
@@ -57,6 +82,8 @@ const ContentEditor = () => {
     target: string;
     color: string;
   }>>([]);
+  const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
+  const originalContentRef = useRef<string>("");
 
   // Count keyword occurrences in text
   const countKeywordOccurrences = (text: string, keyword: string): number => {
@@ -69,11 +96,72 @@ const ContentEditor = () => {
   const getKeywordColor = (current: number, target: string): string => {
     const [min, max] = target.split('-').map(n => parseInt(n));
     if (current >= min && current <= max) {
-      return "bg-green-500/20 text-green-700 border-green-500";
+      // Success - using theme success color
+      return "bg-success/10 text-success border-success/50";
     } else if (current > 0 && current < min) {
-      return "bg-yellow-500/20 text-yellow-700 border-yellow-500";
+      // Warning - using theme warning color
+      return "bg-warning/10 text-warning border-warning/50";
     } else {
-      return "bg-red-500/20 text-red-700 border-red-500";
+      // Destructive/Error - using theme destructive color
+      return "bg-destructive/10 text-destructive border-destructive/50";
+    }
+  };
+
+  // Highlight keyword in editor
+  const highlightKeywordInEditor = (keyword: string | null) => {
+    if (!editorRef.current) return;
+
+    // If no keyword selected, restore original content
+    if (!keyword) {
+      if (originalContentRef.current) {
+        editorRef.current.innerHTML = originalContentRef.current;
+      }
+      return;
+    }
+
+    // Store original content if not already stored
+    if (!originalContentRef.current) {
+      originalContentRef.current = editorRef.current.innerHTML;
+    } else {
+      // Restore original before applying new highlight
+      editorRef.current.innerHTML = originalContentRef.current;
+    }
+
+    // Create a TreeWalker to find text nodes
+    const walker = document.createTreeWalker(
+      editorRef.current,
+      NodeFilter.SHOW_TEXT,
+      null
+    );
+
+    const textNodes: Text[] = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      textNodes.push(node as Text);
+    }
+
+    // Highlight keyword in each text node
+    const regex = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+
+    textNodes.forEach((textNode) => {
+      const text = textNode.textContent || '';
+      if (regex.test(text)) {
+        const span = document.createElement('span');
+        span.innerHTML = text.replace(regex, '<mark class="keyword-highlight">$1</mark>');
+        textNode.parentNode?.replaceChild(span, textNode);
+      }
+    });
+  };
+
+  // Handle keyword selection
+  const handleKeywordClick = (keyword: string) => {
+    if (selectedKeyword === keyword) {
+      // Deselect if clicking the same keyword
+      setSelectedKeyword(null);
+      highlightKeywordInEditor(null);
+    } else {
+      setSelectedKeyword(keyword);
+      highlightKeywordInEditor(keyword);
     }
   };
 
@@ -89,14 +177,11 @@ const ContentEditor = () => {
         if (data) {
           // API returns {status: 'success', data: {...}}
           const contentRecord = data.data || data;
-          console.log("Loaded content data:", contentRecord);
-          console.log("content_html value:", contentRecord.content_html);
 
           setContentData(contentRecord);
           setTitle(contentRecord.title);
 
           const htmlContent = contentRecord.content_html || "";
-          console.log("htmlContent to set:", htmlContent?.substring(0, 200));
           setContent(htmlContent);
 
           // Extract keywords and count occurrences
@@ -141,15 +226,15 @@ const ContentEditor = () => {
     loadContent();
   }, [id, toast]);
 
-  // Set the HTML content when it changes or loading completes
+  // Set the HTML content only on initial load
   useEffect(() => {
-    console.log("useEffect triggered - content:", content?.substring(0, 100), "loading:", loading, "editorRef:", !!editorRef.current);
-    if (editorRef.current && content && !loading) {
+    if (editorRef.current && content && !loading && isInitialLoad.current) {
       // Use a small delay to ensure the contentEditable div is fully ready
       const timeoutId = setTimeout(() => {
         if (editorRef.current) {
-          console.log("Setting editor innerHTML with content length:", content.length);
           editorRef.current.innerHTML = content;
+          originalContentRef.current = content; // Store original content for keyword highlighting
+          isInitialLoad.current = false;
         }
       }, 50);
       return () => clearTimeout(timeoutId);
@@ -243,13 +328,42 @@ const ContentEditor = () => {
       const html = editorRef.current.innerHTML;
       setContent(html);
       updateMetrics(html);
+      // Update original content ref when user edits (only if no keyword is selected)
+      if (!selectedKeyword) {
+        originalContentRef.current = html;
+      }
     }
   };
 
   // Formatting functions
   const execCommand = (command: string, value?: string) => {
-    document.execCommand(command, false, value);
+    // Ensure editor has focus before executing command
     editorRef.current?.focus();
+    document.execCommand(command, false, value);
+    // Update content state after command
+    if (editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      setContent(html);
+      updateMetrics(html);
+    }
+  };
+
+  // Handle image insertion
+  const handleInsertImage = () => {
+    if (imageUrl) {
+      const imgHtml = `<img src="${imageUrl}" alt="${imageAlt || 'Image'}" style="max-width: 100%; height: auto;" />`;
+      editorRef.current?.focus();
+      document.execCommand('insertHTML', false, imgHtml);
+      // Update content state
+      if (editorRef.current) {
+        const html = editorRef.current.innerHTML;
+        setContent(html);
+        updateMetrics(html);
+      }
+    }
+    setImageModalOpen(false);
+    setImageUrl("");
+    setImageAlt("");
   };
 
   // Save content
@@ -259,16 +373,23 @@ const ContentEditor = () => {
     try {
       setSaving(true);
 
+      // Get the latest content directly from the editor
+      const currentContent = editorRef.current?.innerHTML || content;
+
       await apiClient.updateGeneratedContent(parseInt(id), {
         title,
-        content_html: content
+        content_html: currentContent
       });
+
+      // Update the content state with the saved content
+      setContent(currentContent);
 
       toast({
         title: "Success",
         description: "Content saved successfully",
       });
     } catch (error) {
+      console.error("Error saving content:", error);
       toast({
         title: "Error",
         description: "Failed to save content",
@@ -320,20 +441,9 @@ const ContentEditor = () => {
               <Save className="h-4 w-4 mr-2" />
               {saving ? "Saving..." : "Save"}
             </Button>
-            <Button variant="outline" size="sm">
-              <Eye className="h-4 w-4 mr-2" />
-              Preview
-            </Button>
             <Button variant="default" size="sm">
               <Share2 className="h-4 w-4 mr-2" />
               Export
-            </Button>
-            <Button variant="default" size="sm">
-              <Sparkles className="h-4 w-4 mr-2" />
-              Repurpose
-            </Button>
-            <Button variant="ghost" size="sm">
-              <MoreVertical className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -345,20 +455,39 @@ const ContentEditor = () => {
           {/* Toolbar */}
           <div className="border-b border-border bg-card p-3">
             <div className="flex items-center gap-1 flex-wrap">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => execCommand('formatBlock', '<h2>')}
-                title="Heading 2"
-              >
-                H2
-              </Button>
+              {/* Heading Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="gap-1">
+                    Heading
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => execCommand('formatBlock', '<p>')}>
+                    <span className="text-sm">Normal Text</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => execCommand('formatBlock', '<h2>')}>
+                    <span className="text-lg font-semibold">Heading 2</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => execCommand('formatBlock', '<h3>')}>
+                    <span className="text-base font-semibold">Heading 3</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => execCommand('formatBlock', '<h4>')}>
+                    <span className="text-sm font-semibold">Heading 4</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => execCommand('formatBlock', '<h5>')}>
+                    <span className="text-xs font-semibold">Heading 5</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Separator orientation="vertical" className="h-6 mx-1" />
+              {/* Text Formatting */}
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => execCommand('bold')}
-                title="Bold"
+                title="Bold (Ctrl+B)"
               >
                 <Bold className="h-4 w-4" />
               </Button>
@@ -366,7 +495,7 @@ const ContentEditor = () => {
                 variant="ghost"
                 size="sm"
                 onClick={() => execCommand('italic')}
-                title="Italic"
+                title="Italic (Ctrl+I)"
               >
                 <Italic className="h-4 w-4" />
               </Button>
@@ -374,11 +503,20 @@ const ContentEditor = () => {
                 variant="ghost"
                 size="sm"
                 onClick={() => execCommand('underline')}
-                title="Underline"
+                title="Underline (Ctrl+U)"
               >
                 <Underline className="h-4 w-4" />
               </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => execCommand('strikeThrough')}
+                title="Strikethrough"
+              >
+                <Strikethrough className="h-4 w-4" />
+              </Button>
               <Separator orientation="vertical" className="h-6 mx-1" />
+              {/* Lists */}
               <Button
                 variant="ghost"
                 size="sm"
@@ -395,6 +533,8 @@ const ContentEditor = () => {
               >
                 <ListOrdered className="h-4 w-4" />
               </Button>
+              <Separator orientation="vertical" className="h-6 mx-1" />
+              {/* Alignment */}
               <Button
                 variant="ghost"
                 size="sm"
@@ -403,7 +543,50 @@ const ContentEditor = () => {
               >
                 <AlignLeft className="h-4 w-4" />
               </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => execCommand('justifyCenter')}
+                title="Align Center"
+              >
+                <AlignCenter className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => execCommand('justifyRight')}
+                title="Align Right"
+              >
+                <AlignRight className="h-4 w-4" />
+              </Button>
               <Separator orientation="vertical" className="h-6 mx-1" />
+              {/* Block Elements */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => execCommand('formatBlock', '<blockquote>')}
+                title="Blockquote"
+              >
+                <Quote className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const selection = window.getSelection();
+                  if (selection && selection.rangeCount > 0) {
+                    const range = selection.getRangeAt(0);
+                    const code = document.createElement('code');
+                    code.appendChild(range.extractContents());
+                    range.insertNode(code);
+                  }
+                }}
+                title="Inline Code"
+              >
+                <Code className="h-4 w-4" />
+              </Button>
+              <Separator orientation="vertical" className="h-6 mx-1" />
+              {/* Insert Elements */}
               <Button
                 variant="ghost"
                 size="sm"
@@ -418,6 +601,7 @@ const ContentEditor = () => {
               <Button
                 variant="ghost"
                 size="sm"
+                onClick={() => setImageModalOpen(true)}
                 title="Insert Image"
               >
                 <ImageIcon className="h-4 w-4" />
@@ -425,16 +609,39 @@ const ContentEditor = () => {
               <Button
                 variant="ghost"
                 size="sm"
+                onClick={() => {
+                  const rows = prompt('Number of rows:', '3');
+                  const cols = prompt('Number of columns:', '3');
+                  if (rows && cols) {
+                    const numRows = parseInt(rows);
+                    const numCols = parseInt(cols);
+                    let tableHtml = '<table><thead><tr>';
+                    for (let c = 0; c < numCols; c++) {
+                      tableHtml += '<th>Header ' + (c + 1) + '</th>';
+                    }
+                    tableHtml += '</tr></thead><tbody>';
+                    for (let r = 0; r < numRows - 1; r++) {
+                      tableHtml += '<tr>';
+                      for (let c = 0; c < numCols; c++) {
+                        tableHtml += '<td>Cell</td>';
+                      }
+                      tableHtml += '</tr>';
+                    }
+                    tableHtml += '</tbody></table>';
+                    execCommand('insertHTML', tableHtml);
+                  }
+                }}
                 title="Insert Table"
               >
                 <Table className="h-4 w-4" />
               </Button>
               <Separator orientation="vertical" className="h-6 mx-1" />
+              {/* Undo/Redo */}
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => execCommand('undo')}
-                title="Undo"
+                title="Undo (Ctrl+Z)"
               >
                 <Undo className="h-4 w-4" />
               </Button>
@@ -442,14 +649,9 @@ const ContentEditor = () => {
                 variant="ghost"
                 size="sm"
                 onClick={() => execCommand('redo')}
-                title="Redo"
+                title="Redo (Ctrl+Y)"
               >
                 <Redo className="h-4 w-4" />
-              </Button>
-              <Separator orientation="vertical" className="h-6 mx-1" />
-              <Button variant="ghost" size="sm">
-                <Sparkles className="h-4 w-4 mr-2" />
-                AI Assistant
               </Button>
             </div>
           </div>
@@ -492,6 +694,13 @@ const ContentEditor = () => {
                   margin-bottom: 0.5rem;
                   color: hsl(var(--foreground));
                 }
+                .content-editor h5 {
+                  font-size: 1rem;
+                  font-weight: 600;
+                  margin-top: 1rem;
+                  margin-bottom: 0.5rem;
+                  color: hsl(var(--foreground));
+                }
                 .content-editor p {
                   margin-bottom: 1rem;
                   line-height: 1.75;
@@ -504,6 +713,9 @@ const ContentEditor = () => {
                 }
                 .content-editor u {
                   text-decoration: underline;
+                }
+                .content-editor s, .content-editor strike {
+                  text-decoration: line-through;
                 }
                 .content-editor ul {
                   list-style-type: disc;
@@ -558,6 +770,18 @@ const ContentEditor = () => {
                   background: hsl(var(--muted));
                   font-weight: 600;
                 }
+                .content-editor:focus {
+                  outline: none;
+                  caret-color: hsl(var(--foreground));
+                }
+                .content-editor .keyword-highlight,
+                .content-editor mark.keyword-highlight {
+                  background: hsl(var(--primary) / 0.3);
+                  color: inherit;
+                  padding: 0.1rem 0.2rem;
+                  border-radius: 0.25rem;
+                  border-bottom: 2px solid hsl(var(--primary));
+                }
               `}</style>
               <div
                 ref={editorRef}
@@ -568,7 +792,9 @@ const ContentEditor = () => {
                   fontFamily: 'system-ui, -apple-system, sans-serif',
                   fontSize: '16px',
                   lineHeight: '1.75',
-                  color: 'hsl(var(--foreground))'
+                  color: 'hsl(var(--foreground))',
+                  caretColor: 'hsl(var(--foreground))',
+                  cursor: 'text'
                 }}
                 suppressContentEditableWarning
               />
@@ -634,40 +860,37 @@ const ContentEditor = () => {
 
             {/* Content Structure */}
             <div>
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold">Content Structure</h3>
-                <Button variant="ghost" size="sm">
-                  Adjust
-                </Button>
               </div>
 
-              <div className="grid grid-cols-4 gap-4">
-                <div className="text-center">
-                  <div className="text-sm text-muted-foreground mb-1">WORDS</div>
-                  <div className="text-lg font-bold">{wordCount}</div>
-                  <div className={`text-xs ${contentData?.word_count ? (wordCount >= contentData.word_count * 0.9 && wordCount <= contentData.word_count * 1.1 ? 'text-success' : 'text-warning') : 'text-muted-foreground'}`}>
-                    {contentData?.word_count ? `${Math.floor(contentData.word_count * 0.9)}-${Math.ceil(contentData.word_count * 1.1)}` : 'No target'}
+              <div className="grid grid-cols-4 gap-1.5">
+                <div className="bg-muted/30 rounded-md p-1.5 text-center">
+                  <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Words</div>
+                  <div className="text-sm font-bold leading-tight">{wordCount}</div>
+                  <div className={`text-[9px] leading-tight ${contentData?.word_count ? (wordCount >= contentData.word_count * 0.9 && wordCount <= contentData.word_count * 1.1 ? 'text-green-600' : 'text-amber-600') : 'text-muted-foreground'}`}>
+                    {contentData?.word_count ? `${Math.floor(contentData.word_count * 0.9)}-${Math.ceil(contentData.word_count * 1.1)}` : '—'}
                   </div>
                 </div>
-                <div className="text-center">
-                  <div className="text-sm text-muted-foreground mb-1">HEADINGS</div>
-                  <div className="text-lg font-bold">{headingsCount}</div>
-                  <div className={`text-xs ${wordCount > 0 ? (headingsCount >= Math.floor(wordCount / 300) && headingsCount <= Math.ceil(wordCount / 150) ? 'text-success' : 'text-warning') : 'text-muted-foreground'}`}>
-                    {wordCount > 0 ? `${Math.floor(wordCount / 300)}-${Math.ceil(wordCount / 150)}` : 'No target'}
+                <div className="bg-muted/30 rounded-md p-1.5 text-center">
+                  <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Heads</div>
+                  <div className="text-sm font-bold leading-tight">{headingsCount}</div>
+                  <div className={`text-[9px] leading-tight ${wordCount > 0 ? (headingsCount >= Math.floor(wordCount / 300) && headingsCount <= Math.ceil(wordCount / 150) ? 'text-green-600' : 'text-amber-600') : 'text-muted-foreground'}`}>
+                    {wordCount > 0 ? `${Math.floor(wordCount / 300)}-${Math.ceil(wordCount / 150)}` : '—'}
                   </div>
                 </div>
-                <div className="text-center">
-                  <div className="text-sm text-muted-foreground mb-1">PARAGRAPHS</div>
-                  <div className="text-lg font-bold">{paragraphsCount}</div>
-                  <div className={`text-xs ${wordCount > 0 ? (paragraphsCount >= Math.floor(wordCount / 150) ? 'text-success' : 'text-warning') : 'text-muted-foreground'}`}>
-                    {wordCount > 0 ? `at least ${Math.floor(wordCount / 150)}` : 'No target'}
+                <div className="bg-muted/30 rounded-md p-1.5 text-center">
+                  <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Paras</div>
+                  <div className="text-sm font-bold leading-tight">{paragraphsCount}</div>
+                  <div className={`text-[9px] leading-tight ${wordCount > 0 ? (paragraphsCount >= Math.floor(wordCount / 150) ? 'text-green-600' : 'text-amber-600') : 'text-muted-foreground'}`}>
+                    {wordCount > 0 ? `≥${Math.floor(wordCount / 150)}` : '—'}
                   </div>
                 </div>
-                <div className="text-center">
-                  <div className="text-sm text-muted-foreground mb-1">IMAGES</div>
-                  <div className="text-lg font-bold">{imagesCount}</div>
-                  <div className={`text-xs ${wordCount > 0 ? (imagesCount >= 1 ? 'text-success' : 'text-warning') : 'text-muted-foreground'}`}>
-                    {wordCount > 0 ? `${Math.floor(wordCount / 500)}-${Math.ceil(wordCount / 200)}` : 'No target'}
+                <div className="bg-muted/30 rounded-md p-1.5 text-center">
+                  <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Imgs</div>
+                  <div className="text-sm font-bold leading-tight">{imagesCount}</div>
+                  <div className={`text-[9px] leading-tight ${wordCount > 0 ? (imagesCount >= 1 ? 'text-green-600' : 'text-amber-600') : 'text-muted-foreground'}`}>
+                    {wordCount > 0 ? `${Math.floor(wordCount / 500)}-${Math.ceil(wordCount / 200)}` : '—'}
                   </div>
                 </div>
               </div>
@@ -677,39 +900,104 @@ const ContentEditor = () => {
 
             {/* Terms */}
             <div>
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold">Terms</h3>
-                <Button variant="ghost" size="sm">
-                  Adjust
+                <span className="text-[10px] text-muted-foreground">{keywords.length} keywords</span>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                <Button variant="secondary" size="sm" className="h-6 text-[10px] px-2">
+                  All <Badge variant="secondary" className="ml-1 h-4 text-[10px] px-1">{keywords.length}</Badge>
+                </Button>
+                <Button variant="outline" size="sm" className="h-6 text-[10px] px-2">
+                  Used <Badge variant="secondary" className="ml-1 h-4 text-[10px] px-1">{keywords.filter(k => k.current > 0).length}</Badge>
+                </Button>
+                <Button variant="outline" size="sm" className="h-6 text-[10px] px-2">
+                  Missing <Badge variant="secondary" className="ml-1 h-4 text-[10px] px-1">{keywords.filter(k => k.current === 0).length}</Badge>
                 </Button>
               </div>
 
-              <div className="flex gap-2 mb-4">
-                <Button variant="secondary" size="sm" className="text-xs">
-                  All <Badge variant="secondary" className="ml-1">80</Badge>
-                </Button>
-                <Button variant="outline" size="sm" className="text-xs">
-                  Headings <Badge variant="secondary" className="ml-1">3</Badge>
-                </Button>
-                <Button variant="outline" size="sm" className="text-xs">
-                  NLP <Badge variant="secondary" className="ml-1">31</Badge>
-                </Button>
-              </div>
-
-              <div className="space-y-2">
+              {/* Tag Cloud */}
+              <div className="flex flex-wrap gap-1.5">
                 {keywords.map((keyword, index) => (
-                  <div key={index} className="flex items-center justify-between">
-                    <Badge variant="outline" className={`${keyword.color} text-xs px-2 py-1 border`}>
-                      {keyword.term}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">{keyword.target}</span>
-                  </div>
+                  <span
+                    key={index}
+                    onClick={() => handleKeywordClick(keyword.term)}
+                    className={`inline-flex items-center px-2 py-0.5 rounded-full border cursor-pointer transition-all hover:scale-105 text-[11px] ${
+                      selectedKeyword === keyword.term
+                        ? 'bg-primary text-primary-foreground border-primary ring-2 ring-primary/30'
+                        : keyword.color
+                    }`}
+                    title={`${keyword.term}: ${keyword.current} uses (target: ${keyword.target}) - Click to highlight`}
+                  >
+                    {keyword.term}
+                    <span className="ml-1 opacity-70">{keyword.current}</span>
+                  </span>
                 ))}
               </div>
+              {selectedKeyword && (
+                <p className="text-[10px] text-muted-foreground mt-2">
+                  Click keyword again to deselect
+                </p>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Image Insert Modal */}
+      <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Insert Image</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="imageUrl">Image URL</Label>
+              <Input
+                id="imageUrl"
+                placeholder="https://example.com/image.jpg"
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="imageAlt">Alt Text (optional)</Label>
+              <Input
+                id="imageAlt"
+                placeholder="Description of the image"
+                value={imageAlt}
+                onChange={(e) => setImageAlt(e.target.value)}
+              />
+            </div>
+            {imageUrl && (
+              <div className="border rounded-lg p-2">
+                <p className="text-sm text-muted-foreground mb-2">Preview:</p>
+                <img
+                  src={imageUrl}
+                  alt={imageAlt || "Preview"}
+                  className="max-w-full h-auto max-h-48 object-contain mx-auto"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setImageModalOpen(false);
+              setImageUrl("");
+              setImageAlt("");
+            }}>
+              Cancel
+            </Button>
+            <Button onClick={handleInsertImage} disabled={!imageUrl}>
+              Insert Image
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
