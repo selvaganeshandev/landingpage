@@ -36,6 +36,7 @@ import ResetPassword from "./pages/ResetPassword";
 import AcceptInvitation from "./pages/AcceptInvitation";
 import OrganizationSettings from "./pages/OrganizationSettings";
 import TeamMemberPermissions from "./pages/TeamMemberPermissions";
+import DomainSettings from "./pages/DomainSettings";
 import MisinformationAlerts from "./pages/MisinformationAlerts";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
@@ -181,6 +182,11 @@ const App = () => (
               <Route path="/organization-settings/members/:memberId" element={
                 <ProtectedRoute requiredPermission={MODULES.TEAM_MANAGEMENT} requiredLevel="admin">
                   <TeamMemberPermissions />
+                </ProtectedRoute>
+              } />
+              <Route path="/organization-settings/domains/:domainId" element={
+                <ProtectedRoute requiredPermission={MODULES.ORGANIZATION_SETTINGS} requiredLevel="read">
+                  <DomainSettings />
                 </ProtectedRoute>
               } />
               

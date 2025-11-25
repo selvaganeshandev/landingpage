@@ -91,7 +91,7 @@ const allNavGroups: NavGroup[] = [
     name: "Advanced",
     icon: Sparkles,
     items: [
-      { name: "Multilingual", path: "/multilingual", icon: Globe, module: MODULES.MULTILINGUAL },
+      // { name: "Multilingual", path: "/multilingual", icon: Globe, module: MODULES.MULTILINGUAL },
       { name: "Traffic Attribution", path: "/traffic", icon: Link2, module: MODULES.TRAFFIC_ATTRIBUTION },
       { name: "Misinformation", path: "/misinformation", icon: AlertTriangle, module: MODULES.MISINFORMATION_ALERTS },
     ],

@@ -1148,7 +1148,17 @@ export default function OrganizationSettings() {
                     className="flex items-center justify-between p-3 border rounded-lg"
                   >
                     <div className="flex items-center gap-3">
-                      <Globe className="h-4 w-4 text-muted-foreground" />
+                      <img
+                        src={`https://www.google.com/s2/favicons?domain=${domain.url}&sz=32`}
+                        alt={`${domain.name} favicon`}
+                        className="h-5 w-5 rounded"
+                        onError={(e) => {
+                          // Fallback to Globe icon if favicon fails to load
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                        }}
+                      />
+                      <Globe className="h-5 w-5 text-muted-foreground hidden" />
                       <div>
                         <p className="font-medium capitalize">{domain.name}</p>
                         <p className="text-sm text-muted-foreground">{domain.url}</p>
@@ -1184,6 +1194,15 @@ export default function OrganizationSettings() {
                       >
                         <Plus className="h-4 w-4" />
                         Add Keywords
+                      </Button>
+
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate(`/organization-settings/domains/${domain.id}`)}
+                        title="Domain Settings"
+                      >
+                        <Settings className="h-4 w-4" />
                       </Button>
 
                       <Button
