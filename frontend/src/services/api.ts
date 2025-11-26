@@ -1067,6 +1067,22 @@ export const apiClient = {
     return downloadFile(`/reports/generated/${id}/download/`, downloadFilename);
   },
 
+  downloadAllReports: async (reportIds?: number[], domainId?: number) => {
+    // Build query params
+    const params = new URLSearchParams();
+    if (reportIds && reportIds.length > 0) {
+      params.set('ids', reportIds.join(','));
+    }
+    if (domainId) {
+      params.set('domain_id', String(domainId));
+    }
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+
+    // Download the ZIP file
+    const today = new Date().toISOString().split('T')[0];
+    return downloadFile(`/reports/generated/download_all/${queryString}`, `reports_${today}.zip`);
+  },
+
   // Report Generation
   generateReport: (data: any) => apiRequest('/reports/generation/generate_now/', {
     method: 'POST',

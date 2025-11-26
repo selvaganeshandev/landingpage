@@ -16,6 +16,9 @@ from .serializers import (
 )
 from .services.html_to_pdf import convert_html_to_pdf
 import logging
+import zipfile
+import io
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +207,68 @@ class GeneratedReportViewSet(viewsets.ReadOnlyModelViewSet):
                 {'error': 'Report file not found on disk'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+    @action(detail=False, methods=['get'])
+    def download_all(self, request):
+        """Download all reports as a single ZIP file"""
+        # Get report IDs from query params (comma-separated)
+        report_ids = request.query_params.get('ids', '')
+
+        if report_ids:
+            # Download specific reports
+            ids_list = [int(id.strip()) for id in report_ids.split(',') if id.strip()]
+            reports = self.get_queryset().filter(id__in=ids_list)
+        else:
+            # Download all reports for the domain/organization
+            reports = self.get_queryset()
+
+        if not reports.exists():
+            return Response(
+                {'error': 'No reports found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Create ZIP file in memory
+        zip_buffer = io.BytesIO()
+
+        files_added = 0
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for report in reports:
+                if not report.file_path:
+                    continue
+
+                try:
+                    # Get the file content
+                    file_content = report.file_path.read()
+
+                    # Create a clean filename
+                    filename = f"{report.name}.{report.format.lower()}"
+                    # Sanitize filename (remove invalid characters)
+                    filename = "".join(c for c in filename if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+
+                    # Add to ZIP
+                    zip_file.writestr(filename, file_content)
+                    files_added += 1
+                except Exception as e:
+                    logger.warning(f"Could not add report {report.id} to ZIP: {str(e)}")
+                    continue
+
+        if files_added == 0:
+            return Response(
+                {'error': 'No report files available for download'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Prepare response
+        zip_buffer.seek(0)
+
+        # Generate filename with date
+        zip_filename = f"reports_{timezone.now().strftime('%Y-%m-%d')}.zip"
+
+        response = HttpResponse(zip_buffer.getvalue(), content_type='application/zip')
+        response['Content-Disposition'] = f'attachment; filename="{zip_filename}"'
+
+        return response
 
 
 class ReportGenerationViewSet(viewsets.ViewSet):

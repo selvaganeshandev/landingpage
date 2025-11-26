@@ -1,5 +1,6 @@
 """
 PDF Report Generator using ReportLab
+Modern, professional design with proper spacing and visual hierarchy
 """
 from io import BytesIO
 from datetime import datetime
@@ -9,10 +10,10 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph,
-    Spacer, PageBreak, Image, KeepTogether
+    Spacer, PageBreak, Image, KeepTogether, HRFlowable
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.graphics.shapes import Drawing, Rect
+from reportlab.graphics.shapes import Drawing, Rect, Line
 from reportlab.graphics.charts.barcharts import VerticalBarChart, HorizontalBarChart
 from reportlab.graphics.charts.piecharts import Pie
 from reportlab.graphics.charts.linecharts import HorizontalLineChart
@@ -22,52 +23,153 @@ import os
 class PDFReportGenerator:
     """Generate PDF reports using ReportLab"""
 
+    # Modern color palette
+    COLORS = {
+        'primary': colors.HexColor('#6366f1'),      # Indigo
+        'primary_light': colors.HexColor('#eef2ff'),
+        'success': colors.HexColor('#10b981'),      # Green
+        'success_light': colors.HexColor('#ecfdf5'),
+        'warning': colors.HexColor('#f59e0b'),      # Amber
+        'warning_light': colors.HexColor('#fffbeb'),
+        'danger': colors.HexColor('#ef4444'),       # Red
+        'danger_light': colors.HexColor('#fef2f2'),
+        'info': colors.HexColor('#3b82f6'),         # Blue
+        'info_light': colors.HexColor('#eff6ff'),
+        'purple': colors.HexColor('#8b5cf6'),
+        'purple_light': colors.HexColor('#f5f3ff'),
+        'dark': colors.HexColor('#1f2937'),
+        'gray': colors.HexColor('#6b7280'),
+        'light_gray': colors.HexColor('#f3f4f6'),
+        'border': colors.HexColor('#e5e7eb'),
+        'white': colors.white,
+    }
+
     def __init__(self, report_data, report_type):
         self.data = report_data
         self.report_type = report_type
         self.buffer = BytesIO()
+        self.page_width = letter[0]
+        self.page_height = letter[1]
         self.doc = SimpleDocTemplate(
             self.buffer,
             pagesize=letter,
-            rightMargin=0.75*inch,
-            leftMargin=0.75*inch,
-            topMargin=0.75*inch,
+            rightMargin=0.6*inch,
+            leftMargin=0.6*inch,
+            topMargin=0.6*inch,
             bottomMargin=0.75*inch,
         )
         self.styles = getSampleStyleSheet()
         self.story = []
+        self.page_number = 0
 
-        # Custom styles
+        # Calculate usable width
+        self.usable_width = self.page_width - 1.2*inch
+
+        self._setup_styles()
+
+    def _setup_styles(self):
+        """Setup custom paragraph styles"""
+        # Report Title
         self.styles.add(ParagraphStyle(
-            name='CustomTitle',
+            name='ReportTitle',
             parent=self.styles['Heading1'],
-            fontSize=24,
-            textColor=colors.HexColor('#1a1a1a'),
-            spaceAfter=30,
-            alignment=TA_CENTER,
+            fontSize=28,
+            textColor=self.COLORS['dark'],
+            spaceAfter=6,
+            spaceBefore=0,
+            alignment=TA_LEFT,
+            fontName='Helvetica-Bold',
         ))
 
+        # Report Subtitle
         self.styles.add(ParagraphStyle(
-            name='CustomHeading',
+            name='ReportSubtitle',
+            parent=self.styles['Normal'],
+            fontSize=12,
+            textColor=self.COLORS['gray'],
+            spaceAfter=20,
+            alignment=TA_LEFT,
+        ))
+
+        # Section Heading
+        self.styles.add(ParagraphStyle(
+            name='SectionHeading',
             parent=self.styles['Heading2'],
             fontSize=16,
-            textColor=colors.HexColor('#333333'),
+            textColor=self.COLORS['dark'],
             spaceAfter=12,
-            spaceBefore=12,
+            spaceBefore=24,
+            fontName='Helvetica-Bold',
         ))
 
+        # Subsection Heading
+        self.styles.add(ParagraphStyle(
+            name='SubsectionHeading',
+            parent=self.styles['Heading3'],
+            fontSize=13,
+            textColor=self.COLORS['dark'],
+            spaceAfter=8,
+            spaceBefore=16,
+            fontName='Helvetica-Bold',
+        ))
+
+        # Body Text - CustomBody to avoid conflict with default BodyText
         self.styles.add(ParagraphStyle(
             name='CustomBody',
             parent=self.styles['Normal'],
-            fontSize=11,
-            textColor=colors.HexColor('#555555'),
+            fontSize=10,
+            textColor=self.COLORS['gray'],
             spaceAfter=8,
+            leading=14,
         ))
+
+        # Small Text
+        self.styles.add(ParagraphStyle(
+            name='SmallText',
+            parent=self.styles['Normal'],
+            fontSize=9,
+            textColor=self.COLORS['gray'],
+            spaceAfter=4,
+        ))
+
+        # Metric Value (large number)
+        self.styles.add(ParagraphStyle(
+            name='MetricValue',
+            parent=self.styles['Normal'],
+            fontSize=32,
+            textColor=self.COLORS['dark'],
+            fontName='Helvetica-Bold',
+            alignment=TA_LEFT,
+        ))
+
+        # Metric Label
+        self.styles.add(ParagraphStyle(
+            name='MetricLabel',
+            parent=self.styles['Normal'],
+            fontSize=10,
+            textColor=self.COLORS['gray'],
+            spaceAfter=4,
+        ))
+
+    def _add_footer(self, canvas, doc):
+        """Add footer with page number and branding"""
+        canvas.saveState()
+        # Footer line
+        canvas.setStrokeColor(self.COLORS['border'])
+        canvas.setLineWidth(0.5)
+        canvas.line(0.6*inch, 0.6*inch, self.page_width - 0.6*inch, 0.6*inch)
+
+        # Footer text
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(self.COLORS['gray'])
+        canvas.drawString(0.6*inch, 0.4*inch, f"AI Visibility Monitor - {self.report_type}")
+        canvas.drawRightString(self.page_width - 0.6*inch, 0.4*inch, f"Page {doc.page}")
+        canvas.restoreState()
 
     def generate(self):
         """Generate the PDF and return BytesIO buffer"""
-        # Add title
-        self._add_title()
+        # Add title header
+        self._add_header()
 
         # Add content based on report type
         if self.report_type == 'Executive Dashboard':
@@ -79,51 +181,121 @@ class PDFReportGenerator:
         elif self.report_type == 'Content Strategy':
             self._generate_content_strategy()
 
-        # Build PDF
-        self.doc.build(self.story)
+        # Build PDF with footer
+        self.doc.build(self.story, onFirstPage=self._add_footer, onLaterPages=self._add_footer)
         self.buffer.seek(0)
         return self.buffer
 
-    def _add_title(self):
-        """Add report title and metadata"""
-        title = Paragraph(self.report_type, self.styles['CustomTitle'])
-        self.story.append(title)
+    def _add_header(self):
+        """Add modern report header with prominent domain name and favicon"""
+        domain_name = self.data.get('domain_name', 'N/A')
+        domain_url = self.data.get('domain_url', '')
+        period_start = self.data['period']['start'].strftime('%B %d, %Y')
+        period_end = self.data['period']['end'].strftime('%B %d, %Y')
 
-        # Add domain and period info
-        meta_text = f"""
-        <b>Domain:</b> {self.data.get('domain_name', 'N/A')}<br/>
-        <b>Period:</b> {self.data['period']['start'].strftime('%Y-%m-%d')} to {self.data['period']['end'].strftime('%Y-%m-%d')}<br/>
-        <b>Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        """
-        meta = Paragraph(meta_text, self.styles['CustomBody'])
-        self.story.append(meta)
-        self.story.append(Spacer(1, 0.3*inch))
+        # Try to get favicon
+        favicon_img = None
+        if domain_url:
+            try:
+                import urllib.request
+                # Get domain from URL
+                from urllib.parse import urlparse
+                parsed = urlparse(domain_url)
+                domain_host = parsed.netloc or domain_url.replace('https://', '').replace('http://', '').split('/')[0]
+                favicon_url = f"https://www.google.com/s2/favicons?domain={domain_host}&sz=64"
+
+                # Download favicon to temp file
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
+                    urllib.request.urlretrieve(favicon_url, tmp.name)
+                    favicon_img = Image(tmp.name, width=32, height=32)
+            except Exception as e:
+                favicon_img = None
+
+        # Build header with favicon and domain name side by side
+        if favicon_img:
+            # Domain name style - use larger leading to match favicon height
+            domain_para = Paragraph(domain_name, ParagraphStyle(
+                'DomainInline',
+                parent=self.styles['Normal'],
+                fontSize=26,
+                textColor=self.COLORS['dark'],
+                fontName='Helvetica-Bold',
+                leading=32,  # Match favicon height for vertical centering
+            ))
+
+            # Create a table with favicon and domain name
+            header_data = [[favicon_img, domain_para]]
+            header_table = Table(header_data, colWidths=[44, self.usable_width - 54], rowHeights=[36])
+            header_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+                ('ALIGN', (1, 0), (1, 0), 'LEFT'),
+                ('LEFTPADDING', (0, 0), (0, 0), 0),
+                ('LEFTPADDING', (1, 0), (1, 0), 8),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            self.story.append(header_table)
+        else:
+            # No favicon - just domain name
+            domain_style = ParagraphStyle(
+                'DomainName',
+                parent=self.styles['Normal'],
+                fontSize=26,
+                textColor=self.COLORS['dark'],
+                fontName='Helvetica-Bold',
+            )
+            self.story.append(Paragraph(domain_name, domain_style))
+
+        self.story.append(Spacer(1, 8))
+
+        # Report type and date on same line
+        meta_text = f'''<font size="10" color="#6b7280">{self.report_type}  •  {period_start} - {period_end}</font>'''
+        meta_style = ParagraphStyle(
+            'MetaInfo',
+            parent=self.styles['Normal'],
+            fontSize=10,
+            textColor=self.COLORS['gray'],
+            spaceAfter=16,
+        )
+        self.story.append(Paragraph(meta_text, meta_style))
+
+        # Divider line
+        self.story.append(HRFlowable(
+            width="100%",
+            thickness=1,
+            color=self.COLORS['border'],
+            spaceBefore=0,
+            spaceAfter=20
+        ))
+
+    def _create_metric_card(self, label, value, trend_text="", color_key='primary'):
+        """Create a single metric card as a table"""
+        bg_color = self.COLORS.get(f'{color_key}_light', self.COLORS['light_gray'])
+        text_color = self.COLORS.get(color_key, self.COLORS['primary'])
+
+        card_data = [
+            [Paragraph(f'<font color="#{text_color.hexval()[2:]}">{label}</font>', self.styles['MetricLabel'])],
+            [Paragraph(f'<font size="28"><b>{value}</b></font>', self.styles['CustomBody'])],
+        ]
+        if trend_text:
+            card_data.append([Paragraph(f'<font color="#10b981" size="9">{trend_text}</font>', self.styles['SmallText'])])
+
+        card_table = Table(card_data, colWidths=[self.usable_width/4 - 10])
+        card_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), bg_color),
+            ('TOPPADDING', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, -1), (-1, -1), 12),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+        return card_table
 
     def _generate_executive_dashboard(self):
-        """Generate Executive Dashboard report with all 5 sections"""
-
-        # 1. Executive Summary
-        self._add_executive_summary()
-        self.story.append(Spacer(1, 0.4*inch))
-
-        # 2. Key Metrics
-        self._add_key_metrics()
-        self.story.append(Spacer(1, 0.4*inch))
-
-        # 3. Visibility Trends
-        self._add_visibility_trends()
-        self.story.append(Spacer(1, 0.4*inch))
-
-        # 4. Competitive Landscape
-        self._add_competitive_landscape()
-        self.story.append(Spacer(1, 0.4*inch))
-
-        # 5. Strategic Recommendations
-        self._add_strategic_recommendations()
-
-    def _add_executive_summary(self):
-        """Add Executive Summary section with styled metric cards"""
-        self.story.append(Paragraph('Executive Summary', self.styles['CustomHeading']))
+        """Generate Executive Dashboard report with modern design"""
 
         metrics = self.data.get('key_metrics', {})
         domain_name = self.data.get('domain_name', 'N/A')
@@ -133,280 +305,360 @@ class PDFReportGenerator:
         total_mentions = metrics.get('total_mentions', 0)
         mention_rate = metrics.get('mention_rate', 0)
         avg_sentiment = metrics.get('avg_sentiment', 0)
+        competitor_count = metrics.get('competitor_count', 0)
 
-        # Determine trends
-        visibility_trend = '↗ Growing' if mention_rate > 50 else '→ Stable' if mention_rate > 30 else '↘ Needs Attention'
-        mentions_trend = '↗ Up' if total_mentions > 100 else '→ Steady'
+        # ===== SECTION 1: Key Metrics Cards =====
+        self.story.append(Paragraph('Performance Overview', self.styles['SectionHeading']))
+
+        # Calculate trends
+        visibility_trend = 'Stable' if mention_rate >= 40 else ('Growing' if mention_rate >= 20 else 'Needs attention')
         sentiment_score = int(avg_sentiment * 100) if avg_sentiment > 0 else 50
-        sentiment_trend = '✓ Positive' if avg_sentiment > 0.3 else '→ Neutral'
+        sentiment_label = 'Positive' if avg_sentiment > 0.3 else ('Neutral' if avg_sentiment >= 0 else 'Negative')
 
-        # Create 4 metric cards in a row
-        metric_cards_data = [
-            ['🎯 Overall Visibility Score', '📊 Total AI Mentions'],
-            [f'{mention_rate}%', f'{total_mentions}'],
-            [visibility_trend, mentions_trend],
-            ['', ''],
-            ['✓ Positive Sentiment', '💰 Total Prompts Monitored'],
-            [f'{sentiment_score}%', f'{total_prompts}'],
-            [sentiment_trend, 'Tracking'],
-        ]
+        # Create 4 metric cards in a 2x2 grid
+        card_width = (self.usable_width - 20) / 2
 
-        # Create a table for metric cards with colored backgrounds
-        metric_table = Table(metric_cards_data, colWidths=[3*inch, 3*inch])
-        metric_table.setStyle(TableStyle([
-            # First row - Card titles
-            ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#EFF6FF')),  # Blue background
-            ('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#FAF5FF')),  # Purple background
-            ('TEXTCOLOR', (0, 0), (0, 0), colors.HexColor('#3B82F6')),
-            ('TEXTCOLOR', (1, 0), (1, 0), colors.HexColor('#A855F7')),
+        # Row 1: Visibility Score and Total Mentions
+        row1_data = [[
+            self._create_single_metric_cell('AI Visibility Score', f'{mention_rate}%', visibility_trend, 'info'),
+            self._create_single_metric_cell('Total Mentions', f'{total_mentions}', f'From {total_prompts} prompts', 'purple'),
+        ]]
+
+        row1_table = Table(row1_data, colWidths=[card_width, card_width])
+        row1_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (0, -1), 10),
+            ('RIGHTPADDING', (1, 0), (1, -1), 0),
+        ]))
+        self.story.append(row1_table)
+        self.story.append(Spacer(1, 10))
+
+        # Row 2: Sentiment and Competitors
+        row2_data = [[
+            self._create_single_metric_cell('Sentiment Score', f'{sentiment_score}%', sentiment_label, 'success'),
+            self._create_single_metric_cell('Competitors Tracked', f'{competitor_count}', 'Active monitoring', 'warning'),
+        ]]
+
+        row2_table = Table(row2_data, colWidths=[card_width, card_width])
+        row2_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (0, -1), 10),
+            ('RIGHTPADDING', (1, 0), (1, -1), 0),
+        ]))
+        self.story.append(row2_table)
+
+        # ===== SECTION 2: Platform Performance =====
+        self.story.append(Paragraph('Platform Distribution', self.styles['SectionHeading']))
+
+        # Use real platform data if available, otherwise use calculated distribution
+        platform_breakdown = self.data.get('platform_breakdown', [])
+        platform_table_data = [['Platform', 'Queries', 'Mentions', 'Mention Rate', 'Sentiment']]
+
+        if platform_breakdown:
+            for plat in platform_breakdown:
+                platform_name = plat.get('platform', 'Unknown')
+                if platform_name:
+                    platform_name = platform_name.title()
+                platform_table_data.append([
+                    platform_name,
+                    str(plat.get('total', 0)),
+                    str(plat.get('mentions', 0)),
+                    f"{plat.get('mention_rate', 0)}%",
+                    f"{plat.get('avg_sentiment', 0):.2f}"
+                ])
+        else:
+            # Fallback to calculated distribution
+            platforms = ['ChatGPT', 'Claude', 'Gemini', 'Perplexity']
+            for platform in platforms:
+                queries = max(1, total_prompts // 4)
+                mentions = max(0, total_mentions // 4)
+                rate = (mentions / queries * 100) if queries > 0 else 0
+                platform_table_data.append([platform, str(queries), str(mentions), f'{rate:.0f}%', f'{avg_sentiment:.2f}'])
+
+        # Full width columns
+        col_widths = [self.usable_width * 0.25, self.usable_width * 0.18, self.usable_width * 0.18, self.usable_width * 0.22, self.usable_width * 0.17]
+        platform_table = Table(platform_table_data, colWidths=col_widths)
+        platform_table.setStyle(TableStyle([
+            # Header row
+            ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['dark']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('TOPPADDING', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-
-            # Second row - Big numbers
-            ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 1), (-1, 1), 24),
-            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#1A1A1A')),
-            ('TOPPADDING', (0, 1), (-1, 1), 8),
-            ('BOTTOMPADDING', (0, 1), (-1, 1), 8),
-            ('BACKGROUND', (0, 1), (0, 1), colors.HexColor('#EFF6FF')),
-            ('BACKGROUND', (1, 1), (1, 1), colors.HexColor('#FAF5FF')),
-
-            # Third row - Trends
-            ('FONTSIZE', (0, 2), (-1, 2), 9),
-            ('TEXTCOLOR', (0, 2), (-1, 2), colors.HexColor('#16A34A')),
-            ('BACKGROUND', (0, 2), (0, 2), colors.HexColor('#EFF6FF')),
-            ('BACKGROUND', (1, 2), (1, 2), colors.HexColor('#FAF5FF')),
-            ('TOPPADDING', (0, 2), (-1, 2), 4),
-            ('BOTTOMPADDING', (0, 2), (-1, 2), 12),
-
-            # Spacing row
-            ('LINEABOVE', (0, 3), (-1, 3), 0, colors.white),
-            ('TOPPADDING', (0, 3), (-1, 3), 8),
-            ('BOTTOMPADDING', (0, 3), (-1, 3), 8),
-
-            # Fourth row - Second set of card titles
-            ('BACKGROUND', (0, 4), (0, 4), colors.HexColor('#F0FDF4')),  # Green background
-            ('BACKGROUND', (1, 4), (1, 4), colors.HexColor('#FEFCE8')),  # Amber background
-            ('TEXTCOLOR', (0, 4), (0, 4), colors.HexColor('#22C55E')),
-            ('TEXTCOLOR', (1, 4), (1, 4), colors.HexColor('#F59E0B')),
-            ('FONTNAME', (0, 4), (-1, 4), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 4), (-1, 4), 10),
-            ('TOPPADDING', (0, 4), (-1, 4), 12),
-            ('BOTTOMPADDING', (0, 4), (-1, 4), 8),
-
-            # Fifth row - Big numbers
-            ('FONTNAME', (0, 5), (-1, 5), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 5), (-1, 5), 24),
-            ('TEXTCOLOR', (0, 5), (-1, 5), colors.HexColor('#1A1A1A')),
-            ('TOPPADDING', (0, 5), (-1, 5), 8),
-            ('BOTTOMPADDING', (0, 5), (-1, 5), 8),
-            ('BACKGROUND', (0, 5), (0, 5), colors.HexColor('#F0FDF4')),
-            ('BACKGROUND', (1, 5), (1, 5), colors.HexColor('#FEFCE8')),
-
-            # Sixth row - Trends
-            ('FONTSIZE', (0, 6), (-1, 6), 9),
-            ('TEXTCOLOR', (0, 6), (-1, 6), colors.HexColor('#16A34A')),
-            ('BACKGROUND', (0, 6), (0, 6), colors.HexColor('#F0FDF4')),
-            ('BACKGROUND', (1, 6), (1, 6), colors.HexColor('#FEFCE8')),
-            ('TOPPADDING', (0, 6), (-1, 6), 4),
-            ('BOTTOMPADDING', (0, 6), (-1, 6), 12),
-
-            # Borders for all cards
-            ('BOX', (0, 0), (0, 2), 1, colors.HexColor('#E5E7EB')),
-            ('BOX', (1, 0), (1, 2), 1, colors.HexColor('#E5E7EB')),
-            ('BOX', (0, 4), (0, 6), 1, colors.HexColor('#E5E7EB')),
-            ('BOX', (1, 4), (1, 6), 1, colors.HexColor('#E5E7EB')),
-
-            # Rounded corners effect
-            ('ROUNDEDCORNERS', [8, 8, 8, 8]),
-        ]))
-
-        self.story.append(metric_table)
-
-    def _add_key_metrics(self):
-        """Add Key Performance Indicators section"""
-        self.story.append(Paragraph('Key Performance Indicators', self.styles['CustomHeading']))
-
-        metrics = self.data.get('key_metrics', {})
-
-        # Create metrics cards layout
-        metrics_data = [
-            ['Metric', 'Current Value', 'Status'],
-            ['Total Prompts Monitored', str(metrics.get('total_prompts', 0)), '📊'],
-            ['Total Mentions Received', str(metrics.get('total_mentions', 0)), '✓'],
-            ['Mention Rate', f"{metrics.get('mention_rate', 0)}%", '📈' if metrics.get('mention_rate', 0) > 50 else '📉'],
-            ['Average Sentiment Score', f"{metrics.get('avg_sentiment', 0):.2f}", '😊' if metrics.get('avg_sentiment', 0) > 0 else '😐'],
-            ['Competitors Tracked', str(metrics.get('competitor_count', 0)), '🎯'],
-        ]
-
-        metrics_table = Table(metrics_data, colWidths=[3*inch, 1.5*inch, 1*inch])
-        metrics_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#6366f1')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('ALIGN', (2, 0), (2, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('TOPPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8fafc')),
-            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e2e8f0')),
+            ('TOPPADDING', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            # Data rows
             ('FONTSIZE', (0, 1), (-1, -1), 10),
             ('TOPPADDING', (0, 1), (-1, -1), 10),
             ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['light_gray']]),
+            # Alignment
+            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            # Grid
+            ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
         ]))
+        self.story.append(platform_table)
 
-        self.story.append(metrics_table)
+        # ===== SECTION 2b: Sentiment Analysis =====
+        sentiment_data = self.data.get('sentiment_breakdown', {})
+        if sentiment_data and sentiment_data.get('total', 0) > 0:
+            self.story.append(Paragraph('Sentiment Analysis', self.styles['SectionHeading']))
 
-        # Top Performing Prompts subsection
-        self.story.append(Spacer(1, 0.3*inch))
-        self.story.append(Paragraph('Top Performing Prompts', self.styles['CustomBody']))
-        self.story.append(Spacer(1, 0.1*inch))
+            # Create sentiment summary cards
+            sent_card_width = (self.usable_width - 20) / 3
+            sent_row_data = [[
+                self._create_sentiment_card('Positive', sentiment_data.get('positive', 0), sentiment_data.get('positive_pct', 0), 'success'),
+                self._create_sentiment_card('Neutral', sentiment_data.get('neutral', 0), sentiment_data.get('neutral_pct', 0), 'warning'),
+                self._create_sentiment_card('Negative', sentiment_data.get('negative', 0), sentiment_data.get('negative_pct', 0), 'danger'),
+            ]]
+            sent_table = Table(sent_row_data, colWidths=[sent_card_width, sent_card_width, sent_card_width])
+            sent_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            self.story.append(sent_table)
+
+        # ===== SECTION 3: Top Performing Prompts =====
+        self.story.append(Paragraph('Top Performing Prompts', self.styles['SectionHeading']))
 
         top_prompts = self.data.get('top_prompts', [])
         if top_prompts:
-            prompt_data = [['Rank', 'Prompt', 'Type', 'Mentions']]
+            prompt_data = [['#', 'Prompt', 'Type', 'Mentions']]
             for idx, prompt in enumerate(top_prompts[:5], 1):
+                prompt_text = prompt.get('text', '')[:60]
+                if len(prompt.get('text', '')) > 60:
+                    prompt_text += '...'
                 prompt_data.append([
                     str(idx),
-                    prompt.get('text', '')[:60] + ('...' if len(prompt.get('text', '')) > 60 else ''),
+                    prompt_text,
                     prompt.get('type', 'N/A').title(),
                     str(prompt.get('mentions', 0))
                 ])
 
-            prompt_table = Table(prompt_data, colWidths=[0.5*inch, 3.5*inch, 0.8*inch, 0.7*inch])
+            # Full width columns
+            prompt_col_widths = [self.usable_width * 0.06, self.usable_width * 0.64, self.usable_width * 0.18, self.usable_width * 0.12]
+            prompt_table = Table(prompt_data, colWidths=prompt_col_widths)
             prompt_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#475569')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('ALIGN', (0, 0), (0, -1), 'CENTER'),
-                ('ALIGN', (3, 0), (3, -1), 'CENTER'),
+                # Header
+                ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['primary']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
                 ('TOPPADDING', (0, 0), (-1, 0), 10),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                # Data rows
                 ('FONTSIZE', (0, 1), (-1, -1), 9),
-                ('TOPPADDING', (0, 1), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['primary_light']]),
+                # Alignment
+                ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+                ('ALIGN', (3, 0), (3, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                # Grid
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 10),
             ]))
-
             self.story.append(prompt_table)
         else:
-            self.story.append(Paragraph('No prompt performance data available for this period.', self.styles['CustomBody']))
+            self.story.append(Paragraph(
+                'No prompt data available for this period. Add prompts to start tracking.',
+                self.styles['CustomBody']
+            ))
 
-    def _add_visibility_trends(self):
-        """Add Visibility Trends section with chart"""
-        self.story.append(Paragraph('Visibility Trends', self.styles['CustomHeading']))
+        # ===== SECTION 4: Competitive Position =====
+        self.story.append(Paragraph('Competitive Position', self.styles['SectionHeading']))
 
-        trend_text = """
-        This section analyzes your visibility trends across AI platforms over the reporting period.
-        The data shows patterns in how frequently your domain appears in AI responses.
-        """
-        self.story.append(Paragraph(trend_text, self.styles['CustomBody']))
-        self.story.append(Spacer(1, 0.2*inch))
-
-        # Simple trend visualization using table
-        metrics = self.data.get('key_metrics', {})
-        trend_data = [
-            ['Metric', 'Value', 'Trend Indicator'],
-            ['Mention Rate', f"{metrics.get('mention_rate', 0)}%", '→' if metrics.get('mention_rate', 0) >= 40 else '↗' if metrics.get('mention_rate', 0) >= 20 else '↘'],
-            ['Total Mentions', str(metrics.get('total_mentions', 0)), '📊'],
-            ['Sentiment Score', f"{metrics.get('avg_sentiment', 0):.2f}", '↗' if metrics.get('avg_sentiment', 0) > 0 else '→'],
-        ]
-
-        trend_table = Table(trend_data, colWidths=[2.5*inch, 1.5*inch, 1.5*inch])
-        trend_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10b981')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('ALIGN', (2, 0), (2, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ]))
-
-        self.story.append(trend_table)
-
-    def _add_competitive_landscape(self):
-        """Add Competitive Landscape section"""
-        self.story.append(Paragraph('Competitive Landscape', self.styles['CustomHeading']))
-
-        landscape_text = """
-        Understanding your position relative to competitors is crucial for strategic planning.
-        This analysis shows how your visibility compares across the competitive landscape.
-        """
-        self.story.append(Paragraph(landscape_text, self.styles['CustomBody']))
-        self.story.append(Spacer(1, 0.2*inch))
-
-        # Competitive metrics
-        metrics = self.data.get('key_metrics', {})
-        comp_count = metrics.get('competitor_count', 0)
-
-        if comp_count > 0:
+        if competitor_count > 0:
             comp_summary = f"""
-            <b>Competitive Overview:</b><br/>
-            • Currently tracking <b>{comp_count}</b> direct competitors<br/>
-            • Your mention rate: <b>{metrics.get('mention_rate', 0)}%</b><br/>
-            • Your sentiment score: <b>{metrics.get('avg_sentiment', 0):.2f}</b><br/><br/>
-
-            <i>Note: Detailed competitor analysis is available in the Competitor Focus report.</i>
+            <b>Market Overview</b><br/><br/>
+            You are currently tracking <b>{competitor_count}</b> competitors in your market.
+            Your visibility score of <b>{mention_rate}%</b> indicates {'strong' if mention_rate > 50 else 'moderate' if mention_rate > 25 else 'developing'}
+            presence across AI platforms.<br/><br/>
+            <b>Key Insight:</b> {'Your mention rate is above average - focus on maintaining momentum.' if mention_rate > 50 else 'There is opportunity to improve visibility through content optimization.'}
             """
             self.story.append(Paragraph(comp_summary, self.styles['CustomBody']))
         else:
-            self.story.append(Paragraph('No competitor data available. Add competitors in your dashboard to enable competitive analysis.', self.styles['CustomBody']))
+            self.story.append(Paragraph(
+                'Add competitors in your dashboard to enable competitive analysis and benchmarking.',
+                self.styles['CustomBody']
+            ))
 
-    def _add_strategic_recommendations(self):
-        """Add Strategic Recommendations section"""
-        self.story.append(Paragraph('Strategic Recommendations', self.styles['CustomHeading']))
-
-        metrics = self.data.get('key_metrics', {})
-        mention_rate = metrics.get('mention_rate', 0)
-        sentiment = metrics.get('avg_sentiment', 0)
-        total_prompts = metrics.get('total_prompts', 0)
+        # ===== SECTION 5: Strategic Recommendations =====
+        self.story.append(Spacer(1, 20))
+        self.story.append(Paragraph('Strategic Recommendations', self.styles['SectionHeading']))
 
         # Generate recommendations based on metrics
         recommendations = []
 
+        # Visibility recommendation
         if mention_rate < 30:
-            recommendations.append("• <b>Improve Mention Rate:</b> Your current mention rate of {:.1f}% is below target. Focus on creating more relevant content and optimizing existing prompts.".format(mention_rate))
-        elif mention_rate < 50:
-            recommendations.append("• <b>Optimize Mention Rate:</b> You're at {:.1f}% mention rate. Target 60%+ by refining top-performing prompt patterns.".format(mention_rate))
+            recommendations.append({
+                'priority': 'High',
+                'title': 'Improve AI Visibility',
+                'description': f'Your current visibility of {mention_rate}% is below target. Focus on creating more AI-optimized content.',
+                'color': 'danger'
+            })
+        elif mention_rate < 60:
+            recommendations.append({
+                'priority': 'Medium',
+                'title': 'Optimize Visibility',
+                'description': f'With {mention_rate}% visibility, target 60%+ by analyzing top-performing prompt patterns.',
+                'color': 'warning'
+            })
         else:
-            recommendations.append("• <b>Maintain Excellence:</b> Your {:.1f}% mention rate is strong. Continue current strategies and explore new prompt categories.".format(mention_rate))
+            recommendations.append({
+                'priority': 'Low',
+                'title': 'Maintain Excellence',
+                'description': f'Your {mention_rate}% visibility is strong. Continue current strategies and expand to new topics.',
+                'color': 'success'
+            })
 
-        if sentiment < 0:
-            recommendations.append("• <b>Address Sentiment Issues:</b> Negative sentiment detected ({}). Review content accuracy and address user concerns.".format(sentiment))
-        elif sentiment < 0.3:
-            recommendations.append("• <b>Enhance Sentiment:</b> Sentiment is neutral. Improve content quality and relevance to achieve more positive responses.")
+        # Sentiment recommendation
+        if avg_sentiment < 0:
+            recommendations.append({
+                'priority': 'High',
+                'title': 'Address Negative Sentiment',
+                'description': 'Negative sentiment detected. Review content accuracy and address potential misinformation.',
+                'color': 'danger'
+            })
+        elif avg_sentiment < 0.3:
+            recommendations.append({
+                'priority': 'Medium',
+                'title': 'Enhance Sentiment',
+                'description': 'Sentiment is neutral. Improve content quality to achieve more positive AI responses.',
+                'color': 'warning'
+            })
         else:
-            recommendations.append("• <b>Leverage Positive Sentiment:</b> Strong positive sentiment ({}). Use this momentum for brand building.".format(sentiment))
+            recommendations.append({
+                'priority': 'Low',
+                'title': 'Leverage Positive Sentiment',
+                'description': 'Strong positive sentiment. Use this for brand building and thought leadership.',
+                'color': 'success'
+            })
 
-        if total_prompts < 50:
-            recommendations.append("• <b>Expand Coverage:</b> Only {} prompts monitored. Increase prompt diversity to capture more opportunities.".format(total_prompts))
+        # Coverage recommendation
+        if total_prompts < 20:
+            recommendations.append({
+                'priority': 'Medium',
+                'title': 'Expand Prompt Coverage',
+                'description': f'Only {total_prompts} prompts monitored. Add more diverse prompts to capture more opportunities.',
+                'color': 'warning'
+            })
 
-        recommendations.append("• <b>Monitor Competitors:</b> Regularly review competitive positioning to identify gaps and opportunities.")
-        recommendations.append("• <b>Optimize Content:</b> Focus on prompts with high engagement and low mention rates for quick wins.")
+        # Create recommendation cards
+        for rec in recommendations:
+            self._add_recommendation_card(rec)
 
-        rec_text = "<br/>".join(recommendations)
-        rec_text = f"""
-        <b>Key Action Items:</b><br/><br/>
-        {rec_text}<br/><br/>
+        # Quick wins section
+        self.story.append(Spacer(1, 20))
+        self.story.append(Paragraph('Quick Wins', self.styles['SubsectionHeading']))
 
-        <i>For detailed optimization strategies, refer to the Content Strategy report.</i>
+        quick_wins = [
+            'Review and optimize your top-performing prompts for additional keywords',
+            'Monitor competitor content strategies weekly for new opportunities',
+            'Update website content based on common AI query patterns',
+            'Track sentiment trends to identify potential reputation issues early',
+        ]
+
+        for win in quick_wins:
+            self.story.append(Paragraph(f'• {win}', self.styles['CustomBody']))
+
+    def _create_sentiment_card(self, label, count, percentage, color_key):
+        """Create a sentiment summary card"""
+        bg_color = self.COLORS.get(f'{color_key}_light', self.COLORS['light_gray'])
+        accent_color = self.COLORS.get(color_key, self.COLORS['primary'])
+
+        content = f'''<font size="9" color="#{accent_color.hexval()[2:]}">{label}</font><br/><br/>
+<font size="22" color="#1f2937"><b>{percentage}%</b></font><br/><br/>
+<font size="9" color="#6b7280">{count} responses</font>'''
+
+        content_style = ParagraphStyle(
+            'SentimentContent_' + color_key + '_' + str(id(self)),
+            parent=self.styles['Normal'],
+            fontSize=10,
+            leading=14,
+        )
+
+        cell_data = [[Paragraph(content, content_style)]]
+        cell_table = Table(cell_data)
+        cell_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), bg_color),
+            ('TOPPADDING', (0, 0), (-1, -1), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('LEFTPADDING', (0, 0), (-1, -1), 14),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 14),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+        return cell_table
+
+    def _create_single_metric_cell(self, label, value, subtitle, color_key):
+        """Create a styled metric cell with proper vertical stacking"""
+        bg_color = self.COLORS.get(f'{color_key}_light', self.COLORS['light_gray'])
+        accent_color = self.COLORS.get(color_key, self.COLORS['primary'])
+
+        # Build content as a single paragraph with line breaks and explicit spacing
+        content = f'''<font size="10" color="#{accent_color.hexval()[2:]}">{label}</font><br/><br/>
+<font size="28" color="#1f2937"><b>{value}</b></font><br/><br/>
+<font size="9" color="#6b7280">{subtitle}</font>'''
+
+        content_style = ParagraphStyle(
+            'MetricContent_' + color_key + '_' + str(id(self)),
+            parent=self.styles['Normal'],
+            fontSize=10,
+            leading=16,
+        )
+
+        cell_data = [[Paragraph(content, content_style)]]
+        cell_table = Table(cell_data)
+        cell_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), bg_color),
+            ('TOPPADDING', (0, 0), (-1, -1), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 14),
+            ('LEFTPADDING', (0, 0), (-1, -1), 16),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 16),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+        return cell_table
+
+    def _add_recommendation_card(self, rec):
+        """Add a styled recommendation card"""
+        color_key = rec.get('color', 'primary')
+        bg_color = self.COLORS.get(f'{color_key}_light', self.COLORS['light_gray'])
+        accent_color = self.COLORS.get(color_key, self.COLORS['primary'])
+
+        # Priority badge
+        priority_text = f'<font color="#{accent_color.hexval()[2:]}"><b>{rec["priority"]} Priority</b></font>'
+
+        card_content = f"""
+        {priority_text}<br/>
+        <font size="12"><b>{rec['title']}</b></font><br/><br/>
+        <font size="10" color="#6b7280">{rec['description']}</font>
         """
 
-        self.story.append(Paragraph(rec_text, self.styles['CustomBody']))
+        card_data = [[Paragraph(card_content, self.styles['CustomBody'])]]
+        card_table = Table(card_data, colWidths=[self.usable_width])
+        card_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), bg_color),
+            ('TOPPADDING', (0, 0), (-1, -1), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 14),
+            ('LEFTPADDING', (0, 0), (-1, -1), 16),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 16),
+            ('LINEBELOW', (0, 0), (-1, -1), 3, accent_color),
+        ]))
+
+        self.story.append(card_table)
+        self.story.append(Spacer(1, 10))
 
     def _generate_detailed_analytics(self):
         """Generate Detailed Analytics report"""
-        self.story.append(Paragraph('LLM Performance Overview', self.styles['CustomHeading']))
+        self.story.append(Paragraph('LLM Performance Overview', self.styles['SectionHeading']))
 
         llm_perf = self.data.get('llm_performance', {})
         if llm_perf:
@@ -421,23 +673,26 @@ class PDFReportGenerator:
 
             llm_table = Table(llm_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
             llm_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4a5568')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['dark']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 11),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('TOPPADDING', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['light_gray']]),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+                ('TOPPADDING', (0, 1), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
             ]))
 
             self.story.append(llm_table)
             self.story.append(Spacer(1, 0.3*inch))
 
         # Daily Statistics
-        self.story.append(Paragraph('Daily Performance Trends', self.styles['CustomHeading']))
+        self.story.append(Paragraph('Daily Performance Trends', self.styles['SectionHeading']))
 
-        daily_stats = self.data.get('daily_stats', [])[:14]  # Last 14 days
+        daily_stats = self.data.get('daily_stats', [])[:14]
         if daily_stats:
             daily_data = [['Date', 'Total Queries', 'Mentions']]
             for stat in daily_stats:
@@ -449,170 +704,268 @@ class PDFReportGenerator:
 
             daily_table = Table(daily_data, colWidths=[2*inch, 2*inch, 2*inch])
             daily_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4a5568')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['primary']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['primary_light']]),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ]))
 
             self.story.append(daily_table)
 
     def _generate_competitor_focus(self):
-        """Generate Competitor Focus report"""
-
-        # 1. Executive Summary - Your Brand vs Market
-        self.story.append(Paragraph('Competitive Overview', self.styles['CustomHeading']))
+        """Generate Competitor Focus report with modern design"""
 
         our_metrics = self.data.get('our_metrics', {})
         total_competitors = self.data.get('total_competitors', 0)
         total_market = self.data.get('total_market_mentions', 0)
+        competitors = self.data.get('competitors', [])
 
-        summary_text = f"""
-        <b>Market Analysis Summary</b><br/>
-        • Your brand: <b>{self.data.get('domain_name', 'N/A')}</b><br/>
-        • Total competitors tracked: <b>{total_competitors}</b><br/>
-        • Total market mentions: <b>{total_market}</b><br/>
-        • Report period: {self.data['period']['start'].strftime('%Y-%m-%d')} to {self.data['period']['end'].strftime('%Y-%m-%d')}
-        """
-        self.story.append(Paragraph(summary_text, self.styles['CustomBody']))
-        self.story.append(Spacer(1, 0.3*inch))
+        # ===== SECTION 1: Market Overview Cards =====
+        self.story.append(Paragraph('Market Overview', self.styles['SectionHeading']))
 
-        # 2. Your Brand Metrics Card
-        self.story.append(Paragraph('Your Brand Performance', self.styles['CustomHeading']))
+        # Create 2x2 metric cards
+        card_width = (self.usable_width - 20) / 2
+
+        # Row 1: Total Competitors and Market Mentions
+        row1_data = [[
+            self._create_single_metric_cell('Competitors Tracked', str(total_competitors), 'Active monitoring', 'info'),
+            self._create_single_metric_cell('Market Mentions', str(total_market), 'Total across all brands', 'purple'),
+        ]]
+        row1_table = Table(row1_data, colWidths=[card_width, card_width])
+        row1_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (0, -1), 10),
+            ('RIGHTPADDING', (1, 0), (1, -1), 0),
+        ]))
+        self.story.append(row1_table)
+        self.story.append(Spacer(1, 10))
+
+        # Row 2: Your Share of Voice and Visibility Score
+        our_sov = our_metrics.get('share_of_voice', 0)
+        our_visibility = our_metrics.get('visibility_score', 0)
+        row2_data = [[
+            self._create_single_metric_cell('Your Share of Voice', f'{our_sov}%', 'Growing' if our_sov > 30 else 'Developing', 'success'),
+            self._create_single_metric_cell('Your Visibility Score', f'{our_visibility}%', 'vs competitors', 'warning'),
+        ]]
+        row2_table = Table(row2_data, colWidths=[card_width, card_width])
+        row2_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (0, -1), 10),
+            ('RIGHTPADDING', (1, 0), (1, -1), 0),
+        ]))
+        self.story.append(row2_table)
+
+        # ===== SECTION 2: Your Brand Performance =====
+        self.story.append(Paragraph('Your Brand Performance', self.styles['SectionHeading']))
+
+        our_mentions = our_metrics.get('mentions', 0)
+        our_sentiment = our_metrics.get('sentiment_score', 0)
 
         our_data = [
             ['Metric', 'Value', 'Status'],
-            ['Total Mentions', str(our_metrics.get('mentions', 0)), '📊'],
-            ['Visibility Score', f"{our_metrics.get('visibility_score', 0)}%", '🎯'],
-            ['Share of Voice', f"{our_metrics.get('share_of_voice', 0)}%", '📈' if our_metrics.get('share_of_voice', 0) > 30 else '📉'],
-            ['Sentiment Score', f"{our_metrics.get('sentiment_score', 0):.2f}", '😊' if our_metrics.get('sentiment_score', 0) > 0 else '😐'],
-            ['Prompts Monitored', str(our_metrics.get('total_prompts', 0)), '✓'],
+            ['Total Mentions', str(our_mentions), 'Active'],
+            ['Visibility Score', f"{our_visibility}%", 'Tracking'],
+            ['Share of Voice', f"{our_sov}%", 'Growing' if our_sov > 30 else 'Developing'],
+            ['Sentiment Score', f"{our_sentiment:.2f}", 'Positive' if our_sentiment > 0 else 'Neutral'],
         ]
 
-        our_table = Table(our_data, colWidths=[2.5*inch, 1.5*inch, 1*inch])
+        # Full width table
+        our_col_widths = [self.usable_width * 0.45, self.usable_width * 0.30, self.usable_width * 0.25]
+        our_table = Table(our_data, colWidths=our_col_widths)
         our_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3b82f6')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+            ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['primary']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 11),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
             ('TOPPADDING', (0, 0), (-1, 0), 10),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#eff6ff')),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#bfdbfe')),
-            ('FONTSIZE', (0, 1), (-1, -1), 10),
-            ('TOPPADDING', (0, 1), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['primary_light']]),
+            ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+            ('TOPPADDING', (0, 1), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
         ]))
         self.story.append(our_table)
-        self.story.append(Spacer(1, 0.4*inch))
 
-        # 3. Competitor Comparison Table
-        self.story.append(Paragraph('Competitor Analysis', self.styles['CustomHeading']))
+        # ===== SECTION 3: Competitor Comparison Table =====
+        self.story.append(Paragraph('Competitor Analysis', self.styles['SectionHeading']))
 
-        competitors = self.data.get('competitors', [])
         if competitors:
-            comp_data = [['#', 'Competitor', 'Mentions', 'Share of Voice', 'Visibility', 'Sentiment', 'Trend']]
+            comp_data = [['#', 'Competitor', 'Mentions', 'Share of Voice', 'Visibility', 'Trend']]
             for idx, comp in enumerate(competitors[:10], 1):
-                trend_icon = '↗' if comp.get('trend', 0) > 0 else ('↘' if comp.get('trend', 0) < 0 else '→')
-                sentiment_display = f"{comp.get('sentiment_score', 0):.2f}"
+                trend_val = comp.get('trend', 0)
+                trend_icon = '+' if trend_val > 0 else ('-' if trend_val < 0 else '')
+                trend_str = f"{trend_icon}{abs(trend_val)}%" if trend_val != 0 else "—"
                 comp_data.append([
                     str(idx),
-                    comp.get('name', '')[:20],
+                    comp.get('name', '')[:25],
                     str(comp.get('mentions', 0)),
                     f"{comp.get('share_of_voice', 0)}%",
                     f"{comp.get('visibility_score', 0)}%",
-                    sentiment_display,
-                    f"{trend_icon} {comp.get('trend', 0)}%"
+                    trend_str
                 ])
 
-            comp_table = Table(comp_data, colWidths=[0.3*inch, 1.5*inch, 0.8*inch, 0.9*inch, 0.8*inch, 0.8*inch, 0.8*inch])
+            # Full width columns
+            comp_col_widths = [self.usable_width * 0.06, self.usable_width * 0.34, self.usable_width * 0.15,
+                              self.usable_width * 0.18, self.usable_width * 0.15, self.usable_width * 0.12]
+            comp_table = Table(comp_data, colWidths=comp_col_widths)
             comp_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#475569')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+                ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['dark']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 9),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                ('TOPPADDING', (0, 0), (-1, 0), 8),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('TOPPADDING', (0, 1), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('TOPPADDING', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+                ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+                ('ALIGN', (2, 0), (-1, -1), 'CENTER'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['light_gray']]),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 10),
             ]))
             self.story.append(comp_table)
         else:
-            self.story.append(Paragraph('No competitor data available. Add competitors in your dashboard to enable competitive analysis.', self.styles['CustomBody']))
+            self.story.append(Paragraph('No competitor data available. Add competitors to enable analysis.', self.styles['CustomBody']))
 
-        self.story.append(Spacer(1, 0.4*inch))
-
-        # 4. Platform Breakdown
+        # ===== SECTION 4: Platform Performance =====
         platform_data = self.data.get('platform_breakdown', [])
         if platform_data:
-            self.story.append(Paragraph('Platform Performance', self.styles['CustomHeading']))
+            self.story.append(Paragraph('Platform Performance', self.styles['SectionHeading']))
 
-            platform_rows = [['Platform', 'Total Queries', 'Mentions', 'Mention Rate']]
-            for p in platform_data[:5]:
-                platform_rows.append([
-                    p.get('platform', 'Unknown').title(),
-                    str(p.get('total', 0)),
-                    str(p.get('mentions', 0)),
-                    f"{p.get('mention_rate', 0)}%"
+            plat_table_data = [['Platform', 'Total Queries', 'Mentions', 'Mention Rate']]
+            for plat in platform_data:
+                plat_table_data.append([
+                    plat.get('platform', 'Unknown').title(),
+                    str(plat.get('total', 0)),
+                    str(plat.get('mentions', 0)),
+                    f"{plat.get('mention_rate', 0)}%"
                 ])
 
-            platform_table = Table(platform_rows, colWidths=[1.5*inch, 1.3*inch, 1.3*inch, 1.3*inch])
-            platform_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10b981')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            plat_col_widths = [self.usable_width * 0.30, self.usable_width * 0.25, self.usable_width * 0.22, self.usable_width * 0.23]
+            plat_table = Table(plat_table_data, colWidths=plat_col_widths)
+            plat_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['info']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('TOPPADDING', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['info_light']]),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ]))
-            self.story.append(platform_table)
+            self.story.append(plat_table)
 
-        self.story.append(Spacer(1, 0.4*inch))
-
-        # 5. Key Insights
-        self.story.append(Paragraph('Key Competitive Insights', self.styles['CustomHeading']))
-
-        insights = []
+        # ===== SECTION 5: Sentiment Comparison =====
         if competitors:
-            top_competitor = competitors[0] if competitors else None
-            if top_competitor:
-                insights.append(f"• <b>Market Leader:</b> {top_competitor.get('name', 'N/A')} leads with {top_competitor.get('mentions', 0)} mentions ({top_competitor.get('share_of_voice', 0)}% share of voice)")
+            self.story.append(Paragraph('Sentiment Comparison', self.styles['SectionHeading']))
 
-            our_sov = our_metrics.get('share_of_voice', 0)
+            sent_table_data = [['Brand', 'Sentiment Score', 'Rating']]
+            # Add our brand first
+            sent_table_data.append([
+                self.data.get('domain_name', 'Your Brand'),
+                f"{our_sentiment:.2f}",
+                'Positive' if our_sentiment > 0.3 else ('Neutral' if our_sentiment >= 0 else 'Negative')
+            ])
+            # Add competitors
+            for comp in competitors[:5]:
+                sent = comp.get('sentiment_score', 0)
+                sent_table_data.append([
+                    comp.get('name', ''),
+                    f"{sent:.2f}",
+                    'Positive' if sent > 0.3 else ('Neutral' if sent >= 0 else 'Negative')
+                ])
+
+            sent_col_widths = [self.usable_width * 0.45, self.usable_width * 0.28, self.usable_width * 0.27]
+            sent_table = Table(sent_table_data, colWidths=sent_col_widths)
+            sent_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['success']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('TOPPADDING', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                # Highlight our brand row
+                ('BACKGROUND', (0, 1), (-1, 1), self.COLORS['success_light']),
+                ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+                ('ROWBACKGROUNDS', (0, 2), (-1, -1), [self.COLORS['white'], self.COLORS['light_gray']]),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ]))
+            self.story.append(sent_table)
+
+        # ===== SECTION 6: Strategic Recommendations =====
+        self.story.append(Spacer(1, 20))
+        self.story.append(Paragraph('Strategic Recommendations', self.styles['SectionHeading']))
+
+        # Generate insights as recommendation cards
+        if competitors:
+            top_competitor = competitors[0]
+
+            # Market leader insight
+            self._add_recommendation_card({
+                'priority': 'Info',
+                'title': 'Market Leader',
+                'description': f"{top_competitor.get('name', 'N/A')} leads the market with {top_competitor.get('mentions', 0)} mentions and {top_competitor.get('share_of_voice', 0)}% share of voice.",
+                'color': 'info'
+            })
+
+            # Your position insight
             if our_sov > 30:
-                insights.append(f"• <b>Strong Position:</b> Your brand holds {our_sov}% share of voice - a competitive position in the market")
-            elif our_sov > 10:
-                insights.append(f"• <b>Growth Opportunity:</b> Your {our_sov}% share of voice indicates room for improvement through content optimization")
+                self._add_recommendation_card({
+                    'priority': 'Strong',
+                    'title': 'Competitive Position',
+                    'description': f"Your {our_sov}% share of voice puts you in a strong competitive position. Focus on maintaining momentum.",
+                    'color': 'success'
+                })
             else:
-                insights.append(f"• <b>Action Required:</b> With only {our_sov}% share of voice, focus on increasing visibility through targeted content")
+                self._add_recommendation_card({
+                    'priority': 'Opportunity',
+                    'title': 'Growth Potential',
+                    'description': f"Your current {our_sov}% share of voice has room for growth. Focus on content optimization to increase visibility.",
+                    'color': 'warning'
+                })
 
-            positive_trend = [c for c in competitors if c.get('trend', 0) > 0]
-            if positive_trend:
-                insights.append(f"• <b>Rising Competitors:</b> {len(positive_trend)} competitor(s) showing upward trend - monitor closely")
-
-        if not insights:
-            insights.append("• Add competitors to your dashboard to generate competitive insights")
-
-        insights_text = "<br/>".join(insights)
-        self.story.append(Paragraph(insights_text, self.styles['CustomBody']))
+            # Actionable recommendation
+            if len(competitors) > 1:
+                gap = top_competitor.get('mentions', 0) - our_mentions
+                if gap > 0:
+                    self._add_recommendation_card({
+                        'priority': 'Action',
+                        'title': 'Close the Gap',
+                        'description': f"You are {gap} mentions behind the market leader. Increase prompt coverage in key topic areas.",
+                        'color': 'primary'
+                    })
+        else:
+            self.story.append(Paragraph('Add competitors to your dashboard to generate competitive insights and benchmarking analysis.', self.styles['CustomBody']))
 
     def _generate_content_strategy(self):
         """Generate Content Strategy report"""
 
-        # 1. Content Overview Section
-        self.story.append(Paragraph('Content Overview', self.styles['CustomHeading']))
+        # 1. Content Overview
+        self.story.append(Paragraph('Content Overview', self.styles['SectionHeading']))
 
         overview = self.data.get('overview', {})
         domain_name = self.data.get('domain_name', 'N/A')
@@ -627,55 +980,48 @@ class PDFReportGenerator:
         self.story.append(Paragraph(overview_text, self.styles['CustomBody']))
         self.story.append(Spacer(1, 0.3*inch))
 
-        # 2. Topic Performance Section
-        self.story.append(Paragraph('Topic Performance', self.styles['CustomHeading']))
+        # 2. Topic Performance
+        self.story.append(Paragraph('Topic Performance', self.styles['SectionHeading']))
 
         topics = self.data.get('topic_performance', [])
         if topics:
             topic_data = [['Topic', 'Mentions', 'Coverage', 'Sentiment', 'Trend']]
             for topic in topics[:10]:
-                trend_icon = '↗' if topic.get('growth', 0) > 0 else ('↘' if topic.get('growth', 0) < 0 else '→')
+                trend = topic.get('growth', 0)
+                trend_str = f"+{trend}%" if trend > 0 else f"{trend}%"
                 topic_data.append([
                     topic.get('name', '')[:25],
                     str(topic.get('mentions', 0)),
                     f"{topic.get('coverage_score', 0)}%",
                     f"{topic.get('sentiment', 0):.2f}",
-                    f"{trend_icon} {topic.get('growth', 0)}%"
+                    trend_str
                 ])
 
             topic_table = Table(topic_data, colWidths=[2*inch, 0.8*inch, 0.9*inch, 0.9*inch, 0.9*inch])
             topic_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#6366f1')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['primary']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
                 ('TOPPADDING', (0, 0), (-1, 0), 10),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
-                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['primary_light']]),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
                 ('TOPPADDING', (0, 1), (-1, -1), 8),
                 ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
             ]))
             self.story.append(topic_table)
         else:
-            self.story.append(Paragraph('No topic data available. Add topics in your dashboard to track performance.', self.styles['CustomBody']))
+            self.story.append(Paragraph('No topic data available. Add topics to track performance.', self.styles['CustomBody']))
 
+        # 3. Content Gaps
         self.story.append(Spacer(1, 0.4*inch))
-
-        # 3. Content Gaps Analysis
-        self.story.append(Paragraph('Content Gaps Analysis', self.styles['CustomHeading']))
+        self.story.append(Paragraph('Content Gaps Analysis', self.styles['SectionHeading']))
 
         gaps = self.data.get('content_gaps', [])
         if gaps:
-            gap_text = f"Found <b>{len(gaps)}</b> keyword gaps with untapped potential:"
-            self.story.append(Paragraph(gap_text, self.styles['CustomBody']))
-            self.story.append(Spacer(1, 0.1*inch))
-
-            gap_data = [['Keyword', 'Priority', 'Opportunity Score', 'Est. Traffic']]
+            gap_data = [['Keyword', 'Priority', 'Opportunity', 'Est. Traffic']]
             for gap in gaps[:10]:
                 gap_data.append([
                     gap.get('keyword', '')[:30],
@@ -686,101 +1032,25 @@ class PDFReportGenerator:
 
             gap_table = Table(gap_data, colWidths=[2*inch, 1*inch, 1.2*inch, 1.2*inch])
             gap_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#ef4444')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['danger']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
                 ('TOPPADDING', (0, 0), (-1, 0), 10),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fef2f2')),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#fecaca')),
-                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['danger_light'], self.COLORS['white']]),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
                 ('TOPPADDING', (0, 1), (-1, -1), 8),
                 ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
             ]))
-
             self.story.append(gap_table)
         else:
             self.story.append(Paragraph('No content gaps identified. Great coverage!', self.styles['CustomBody']))
 
+        # 4. Recommendations
         self.story.append(Spacer(1, 0.4*inch))
-
-        # 4. Trending Keywords
-        self.story.append(Paragraph('Trending Keywords', self.styles['CustomHeading']))
-
-        trending = self.data.get('trending_keywords', [])
-        if trending:
-            trending_data = [['Keyword', 'Mentions', 'Growth', 'Search Volume']]
-            for kw in trending[:10]:
-                trending_data.append([
-                    kw.get('keyword', '')[:25],
-                    str(kw.get('mentions', 0)),
-                    f"↗ {kw.get('growth', 0)}%",
-                    f"{kw.get('search_volume', 0):,}"
-                ])
-
-            trending_table = Table(trending_data, colWidths=[2*inch, 1*inch, 1*inch, 1.4*inch])
-            trending_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10b981')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-                ('TOPPADDING', (0, 0), (-1, 0), 10),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f0fdf4')),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#bbf7d0')),
-                ('FONTSIZE', (0, 1), (-1, -1), 9),
-                ('TOPPADDING', (0, 1), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
-            ]))
-            self.story.append(trending_table)
-        else:
-            self.story.append(Paragraph('No trending keywords detected in this period.', self.styles['CustomBody']))
-
-        self.story.append(Spacer(1, 0.4*inch))
-
-        # 5. Untapped Keywords
-        untapped = self.data.get('untapped_keywords', [])
-        if untapped:
-            self.story.append(Paragraph('Untapped Keywords', self.styles['CustomHeading']))
-
-            untapped_text = "Keywords with potential but zero mentions:"
-            self.story.append(Paragraph(untapped_text, self.styles['CustomBody']))
-            self.story.append(Spacer(1, 0.1*inch))
-
-            untapped_data = [['Keyword', 'Priority', 'Search Volume']]
-            for kw in untapped[:10]:
-                untapped_data.append([
-                    kw.get('keyword', '')[:30],
-                    kw.get('priority', 'Medium'),
-                    f"{kw.get('search_volume', 0):,}"
-                ])
-
-            untapped_table = Table(untapped_data, colWidths=[2.5*inch, 1*inch, 1.5*inch])
-            untapped_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f59e0b')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-                ('TOPPADDING', (0, 0), (-1, 0), 10),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fffbeb')),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#fde68a')),
-                ('FONTSIZE', (0, 1), (-1, -1), 9),
-                ('TOPPADDING', (0, 1), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
-            ]))
-            self.story.append(untapped_table)
-            self.story.append(Spacer(1, 0.4*inch))
-
-        # 6. Strategic Recommendations
-        self.story.append(Paragraph('Strategic Recommendations', self.styles['CustomHeading']))
+        self.story.append(Paragraph('Strategic Recommendations', self.styles['SectionHeading']))
 
         recommendations = self.data.get('recommendations', [])
         if recommendations:
@@ -788,30 +1058,20 @@ class PDFReportGenerator:
                 rec_text = f"""
                 <b>{rec.get('priority', '')}. {rec.get('title', '')}</b><br/>
                 {rec.get('description', '')}<br/>
-                <i>Timeline: {rec.get('timeline', 'N/A')} | Content: {rec.get('content_pieces', 'N/A')} | Expected: {rec.get('expected_traffic', 'N/A')}</i>
+                <i>Timeline: {rec.get('timeline', 'N/A')} | Expected: {rec.get('expected_traffic', 'N/A')}</i>
                 """
                 self.story.append(Paragraph(rec_text, self.styles['CustomBody']))
-                self.story.append(Spacer(1, 0.15*inch))
+                self.story.append(Spacer(1, 0.1*inch))
         else:
-            # Generate default recommendations based on data
             default_recs = []
-
             if gaps:
-                default_recs.append(f"• <b>Address Content Gaps:</b> Focus on top {len(gaps)} keyword gaps to expand coverage")
-
+                default_recs.append(f"• <b>Address Content Gaps:</b> Focus on the top {min(5, len(gaps))} keyword gaps")
             if topics:
                 low_coverage = [t for t in topics if t.get('coverage_score', 0) < 50]
                 if low_coverage:
                     default_recs.append(f"• <b>Improve Topic Coverage:</b> {len(low_coverage)} topics need attention")
-
-            if trending:
-                default_recs.append(f"• <b>Capitalize on Trends:</b> {len(trending)} keywords showing growth momentum")
-
-            if untapped:
-                default_recs.append(f"• <b>Explore Untapped Potential:</b> {len(untapped)} keywords with zero mentions")
-
             if default_recs:
-                rec_text = "<br/>".join(default_recs)
-                self.story.append(Paragraph(rec_text, self.styles['CustomBody']))
+                for rec in default_recs:
+                    self.story.append(Paragraph(rec, self.styles['CustomBody']))
             else:
-                self.story.append(Paragraph('Maintain current content strategy and monitor for new opportunities.', self.styles['CustomBody']))
+                self.story.append(Paragraph('Maintain current content strategy and monitor for opportunities.', self.styles['CustomBody']))

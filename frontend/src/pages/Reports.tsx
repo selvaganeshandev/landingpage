@@ -146,22 +146,42 @@ const Reports = () => {
   };
 
   const handleDownloadAll = async () => {
-    try {
-      // Download all generated reports
-      for (const report of generatedReports) {
-        if (report.file_path) {
-          const response = await apiClient.downloadReport(report.id);
-          // Handle download (browser will handle file download)
-        }
-      }
+    if (!domainId) {
       toast({
-        title: "Downloading Reports",
-        description: `Downloading ${generatedReports.length} reports...`,
+        title: "No Domain Selected",
+        description: "Please select a domain first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (generatedReports.length === 0) {
+      toast({
+        title: "No Reports",
+        description: "No generated reports available to download.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      toast({
+        title: "Preparing Download",
+        description: "Creating ZIP file with all reports...",
+      });
+
+      // Get all report IDs for the current domain
+      const reportIds = generatedReports.map((r: any) => r.id);
+      await apiClient.downloadAllReports(reportIds, domainId);
+
+      toast({
+        title: "Download Started",
+        description: "Your reports ZIP file is downloading.",
       });
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to download reports",
+        title: "Download Failed",
+        description: error.message || "Failed to download reports. Please try again.",
         variant: "destructive",
       });
     }
@@ -169,8 +189,8 @@ const Reports = () => {
 
   const handleShareReport = () => {
     toast({
-      title: "Share Report",
-      description: "Opening sharing options...",
+      title: "Coming Soon",
+      description: "Report sharing feature will be available soon.",
     });
   };
 
@@ -328,13 +348,14 @@ const Reports = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" onClick={handleManageTemplates}>
-            <Settings className="h-4 w-4 mr-2" />
-            Manage Templates
-          </Button>
-          <Button onClick={handleCreateReport}>
+          <Button onClick={() => {
+            toast({
+              title: "Coming Soon",
+              description: "Custom template creation will be available soon.",
+            });
+          }}>
             <Plus className="h-4 w-4 mr-2" />
-            Create Report
+            Create Template
           </Button>
         </div>
       </div>
@@ -372,11 +393,12 @@ const Reports = () => {
             </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="space-y-3">
             {scheduledReports.map((report: any) => (
               <div key={report.id} className="p-4 rounded-lg border border-border hover:border-primary transition-all duration-300">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <div className="flex items-center gap-4">
+                  {/* Favicon */}
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                     <img
                       src={`https://www.google.com/s2/favicons?domain=${report.domain_url || selectedDomain?.url}&sz=64`}
                       alt="Domain favicon"
@@ -386,62 +408,66 @@ const Reports = () => {
                       }}
                     />
                   </div>
-                  <Badge variant={report.status === "active" ? "default" : "secondary"} className="text-xs">
+
+                  {/* Report Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="font-medium text-sm truncate">{report.name}</h4>
+                      {report.template_name && (
+                        <Badge variant="outline" className="text-xs flex-shrink-0">
+                          {report.template_name}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                      <span>{formatSchedule(report)}</span>
+                      {report.next_run_at && (
+                        <span>Next: {new Date(report.next_run_at).toLocaleDateString()}</span>
+                      )}
+                      {report.formats && (
+                        <span>Format: {report.formats.join(', ')}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Status Badge */}
+                  <Badge variant={report.status === "active" ? "default" : "secondary"} className="text-xs flex-shrink-0">
                     {report.status}
                   </Badge>
-                </div>
-                <h4 className="font-medium text-sm mb-2 line-clamp-2">{report.name}</h4>
-                {report.template_name && (
-                  <Badge variant="outline" className="text-xs mb-2">
-                    {report.template_name}
-                  </Badge>
-                )}
-                <div className="space-y-1 text-xs text-muted-foreground mb-3">
-                  <p>{formatSchedule(report)}</p>
-                  {report.next_run_at && (
-                    <p>Next: {new Date(report.next_run_at).toLocaleDateString()}</p>
-                  )}
-                  {report.formats && (
-                    <p>Formats: {report.formats.join(', ')}</p>
-                  )}
-                </div>
-                <div className="flex gap-2 mb-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => handlePreview(report)}
-                  >
-                    <Eye className="h-3 w-3 mr-1" />
-                    View
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => handleRunNow(report)}
-                    disabled={report.status === 'paused'}
-                  >
-                    Run Now
-                  </Button>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="flex-1 text-xs"
-                    onClick={() => handleEdit(report)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="flex-1 text-xs"
-                    onClick={() => handleToggleStatus(report)}
-                  >
-                    {report.status === 'active' ? 'Pause' : 'Resume'}
-                  </Button>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handlePreview(report)}
+                    >
+                      <Eye className="h-3 w-3 mr-1" />
+                      View
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleRunNow(report)}
+                      disabled={report.status === 'paused'}
+                    >
+                      Run Now
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleEdit(report)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleToggleStatus(report)}
+                    >
+                      {report.status === 'active' ? 'Pause' : 'Resume'}
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -449,8 +475,8 @@ const Reports = () => {
         )}
       </Card>
 
-      {/* Recent Reports */}
-      <Card className="p-6">
+      {/* Recent Reports - Hidden for now */}
+      {/* <Card className="p-6">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold">Recent Reports</h3>
           <Button variant="outline" size="sm">View All</Button>
@@ -507,7 +533,7 @@ const Reports = () => {
             ))}
           </div>
         )}
-      </Card>
+      </Card> */}
 
       {/* Templates */}
       <Card className="p-6">

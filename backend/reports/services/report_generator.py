@@ -56,6 +56,30 @@ class ReportDataService:
             mention_count=Count('analytics', filter=Q(analytics__is_mention=True))
         ).order_by('-mention_count')[:5]
 
+        # Get platform breakdown
+        platform_breakdown = analytics.values('platform').annotate(
+            count=Count('id'),
+            mentions=Count('id', filter=Q(is_mention=True)),
+            avg_sentiment=Avg('sentiment_score')
+        ).order_by('-mentions')
+
+        platform_data = [
+            {
+                'platform': p['platform'] or 'Unknown',
+                'total': p['count'],
+                'mentions': p['mentions'],
+                'mention_rate': round((p['mentions'] / p['count'] * 100) if p['count'] > 0 else 0, 1),
+                'avg_sentiment': round(p['avg_sentiment'] or 0, 2)
+            }
+            for p in platform_breakdown
+        ]
+
+        # Calculate sentiment breakdown
+        positive_count = analytics.filter(sentiment_score__gt=0.3).count()
+        neutral_count = analytics.filter(sentiment_score__gte=0, sentiment_score__lte=0.3).count()
+        negative_count = analytics.filter(sentiment_score__lt=0).count()
+        total_analyzed = positive_count + neutral_count + negative_count
+
         return {
             'period': {
                 'start': self.start_date,
@@ -76,7 +100,18 @@ class ReportDataService:
                 }
                 for p in top_prompts
             ],
+            'platform_breakdown': platform_data,
+            'sentiment_breakdown': {
+                'positive': positive_count,
+                'neutral': neutral_count,
+                'negative': negative_count,
+                'total': total_analyzed,
+                'positive_pct': round((positive_count / total_analyzed * 100) if total_analyzed > 0 else 0, 1),
+                'neutral_pct': round((neutral_count / total_analyzed * 100) if total_analyzed > 0 else 0, 1),
+                'negative_pct': round((negative_count / total_analyzed * 100) if total_analyzed > 0 else 0, 1),
+            },
             'domain_name': self.domain.name,
+            'domain_url': self.domain.url,
             'organisation_name': self.organisation.name,
         }
 
