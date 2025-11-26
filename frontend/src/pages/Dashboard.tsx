@@ -215,6 +215,7 @@ const Dashboard = () => {
           change={summary?.metrics?.citations_change ?? undefined}
           trend={summary?.metrics?.citations_change && summary.metrics.citations_change > 0 ? "up" : "down"}
           icon={<Link2 className="h-4 w-4" />}
+          href="/citations"
         />
         <MetricCard
           title="Total Mentions"

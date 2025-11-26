@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useContentGeneration } from "@/hooks/useContentGeneration";
 import { AddCompetitorDialog } from "@/components/AddCompetitorDialog";
 import { PageLoader } from "@/components/PageLoader";
+import { GenerateContentDialog } from "@/components/GenerateContentDialog";
 import {
   Select,
   SelectContent,
@@ -140,6 +141,8 @@ const Competitors = () => {
   const { toast } = useToast();
   const { navigateToContentGeneration } = useContentGeneration();
   const [addCompetitorDialogOpen, setAddCompetitorDialogOpen] = useState(false);
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+  const [selectedGap, setSelectedGap] = useState<any>(null);
   const { user } = useAuth();
   const { selectedDomain, loadDomains } = useDomainStore();
   const [domainId, setDomainId] = useState<string | null>(null);
@@ -1209,13 +1212,8 @@ const Competitors = () => {
   };
 
   const handleGenerateForGap = (gap: typeof answerGapData[0]) => {
-    navigateToContentGeneration({
-      topic: gap.query,
-      keywords: gap.query.toLowerCase().split(' '),
-      source: `Answer Gap - Competitor: ${gap.competitor}`,
-      priority: gap.opportunity as any,
-      articleType: "guide"
-    });
+    setSelectedGap(gap);
+    setGenerateDialogOpen(true);
   };
 
   const heatmapData = heatmap;
@@ -2236,6 +2234,20 @@ const Competitors = () => {
         open={addCompetitorDialogOpen}
         onOpenChange={setAddCompetitorDialogOpen}
         onAdd={handleAddCompetitorSubmit}
+      />
+
+      <GenerateContentDialog
+        open={generateDialogOpen}
+        onOpenChange={setGenerateDialogOpen}
+        existingContent={selectedGap ? {
+          title: selectedGap.query,
+          targetKeywords: selectedGap.query.toLowerCase().split(' '),
+          type: "guide",
+          wordCount: 1500,
+          priority: selectedGap.opportunity,
+          source: `Answer Gap - Competitor: ${selectedGap.competitor}`,
+          description: `Generate content to address this answer gap where ${selectedGap.competitor} is mentioned but you are not. Platforms: ${selectedGap.platforms ? selectedGap.platforms.join(', ') : 'Multiple'}`
+        } : undefined}
       />
     </div>
   );

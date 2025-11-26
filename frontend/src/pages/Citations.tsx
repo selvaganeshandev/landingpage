@@ -575,7 +575,7 @@ const CitationsTable = ({
                 )}
               </TableCell>
               <TableCell className="py-2 px-2">
-                <Badge className={citation.is_your_domain ? "bg-success text-success-foreground" : "bg-muted"}>
+                <Badge className={citation.is_your_domain ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground hover:bg-muted hover:text-muted-foreground"}>
                   {citation.is_your_domain ? "Your Domain" : "Third Party"}
                 </Badge>
               </TableCell>
