@@ -808,6 +808,93 @@ def citation_detail(request, citation_id):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def alert_full_comparison(request, alert_id):
+    """
+    Get full comparison data for a misinformation alert.
+    Returns the complete LLM response and full source content for detailed comparison.
+
+    Returns:
+        - Alert details
+        - Full prompt text
+        - Full LLM response (context_summary from prompt_analytics)
+        - Full source content (extracted_text from citation_content)
+        - Citation URL details
+    """
+    try:
+        alert = MisinformationAlert.objects.select_related(
+            'domain', 'prompt', 'prompt_analytics', 'citation_url'
+        ).get(id=alert_id)
+    except MisinformationAlert.DoesNotExist:
+        return Response(
+            {'error': 'Alert not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Get full LLM response from prompt_analytics
+    llm_response = None
+    prompt_text = None
+    platform = None
+
+    if alert.prompt_analytics:
+        llm_response = alert.prompt_analytics.context_summary
+        platform = alert.prompt_analytics.platform
+
+    if alert.prompt:
+        prompt_text = alert.prompt.prompt
+
+    # Get full source content from citation_content
+    source_content_full = None
+    page_title = None
+    meta_description = None
+    source_url = None
+    crawl_status = None
+
+    if alert.citation_url:
+        source_url = alert.citation_url.url
+        crawl_status = alert.citation_url.crawl_status
+
+        # Get the CitationContent
+        try:
+            citation_content = CitationContent.objects.get(citation_url=alert.citation_url)
+            source_content_full = citation_content.extracted_text
+            page_title = citation_content.page_title
+            meta_description = citation_content.meta_description
+        except CitationContent.DoesNotExist:
+            pass
+
+    data = {
+        'alert': {
+            'id': alert.id,
+            'alert_type': alert.alert_type,
+            'severity': alert.severity,
+            'status': alert.status,
+            'llm_claim': alert.llm_claim,
+            'source_content_snippet': alert.source_content,
+            'explanation': alert.explanation,
+            'created_at': alert.created_at,
+        },
+        'prompt': {
+            'id': alert.prompt.id if alert.prompt else None,
+            'text': prompt_text,
+        },
+        'llm_response': {
+            'platform': platform,
+            'full_response': llm_response,
+        },
+        'source': {
+            'url': source_url,
+            'crawl_status': crawl_status,
+            'page_title': page_title,
+            'meta_description': meta_description,
+            'full_content': source_content_full,
+        },
+    }
+
+    return Response(data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def citations_by_source(request):
     """
     Get citations grouped by source domain.

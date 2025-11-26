@@ -13,6 +13,7 @@ urlpatterns = [
     # Alerts
     path('alerts/', views.alert_list, name='alert-list'),
     path('alerts/<int:alert_id>/', views.alert_detail, name='alert-detail'),
+    path('alerts/<int:alert_id>/comparison/', views.alert_full_comparison, name='alert-full-comparison'),
 
     # Scans
     path('scan/', views.trigger_scan, name='trigger-scan'),

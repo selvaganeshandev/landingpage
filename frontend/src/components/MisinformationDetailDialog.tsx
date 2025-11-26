@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,6 +9,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { FullComparisonDialog } from "@/components/FullComparisonDialog";
 import {
   CheckCircle,
   XCircle,
@@ -16,7 +18,8 @@ import {
   AlertTriangle,
   Eye,
   LinkIcon,
-  FileText
+  FileText,
+  Maximize2
 } from "lucide-react";
 
 interface MisinformationAlert {
@@ -104,6 +107,8 @@ export function MisinformationDetailDialog({
   onOpenChange,
   misinformationCase,
 }: MisinformationDetailDialogProps) {
+  const [comparisonDialogOpen, setComparisonDialogOpen] = useState(false);
+
   if (!misinformationCase) return null;
 
   const AlertTypeIcon = getAlertTypeIcon(misinformationCase.alert_type);
@@ -294,6 +299,13 @@ export function MisinformationDetailDialog({
             Close
           </Button>
           <div className="flex gap-2">
+            <Button
+              variant="default"
+              onClick={() => setComparisonDialogOpen(true)}
+            >
+              <Maximize2 className="h-4 w-4 mr-2" />
+              View Full Comparison
+            </Button>
             {misinformationCase.citation_url && (
               <Button
                 variant="outline"
@@ -306,6 +318,13 @@ export function MisinformationDetailDialog({
           </div>
         </div>
       </DialogContent>
+
+      {/* Full Comparison Dialog */}
+      <FullComparisonDialog
+        open={comparisonDialogOpen}
+        onOpenChange={setComparisonDialogOpen}
+        alertId={misinformationCase.id}
+      />
     </Dialog>
   );
 }

@@ -9,7 +9,6 @@ import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
 import { PageLoader } from "@/components/PageLoader";
 import { MisinformationDetailDialog } from "@/components/MisinformationDetailDialog";
-import { MisinformationActionDialog } from "@/components/MisinformationActionDialog";
 import { ConfigureDetectionDialog } from "@/components/ConfigureDetectionDialog";
 import { StartScanDialog } from "@/components/StartScanDialog";
 import { ContentComparisonDialog } from "@/components/ContentComparisonDialog";
@@ -20,7 +19,6 @@ import {
   Shield,
   Eye,
   FileText,
-  Settings,
   Search,
   Filter,
   TrendingUp,
@@ -164,7 +162,6 @@ const MisinformationAlerts = () => {
   // UI state
   const [selectedTab, setSelectedTab] = useState("active");
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
-  const [actionDialogOpen, setActionDialogOpen] = useState(false);
   const [configureDialogOpen, setConfigureDialogOpen] = useState(false);
   const [startScanDialogOpen, setStartScanDialogOpen] = useState(false);
   const [comparisonDialogOpen, setComparisonDialogOpen] = useState(false);
@@ -309,11 +306,6 @@ const MisinformationAlerts = () => {
   const handleViewDetails = (misinformationCase: MisinformationAlert) => {
     setSelectedCase(misinformationCase);
     setDetailDialogOpen(true);
-  };
-
-  const handleTakeAction = (misinformationCase: MisinformationAlert) => {
-    setSelectedCase(misinformationCase);
-    setActionDialogOpen(true);
   };
 
   const handleConfigureRules = () => {
@@ -595,10 +587,6 @@ const MisinformationAlerts = () => {
                           <Eye className="h-3 w-3 mr-1" />
                           View Details
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => handleTakeAction(item)}>
-                          <Settings className="h-3 w-3 mr-1" />
-                          Take Action
-                        </Button>
                         {sourceUrl && (
                           <Button
                             size="sm"
@@ -729,11 +717,6 @@ const MisinformationAlerts = () => {
         </CardContent>
       </Card>
 
-    <MisinformationActionDialog
-      open={actionDialogOpen}
-      onOpenChange={setActionDialogOpen}
-      misinformationCase={selectedCase}
-    />
     <ConfigureDetectionDialog
       open={configureDialogOpen}
       onOpenChange={setConfigureDialogOpen}

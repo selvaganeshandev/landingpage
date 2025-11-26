@@ -1,11 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { useContentGeneration } from "@/hooks/useContentGeneration";
 import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
 import { PageLoader } from "@/components/PageLoader";
@@ -18,6 +16,7 @@ import {
 } from "lucide-react";
 import { TopicDetailDialog } from "@/components/TopicDetailDialog";
 import { TopicOptimizeDialog } from "@/components/TopicOptimizeDialog";
+import { GenerateContentDialog } from "@/components/GenerateContentDialog";
 import { 
   PieChart,
   Pie,
@@ -57,12 +56,11 @@ interface Topic {
 }
 
 const Topics = () => {
-  const navigate = useNavigate();
   const { toast } = useToast();
-  const { navigateToContentGeneration } = useContentGeneration();
   const { selectedDomain } = useDomainStore();
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [optimizeDialogOpen, setOptimizeDialogOpen] = useState(false);
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,13 +72,8 @@ const Topics = () => {
   const [promptLoading, setPromptLoading] = useState(false);
 
   const handleGenerateContent = (topic: typeof topics[0]) => {
-    navigateToContentGeneration({
-      topic: topic.name,
-      keywords: topic.keywords,
-      source: "Topic Analysis",
-      priority: topic.trend > 10 ? "high" : "medium",
-      articleType: "guide"
-    });
+    setSelectedTopic(topic);
+    setGenerateDialogOpen(true);
   };
 
   const handleViewDetails = (topic: typeof topics[0]) => {
@@ -601,6 +594,16 @@ const Topics = () => {
         open={optimizeDialogOpen}
         onOpenChange={setOptimizeDialogOpen}
         topic={selectedTopic}
+      />
+      <GenerateContentDialog
+        open={generateDialogOpen}
+        onOpenChange={setGenerateDialogOpen}
+        existingContent={selectedTopic ? {
+          title: selectedTopic.name,
+          targetKeywords: selectedTopic.keywords,
+          type: "guide",
+          wordCount: 1500
+        } : undefined}
       />
     </div>
   );

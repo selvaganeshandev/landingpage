@@ -1161,6 +1161,9 @@ export const apiClient = {
   getMisinformationAlert: (alertId: number) =>
     apiRequest(`/misinformation/alerts/${alertId}/`),
 
+  getMisinformationAlertComparison: (alertId: number) =>
+    apiRequest(`/misinformation/alerts/${alertId}/comparison/`),
+
   updateMisinformationAlert: (alertId: number, data: { status: string }) =>
     apiRequest(`/misinformation/alerts/${alertId}/`, {
       method: 'PATCH',
