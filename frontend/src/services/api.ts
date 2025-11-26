@@ -1193,6 +1193,47 @@ export const apiClient = {
     }).toString()}`;
     return apiRequest(`/misinformation/analytics/${queryParams}`);
   },
+
+  // ===== Citations =====
+  getCitationsDashboard: (params: { domain_id: string; days?: number }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.days ? { days: String(params.days) } : {}),
+    }).toString()}`;
+    return apiRequest(`/misinformation/citations/dashboard/${queryParams}`);
+  },
+
+  getCitations: (params: {
+    domain_id: string;
+    status?: string;
+    source_type?: string;
+    platform?: string;
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.source_type ? { source_type: params.source_type } : {}),
+      ...(params.platform ? { platform: params.platform } : {}),
+      ...(params.search ? { search: params.search } : {}),
+      ...(params.page ? { page: String(params.page) } : {}),
+      ...(params.page_size ? { page_size: String(params.page_size) } : {}),
+    }).toString()}`;
+    return apiRequest(`/misinformation/citations/${queryParams}`);
+  },
+
+  getCitationDetail: (citationId: number) =>
+    apiRequest(`/misinformation/citations/${citationId}/`),
+
+  getCitationsBySource: (params: { domain_id: string; limit?: number }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.limit ? { limit: String(params.limit) } : {}),
+    }).toString()}`;
+    return apiRequest(`/misinformation/citations/by-source/${queryParams}`);
+  },
 };
 
 // Also export as 'api' for flexibility

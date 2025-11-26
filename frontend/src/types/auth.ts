@@ -60,6 +60,7 @@ export const MODULES = {
   MENTIONS: 'mentions',
   PROMPTS: 'prompts',
   ALERTS: 'alerts',
+  CITATIONS: 'citations',
   SENTIMENT_ANALYSIS: 'sentiment_analysis',
   TOPICS: 'topics',
   SHARE_OF_VOICE: 'share_of_voice',

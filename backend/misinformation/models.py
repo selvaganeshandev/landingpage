@@ -334,6 +334,63 @@ class MisinformationAlert(models.Model):
         return f"{self.alert_type} - {self.severity} - {self.domain.name}"
 
 
+class CitationMention(models.Model):
+    """
+    Tracks each occurrence of a citation URL in AI responses.
+    This bridges CitationURL and PromptAnalytics to capture when/where citations appear.
+    """
+    citation_url = models.ForeignKey(
+        CitationURL,
+        on_delete=models.CASCADE,
+        related_name='mentions',
+        help_text="The citation URL being mentioned"
+    )
+    prompt_analytics = models.ForeignKey(
+        'prompts.PromptAnalytics',
+        on_delete=models.CASCADE,
+        related_name='citation_mentions',
+        help_text="The prompt analytics record containing this citation"
+    )
+    domain = models.ForeignKey(
+        'domains.Domain',
+        on_delete=models.CASCADE,
+        related_name='citation_mentions',
+        help_text="Associated domain (denormalized for query efficiency)"
+    )
+    context_snippet = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Extracted context where this citation appeared in the response"
+    )
+    position_in_response = models.PositiveIntegerField(
+        default=1,
+        help_text="Position of this citation in the response (1st, 2nd, 3rd, etc.)"
+    )
+    is_primary_source = models.BooleanField(
+        default=False,
+        help_text="Whether this is the primary/main source cited for the claim"
+    )
+    mentioned_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this citation was mentioned"
+    )
+
+    class Meta:
+        db_table = 'citation_mentions'
+        verbose_name = 'Citation Mention'
+        verbose_name_plural = 'Citation Mentions'
+        ordering = ['-mentioned_at']
+        indexes = [
+            models.Index(fields=['domain', '-mentioned_at']),
+            models.Index(fields=['citation_url', '-mentioned_at']),
+            models.Index(fields=['prompt_analytics', 'position_in_response']),
+            models.Index(fields=['domain', 'citation_url']),
+        ]
+
+    def __str__(self):
+        return f"Mention of {self.citation_url.url[:30]}... at position {self.position_in_response}"
+
+
 class MisinformationAnalytics(models.Model):
     """
     Daily aggregated metrics per domain for misinformation tracking.

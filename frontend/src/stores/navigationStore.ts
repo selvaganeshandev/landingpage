@@ -21,6 +21,7 @@ import {
   MessageSquarePlus,
   Clock,
   Calendar,
+  ExternalLink,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -67,6 +68,7 @@ const allNavGroups: NavGroup[] = [
     items: [
       { name: "Prompts", path: "/prompts", icon: Search, module: MODULES.PROMPTS },
       { name: "Mentions", path: "/mentions", icon: MessageSquare, module: MODULES.MENTIONS },
+      { name: "Citations", path: "/citations", icon: ExternalLink, module: MODULES.CITATIONS },
       { name: "Alerts", path: "/alerts", icon: Bell, module: MODULES.ALERTS },
     ],
   },

@@ -21,4 +21,10 @@ urlpatterns = [
 
     # Analytics
     path('analytics/', views.analytics, name='analytics'),
+
+    # Citations
+    path('citations/dashboard/', views.citations_dashboard, name='citations-dashboard'),
+    path('citations/', views.citations_list, name='citations-list'),
+    path('citations/<int:citation_id>/', views.citation_detail, name='citation-detail'),
+    path('citations/by-source/', views.citations_by_source, name='citations-by-source'),
 ]

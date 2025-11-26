@@ -38,6 +38,7 @@ import OrganizationSettings from "./pages/OrganizationSettings";
 import TeamMemberPermissions from "./pages/TeamMemberPermissions";
 import DomainSettings from "./pages/DomainSettings";
 import MisinformationAlerts from "./pages/MisinformationAlerts";
+import Citations from "./pages/Citations";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
 import Profile from "./pages/Profile";
@@ -104,7 +105,12 @@ const App = () => (
                   <Alerts />
                 </ProtectedRoute>
               } />
-              
+              <Route path="/citations" element={
+                <ProtectedRoute requiredPermission={MODULES.CITATIONS}>
+                  <Citations />
+                </ProtectedRoute>
+              } />
+
               {/* Analytics */}
               <Route path="/sentiment" element={
                 <ProtectedRoute requiredPermission={MODULES.SENTIMENT_ANALYSIS}>

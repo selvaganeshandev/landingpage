@@ -14,6 +14,7 @@ from .models import (
     MisinformationScan,
     CitationURL,
     CitationContent,
+    CitationMention,
     MisinformationAlert,
     MisinformationAnalytics,
 )
@@ -162,14 +163,14 @@ class MisinformationScanner:
         logger.info(f"Found {len(urls)} URLs in prompt analytics {pa.id}")
         self.citations_found += len(urls)
 
-        for url_data in urls:
+        for position, url_data in enumerate(urls, start=1):
             try:
-                self._process_url(pa, url_data)
+                self._process_url(pa, url_data, position)
             except Exception as e:
                 logger.error(f"Error processing URL {url_data['url']}: {e}")
                 continue
 
-    def _process_url(self, pa: PromptAnalytics, url_data: dict):
+    def _process_url(self, pa: PromptAnalytics, url_data: dict, position: int = 1):
         """
         Process a single URL: crawl, parse, and compare.
         Only creates alerts for brand-related URLs.
@@ -177,6 +178,7 @@ class MisinformationScanner:
         Args:
             pa: PromptAnalytics instance
             url_data: Dict with 'url' and 'url_hash'
+            position: Position of this URL in the response (1-indexed)
         """
         url = url_data['url']
         url_hash = url_data['url_hash']
@@ -192,6 +194,21 @@ class MisinformationScanner:
             defaults={
                 'url': url,
                 'crawl_status': 'pending'
+            }
+        )
+
+        # Always create a CitationMention record to track this occurrence
+        # Extract context snippet from around where URL might appear
+        context_snippet = self._extract_context_snippet(pa.context_summary or "", url)
+
+        CitationMention.objects.get_or_create(
+            citation_url=citation_url,
+            prompt_analytics=pa,
+            defaults={
+                'domain': self.domain,
+                'context_snippet': context_snippet,
+                'position_in_response': position,
+                'is_primary_source': position == 1,  # First citation is primary
             }
         )
 
@@ -303,6 +320,47 @@ class MisinformationScanner:
             return True
 
         return False
+
+    def _extract_context_snippet(self, text: str, url: str, window: int = 200) -> str:
+        """
+        Extract a snippet of text around where the URL might appear.
+
+        Args:
+            text: Full response text
+            url: URL to find context for
+            window: Number of characters on each side of URL
+
+        Returns:
+            Context snippet string
+        """
+        if not text:
+            return ""
+
+        # Try to find the URL in text
+        url_pos = text.find(url)
+        if url_pos == -1:
+            # URL not found directly, try domain only
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc
+            url_pos = text.find(domain)
+
+        if url_pos == -1:
+            # If still not found, return first 400 chars as general context
+            return text[:400] if len(text) > 400 else text
+
+        # Extract window around the URL
+        start = max(0, url_pos - window)
+        end = min(len(text), url_pos + len(url) + window)
+
+        snippet = text[start:end]
+
+        # Add ellipsis if truncated
+        if start > 0:
+            snippet = "..." + snippet
+        if end < len(text):
+            snippet = snippet + "..."
+
+        return snippet
 
     def _compare_content(
         self,
