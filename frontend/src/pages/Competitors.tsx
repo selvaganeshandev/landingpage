@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { 
+import {
   Plus,
   TrendingUp,
   TrendingDown,
@@ -30,7 +30,8 @@ import {
   AlertCircle,
   Search,
   Sparkles,
-  Loader2
+  Loader2,
+  ExternalLink
 } from "lucide-react";
 import { 
   RadarChart,
@@ -1583,7 +1584,16 @@ const Competitors = () => {
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="text-xl font-semibold font-inter">{competitor.name}</h3>
                         </div>
-                        <p className="text-sm text-muted-foreground">{competitor.url}</p>
+                        <a
+                          href={competitor.url.startsWith('http') ? competitor.url : `https://${competitor.url}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-muted-foreground hover:text-primary transition-colors inline-flex items-center gap-1 group"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {competitor.url}
+                          <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </a>
                       </div>
                       <div
                         className="w-12 h-12 rounded-xl shadow-glow flex items-center justify-center font-bold text-white text-lg font-inter bg-primary"
