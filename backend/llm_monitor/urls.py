@@ -29,4 +29,5 @@ urlpatterns = [
     path('analytics/', include('analytics.urls')),
     path('integrations/', include('integrations.urls')),
     path('reports/', include('reports.urls')),
+    path('misinformation/', include('misinformation.urls')),
 ]

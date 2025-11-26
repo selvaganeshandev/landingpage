@@ -1,21 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { useDomainStore } from "@/stores/domainStore";
+import { apiClient } from "@/services/api";
+import { PageLoader } from "@/components/PageLoader";
 import { MisinformationDetailDialog } from "@/components/MisinformationDetailDialog";
 import { MisinformationActionDialog } from "@/components/MisinformationActionDialog";
-import { AddMonitoringRuleDialog } from "@/components/AddMonitoringRuleDialog";
 import { ConfigureDetectionDialog } from "@/components/ConfigureDetectionDialog";
 import { StartScanDialog } from "@/components/StartScanDialog";
 import { ContentComparisonDialog } from "@/components/ContentComparisonDialog";
-import { 
-  AlertTriangle, 
-  CheckCircle, 
-  Clock, 
-  Shield, 
+import {
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  Shield,
   Eye,
   FileText,
   Settings,
@@ -26,140 +28,90 @@ import {
   XCircle,
   MessageSquare,
   ExternalLink,
-  Play
+  Play,
+  LinkIcon,
+  RefreshCw,
+  Loader2
 } from "lucide-react";
 
-const activeMisinformation = [
-  {
-    id: 1,
-    title: "Incorrect Product Ingredients Listed",
-    description: "AI models citing outdated ingredient list from 2022 formulation",
-    severity: "high",
-    platform: "ChatGPT",
-    detectedAt: "2 hours ago",
-    mentions: 24,
-    status: "investigating",
-    impact: "Product Information",
-    correctInfo: "Current ingredient list includes updated plant-based formula",
-    incorrectInfo: "Lists dairy-based ingredients that were removed in 2023"
-  },
-  {
-    id: 2,
-    title: "Wrong Company Founding Date",
-    description: "Multiple AI platforms reporting incorrect founding year",
-    severity: "medium",
-    platform: "Perplexity",
-    detectedAt: "5 hours ago",
-    mentions: 12,
-    status: "correcting",
-    impact: "Company History",
-    correctInfo: "Founded in 2018",
-    incorrectInfo: "Founded in 2015"
-  },
-  {
-    id: 3,
-    title: "Misattributed CEO Quote",
-    description: "Quote from competitor CEO attributed to our leadership",
-    severity: "high",
-    platform: "Claude",
-    detectedAt: "1 day ago",
-    mentions: 8,
-    status: "escalated",
-    impact: "Brand Reputation",
-    correctInfo: "Quote belongs to CompetitorCo CEO",
-    incorrectInfo: "Incorrectly attributed to our CEO"
-  },
-  {
-    id: 4,
-    title: "Pricing Information Outdated",
-    description: "Old pricing from 2023 being referenced instead of current rates",
-    severity: "medium",
-    platform: "Gemini",
-    detectedAt: "1 day ago",
-    mentions: 18,
-    status: "monitoring",
-    impact: "Pricing & Sales",
-    correctInfo: "Current pricing: $49/month",
-    incorrectInfo: "Stating $39/month (2023 pricing)"
-  }
-];
+// Types for API responses
+interface MisinformationAlert {
+  id: number;
+  alert_type: 'misinformation' | 'broken_link' | 'outdated';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  status: 'new' | 'reviewed' | 'resolved' | 'dismissed';
+  llm_claim: string;
+  source_content?: string;
+  explanation?: string;
+  created_at: string;
+  reviewed_at?: string;
+  citation_url?: {
+    url: string;
+    crawl_status: string;
+  };
+  prompt?: {
+    id: number;
+    prompt_text: string;
+  };
+}
 
-const resolvedCases = [
-  {
-    id: 1,
-    title: "Incorrect Certification Claims",
-    platform: "ChatGPT",
-    resolvedAt: "3 days ago",
-    resolutionTime: "2 days",
-    mentions: 31,
-    status: "verified"
-  },
-  {
-    id: 2,
-    title: "Wrong Market Position Data",
-    platform: "Perplexity",
-    resolvedAt: "1 week ago",
-    resolutionTime: "4 days",
-    mentions: 15,
-    status: "verified"
-  },
-  {
-    id: 3,
-    title: "Outdated Product Features",
-    platform: "Multiple",
-    resolvedAt: "2 weeks ago",
-    resolutionTime: "1 week",
-    mentions: 42,
-    status: "verified"
-  }
-];
+interface DashboardData {
+  total_detected: number;
+  broken_links: number;
+  misinformation: number;
+  outdated_content: number;
+  active_cases: number;
+  resolved_cases: number;
+  avg_response_time_hours: number;
+  trends: {
+    total_detected_change: number;
+    active_cases_change: number;
+    response_time_change: number;
+    resolved_change: number;
+  };
+}
 
-const detectionMetrics = [
-  { name: "Total Detected", value: "47", change: "+12%", trend: "up" as const },
-  { name: "Active Cases", value: "12", change: "-5%", trend: "down" as const },
-  { name: "Avg. Response Time", value: "3.2 days", change: "-18%", trend: "down" as const },
-  { name: "Verified Corrections", value: "35", change: "+23%", trend: "up" as const }
-];
 
-const monitoringRules = [
-  {
-    id: 1,
-    name: "Product Information Accuracy",
-    description: "Monitors for incorrect product specs, ingredients, or features",
-    status: "active",
-    detections: 15,
-    lastTriggered: "2 hours ago"
-  },
-  {
-    id: 2,
-    name: "Company Data Verification",
-    description: "Checks founding date, location, team size, and company facts",
-    status: "active",
-    detections: 8,
-    lastTriggered: "5 hours ago"
-  },
-  {
-    id: 3,
-    name: "Pricing & Plans Monitor",
-    description: "Ensures current pricing and plan details are cited correctly",
-    status: "active",
-    detections: 12,
-    lastTriggered: "1 day ago"
-  },
-  {
-    id: 4,
-    name: "Leadership & Quotes",
-    description: "Verifies attribution of statements and executive information",
-    status: "paused",
-    detections: 4,
-    lastTriggered: "3 days ago"
+// Helper to format time ago
+const formatTimeAgo = (dateString: string) => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffDays > 0) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+  if (diffHours > 0) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+  return 'Just now';
+};
+
+// Map alert types to display labels
+const alertTypeLabels: Record<string, string> = {
+  misinformation: 'Misinformation',
+  broken_link: 'Broken Link',
+  outdated: 'Outdated Information'
+};
+
+// Map alert types to icons
+const getAlertTypeIcon = (alertType: string) => {
+  switch (alertType) {
+    case 'broken_link':
+      return LinkIcon;
+    case 'outdated_content':
+      return Clock;
+    case 'missing_citation':
+      return FileText;
+    default:
+      return AlertTriangle;
   }
-];
+};
 
 const getSeverityColor = (severity: string) => {
   switch (severity) {
-    case "high":
+    case "critical":
       return "bg-destructive text-destructive-foreground";
+    case "high":
+      return "bg-destructive/80 text-destructive-foreground";
     case "medium":
       return "bg-warning text-warning-foreground";
     case "low":
@@ -171,16 +123,14 @@ const getSeverityColor = (severity: string) => {
 
 const getStatusColor = (status: string) => {
   switch (status) {
-    case "investigating":
+    case "new":
       return "text-warning";
-    case "correcting":
+    case "reviewed":
       return "text-primary";
-    case "escalated":
-      return "text-destructive";
-    case "monitoring":
-      return "text-muted-foreground";
-    case "verified":
+    case "resolved":
       return "text-success";
+    case "dismissed":
+      return "text-muted-foreground";
     default:
       return "text-muted-foreground";
   }
@@ -188,16 +138,14 @@ const getStatusColor = (status: string) => {
 
 const getStatusIcon = (status: string) => {
   switch (status) {
-    case "investigating":
-      return Search;
-    case "correcting":
-      return Settings;
-    case "escalated":
-      return AlertTriangle;
-    case "monitoring":
+    case "new":
+      return AlertCircle;
+    case "reviewed":
       return Eye;
-    case "verified":
+    case "resolved":
       return CheckCircle;
+    case "dismissed":
+      return XCircle;
     default:
       return Clock;
   }
@@ -205,23 +153,151 @@ const getStatusIcon = (status: string) => {
 
 const MisinformationAlerts = () => {
   const { toast } = useToast();
+  const { selectedDomain } = useDomainStore();
+
+  // UI state
   const [selectedTab, setSelectedTab] = useState("active");
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [actionDialogOpen, setActionDialogOpen] = useState(false);
-  const [addRuleDialogOpen, setAddRuleDialogOpen] = useState(false);
   const [configureDialogOpen, setConfigureDialogOpen] = useState(false);
   const [startScanDialogOpen, setStartScanDialogOpen] = useState(false);
   const [comparisonDialogOpen, setComparisonDialogOpen] = useState(false);
-  const [selectedCase, setSelectedCase] = useState<typeof activeMisinformation[0] | null>(null);
-  const [selectedRule, setSelectedRule] = useState<typeof monitoringRules[0] | null>(null);
-  const [rules, setRules] = useState(monitoringRules);
+  const [selectedCase, setSelectedCase] = useState<MisinformationAlert | null>(null);
 
-  const handleViewDetails = (misinformationCase: typeof activeMisinformation[0]) => {
+  // Data state
+  const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [activeAlerts, setActiveAlerts] = useState<MisinformationAlert[]>([]);
+  const [resolvedAlerts, setResolvedAlerts] = useState<MisinformationAlert[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch data when domain changes
+  useEffect(() => {
+    if (selectedDomain?.id) {
+      fetchData();
+    }
+  }, [selectedDomain?.id]);
+
+  const fetchData = async () => {
+    if (!selectedDomain?.id) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Fetch dashboard data and alerts in parallel
+      // Status values: new, reviewed (active), resolved, dismissed (closed)
+      const [dashboardRes, activeRes, resolvedRes] = await Promise.all([
+        apiClient.getMisinformationDashboard({ domain_id: String(selectedDomain.id), days: 30 }),
+        apiClient.getMisinformationAlerts({
+          domain_id: String(selectedDomain.id),
+          status: 'new,reviewed'
+        }),
+        apiClient.getMisinformationAlerts({
+          domain_id: String(selectedDomain.id),
+          status: 'resolved,dismissed'
+        })
+      ]);
+
+      setDashboardData(dashboardRes as DashboardData);
+      setActiveAlerts((activeRes as any).results || []);
+      setResolvedAlerts((resolvedRes as any).results || []);
+    } catch (err: any) {
+      console.error('Error fetching misinformation data:', err);
+      setError(err.message || 'Failed to load misinformation data');
+      toast({
+        title: "Error loading data",
+        description: err.message || 'Failed to load misinformation data',
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTriggerScan = async () => {
+    if (!selectedDomain?.id) return;
+
+    setScanning(true);
+    try {
+      await apiClient.triggerMisinformationScan({ domain_id: selectedDomain.id });
+      toast({
+        title: "Scan Started",
+        description: "Misinformation scan has been initiated. This may take a few minutes."
+      });
+      // Refresh data after a delay
+      setTimeout(() => fetchData(), 5000);
+    } catch (err: any) {
+      toast({
+        title: "Scan Failed",
+        description: err.message || 'Failed to start scan',
+        variant: "destructive"
+      });
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handleUpdateAlertStatus = async (alertId: number, status: string) => {
+    try {
+      await apiClient.updateMisinformationAlert(alertId, { status });
+      toast({
+        title: "Status Updated",
+        description: `Alert status changed to ${status}`
+      });
+      fetchData(); // Refresh the list
+    } catch (err: any) {
+      toast({
+        title: "Update Failed",
+        description: err.message || 'Failed to update alert status',
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Generate detection metrics from dashboard data
+  // Summary Cards: Total Detected, Broken Links, Misinformation, Outdated Information
+  const defaultMetrics = [
+    { name: "Total Detected", value: "0", icon: AlertTriangle, color: "text-destructive" },
+    { name: "Broken Links", value: "0", icon: LinkIcon, color: "text-warning" },
+    { name: "Misinformation", value: "0", icon: AlertCircle, color: "text-destructive" },
+    { name: "Outdated Info", value: "0", icon: Clock, color: "text-muted-foreground" }
+  ];
+
+  const detectionMetrics = dashboardData ? [
+    {
+      name: "Total Detected",
+      value: String(dashboardData.total_detected || 0),
+      icon: AlertTriangle,
+      color: "text-destructive"
+    },
+    {
+      name: "Broken Links",
+      value: String(dashboardData.broken_links || 0),
+      icon: LinkIcon,
+      color: "text-warning"
+    },
+    {
+      name: "Misinformation",
+      value: String(dashboardData.misinformation || 0),
+      icon: AlertCircle,
+      color: "text-destructive"
+    },
+    {
+      name: "Outdated Info",
+      value: String(dashboardData.outdated_content || 0),
+      icon: Clock,
+      color: "text-muted-foreground"
+    }
+  ] : defaultMetrics;
+
+  const handleViewDetails = (misinformationCase: MisinformationAlert) => {
     setSelectedCase(misinformationCase);
     setDetailDialogOpen(true);
   };
 
-  const handleTakeAction = (misinformationCase: typeof activeMisinformation[0]) => {
+  const handleTakeAction = (misinformationCase: MisinformationAlert) => {
     setSelectedCase(misinformationCase);
     setActionDialogOpen(true);
   };
@@ -231,39 +307,13 @@ const MisinformationAlerts = () => {
   };
 
   const handleStartMonitoring = () => {
-    setStartScanDialogOpen(true);
+    handleTriggerScan();
   };
 
-  const handleAddRule = () => {
-    setSelectedRule(null);
-    setAddRuleDialogOpen(true);
-  };
-
-  const handleEditRule = (rule: typeof monitoringRules[0]) => {
-    setSelectedRule(rule);
-    setAddRuleDialogOpen(true);
-  };
-
-  const handleToggleRuleStatus = (ruleId: number) => {
-    setRules(rules.map(rule => 
-      rule.id === ruleId 
-        ? { ...rule, status: rule.status === "active" ? "paused" : "active" }
-        : rule
-    ));
-    const rule = rules.find(r => r.id === ruleId);
-    toast({
-      title: "Rule status updated",
-      description: `${rule?.name} has been ${rule?.status === "active" ? "paused" : "activated"}`,
-    });
-  };
-
-  const handleSaveRule = (rule: typeof monitoringRules[0]) => {
-    if (rule.id) {
-      setRules(rules.map(r => r.id === rule.id ? rule : r));
-    } else {
-      setRules([...rules, { ...rule, id: rules.length + 1, detections: 0, lastTriggered: "Never" }]);
-    }
-  };
+  // Show loading state
+  if (loading && !dashboardData) {
+    return <PageLoader />;
+  }
 
   const handleExportReport = () => {
     toast({
@@ -282,43 +332,43 @@ const MisinformationAlerts = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" onClick={() => setComparisonDialogOpen(true)}>
-            <Search className="h-4 w-4 mr-2" />
-            Compare Content
-          </Button>
-          <Button variant="outline" onClick={handleConfigureRules}>
-            <Settings className="h-4 w-4 mr-2" />
-            Configure Rules
-          </Button>
-          <Button onClick={handleStartMonitoring}>
-            <Play className="h-4 w-4 mr-2" />
-            Start Scan
+          <Button onClick={handleStartMonitoring} disabled={scanning || !selectedDomain}>
+            {scanning ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4 mr-2" />
+            )}
+            {scanning ? 'Scanning...' : 'Start Scan'}
           </Button>
         </div>
       </div>
 
-      {/* Detection Metrics */}
+      {/* Detection Metrics - Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {detectionMetrics.map((metric) => (
-          <Card key={metric.name} className="transition-all duration-300 border border-border hover:border-primary">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {metric.name}
-              </CardTitle>
-              <Shield className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{metric.value}</div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <TrendingUp className={`h-3 w-3 ${metric.trend === 'up' ? 'text-success' : 'text-destructive'}`} />
-                <span className={metric.trend === 'up' ? 'text-success' : 'text-destructive'}>
-                  {metric.change}
-                </span>
-                <span>from last month</span>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        {detectionMetrics.map((metric) => {
+          const IconComponent = metric.icon;
+          return (
+            <Card key={metric.name} className="transition-all duration-300 border border-border hover:border-primary">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  {metric.name}
+                </CardTitle>
+                <div className={`p-2 rounded-lg bg-muted/50`}>
+                  <IconComponent className={`h-4 w-4 ${metric.color}`} />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">{metric.value}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {metric.name === "Total Detected" && "All issues found"}
+                  {metric.name === "Broken Links" && "Invalid citations"}
+                  {metric.name === "Misinformation" && "Factual errors"}
+                  {metric.name === "Outdated Info" && "Stale content"}
+                </p>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       {/* Main Content Tabs */}
@@ -328,15 +378,11 @@ const MisinformationAlerts = () => {
             <TabsList className="bg-muted/50 p-1 border border-border">
               <TabsTrigger value="active" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
                 <AlertCircle className="h-4 w-4 mr-2" />
-                Active Cases ({activeMisinformation.length})
+                Active Cases ({activeAlerts.length})
               </TabsTrigger>
               <TabsTrigger value="resolved" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
                 <CheckCircle className="h-4 w-4 mr-2" />
-                Resolved ({resolvedCases.length})
-              </TabsTrigger>
-              <TabsTrigger value="monitoring" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
-                <Shield className="h-4 w-4 mr-2" />
-                Monitoring Rules
+                Resolved ({resolvedAlerts.length})
               </TabsTrigger>
             </TabsList>
           </div>
@@ -359,83 +405,115 @@ const MisinformationAlerts = () => {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {activeMisinformation.map((item) => {
-                const StatusIcon = getStatusIcon(item.status);
-                return (
-                  <div
-                    key={item.id}
-                    className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h4 className="font-semibold">{item.title}</h4>
-                          <Badge className={getSeverityColor(item.severity)}>
-                            {item.severity}
-                          </Badge>
-                          <Badge variant="outline" className={getStatusColor(item.status)}>
-                            <StatusIcon className="h-3 w-3 mr-1" />
-                            {item.status}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground mb-3">
-                          {item.description}
-                        </p>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground">Platform:</span>
-                              <Badge variant="secondary">{item.platform}</Badge>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground">Impact:</span>
-                              <span className="font-medium">{item.impact}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground">Detected:</span>
-                              <span>{item.detectedAt}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <MessageSquare className="h-3 w-3 text-muted-foreground" />
-                              <span>{item.mentions} mentions affected</span>
-                            </div>
+              {activeAlerts.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Shield className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p className="text-lg font-medium">No active cases</p>
+                  <p className="text-sm">Start a scan to detect misinformation issues</p>
+                </div>
+              ) : (
+                activeAlerts.map((item) => {
+                  const StatusIcon = getStatusIcon(item.status);
+                  const AlertTypeIcon = getAlertTypeIcon(item.alert_type);
+                  const sourceUrl = item.citation_url?.url;
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <AlertTypeIcon className="h-4 w-4 text-muted-foreground" />
+                            <h4 className="font-semibold">
+                              {alertTypeLabels[item.alert_type] || item.alert_type}
+                            </h4>
+                            <Badge className={getSeverityColor(item.severity)}>
+                              {item.severity}
+                            </Badge>
+                            <Badge variant="outline" className={getStatusColor(item.status)}>
+                              <StatusIcon className="h-3 w-3 mr-1" />
+                              {item.status}
+                            </Badge>
                           </div>
-                          <div className="space-y-2">
-                            <div className="p-2 bg-destructive/10 rounded">
-                              <p className="text-xs font-medium mb-1 text-destructive flex items-center gap-1">
-                                <XCircle className="h-3 w-3" />
-                                Incorrect Information:
-                              </p>
-                              <p className="text-xs">{item.incorrectInfo}</p>
+                          {item.explanation && (
+                            <p className="text-sm text-muted-foreground mb-3">
+                              {item.explanation}
+                            </p>
+                          )}
+                          <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-muted-foreground">Detected:</span>
+                                <span>{formatTimeAgo(item.created_at)}</span>
+                              </div>
+                              {sourceUrl && (
+                                <div className="flex items-center gap-2">
+                                  <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                                  <a
+                                    href={sourceUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-primary hover:underline truncate max-w-[200px]"
+                                  >
+                                    {sourceUrl}
+                                  </a>
+                                </div>
+                              )}
+                              {item.prompt && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground">Prompt:</span>
+                                  <span className="truncate max-w-[200px]">{item.prompt.prompt_text}</span>
+                                </div>
+                              )}
                             </div>
-                            <div className="p-2 bg-success/10 rounded">
-                              <p className="text-xs font-medium mb-1 text-success flex items-center gap-1">
-                                <CheckCircle className="h-3 w-3" />
-                                Correct Information:
-                              </p>
-                              <p className="text-xs">{item.correctInfo}</p>
+                            <div className="space-y-2">
+                              {item.llm_claim && (
+                                <div className="p-2 bg-destructive/10 rounded">
+                                  <p className="text-xs font-medium mb-1 text-destructive flex items-center gap-1">
+                                    <XCircle className="h-3 w-3" />
+                                    LLM Claim:
+                                  </p>
+                                  <p className="text-xs line-clamp-3">{item.llm_claim}</p>
+                                </div>
+                              )}
+                              {item.source_content && (
+                                <div className="p-2 bg-success/10 rounded">
+                                  <p className="text-xs font-medium mb-1 text-success flex items-center gap-1">
+                                    <CheckCircle className="h-3 w-3" />
+                                    Source Content:
+                                  </p>
+                                  <p className="text-xs line-clamp-3">{item.source_content}</p>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
                       </div>
+                      <div className="flex gap-2 pt-3 border-t border-border">
+                        <Button size="sm" onClick={() => handleViewDetails(item)}>
+                          <Eye className="h-3 w-3 mr-1" />
+                          View Details
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleTakeAction(item)}>
+                          <Settings className="h-3 w-3 mr-1" />
+                          Take Action
+                        </Button>
+                        {sourceUrl && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => window.open(sourceUrl, '_blank')}
+                          >
+                            <ExternalLink className="h-3 w-3 mr-1" />
+                            View Source
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex gap-2 pt-3 border-t border-border">
-                      <Button size="sm" onClick={() => handleViewDetails(item)}>
-                        <Eye className="h-3 w-3 mr-1" />
-                        View Details
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleTakeAction(item)}>
-                        <Settings className="h-3 w-3 mr-1" />
-                        Take Action
-                      </Button>
-                      <Button size="sm" variant="ghost">
-                        <ExternalLink className="h-3 w-3 mr-1" />
-                        View Source
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -450,157 +528,61 @@ const MisinformationAlerts = () => {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {resolvedCases.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-10 rounded-lg bg-success/10 flex items-center justify-center">
-                        <CheckCircle className="h-5 w-5 text-success" />
-                      </div>
-                      <div>
-                        <h4 className="font-medium">{item.title}</h4>
-                        <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
-                          <Badge variant="secondary">{item.platform}</Badge>
-                          <span>•</span>
-                          <span>{item.mentions} mentions corrected</span>
-                          <span>•</span>
-                          <span>Resolved {item.resolvedAt}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p className="text-sm font-medium">Resolution Time</p>
-                        <p className="text-sm text-muted-foreground">{item.resolutionTime}</p>
-                      </div>
-                      <Button size="sm" variant="outline" onClick={() => {
-                        const fullCase = activeMisinformation.find(c => c.id === item.id);
-                        if (fullCase) handleViewDetails(fullCase);
-                      }}>
-                        View Details
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Monitoring Rules Tab */}
-        <TabsContent value="monitoring" className="space-y-6">
-          <Card className="border border-border">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Automated Monitoring Rules</CardTitle>
-                  <CardDescription>
-                    Configure what to monitor and how to detect issues
-                  </CardDescription>
+              {resolvedAlerts.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <CheckCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p className="text-lg font-medium">No resolved cases yet</p>
+                  <p className="text-sm">Resolved cases will appear here</p>
                 </div>
-                <Button onClick={handleAddRule}>
-                  <Settings className="h-4 w-4 mr-2" />
-                  Add Rule
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {rules.map((rule) => (
-                <div
-                  key={rule.id}
-                  className="p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h4 className="font-semibold">{rule.name}</h4>
-                        <Badge variant={rule.status === "active" ? "default" : "secondary"}>
-                          {rule.status}
-                        </Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground mb-3">
-                        {rule.description}
-                      </p>
-                      <div className="flex items-center gap-4 text-sm">
-                        <div className="flex items-center gap-2">
-                          <AlertCircle className="h-4 w-4 text-muted-foreground" />
-                          <span>{rule.detections} detections</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-4 w-4 text-muted-foreground" />
-                          <span>Last triggered {rule.lastTriggered}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="outline" onClick={() => handleEditRule(rule)}>
-                        Edit
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="ghost"
-                        onClick={() => handleToggleRuleStatus(rule.id)}
+              ) : (
+                <div className="space-y-3">
+                  {resolvedAlerts.map((item) => {
+                    const AlertTypeIcon = getAlertTypeIcon(item.alert_type);
+                    return (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary"
                       >
-                        {rule.status === "active" ? "Pause" : "Activate"}
-                      </Button>
-                    </div>
-                  </div>
+                        <div className="flex items-center gap-4">
+                          <div className="h-10 w-10 rounded-lg bg-success/10 flex items-center justify-center">
+                            <CheckCircle className="h-5 w-5 text-success" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <AlertTypeIcon className="h-4 w-4 text-muted-foreground" />
+                              <h4 className="font-medium">{item.title}</h4>
+                            </div>
+                            <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
+                              <Badge variant="secondary">
+                                {alertTypeLabels[item.alert_type] || item.alert_type}
+                              </Badge>
+                              {item.platform && (
+                                <>
+                                  <span>•</span>
+                                  <span>{item.platform}</span>
+                                </>
+                              )}
+                              <span>•</span>
+                              <span>Resolved {item.resolved_at ? formatTimeAgo(item.resolved_at) : 'recently'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          {item.resolution_notes && (
+                            <div className="text-right max-w-[200px]">
+                              <p className="text-sm font-medium">Resolution Notes</p>
+                              <p className="text-sm text-muted-foreground truncate">{item.resolution_notes}</p>
+                            </div>
+                          )}
+                          <Button size="sm" variant="outline" onClick={() => handleViewDetails(item)}>
+                            View Details
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          {/* Detection Configuration */}
-          <Card className="border border-border">
-            <CardHeader>
-              <CardTitle>Detection Settings</CardTitle>
-              <CardDescription>
-                Configure sensitivity and notification preferences
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Detection Sensitivity</label>
-                  <select className="w-full p-2 border rounded-lg">
-                    <option>High (All potential issues)</option>
-                    <option>Medium (Likely issues)</option>
-                    <option>Low (Only confirmed issues)</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Scan Frequency</label>
-                  <select className="w-full p-2 border rounded-lg">
-                    <option>Real-time</option>
-                    <option>Every hour</option>
-                    <option>Every 6 hours</option>
-                    <option>Daily</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Alert Priority Threshold</label>
-                  <select className="w-full p-2 border rounded-lg">
-                    <option>All severities</option>
-                    <option>Medium and High only</option>
-                    <option>High only</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Notification Channel</label>
-                  <select className="w-full p-2 border rounded-lg">
-                    <option>Email + In-app</option>
-                    <option>Email only</option>
-                    <option>In-app only</option>
-                    <option>Slack integration</option>
-                  </select>
-                </div>
-              </div>
-              <Button>
-                Save Settings
-              </Button>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -617,12 +599,6 @@ const MisinformationAlerts = () => {
       open={actionDialogOpen}
       onOpenChange={setActionDialogOpen}
       misinformationCase={selectedCase}
-    />
-    <AddMonitoringRuleDialog
-      open={addRuleDialogOpen}
-      onOpenChange={setAddRuleDialogOpen}
-      rule={selectedRule}
-      onSave={handleSaveRule}
     />
     <ConfigureDetectionDialog
       open={configureDialogOpen}

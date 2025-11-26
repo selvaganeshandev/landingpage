@@ -1111,6 +1111,70 @@ export const apiClient = {
     method: 'DELETE',
     useEngine: true,
   }),
+
+  // ===== Misinformation Alerts =====
+  getMisinformationDashboard: (params: { domain_id: string; days?: number }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.days ? { days: String(params.days) } : {}),
+    }).toString()}`;
+    return apiRequest(`/misinformation/dashboard/${queryParams}`);
+  },
+
+  getMisinformationAlerts: (params: {
+    domain_id: string;
+    alert_type?: string;
+    severity?: string;
+    status?: string;
+    page?: number;
+    page_size?: number;
+  }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.alert_type ? { alert_type: params.alert_type } : {}),
+      ...(params.severity ? { severity: params.severity } : {}),
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.page ? { page: String(params.page) } : {}),
+      ...(params.page_size ? { page_size: String(params.page_size) } : {}),
+    }).toString()}`;
+    return apiRequest(`/misinformation/alerts/${queryParams}`);
+  },
+
+  getMisinformationAlert: (alertId: number) =>
+    apiRequest(`/misinformation/alerts/${alertId}/`),
+
+  updateMisinformationAlert: (alertId: number, data: { status: string }) =>
+    apiRequest(`/misinformation/alerts/${alertId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  triggerMisinformationScan: (data: { domain_id: number; prompt_analytics_ids?: number[] }) =>
+    apiRequest('/misinformation/scan/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getMisinformationScanStatus: (scanId: number) =>
+    apiRequest(`/misinformation/scan/${scanId}/`),
+
+  getMisinformationScans: (params: { domain_id: string; page?: number; page_size?: number }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.page ? { page: String(params.page) } : {}),
+      ...(params.page_size ? { page_size: String(params.page_size) } : {}),
+    }).toString()}`;
+    return apiRequest(`/misinformation/scans/${queryParams}`);
+  },
+
+  getMisinformationAnalytics: (params: { domain_id: string; start_date?: string; end_date?: string }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.start_date ? { start_date: params.start_date } : {}),
+      ...(params.end_date ? { end_date: params.end_date } : {}),
+    }).toString()}`;
+    return apiRequest(`/misinformation/analytics/${queryParams}`);
+  },
 };
 
 // Also export as 'api' for flexibility
