@@ -31,7 +31,11 @@ import {
   Play,
   LinkIcon,
   RefreshCw,
-  Loader2
+  Loader2,
+  Info,
+  Globe,
+  FileSearch,
+  Zap
 } from "lucide-react";
 
 // Types for API responses
@@ -697,6 +701,47 @@ const MisinformationAlerts = () => {
       onOpenChange={setDetailDialogOpen}
       misinformationCase={selectedCase}
     />
+    {/* How It Works - Information Card */}
+      <Card className="border border-border bg-muted/30">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Info className="h-4 w-4 text-primary" />
+            How Misinformation Detection Works
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 font-medium">
+                <Globe className="h-4 w-4 text-blue-500" />
+                <span>1. Citation Crawling</span>
+              </div>
+              <p className="text-muted-foreground text-xs">
+                We extract all URLs cited in AI responses about your brand and crawl each page to get the actual content.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 font-medium">
+                <FileSearch className="h-4 w-4 text-purple-500" />
+                <span>2. Content Comparison</span>
+              </div>
+              <p className="text-muted-foreground text-xs">
+                AI compares what the LLM claimed about your brand against the actual source content to find discrepancies.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 font-medium">
+                <Zap className="h-4 w-4 text-orange-500" />
+                <span>3. Issue Detection</span>
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Flags broken links (404/410), misinformation (factual errors), and outdated info (old prices, discontinued products).
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
     <MisinformationActionDialog
       open={actionDialogOpen}
       onOpenChange={setActionDialogOpen}

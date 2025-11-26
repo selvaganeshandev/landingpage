@@ -266,12 +266,22 @@ Be thorough but fair. Only flag genuine issues ABOUT {brand_name}, not minor wor
         # Split into sentences
         sentences = re.split(r'(?<=[.!?])\s+', response_text)
 
+        # Build search terms - include full name and first word (e.g., "Airbnb US" -> ["airbnb us", "airbnb"])
+        brand_lower = brand_name.lower()
+        search_terms = [brand_lower]
+
+        # Add first word if brand name has multiple words (e.g., "Airbnb US" -> "airbnb")
+        first_word = brand_lower.split()[0] if ' ' in brand_lower else None
+        if first_word and len(first_word) >= 3:  # Only if first word is meaningful (3+ chars)
+            search_terms.append(first_word)
+
         # Find sentences mentioning the brand
         claims = []
-        brand_lower = brand_name.lower()
 
         for sentence in sentences:
-            if brand_lower in sentence.lower():
+            sentence_lower = sentence.lower()
+            # Check if any search term matches
+            if any(term in sentence_lower for term in search_terms):
                 sentence = sentence.strip()
                 if len(sentence) > 20:  # Skip very short sentences
                     claims.append(sentence)
