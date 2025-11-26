@@ -1,0 +1,89 @@
+# Generated placeholder - recreated to match applied state
+
+from django.conf import settings
+from django.db import migrations, models
+import django.db.models.deletion
+
+
+class Migration(migrations.Migration):
+
+    initial = True
+
+    dependencies = [
+        ('authentication', '0001_initial'),
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name='Domain',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('name', models.CharField(help_text='Name of the domain', max_length=255)),
+                ('url', models.URLField(help_text='URL of the domain')),
+                ('country', models.CharField(default='United States', help_text='Country name for domain context', max_length=100)),
+                ('total_mentions', models.PositiveIntegerField(default=0, help_text='Total number of mentions')),
+                ('total_citations', models.PositiveIntegerField(default=0, help_text='Total number of citations')),
+                ('visibility_score', models.DecimalField(decimal_places=2, default=0.0, help_text='Visibility score of the domain', max_digits=5)),
+                ('average_position', models.DecimalField(decimal_places=2, default=0.0, help_text='Average position in search results', max_digits=8)),
+                ('active_alerts', models.PositiveIntegerField(default=0, help_text='Number of active alerts')),
+                ('sentiment_category', models.CharField(choices=[('positive', 'Positive'), ('neutral', 'Neutral'), ('negative', 'Negative')], default='neutral', help_text='Overall sentiment category of mentions (positive/neutral/negative)', max_length=10)),
+                ('sentiment_score', models.DecimalField(decimal_places=2, default=0.0, help_text='Sentiment score (-1.00 to 1.00)', max_digits=3)),
+                ('processing_status', models.CharField(choices=[('INIT', 'Initial'), ('SCHD', 'Scheduled'), ('PROC', 'Processing'), ('COMP', 'Completed'), ('FAIL', 'Failed')], default='INIT', help_text='Current processing status of the domain', max_length=10)),
+                ('track_message', models.TextField(blank=True, help_text='Message or notes about the processing status', null=True)),
+                ('tracked_at', models.DateTimeField(blank=True, help_text='Timestamp when the domain was last tracked', null=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True, help_text='Timestamp when the domain was created')),
+                ('modified_at', models.DateTimeField(auto_now=True, help_text='Timestamp when the domain was last modified')),
+                ('organisation', models.ForeignKey(help_text='Organisation this domain belongs to', on_delete=django.db.models.deletion.CASCADE, related_name='domains', to='authentication.organisation')),
+            ],
+            options={
+                'verbose_name': 'Domain',
+                'verbose_name_plural': 'Domains',
+                'db_table': 'domains',
+                'ordering': ['name'],
+            },
+        ),
+        migrations.CreateModel(
+            name='DomainAccess',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('modified_at', models.DateTimeField(auto_now=True)),
+                ('domain', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='user_access', to='domains.domain')),
+                ('granted_by', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='granted_domain_access', to='authentication.account')),
+                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='domain_access', to='authentication.account')),
+            ],
+            options={
+                'verbose_name': 'Domain Access',
+                'verbose_name_plural': 'Domain Access',
+                'db_table': 'domain_access',
+            },
+        ),
+        migrations.AddConstraint(
+            model_name='domain',
+            constraint=models.UniqueConstraint(fields=('url', 'organisation'), name='unique_url_organisation'),
+        ),
+        migrations.AddIndex(
+            model_name='domain',
+            index=models.Index(fields=['organisation', 'processing_status'], name='domains_organis_5a39d1_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='domain',
+            index=models.Index(fields=['organisation', '-visibility_score'], name='domains_organis_d99e9a_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='domain',
+            index=models.Index(fields=['processing_status', 'tracked_at'], name='domains_process_b3c64c_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='domain',
+            index=models.Index(fields=['sentiment_category', '-sentiment_score'], name='domains_sentime_2a9f91_idx'),
+        ),
+        migrations.AlterUniqueTogether(
+            name='domainaccess',
+            unique_together={('user', 'domain')},
+        ),
+        migrations.AddIndex(
+            model_name='domainaccess',
+            index=models.Index(fields=['granted_by', 'created_at'], name='domain_acce_granted_3e7c14_idx'),
+        ),
+    ]
