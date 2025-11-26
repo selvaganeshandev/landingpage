@@ -426,10 +426,11 @@ def dashboard_summary(request):
     for snapshot in snapshot_qs:
         sentiment = float(snapshot.sentiment_score or 0)
         mentions = snapshot.mentions
-        
-        if sentiment > 0.33:
+
+        # More sensitive thresholds for better sentiment distribution
+        if sentiment > 0.05:
             total_positive_mentions += mentions
-        elif sentiment >= -0.33:
+        elif sentiment >= -0.05:
             total_neutral_mentions += mentions
         else:
             total_negative_mentions += mentions
