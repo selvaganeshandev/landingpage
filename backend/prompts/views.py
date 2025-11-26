@@ -62,8 +62,14 @@ def get_mentions(request):
     if not has_access:
         return Response({'error': 'Forbidden: no access to this domain.'}, status=status.HTTP_403_FORBIDDEN)
 
-    # Get analytics records that are mentions and published for this domain (via prompt -> group -> domain)
-    mentions = PromptAnalytics.objects.filter(is_mention=True, is_published=True, prompt__group__domain_id=domain_id)
+    # Get analytics records - show all or only mentions based on show_all parameter
+    show_all = request.GET.get('show_all', 'false').lower() == 'true'
+    if show_all:
+        # Show all prompt analytics (published) for this domain
+        mentions = PromptAnalytics.objects.filter(is_published=True, prompt__group__domain_id=domain_id)
+    else:
+        # Show only mentions
+        mentions = PromptAnalytics.objects.filter(is_mention=True, is_published=True, prompt__group__domain_id=domain_id)
     
     # Apply organization filter if user is authenticated and not superuser
     # Temporarily skip organization filtering for testing

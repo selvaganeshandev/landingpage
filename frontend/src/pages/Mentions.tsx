@@ -4,6 +4,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, Filter, ExternalLink, Copy, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -79,6 +81,7 @@ const Mentions = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [availablePlatforms, setAvailablePlatforms] = useState<string[]>(["ChatGPT", "Google Gemini", "Perplexity"]);
   const [availableSentiments, setAvailableSentiments] = useState<string[]>(["Positive", "Negative", "Neutral"]);
+  const [showAll, setShowAll] = useState(false);
   const { toast } = useToast();
 
   // Function to process content and convert markdown-like syntax to HTML
@@ -133,7 +136,7 @@ const Mentions = () => {
     setTotalCount(0);
     void loadMentions(0, true);
     void loadFilters();
-  }, [selectedPlatform, selectedSentiment, searchQuery, selectedDomain?.id]);
+  }, [selectedPlatform, selectedSentiment, searchQuery, selectedDomain?.id, showAll]);
 
   const loadMentions = async (startOffset: number = offset, replace: boolean = false) => {
     try {
@@ -147,6 +150,7 @@ const Mentions = () => {
         domain_id: activeDomainId || undefined,
         limit,
         offset: startOffset,
+        show_all: showAll,
       });
       setTotalCount(response.total_count || 0);
       if (replace) {
@@ -280,20 +284,25 @@ const Mentions = () => {
             <TabsList className="bg-muted/50 p-1 border border-border">
               <TabsTrigger value="all" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">All Platforms</TabsTrigger>
               {availablePlatforms.map(platform => (
-                <TabsTrigger 
-                  key={platform} 
-                  value={platform} 
+                <TabsTrigger
+                  key={platform}
+                  value={platform}
                   className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white"
                 >
                   {platform}
                 </TabsTrigger>
               ))}
             </TabsList>
-            {/* More Filters button hidden */}
-            {/* <Button variant="outline" onClick={handleMoreFilters} className="border border-border">
-              <Filter className="h-4 w-4 mr-2" />
-              More Filters
-            </Button> */}
+            <div className="flex items-center gap-2">
+              <Switch
+                id="show-all"
+                checked={showAll}
+                onCheckedChange={setShowAll}
+              />
+              <Label htmlFor="show-all" className="cursor-pointer text-sm">
+                Show All
+              </Label>
+            </div>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4">
