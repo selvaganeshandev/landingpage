@@ -27,13 +27,79 @@ import {
   Trophy
 } from "lucide-react";
 
+interface TopicPerformance {
+  name: string;
+  keywords?: string[];
+  coverage_score: number;
+  mentions: number;
+  engagement?: number;
+  growth: number;
+  sentiment: number;
+}
+
+interface ContentGap {
+  keyword: string;
+  search_volume: number;
+  competitor_coverage: number;
+  opportunity_score: number;
+  estimated_traffic: number;
+  priority: string;
+}
+
+interface KeywordData {
+  keyword: string;
+  mentions: number;
+  growth?: number;
+  priority?: string;
+  search_volume: number;
+}
+
+interface Recommendation {
+  priority: number;
+  title: string;
+  description: string;
+  timeline: string;
+  content_pieces: string;
+  expected_traffic: string;
+}
+
+interface ContentStrategyData {
+  period?: {
+    start: string;
+    end: string;
+  };
+  domain_name?: string;
+  domain_url?: string;
+  overview?: {
+    content_quality_score: number;
+    topics_covered: number;
+    topics_growth: number;
+    content_gaps_found: number;
+    engagement_rate: number;
+    engagement_growth: number;
+  };
+  content_gaps?: ContentGap[];
+  topic_performance?: TopicPerformance[];
+  untapped_keywords?: KeywordData[];
+  trending_keywords?: KeywordData[];
+  competitor_comparison?: any[];
+  recommendations?: Recommendation[];
+}
+
 interface ContentStrategyTemplateProps {
-  data: any;
+  data: ContentStrategyData | null;
 }
 
 export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) => {
-  // Extract data from API response
-  const overview = data?.overview || {};
+  // Extract data from API response with defaults
+  const overview = data?.overview || {
+    content_quality_score: 0,
+    topics_covered: 0,
+    topics_growth: 0,
+    content_gaps_found: 0,
+    engagement_rate: 0,
+    engagement_growth: 0,
+  };
   const contentGaps = data?.content_gaps || [];
   const topicPerformance = data?.topic_performance || [];
   const untappedKeywords = data?.untapped_keywords || [];
@@ -41,7 +107,46 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
   const competitors = data?.competitor_comparison || [];
   const recommendations = data?.recommendations || [];
   const domainName = data?.domain_name || 'Your Brand';
-  const period = data?.period || {};
+  const period = data?.period;
+
+  // Format period for display
+  const periodDisplay = period
+    ? `${new Date(period.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${new Date(period.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+    : new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  const getGradeFromScore = (score: number) => {
+    if (score >= 90) return 'A+';
+    if (score >= 80) return 'A';
+    if (score >= 70) return 'B';
+    if (score >= 60) return 'C';
+    return 'D';
+  };
+
+  const getTopicBadgeColor = (coverage: number) => {
+    if (coverage >= 80) return { bg: 'bg-green-600', text: 'Excellent' };
+    if (coverage >= 60) return { bg: 'bg-blue-600', text: 'Good' };
+    if (coverage >= 40) return { bg: 'bg-amber-600', text: 'Needs Work' };
+    return { bg: 'bg-red-600', text: 'Critical Gap' };
+  };
+
+  const getTopicRowColor = (coverage: number) => {
+    if (coverage >= 80) return 'bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-900/30';
+    if (coverage >= 60) return 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-900/30';
+    if (coverage >= 40) return 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/30';
+    return 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30';
+  };
+
+  const getTopicIcon = (coverage: number) => {
+    if (coverage >= 60) return <CheckCircle2 className={`h-5 w-5 ${coverage >= 80 ? 'text-green-600' : 'text-blue-600'}`} />;
+    return <AlertTriangle className={`h-5 w-5 ${coverage >= 40 ? 'text-amber-600' : 'text-red-600'}`} />;
+  };
+
+  const getTrendColor = (growth: number) => {
+    if (growth > 10) return 'text-green-600';
+    if (growth > 0) return 'text-blue-600';
+    if (growth < 0) return 'text-red-600';
+    return 'text-muted-foreground';
+  };
 
   return (
     <div className="w-full min-h-screen bg-white dark:bg-gray-950 space-y-8">
@@ -51,16 +156,11 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold mb-2">Content Strategy Report</h1>
-            <p className="text-muted-foreground">Gap Analysis, Opportunities & Recommendations</p>
+            <p className="text-muted-foreground">Gap Analysis, Opportunities & Recommendations for {domainName}</p>
           </div>
           <div className="text-right">
             <p className="text-sm text-muted-foreground">Report Period</p>
-            <p className="font-semibold">
-              {period.start && period.end
-                ? `${new Date(period.start).toLocaleDateString()} - ${new Date(period.end).toLocaleDateString()}`
-                : new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-              }
-            </p>
+            <p className="font-semibold">{periodDisplay}</p>
           </div>
         </div>
       </div>
@@ -74,11 +174,11 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
               <FileText className="h-6 w-6 text-blue-600 dark:text-blue-400" />
               <Badge variant="outline">
                 <Trophy className="h-3 w-3 mr-1" />
-                {overview.content_quality_score >= 90 ? 'A+' : overview.content_quality_score >= 80 ? 'A' : overview.content_quality_score >= 70 ? 'B' : 'C'}
+                {getGradeFromScore(overview.content_quality_score)}
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mb-1">Content Quality Score</p>
-            <p className="text-3xl font-bold">{overview.content_quality_score || 0}/100</p>
+            <p className="text-3xl font-bold">{Math.round(overview.content_quality_score)}/100</p>
             <p className="text-xs text-muted-foreground mt-2">
               {overview.content_quality_score >= 90 ? 'Excellent performance' : overview.content_quality_score >= 70 ? 'Good performance' : 'Needs improvement'}
             </p>
@@ -87,13 +187,13 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
           <Card className="p-5 border border-border">
             <div className="flex items-center justify-between mb-3">
               <Target className="h-6 w-6 text-green-600 dark:text-green-400" />
-              <Badge variant="outline" className={overview.topics_growth > 0 ? "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400" : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"}>
-                {overview.topics_growth > 0 ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
-                {overview.topics_growth > 0 ? '+' : ''}{overview.topics_growth || 0}%
+              <Badge variant="outline" className={overview.topics_growth > 0 ? "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400" : overview.topics_growth < 0 ? "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400" : ""}>
+                {overview.topics_growth > 0 ? <TrendingUp className="h-3 w-3 mr-1" /> : overview.topics_growth < 0 ? <TrendingDown className="h-3 w-3 mr-1" /> : <Minus className="h-3 w-3 mr-1" />}
+                {overview.topics_growth > 0 ? '+' : ''}{Math.round(overview.topics_growth)}%
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mb-1">Topics Covered</p>
-            <p className="text-3xl font-bold">{overview.topics_covered || 0}</p>
+            <p className="text-3xl font-bold">{overview.topics_covered}</p>
             <p className="text-xs text-muted-foreground mt-2">
               {overview.topics_growth > 0 ? `Growing steadily` : 'Monitor performance'}
             </p>
@@ -104,26 +204,26 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
               <Sparkles className="h-6 w-6 text-purple-600 dark:text-purple-400" />
               <Badge variant="outline">
                 <Flame className="h-3 w-3 mr-1" />
-                {overview.content_gaps_found > 10 ? 'Hot' : 'Warm'}
+                {overview.content_gaps_found > 10 ? 'Hot' : overview.content_gaps_found > 0 ? 'Warm' : 'Cold'}
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mb-1">Content Gaps Found</p>
-            <p className="text-3xl font-bold">{overview.content_gaps_found || 0}</p>
+            <p className="text-3xl font-bold">{overview.content_gaps_found}</p>
             <p className="text-xs text-muted-foreground mt-2">
-              {overview.content_gaps_found > 10 ? 'High opportunity areas' : 'Moderate opportunities'}
+              {overview.content_gaps_found > 10 ? 'High opportunity areas' : overview.content_gaps_found > 0 ? 'Moderate opportunities' : 'Good coverage'}
             </p>
           </Card>
 
           <Card className="p-5 border border-border">
             <div className="flex items-center justify-between mb-3">
               <Award className="h-6 w-6 text-amber-600 dark:text-amber-400" />
-              <Badge variant="outline" className={overview.engagement_growth > 0 ? "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400" : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"}>
-                {overview.engagement_growth > 0 ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
-                {overview.engagement_growth > 0 ? '+' : ''}{overview.engagement_growth || 0}%
+              <Badge variant="outline" className={overview.engagement_growth > 0 ? "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400" : overview.engagement_growth < 0 ? "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400" : ""}>
+                {overview.engagement_growth > 0 ? <TrendingUp className="h-3 w-3 mr-1" /> : overview.engagement_growth < 0 ? <TrendingDown className="h-3 w-3 mr-1" /> : <Minus className="h-3 w-3 mr-1" />}
+                {overview.engagement_growth > 0 ? '+' : ''}{Math.round(overview.engagement_growth)}%
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mb-1">Engagement Rate</p>
-            <p className="text-3xl font-bold">{overview.engagement_rate || 0}%</p>
+            <p className="text-3xl font-bold">{Math.round(overview.engagement_rate)}%</p>
             <p className="text-xs text-muted-foreground mt-2">
               {overview.engagement_rate >= 80 ? 'Above industry avg' : 'Room for growth'}
             </p>
@@ -137,8 +237,7 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
         <Card className="p-6 border border-border">
           {contentGaps.length > 0 ? (
           <div className="space-y-4">
-            {/* Render actual content gaps from data */}
-            {contentGaps.map((gap: any, index: number) => {
+            {contentGaps.slice(0, 5).map((gap, index) => {
               const priority = gap.priority || 'Medium';
               const borderColor = priority === 'Critical' ? 'border-red-500' : priority === 'High' ? 'border-amber-500' : 'border-blue-500';
               const bgColor = priority === 'Critical' ? 'bg-red-50 dark:bg-red-900/10' : priority === 'High' ? 'bg-amber-50 dark:bg-amber-900/10' : 'bg-blue-50 dark:bg-blue-900/10';
@@ -210,46 +309,26 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
               Untapped Keywords
             </h3>
             <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 rounded bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30">
-                <div>
-                  <p className="text-sm font-semibold">carbon neutral protein</p>
-                  <p className="text-xs text-muted-foreground">Zero current mentions</p>
-                </div>
-                <div className="text-right">
-                  <Badge className="bg-green-600 text-white mb-1">High</Badge>
-                  <p className="text-xs text-muted-foreground">8,400/mo</p>
-                </div>
-              </div>
-              <div className="flex items-center justify-between p-3 rounded bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30">
-                <div>
-                  <p className="text-sm font-semibold">AI nutrition coach</p>
-                  <p className="text-xs text-muted-foreground">Zero current mentions</p>
-                </div>
-                <div className="text-right">
-                  <Badge className="bg-green-600 text-white mb-1">High</Badge>
-                  <p className="text-xs text-muted-foreground">6,700/mo</p>
-                </div>
-              </div>
-              <div className="flex items-center justify-between p-3 rounded bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30">
-                <div>
-                  <p className="text-sm font-semibold">sustainable supplements</p>
-                  <p className="text-xs text-muted-foreground">Low current mentions</p>
-                </div>
-                <div className="text-right">
-                  <Badge className="bg-amber-600 text-white mb-1">Med</Badge>
-                  <p className="text-xs text-muted-foreground">5,200/mo</p>
-                </div>
-              </div>
-              <div className="flex items-center justify-between p-3 rounded bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30">
-                <div>
-                  <p className="text-sm font-semibold">eco protein powder</p>
-                  <p className="text-xs text-muted-foreground">Low current mentions</p>
-                </div>
-                <div className="text-right">
-                  <Badge className="bg-amber-600 text-white mb-1">Med</Badge>
-                  <p className="text-xs text-muted-foreground">4,800/mo</p>
-                </div>
-              </div>
+              {untappedKeywords.length > 0 ? (
+                untappedKeywords.slice(0, 5).map((kw, index) => {
+                  const priorityColor = kw.priority === 'High' ? 'bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-900/30' : 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/30';
+                  const badgeColor = kw.priority === 'High' ? 'bg-green-600' : 'bg-amber-600';
+                  return (
+                    <div key={index} className={`flex items-center justify-between p-3 rounded border ${priorityColor}`}>
+                      <div>
+                        <p className="text-sm font-semibold">{kw.keyword}</p>
+                        <p className="text-xs text-muted-foreground">Zero current mentions</p>
+                      </div>
+                      <div className="text-right">
+                        <Badge className={`${badgeColor} text-white mb-1`}>{kw.priority || 'Med'}</Badge>
+                        <p className="text-xs text-muted-foreground">{kw.search_volume?.toLocaleString() || 0}/mo</p>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-4">No untapped keywords identified. Add keywords to your domain to track opportunities.</p>
+              )}
             </div>
           </Card>
 
@@ -259,419 +338,205 @@ export const ContentStrategyTemplate = ({ data }: ContentStrategyTemplateProps) 
               Trending Topics to Amplify
             </h3>
             <div className="space-y-3">
-              <div className="p-3 rounded bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-900/30">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold">Vegan protein powder</span>
-                  <Badge className="bg-blue-600 text-white">
-                    <TrendingUp className="h-3 w-3 mr-1" />
-                    +127%
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground mb-2">Already strong, amplify further</p>
-                <div className="flex gap-2">
-                  <Badge variant="outline" className="text-xs">847 mentions</Badge>
-                  <Badge variant="outline" className="text-xs">12.4K searches/mo</Badge>
-                </div>
-              </div>
-              <div className="p-3 rounded bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-900/30">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold">Plant-based fitness</span>
-                  <Badge className="bg-purple-600 text-white">
-                    <TrendingUp className="h-3 w-3 mr-1" />
-                    +94%
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground mb-2">Growing fast, maintain momentum</p>
-                <div className="flex gap-2">
-                  <Badge variant="outline" className="text-xs">623 mentions</Badge>
-                  <Badge variant="outline" className="text-xs">9.8K searches/mo</Badge>
-                </div>
-              </div>
-              <div className="p-3 rounded bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold">Sustainable nutrition</span>
-                  <Badge className="bg-green-600 text-white">
-                    <TrendingUp className="h-3 w-3 mr-1" />
-                    +82%
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground mb-2">Hot topic, increase coverage</p>
-                <div className="flex gap-2">
-                  <Badge variant="outline" className="text-xs">541 mentions</Badge>
-                  <Badge variant="outline" className="text-xs">8.2K searches/mo</Badge>
-                </div>
-              </div>
+              {trendingKeywords.length > 0 ? (
+                trendingKeywords.slice(0, 4).map((kw, index) => {
+                  const colors = [
+                    'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-900/30',
+                    'bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-900/30',
+                    'bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-900/30',
+                    'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-900/30',
+                  ];
+                  const badgeColors = ['bg-blue-600', 'bg-purple-600', 'bg-green-600', 'bg-amber-600'];
+                  return (
+                    <div key={index} className={`p-3 rounded border ${colors[index % colors.length]}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-semibold">{kw.keyword}</span>
+                        <Badge className={`${badgeColors[index % badgeColors.length]} text-white`}>
+                          <TrendingUp className="h-3 w-3 mr-1" />
+                          +{Math.round(kw.growth || 0)}%
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        {(kw.growth || 0) > 50 ? 'Growing fast, maintain momentum' : 'Steady growth, amplify further'}
+                      </p>
+                      <div className="flex gap-2">
+                        <Badge variant="outline" className="text-xs">{kw.mentions} mentions</Badge>
+                        <Badge variant="outline" className="text-xs">{kw.search_volume?.toLocaleString() || 0}/mo</Badge>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-4">No trending keywords detected in this period.</p>
+              )}
             </div>
           </Card>
         </div>
       </div>
 
       {/* Content Performance by Topic */}
-      <div>
-        <h2 className="text-2xl font-bold mb-6">Content Performance by Topic Category</h2>
-        <Card className="p-6 border border-border">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 rounded bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30">
-              <div className="flex-1">
-                <div className="flex items-center gap-3 mb-2">
-                  <CheckCircle2 className="h-5 w-5 text-green-600" />
-                  <h4 className="font-semibold">Plant-Based Nutrition</h4>
-                  <Badge className="bg-green-600 text-white">Excellent</Badge>
-                </div>
-                <div className="grid grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground text-xs">Coverage</p>
-                    <p className="font-bold">94/100</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Mentions</p>
-                    <p className="font-bold">1,247</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Engagement</p>
-                    <p className="font-bold">92%</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Growth</p>
-                    <p className="font-bold text-green-600">+35%</p>
-                  </div>
-                </div>
-              </div>
-            </div>
+      {topicPerformance.length > 0 && (
+        <div>
+          <h2 className="text-2xl font-bold mb-6">Content Performance by Topic Category</h2>
+          <Card className="p-6 border border-border">
+            <div className="space-y-4">
+              {topicPerformance.slice(0, 6).map((topic, index) => {
+                const badgeInfo = getTopicBadgeColor(topic.coverage_score);
+                const rowColor = getTopicRowColor(topic.coverage_score);
+                const icon = getTopicIcon(topic.coverage_score);
 
-            <div className="flex items-center justify-between p-4 rounded bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-900/30">
-              <div className="flex-1">
-                <div className="flex items-center gap-3 mb-2">
-                  <CheckCircle2 className="h-5 w-5 text-blue-600" />
-                  <h4 className="font-semibold">Fitness & Performance</h4>
-                  <Badge className="bg-blue-600 text-white">Good</Badge>
-                </div>
-                <div className="grid grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground text-xs">Coverage</p>
-                    <p className="font-bold">87/100</p>
+                return (
+                  <div key={index} className={`flex items-center justify-between p-4 rounded border ${rowColor}`}>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        {icon}
+                        <h4 className="font-semibold">{topic.name}</h4>
+                        <Badge className={`${badgeInfo.bg} text-white`}>{badgeInfo.text}</Badge>
+                      </div>
+                      <div className="grid grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <p className="text-muted-foreground text-xs">Coverage</p>
+                          <p className="font-bold">{Math.round(topic.coverage_score)}/100</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Mentions</p>
+                          <p className="font-bold">{topic.mentions?.toLocaleString() || 0}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Sentiment</p>
+                          <p className="font-bold">{((topic.sentiment || 0) * 100).toFixed(0)}%</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Growth</p>
+                          <p className={`font-bold ${getTrendColor(topic.growth)}`}>
+                            {topic.growth > 0 ? '+' : ''}{Math.round(topic.growth)}%
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Mentions</p>
-                    <p className="font-bold">1,089</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Engagement</p>
-                    <p className="font-bold">88%</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Growth</p>
-                    <p className="font-bold text-blue-600">+28%</p>
-                  </div>
-                </div>
-              </div>
+                );
+              })}
             </div>
+          </Card>
+        </div>
+      )}
 
-            <div className="flex items-center justify-between p-4 rounded bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30">
-              <div className="flex-1">
-                <div className="flex items-center gap-3 mb-2">
-                  <AlertTriangle className="h-5 w-5 text-amber-600" />
-                  <h4 className="font-semibold">Sustainability & Environment</h4>
-                  <Badge className="bg-amber-600 text-white">Needs Work</Badge>
-                </div>
-                <div className="grid grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground text-xs">Coverage</p>
-                    <p className="font-bold">62/100</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Mentions</p>
-                    <p className="font-bold">412</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Engagement</p>
-                    <p className="font-bold">79%</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Growth</p>
-                    <p className="font-bold text-amber-600">+12%</p>
-                  </div>
-                </div>
-              </div>
+      {/* No Topics Message */}
+      {topicPerformance.length === 0 && (
+        <div>
+          <h2 className="text-2xl font-bold mb-6">Content Performance by Topic Category</h2>
+          <Card className="p-6 border border-border">
+            <div className="text-center py-12">
+              <Target className="h-12 w-12 text-muted-foreground mx-auto mb-3 opacity-50" />
+              <h3 className="text-lg font-semibold mb-2">No Topics Configured</h3>
+              <p className="text-muted-foreground">Add topics to your domain to track content performance by category.</p>
             </div>
-
-            <div className="flex items-center justify-between p-4 rounded bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/30">
-              <div className="flex-1">
-                <div className="flex items-center gap-3 mb-2">
-                  <AlertTriangle className="h-5 w-5 text-red-600" />
-                  <h4 className="font-semibold">Technology & Innovation</h4>
-                  <Badge variant="destructive">Critical Gap</Badge>
-                </div>
-                <div className="grid grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground text-xs">Coverage</p>
-                    <p className="font-bold">38/100</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Mentions</p>
-                    <p className="font-bold">187</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Engagement</p>
-                    <p className="font-bold">71%</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Growth</p>
-                    <p className="font-bold text-red-600">+5%</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* Competitor Content Comparison */}
-      <div>
-        <h2 className="text-2xl font-bold mb-6">Competitor Content Comparison</h2>
-        <Card className="p-6 border border-border">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-3 px-4 font-semibold">Topic Category</th>
-                  <th className="text-center py-3 px-4 font-semibold">Your Brand</th>
-                  <th className="text-center py-3 px-4 font-semibold">PlantPower</th>
-                  <th className="text-center py-3 px-4 font-semibold">GreenFuel</th>
-                  <th className="text-center py-3 px-4 font-semibold">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-b hover:bg-muted/30">
-                  <td className="py-3 px-4 font-medium">Plant-Based Nutrition</td>
-                  <td className="text-center py-3 px-4">
-                    <Badge className="bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400">94%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge variant="outline">82%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge variant="outline">78%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge className="bg-green-600 text-white">Leading</Badge>
-                  </td>
-                </tr>
-                <tr className="border-b hover:bg-muted/30">
-                  <td className="py-3 px-4 font-medium">Fitness & Performance</td>
-                  <td className="text-center py-3 px-4">
-                    <Badge className="bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400">87%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge variant="outline">79%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge variant="outline">85%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge className="bg-green-600 text-white">Leading</Badge>
-                  </td>
-                </tr>
-                <tr className="border-b hover:bg-muted/30">
-                  <td className="py-3 px-4 font-medium">Sustainability</td>
-                  <td className="text-center py-3 px-4">
-                    <Badge variant="outline">62%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">71%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">68%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge variant="secondary" className="bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">Behind</Badge>
-                  </td>
-                </tr>
-                <tr className="border-b hover:bg-muted/30">
-                  <td className="py-3 px-4 font-medium">Technology & AI</td>
-                  <td className="text-center py-3 px-4">
-                    <Badge variant="outline">38%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge className="bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400">52%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge variant="outline">41%</Badge>
-                  </td>
-                  <td className="text-center py-3 px-4">
-                    <Badge variant="destructive">Critical Gap</Badge>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      </div>
-
-      {/* Content Calendar Recommendations */}
-      <div>
-        <h2 className="text-2xl font-bold mb-6">30-Day Content Calendar</h2>
-        <Card className="p-6 border border-border">
-          <div className="space-y-3">
-            <div className="p-4 rounded bg-gradient-to-r from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-900/10 border-l-4 border-l-red-500">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <Calendar className="h-5 w-5 text-red-600" />
-                  <div>
-                    <h4 className="font-semibold">Week 1: Climate-Conscious Nutrition Launch</h4>
-                    <p className="text-xs text-muted-foreground">Critical gap - immediate priority</p>
-                  </div>
-                </div>
-                <Badge variant="destructive">Priority 1</Badge>
-              </div>
-              <div className="mt-3 space-y-1 text-sm">
-                <p className="flex items-center gap-2">
-                  <Plus className="h-3 w-3" />
-                  Create: "Ultimate Guide to Carbon Neutral Protein"
-                </p>
-                <p className="flex items-center gap-2">
-                  <Plus className="h-3 w-3" />
-                  Create: "Comparing Carbon Footprints of Protein Sources"
-                </p>
-                <p className="flex items-center gap-2">
-                  <Plus className="h-3 w-3" />
-                  Create: "Sustainable Packaging in Nutrition Industry"
-                </p>
-              </div>
-            </div>
-
-            <div className="p-4 rounded bg-gradient-to-r from-amber-50 to-amber-100 dark:from-amber-900/20 dark:to-amber-900/10 border-l-4 border-l-amber-500">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <Calendar className="h-5 w-5 text-amber-600" />
-                  <div>
-                    <h4 className="font-semibold">Week 2: AI-Powered Nutrition Series</h4>
-                    <p className="text-xs text-muted-foreground">High opportunity - emerging trend</p>
-                  </div>
-                </div>
-                <Badge className="bg-amber-600 text-white">Priority 2</Badge>
-              </div>
-              <div className="mt-3 space-y-1 text-sm">
-                <p className="flex items-center gap-2">
-                  <Plus className="h-3 w-3" />
-                  Create: "How AI Personalizes Your Nutrition Plan"
-                </p>
-                <p className="flex items-center gap-2">
-                  <Plus className="h-3 w-3" />
-                  Create: "Smart Meal Planning with AI Technology"
-                </p>
-              </div>
-            </div>
-
-            <div className="p-4 rounded bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-900/10 border-l-4 border-l-blue-500">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <Calendar className="h-5 w-5 text-blue-600" />
-                  <div>
-                    <h4 className="font-semibold">Week 3: Gut Health Deep Dive</h4>
-                    <p className="text-xs text-muted-foreground">Moderate opportunity - expand existing content</p>
-                  </div>
-                </div>
-                <Badge className="bg-blue-600 text-white">Priority 3</Badge>
-              </div>
-              <div className="mt-3 space-y-1 text-sm">
-                <p className="flex items-center gap-2">
-                  <Plus className="h-3 w-3" />
-                  Update: Expand existing microbiome content
-                </p>
-                <p className="flex items-center gap-2">
-                  <Plus className="h-3 w-3" />
-                  Create: "Probiotics for Athletes Guide"
-                </p>
-              </div>
-            </div>
-
-            <div className="p-4 rounded bg-gradient-to-r from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-900/10 border-l-4 border-l-green-500">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <Calendar className="h-5 w-5 text-green-600" />
-                  <div>
-                    <h4 className="font-semibold">Week 4: Amplify Top Performers</h4>
-                    <p className="text-xs text-muted-foreground">Maintain momentum on strong topics</p>
-                  </div>
-                </div>
-                <Badge className="bg-green-600 text-white">Maintenance</Badge>
-              </div>
-              <div className="mt-3 space-y-1 text-sm">
-                <p className="flex items-center gap-2">
-                  <Plus className="h-3 w-3" />
-                  Refresh: Top vegan protein powder content
-                </p>
-                <p className="flex items-center gap-2">
-                  <Plus className="h-3 w-3" />
-                  Update: Plant-based fitness guides with new data
-                </p>
-              </div>
-            </div>
-          </div>
-        </Card>
-      </div>
+          </Card>
+        </div>
+      )}
 
       {/* Strategic Recommendations */}
       <div>
         <h2 className="text-2xl font-bold mb-6">Strategic Content Recommendations</h2>
         <div className="space-y-3">
-          <div className="p-5 border-l-4 border-l-red-500 bg-red-50/50 dark:bg-red-900/10 rounded-lg">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center text-sm font-bold text-white flex-shrink-0">
-                1
-              </div>
-              <div className="flex-1">
-                <h4 className="font-semibold mb-2">Immediately Address Climate-Conscious Nutrition Gap</h4>
-                <p className="text-sm text-muted-foreground mb-3">
-                  This is your largest content gap with the highest opportunity score (95/100). Competitors are gaining ground. Launch comprehensive content series within 7 days to capture 12,400 monthly searches.
-                </p>
-                <div className="flex gap-2">
-                  <Badge variant="outline" className="text-xs">Timeline: 7 days</Badge>
-                  <Badge variant="outline" className="text-xs">Content Pieces: 5-7 articles</Badge>
-                  <Badge variant="outline" className="text-xs">Expected Traffic: +1,240/mo</Badge>
-                </div>
-              </div>
-            </div>
-          </div>
+          {recommendations.length > 0 ? (
+            recommendations.slice(0, 5).map((rec, index) => {
+              const colors = [
+                { border: 'border-l-red-500', bg: 'bg-red-50/50 dark:bg-red-900/10', badge: 'bg-red-600' },
+                { border: 'border-l-amber-500', bg: 'bg-amber-50/50 dark:bg-amber-900/10', badge: 'bg-amber-600' },
+                { border: 'border-l-green-500', bg: 'bg-green-50/50 dark:bg-green-900/10', badge: 'bg-green-600' },
+                { border: 'border-l-blue-500', bg: 'bg-blue-50/50 dark:bg-blue-900/10', badge: 'bg-blue-600' },
+                { border: 'border-l-purple-500', bg: 'bg-purple-50/50 dark:bg-purple-900/10', badge: 'bg-purple-600' },
+              ];
+              const color = colors[index % colors.length];
 
-          <div className="p-5 border-l-4 border-l-amber-500 bg-amber-50/50 dark:bg-amber-900/10 rounded-lg">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-amber-600 flex items-center justify-center text-sm font-bold text-white flex-shrink-0">
-                2
-              </div>
-              <div className="flex-1">
-                <h4 className="font-semibold mb-2">Establish AI & Technology Content Leadership</h4>
-                <p className="text-sm text-muted-foreground mb-3">
-                  PlantPower leads this category (52% vs your 38%). AI-powered meal planning is trending +94%. Create authoritative content to reclaim leadership and capture emerging audience.
-                </p>
-                <div className="flex gap-2">
-                  <Badge variant="outline" className="text-xs">Timeline: 14 days</Badge>
-                  <Badge variant="outline" className="text-xs">Content Pieces: 4-6 articles</Badge>
-                  <Badge variant="outline" className="text-xs">Expected Traffic: +890/mo</Badge>
+              return (
+                <div key={index} className={`p-5 border-l-4 ${color.border} ${color.bg} rounded-lg`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`w-8 h-8 rounded-full ${color.badge} flex items-center justify-center text-sm font-bold text-white flex-shrink-0`}>
+                      {rec.priority}
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold mb-2">{rec.title}</h4>
+                      <p className="text-sm text-muted-foreground mb-3">{rec.description}</p>
+                      <div className="flex gap-2 flex-wrap">
+                        <Badge variant="outline" className="text-xs">Timeline: {rec.timeline}</Badge>
+                        <Badge variant="outline" className="text-xs">Content: {rec.content_pieces}</Badge>
+                        <Badge variant="outline" className="text-xs">Expected: {rec.expected_traffic}</Badge>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          </div>
+              );
+            })
+          ) : (
+            // Generate default recommendations based on data
+            <div className="space-y-3">
+              {contentGaps.length > 0 && (
+                <div className="p-5 border-l-4 border-l-red-500 bg-red-50/50 dark:bg-red-900/10 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center text-sm font-bold text-white flex-shrink-0">1</div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold mb-2">Address Top Content Gaps</h4>
+                      <p className="text-sm text-muted-foreground mb-3">
+                        You have {contentGaps.length} content gap{contentGaps.length > 1 ? 's' : ''} identified.
+                        Focus on "{contentGaps[0]?.keyword}" first with an opportunity score of {contentGaps[0]?.opportunity_score}/100.
+                      </p>
+                      <div className="flex gap-2">
+                        <Badge variant="outline" className="text-xs">Priority: High</Badge>
+                        <Badge variant="outline" className="text-xs">Est. Traffic: +{contentGaps[0]?.estimated_traffic?.toLocaleString() || 0}/mo</Badge>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
-          <div className="p-5 border-l-4 border-l-green-500 bg-green-50/50 dark:bg-green-900/10 rounded-lg">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center text-sm font-bold text-white flex-shrink-0">
-                3
-              </div>
-              <div className="flex-1">
-                <h4 className="font-semibold mb-2">Double Down on Plant-Based Nutrition Excellence</h4>
-                <p className="text-sm text-muted-foreground mb-3">
-                  Your strongest category (94% coverage, 1,247 mentions, +35% growth). Maintain dominance by refreshing top content quarterly and expanding into adjacent topics before competitors can catch up.
-                </p>
-                <div className="flex gap-2">
-                  <Badge variant="outline" className="text-xs">Timeline: Ongoing</Badge>
-                  <Badge variant="outline" className="text-xs">Refresh Cycle: Quarterly</Badge>
-                  <Badge variant="outline" className="text-xs">Status: Market Leader</Badge>
+              {topicPerformance.filter(t => t.coverage_score < 60).length > 0 && (
+                <div className="p-5 border-l-4 border-l-amber-500 bg-amber-50/50 dark:bg-amber-900/10 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-amber-600 flex items-center justify-center text-sm font-bold text-white flex-shrink-0">2</div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold mb-2">Improve Low-Performing Topics</h4>
+                      <p className="text-sm text-muted-foreground mb-3">
+                        {topicPerformance.filter(t => t.coverage_score < 60).length} topic{topicPerformance.filter(t => t.coverage_score < 60).length > 1 ? 's need' : ' needs'} attention.
+                        Focus on improving coverage to increase visibility.
+                      </p>
+                      <div className="flex gap-2">
+                        <Badge variant="outline" className="text-xs">Priority: Medium</Badge>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {trendingKeywords.length > 0 && (
+                <div className="p-5 border-l-4 border-l-green-500 bg-green-50/50 dark:bg-green-900/10 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center text-sm font-bold text-white flex-shrink-0">3</div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold mb-2">Capitalize on Trending Keywords</h4>
+                      <p className="text-sm text-muted-foreground mb-3">
+                        {trendingKeywords.length} keyword{trendingKeywords.length > 1 ? 's are' : ' is'} showing growth momentum.
+                        Amplify content around these topics to maintain momentum.
+                      </p>
+                      <div className="flex gap-2">
+                        <Badge variant="outline" className="text-xs">Priority: High</Badge>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {contentGaps.length === 0 && topicPerformance.length === 0 && trendingKeywords.length === 0 && (
+                <div className="text-center py-8">
+                  <Lightbulb className="h-12 w-12 text-muted-foreground mx-auto mb-3 opacity-50" />
+                  <h3 className="text-lg font-semibold mb-2">Add More Data for Recommendations</h3>
+                  <p className="text-muted-foreground">Configure topics, keywords, and prompts to receive strategic content recommendations.</p>
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </div>
       </div>
 
