@@ -77,8 +77,8 @@ class ContentParser:
             if len(extracted_text) > self.max_content_length:
                 extracted_text = extracted_text[:self.max_content_length] + "..."
 
-            # Extract metadata
-            metadata = trafilatura.extract_metadata(html, url=url)
+            # Extract metadata (trafilatura 2.0+ doesn't take url param)
+            metadata = trafilatura.extract_metadata(html)
 
             page_title = ""
             meta_description = ""

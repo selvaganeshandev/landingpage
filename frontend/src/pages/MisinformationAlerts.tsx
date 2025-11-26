@@ -69,6 +69,8 @@ interface DashboardData {
     response_time_change: number;
     resolved_change: number;
   };
+  scan_status: 'NOT_READY' | 'READY' | 'SCANNING' | 'SCANNED' | 'NO_ISSUES';
+  last_scan_at: string | null;
 }
 
 
@@ -203,6 +205,12 @@ const MisinformationAlerts = () => {
       setDashboardData(dashboardRes as DashboardData);
       setActiveAlerts((activeRes as any).results || []);
       setResolvedAlerts((resolvedRes as any).results || []);
+
+      // Reset scanning state based on backend status
+      const status = (dashboardRes as DashboardData).scan_status;
+      if (status && status !== 'SCANNING') {
+        setScanning(false);
+      }
     } catch (err: any) {
       console.error('Error fetching misinformation data:', err);
       setError(err.message || 'Failed to load misinformation data');
@@ -220,22 +228,24 @@ const MisinformationAlerts = () => {
     if (!selectedDomain?.id) return;
 
     setScanning(true);
+    // Show toast immediately when user clicks
+    toast({
+      title: "Scan Started",
+      description: "Misinformation scan has been initiated. This may take a few minutes."
+    });
+
     try {
       await apiClient.triggerMisinformationScan({ domain_id: selectedDomain.id });
-      toast({
-        title: "Scan Started",
-        description: "Misinformation scan has been initiated. This may take a few minutes."
-      });
-      // Refresh data after a delay
+      // Refresh data after a delay to get updated scan_status
       setTimeout(() => fetchData(), 5000);
+      // Keep scanning=true until fetchData updates scan_status from backend
     } catch (err: any) {
       toast({
         title: "Scan Failed",
         description: err.message || 'Failed to start scan',
         variant: "destructive"
       });
-    } finally {
-      setScanning(false);
+      setScanning(false); // Only reset on error
     }
   };
 
@@ -321,6 +331,98 @@ const MisinformationAlerts = () => {
       description: "Generating misinformation report...",
     });
   };
+
+  // Show "Start Scan" card when status is NOT_READY (first time / no data)
+  if (dashboardData?.scan_status === 'NOT_READY' && !scanning) {
+    return (
+      <div className="p-8 space-y-6 bg-background animate-fade-in">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold tracking-tight">Misinformation Alerts</h1>
+              <p className="text-muted-foreground mt-2">
+                Detect and correct AI hallucinations about your brand
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <Card className="p-8 border border-border">
+          <div className="flex flex-col items-center text-center space-y-6 max-w-2xl mx-auto">
+            <div className="p-4 rounded-full bg-muted/50">
+              <Shield className="h-12 w-12 text-primary" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold">Start Misinformation Detection</h2>
+              <p className="text-muted-foreground">
+                Our AI will scan all citations and links from your prompt analytics to detect misinformation, broken links, and outdated content about your brand.
+              </p>
+            </div>
+
+            <Button
+              onClick={handleTriggerScan}
+              disabled={scanning || !selectedDomain}
+              size="lg"
+              className="gradient-primary"
+            >
+              {scanning ? (
+                <>
+                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                  Starting Scan...
+                </>
+              ) : (
+                <>
+                  <Play className="h-5 w-5 mr-2" />
+                  Start Scan
+                </>
+              )}
+            </Button>
+
+            <p className="text-sm text-muted-foreground">
+              Scan typically takes 2-5 minutes depending on the number of citations.
+            </p>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  // Show scanning progress state
+  if (dashboardData?.scan_status === 'SCANNING' || scanning) {
+    return (
+      <div className="p-8 space-y-6 bg-background animate-fade-in">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold tracking-tight">Misinformation Alerts</h1>
+              <p className="text-muted-foreground mt-2">
+                Detect and correct AI hallucinations about your brand
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <Card className="p-8 border border-border">
+          <div className="flex flex-col items-center text-center space-y-6 max-w-2xl mx-auto">
+            <div className="p-4 rounded-full bg-primary/10">
+              <Loader2 className="h-12 w-12 text-primary animate-spin" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold">Scanning in Progress</h2>
+              <p className="text-muted-foreground">
+                We're analyzing citations and comparing content to detect any misinformation about your brand. This may take a few minutes.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              <span>Please wait while we complete the scan...</span>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">

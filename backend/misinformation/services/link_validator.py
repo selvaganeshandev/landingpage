@@ -17,7 +17,7 @@ class LinkValidator:
     Uses HEAD requests for efficiency.
     """
 
-    DEFAULT_TIMEOUT = 10
+    DEFAULT_TIMEOUT = 5  # Reduced from 10 for faster scanning
 
     # Status codes that indicate a broken link
     BROKEN_STATUS_CODES = {

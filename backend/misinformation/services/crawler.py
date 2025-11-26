@@ -1,13 +1,13 @@
 """
 Web Crawler Service
-Crawls URLs with Cloudflare bypass support using cloudscraper.
+Crawls URLs using ScrapingDog API for reliable scraping with anti-bot bypass.
 """
 import logging
 import time
 from typing import Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 
-import cloudscraper
+import requests
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -15,30 +15,24 @@ logger = logging.getLogger(__name__)
 
 class WebCrawler:
     """
-    Web crawler with Cloudflare bypass support.
-    Uses cloudscraper for handling anti-bot protection.
+    Web crawler using ScrapingDog API.
+    Provides reliable scraping with Cloudflare and anti-bot bypass.
     """
 
-    # Default configuration
-    DEFAULT_TIMEOUT = 30
-    DEFAULT_MAX_RETRIES = 3
-    DEFAULT_RATE_LIMIT = 10  # requests per minute
-    DEFAULT_MAX_CONTENT_LENGTH = 50000  # 50KB of text
+    # ScrapingDog API endpoint
+    API_URL = "https://api.scrapingdog.com/scrape"
 
-    # Common user agents for rotation
-    USER_AGENTS = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    ]
+    # Default configuration
+    DEFAULT_TIMEOUT = 30  # seconds (ScrapingDog may take longer)
+    DEFAULT_MAX_RETRIES = 2
+    DEFAULT_RATE_LIMIT = 60  # requests per minute
 
     def __init__(
         self,
         timeout: int = None,
         max_retries: int = None,
-        rate_limit: int = None
+        rate_limit: int = None,
+        use_dynamic: bool = False
     ):
         """
         Initialize the web crawler.
@@ -47,7 +41,12 @@ class WebCrawler:
             timeout: Request timeout in seconds
             max_retries: Maximum number of retry attempts
             rate_limit: Maximum requests per minute
+            use_dynamic: Whether to use dynamic rendering (JavaScript execution)
         """
+        self.api_key = getattr(settings, 'SCRAPINGDOG_API_KEY', None)
+        if not self.api_key:
+            logger.warning("SCRAPINGDOG_API_KEY not configured - crawling will fail")
+
         self.timeout = timeout or getattr(
             settings, 'MISINFO_CRAWL_TIMEOUT', self.DEFAULT_TIMEOUT
         )
@@ -57,41 +56,13 @@ class WebCrawler:
         self.rate_limit = rate_limit or getattr(
             settings, 'MISINFO_CRAWL_RATE_LIMIT', self.DEFAULT_RATE_LIMIT
         )
+        self.use_dynamic = use_dynamic
 
         self._last_request_time = 0
         self._request_count = 0
-        self._user_agent_index = 0
 
-        # Create cloudscraper session
-        self.scraper = self._create_scraper()
-
-    def _create_scraper(self) -> cloudscraper.CloudScraper:
-        """
-        Create a cloudscraper session with browser emulation.
-
-        Returns:
-            CloudScraper instance
-        """
-        scraper = cloudscraper.create_scraper(
-            browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'desktop': True
-            },
-            delay=10  # Delay for JavaScript challenge solving
-        )
-        return scraper
-
-    def _get_next_user_agent(self) -> str:
-        """
-        Get the next user agent in rotation.
-
-        Returns:
-            User agent string
-        """
-        ua = self.USER_AGENTS[self._user_agent_index]
-        self._user_agent_index = (self._user_agent_index + 1) % len(self.USER_AGENTS)
-        return ua
+        # Create requests session
+        self.session = requests.Session()
 
     def _rate_limit_wait(self):
         """
@@ -110,12 +81,13 @@ class WebCrawler:
 
         self._last_request_time = time.time()
 
-    def crawl(self, url: str) -> Tuple[Optional[str], int, Optional[str]]:
+    def crawl(self, url: str, dynamic: bool = None) -> Tuple[Optional[str], int, Optional[str]]:
         """
-        Crawl a URL and return the HTML content.
+        Crawl a URL and return the HTML content using ScrapingDog API.
 
         Args:
             url: The URL to crawl
+            dynamic: Override default dynamic rendering setting
 
         Returns:
             Tuple of (html_content, http_status_code, error_message)
@@ -123,58 +95,70 @@ class WebCrawler:
             - http_status_code: HTTP status code or 0 if connection failed
             - error_message: Error message or None if successful
         """
+        if not self.api_key:
+            return None, 0, "SCRAPINGDOG_API_KEY not configured"
+
+        use_dynamic = dynamic if dynamic is not None else self.use_dynamic
+
         for attempt in range(self.max_retries):
             try:
                 self._rate_limit_wait()
 
-                # Update headers with rotated user agent
-                headers = {
-                    'User-Agent': self._get_next_user_agent(),
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'DNT': '1',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1',
+                # Build ScrapingDog API parameters
+                params = {
+                    "api_key": self.api_key,
+                    "url": url,
+                    "dynamic": "true" if use_dynamic else "false"
                 }
 
-                logger.info(f"Crawling URL: {url} (attempt {attempt + 1}/{self.max_retries})")
+                logger.debug(f"Crawling URL with ScrapingDog: {url} (dynamic={use_dynamic})")
 
-                response = self.scraper.get(
-                    url,
-                    headers=headers,
-                    timeout=self.timeout,
-                    allow_redirects=True
+                response = self.session.get(
+                    self.API_URL,
+                    params=params,
+                    timeout=self.timeout
                 )
 
                 status_code = response.status_code
 
                 # Check for successful response
                 if status_code == 200:
-                    # Check content type
-                    content_type = response.headers.get('Content-Type', '').lower()
-                    if 'text/html' not in content_type and 'text/plain' not in content_type:
-                        logger.warning(f"Non-HTML content type: {content_type} for {url}")
-                        return None, status_code, f"Non-HTML content type: {content_type}"
-
                     html = response.text
-                    logger.info(f"Successfully crawled {url} ({len(html)} chars)")
-                    return html, status_code, None
 
-                elif status_code == 403:
-                    # Cloudflare or access denied
-                    logger.warning(f"Access denied (403) for {url}")
-                    if attempt < self.max_retries - 1:
-                        time.sleep(2 ** attempt)  # Exponential backoff
-                        continue
-                    return None, status_code, "Access denied - possibly blocked by firewall"
+                    # Check if ScrapingDog returned an error in the response
+                    if html.startswith('{"error"'):
+                        try:
+                            error_data = response.json()
+                            error_msg = error_data.get('error', 'Unknown ScrapingDog error')
+                            logger.warning(f"ScrapingDog error for {url}: {error_msg}")
+                            return None, 0, error_msg
+                        except Exception:
+                            pass
+
+                    logger.info(f"Successfully crawled {url} ({len(html)} chars)")
+                    return html, 200, None
+
+                elif status_code == 401:
+                    logger.error("ScrapingDog API key invalid or expired")
+                    return None, status_code, "Invalid API key"
+
+                elif status_code == 402:
+                    logger.error("ScrapingDog API credits exhausted")
+                    return None, status_code, "API credits exhausted"
 
                 elif status_code == 404:
                     logger.info(f"Page not found (404): {url}")
-                    return None, status_code, "Page not found"
+                    return None, 404, "Page not found"
+
+                elif status_code == 429:
+                    logger.warning("ScrapingDog rate limit exceeded")
+                    if attempt < self.max_retries - 1:
+                        time.sleep(5 * (attempt + 1))
+                        continue
+                    return None, status_code, "Rate limit exceeded"
 
                 elif status_code >= 500:
-                    logger.warning(f"Server error ({status_code}) for {url}")
+                    logger.warning(f"ScrapingDog server error ({status_code}) for {url}")
                     if attempt < self.max_retries - 1:
                         time.sleep(2 ** attempt)
                         continue
@@ -184,13 +168,18 @@ class WebCrawler:
                     logger.warning(f"Unexpected status {status_code} for {url}")
                     return None, status_code, f"HTTP {status_code}"
 
-            except cloudscraper.exceptions.CloudflareChallengeError as e:
-                logger.warning(f"Cloudflare challenge failed for {url}: {e}")
+            except requests.Timeout:
+                logger.warning(f"Timeout crawling {url}")
+                if attempt < self.max_retries - 1:
+                    continue
+                return None, 0, "Connection timeout"
+
+            except requests.ConnectionError as e:
+                logger.error(f"Connection error crawling {url}: {e}")
                 if attempt < self.max_retries - 1:
                     time.sleep(2 ** attempt)
-                    self.scraper = self._create_scraper()  # Create new scraper
                     continue
-                return None, 0, "Cloudflare challenge failed - site is protected"
+                return None, 0, "Connection failed"
 
             except Exception as e:
                 logger.error(f"Error crawling {url}: {e}")
@@ -201,10 +190,23 @@ class WebCrawler:
 
         return None, 0, "Max retries exceeded"
 
+    def crawl_dynamic(self, url: str) -> Tuple[Optional[str], int, Optional[str]]:
+        """
+        Crawl a URL with JavaScript rendering enabled.
+        Use this for pages that require JavaScript to load content.
+
+        Args:
+            url: The URL to crawl
+
+        Returns:
+            Tuple of (html_content, http_status_code, error_message)
+        """
+        return self.crawl(url, dynamic=True)
+
     def is_crawlable(self, url: str) -> bool:
         """
         Quick check if a URL is likely crawlable.
-        Does a HEAD request to check availability.
+        Does a simple HEAD request (not through ScrapingDog to save credits).
 
         Args:
             url: The URL to check
@@ -215,10 +217,13 @@ class WebCrawler:
         try:
             self._rate_limit_wait()
 
-            response = self.scraper.head(
+            response = self.session.head(
                 url,
                 timeout=10,
-                allow_redirects=True
+                allow_redirects=True,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
             )
 
             return response.status_code == 200

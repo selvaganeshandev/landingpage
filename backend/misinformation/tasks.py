@@ -74,6 +74,10 @@ class MisinformationScanner:
             started_at=timezone.now()
         )
 
+        # Update domain status to scanning
+        self.domain.misinformation_scan_status = 'SCANNING'
+        self.domain.save(update_fields=['misinformation_scan_status'])
+
         try:
             # Get prompt analytics to scan
             if prompt_analytics_ids:
@@ -108,6 +112,14 @@ class MisinformationScanner:
             self.scan.total_alerts_generated = self.alerts_generated
             self.scan.save()
 
+            # Update domain status based on results
+            if self.alerts_generated > 0:
+                self.domain.misinformation_scan_status = 'SCANNED'
+            else:
+                self.domain.misinformation_scan_status = 'NO_ISSUES'
+            self.domain.last_misinformation_scan_at = timezone.now()
+            self.domain.save(update_fields=['misinformation_scan_status', 'last_misinformation_scan_at'])
+
             # Update daily analytics
             self._update_daily_analytics()
 
@@ -124,6 +136,10 @@ class MisinformationScanner:
             self.scan.error_message = str(e)
             self.scan.completed_at = timezone.now()
             self.scan.save()
+
+            # Reset domain status on failure
+            self.domain.misinformation_scan_status = 'READY'
+            self.domain.save(update_fields=['misinformation_scan_status'])
             raise
 
     def _process_prompt_analytics(self, pa: PromptAnalytics):

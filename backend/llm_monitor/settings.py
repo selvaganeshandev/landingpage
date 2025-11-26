@@ -207,6 +207,9 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 # OpenAI API Configuration
 OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 
+# ScrapingDog API Configuration (for web crawling)
+SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
+
 # Google OAuth Configuration
 GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default=None)
 GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default=None)

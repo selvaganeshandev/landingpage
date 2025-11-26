@@ -11,6 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from domains.models import Domain
+from prompts.models import PromptAnalytics
 from .models import (
     MisinformationScan,
     MisinformationAlert,
@@ -149,6 +150,9 @@ def dashboard(request):
         'trends': trends,
         'recent_alerts': MisinformationAlertListSerializer(recent_alerts, many=True).data,
         'trend_data': MisinformationAnalyticsSerializer(trend, many=True).data,
+        # Domain scan status info
+        'scan_status': domain.misinformation_scan_status,
+        'last_scan_at': domain.last_misinformation_scan_at,
     }
 
     return Response(data)
@@ -289,6 +293,30 @@ def trigger_scan(request):
             },
             status=status.HTTP_409_CONFLICT
         )
+
+    # Check if domain has any prompt analytics with citations to scan
+    has_data = PromptAnalytics.objects.filter(
+        prompt__group__domain_id=domain_id,
+        track_status='COMP',
+        is_mention=True
+    ).exists()
+
+    if not has_data:
+        # Update domain status to NOT_READY
+        domain.misinformation_scan_status = 'NOT_READY'
+        domain.save(update_fields=['misinformation_scan_status'])
+        return Response(
+            {
+                'error': 'No prompt data available for scanning. Please wait for prompts to be tracked first.',
+                'status': 'NOT_READY'
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Domain has data, update status to READY if not already scanning
+    if domain.misinformation_scan_status == 'NOT_READY':
+        domain.misinformation_scan_status = 'READY'
+        domain.save(update_fields=['misinformation_scan_status'])
 
     try:
         scan = run_misinformation_scan(domain_id, prompt_analytics_ids)
