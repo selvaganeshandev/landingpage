@@ -497,17 +497,11 @@ const MisinformationAlerts = () => {
         <TabsContent value="active" className="space-y-6">
           <Card className="border border-border">
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Active Misinformation Cases</CardTitle>
-                  <CardDescription>
-                    Detected inaccuracies requiring attention
-                  </CardDescription>
-                </div>
-                <Button variant="outline" onClick={handleExportReport}>
-                  <FileText className="h-4 w-4 mr-2" />
-                  Export Report
-                </Button>
+              <div>
+                <CardTitle>Active Misinformation Cases</CardTitle>
+                <CardDescription>
+                  Detected inaccuracies requiring attention
+                </CardDescription>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">

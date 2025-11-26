@@ -197,7 +197,7 @@ const Topics = () => {
         // Fetch topic trends (time-series data)
         if (transformedTopics.length > 0) {
           try {
-            const trendsData: any = await apiClient.getTopicTrends(undefined, 90);
+            const trendsData: any = await apiClient.getTopicTrends({ domainId: selectedDomain.id, days: 90 });
             // Ensure trendsData is an array
             const dataArray = Array.isArray(trendsData) ? trendsData : (trendsData?.results || []);
             

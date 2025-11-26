@@ -18,7 +18,6 @@ import {
   CheckCircle2,
   Edit,
   Settings,
-  ArrowLeft,
   List
 } from "lucide-react";
 import {
@@ -184,20 +183,11 @@ const ContentCalendar = () => {
     <div className="p-8 space-y-6 bg-background animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => navigate('/content-gaps')}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight font-inter">Content Calendar</h1>
-            <p className="text-muted-foreground mt-1">
-              AI-powered content generation prioritized by opportunity
-            </p>
-          </div>
+        <div>
+          <h1 className="text-4xl font-bold tracking-tight">Content Planner</h1>
+          <p className="text-muted-foreground mt-1">
+            AI-powered content generation prioritized by opportunity
+          </p>
         </div>
         <div className="flex gap-3">
           <Button onClick={handleGenerateContent} className="gradient-primary shadow-md shadow-primary/20">
@@ -256,10 +246,16 @@ const ContentCalendar = () => {
       </div>
 
       <Tabs value={selectedView} onValueChange={setSelectedView}>
-        <TabsList>
-          <TabsTrigger value="list"><List className="h-4 w-4 mr-2" />List View</TabsTrigger>
-          <TabsTrigger value="calendar"><CalendarIcon className="h-4 w-4 mr-2" />Calendar View</TabsTrigger>
-          <TabsTrigger value="pipeline"><Target className="h-4 w-4 mr-2" />Content Pipeline</TabsTrigger>
+        <TabsList className="bg-muted/50 p-1 border border-border">
+          <TabsTrigger value="list" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
+            <List className="h-4 w-4 mr-2" />List View
+          </TabsTrigger>
+          <TabsTrigger value="calendar" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
+            <CalendarIcon className="h-4 w-4 mr-2" />Calendar View
+          </TabsTrigger>
+          <TabsTrigger value="pipeline" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
+            <Target className="h-4 w-4 mr-2" />Content Pipeline
+          </TabsTrigger>
         </TabsList>
 
         {/* List View */}

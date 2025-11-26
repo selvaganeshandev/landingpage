@@ -731,10 +731,12 @@ export const apiClient = {
     return apiRequest(`/topics/topics/${topicId}/optimize/`);
   },
 
-  getTopicTrends: (topicId?: number, days: number = 30) => {
-    const params = new URLSearchParams({ days: String(days) });
-    if (topicId) params.append('topic_id', String(topicId));
-    return apiRequest(`/topics/topic-analytics/trends/?${params.toString()}`);
+  getTopicTrends: (params: { domainId?: number; topicId?: number; days?: number } = {}) => {
+    const { domainId, topicId, days = 30 } = params;
+    const urlParams = new URLSearchParams({ days: String(days) });
+    if (domainId) urlParams.append('domain_id', String(domainId));
+    if (topicId) urlParams.append('topic_id', String(topicId));
+    return apiRequest(`/topics/topic-analytics/trends/?${urlParams.toString()}`);
   },
 
   // New dedicated analytics endpoints for Topics page

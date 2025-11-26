@@ -32,21 +32,23 @@ else
 fi
 echo ""
 
-# Activate virtual environment
-echo -e "${YELLOW}[2/5] Activating virtual environment...${NC}"
-VENV_PATH="/home/hts-005/Documents/python/v3.12/env"
-if [ -f "$VENV_PATH/bin/activate" ]; then
-    source "$VENV_PATH/bin/activate"
-    echo -e "${GREEN}✓ Virtual environment activated${NC}"
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_PYTHON="$SCRIPT_DIR/backend/.venv/bin/python3"
+ENGINE_DIR="$SCRIPT_DIR/engine"
+
+# Check Python environment
+echo -e "${YELLOW}[2/5] Checking Python environment...${NC}"
+if [ -f "$VENV_PYTHON" ]; then
+    echo -e "${GREEN}✓ Python environment ready${NC}"
 else
-    echo -e "${RED}✗ Virtual environment not found at $VENV_PATH${NC}"
+    echo -e "${RED}✗ Virtual environment not found at $VENV_PYTHON${NC}"
     exit 1
 fi
 echo ""
 
 # Navigate to engine directory
 echo -e "${YELLOW}[3/5] Navigating to engine directory...${NC}"
-ENGINE_DIR="/home/hts-005/Documents/python/v3.12/llm-monitor/engine"
 if [ -d "$ENGINE_DIR" ]; then
     cd "$ENGINE_DIR"
     echo -e "${GREEN}✓ Changed to engine directory${NC}"
@@ -58,13 +60,13 @@ echo ""
 
 # Check Celery installation
 echo -e "${YELLOW}[4/5] Checking Celery installation...${NC}"
-if python -c "import celery" 2> /dev/null; then
-    CELERY_VERSION=$(python -c "import celery; print(celery.__version__)")
+if "$VENV_PYTHON" -c "import celery" 2> /dev/null; then
+    CELERY_VERSION=$("$VENV_PYTHON" -c "import celery; print(celery.__version__)")
     echo -e "${GREEN}✓ Celery $CELERY_VERSION installed${NC}"
 else
     echo -e "${RED}✗ Celery not installed${NC}"
     echo -e "${YELLOW}Installing Celery...${NC}"
-    pip install celery==5.3.4 redis==5.0.1
+    "$VENV_PYTHON" -m pip install celery==5.3.4 redis==5.0.1
 fi
 echo ""
 
@@ -84,41 +86,44 @@ read -p "Enter choice [1-4]: " choice
 case $choice in
     1)
         echo -e "${GREEN}Starting Celery Worker...${NC}"
-        celery -A llm_monitor_engine worker --loglevel=info
+        "$VENV_PYTHON" -m celery -A llm_monitor_engine worker --loglevel=info
         ;;
     2)
         echo -e "${GREEN}Starting Celery Beat...${NC}"
-        celery -A llm_monitor_engine beat --loglevel=info
+        "$VENV_PYTHON" -m celery -A llm_monitor_engine beat --loglevel=info
         ;;
     3)
         echo -e "${GREEN}Starting Celery Worker in background...${NC}"
-        celery -A llm_monitor_engine worker --loglevel=info --logfile=/tmp/celery-worker.log --detach
+        nohup "$VENV_PYTHON" -m celery -A llm_monitor_engine worker --loglevel=info > /tmp/celery-worker.log 2>&1 &
+        WORKER_PID=$!
         sleep 2
         echo -e "${GREEN}Starting Celery Beat in background...${NC}"
-        celery -A llm_monitor_engine beat --loglevel=info --logfile=/tmp/celery-beat.log --detach
+        nohup "$VENV_PYTHON" -m celery -A llm_monitor_engine beat --loglevel=info > /tmp/celery-beat.log 2>&1 &
+        BEAT_PID=$!
         sleep 2
-        echo -e "${GREEN}✓ Celery Worker and Beat started in background${NC}"
+        echo -e "${GREEN}✓ Celery Worker started (PID: $WORKER_PID)${NC}"
+        echo -e "${GREEN}✓ Celery Beat started (PID: $BEAT_PID)${NC}"
         echo -e "${YELLOW}Worker log: /tmp/celery-worker.log${NC}"
         echo -e "${YELLOW}Beat log: /tmp/celery-beat.log${NC}"
         echo ""
-        echo -e "${YELLOW}To stop: pkill -f 'celery worker' && pkill -f 'celery beat'${NC}"
+        echo -e "${YELLOW}To stop: pkill -f 'celery.*worker' && pkill -f 'celery.*beat'${NC}"
         ;;
     4)
         # Check if Flower is installed
-        if python -c "import flower" 2> /dev/null; then
+        if "$VENV_PYTHON" -c "import flower" 2> /dev/null; then
             echo -e "${GREEN}Starting Celery Worker...${NC}"
-            celery -A llm_monitor_engine worker --loglevel=info --detach --logfile=/tmp/celery-worker.log
+            nohup "$VENV_PYTHON" -m celery -A llm_monitor_engine worker --loglevel=info > /tmp/celery-worker.log 2>&1 &
             sleep 2
             echo -e "${GREEN}Starting Flower monitoring...${NC}"
-            celery -A llm_monitor_engine flower --port=5555
+            "$VENV_PYTHON" -m celery -A llm_monitor_engine flower --port=5555
         else
             echo -e "${YELLOW}Flower not installed. Installing...${NC}"
-            pip install flower
+            "$VENV_PYTHON" -m pip install flower
             echo -e "${GREEN}Starting Celery Worker...${NC}"
-            celery -A llm_monitor_engine worker --loglevel=info --detach --logfile=/tmp/celery-worker.log
+            nohup "$VENV_PYTHON" -m celery -A llm_monitor_engine worker --loglevel=info > /tmp/celery-worker.log 2>&1 &
             sleep 2
             echo -e "${GREEN}Starting Flower monitoring...${NC}"
-            celery -A llm_monitor_engine flower --port=5555
+            "$VENV_PYTHON" -m celery -A llm_monitor_engine flower --port=5555
         fi
         ;;
     *)
