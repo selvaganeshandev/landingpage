@@ -22,18 +22,36 @@ import {
   AlertCircle
 } from "lucide-react";
 
-interface MisinformationCase {
+interface MisinformationAlert {
   id: number;
-  title: string;
-  platform: string;
-  severity: string;
-  correctInfo: string;
+  alert_type: 'misinformation' | 'broken_link' | 'outdated';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  status: 'new' | 'reviewed' | 'resolved' | 'dismissed';
+  llm_claim: string;
+  source_content?: string;
+  explanation?: string;
+  created_at: string;
+  reviewed_at?: string;
+  citation_url?: {
+    url: string;
+    crawl_status: string;
+  };
+  prompt?: {
+    id: number;
+    prompt_text: string;
+  };
 }
+
+const alertTypeLabels: Record<string, string> = {
+  misinformation: 'Misinformation',
+  broken_link: 'Broken Link',
+  outdated: 'Outdated Information'
+};
 
 interface MisinformationActionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  misinformationCase: MisinformationCase | null;
+  misinformationCase: MisinformationAlert | null;
 }
 
 export function MisinformationActionDialog({
@@ -60,9 +78,9 @@ export function MisinformationActionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Take Action on Misinformation</DialogTitle>
+          <DialogTitle>Take Action on {alertTypeLabels[misinformationCase.alert_type] || 'Issue'}</DialogTitle>
           <DialogDescription>
-            Choose how to address: {misinformationCase.title}
+            Choose how to address this {misinformationCase.alert_type.replace('_', ' ')} issue
           </DialogDescription>
         </DialogHeader>
 
@@ -71,10 +89,10 @@ export function MisinformationActionDialog({
           <div className="p-4 bg-muted rounded-lg">
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-medium">Case #{misinformationCase.id}</p>
-              <Badge variant="secondary">{misinformationCase.platform}</Badge>
+              <Badge variant="secondary">{alertTypeLabels[misinformationCase.alert_type]}</Badge>
             </div>
             <p className="text-sm text-muted-foreground">
-              {misinformationCase.title}
+              {misinformationCase.explanation || misinformationCase.llm_claim}
             </p>
           </div>
 
@@ -142,14 +160,27 @@ export function MisinformationActionDialog({
 
           <Separator />
 
-          {/* Correct Information Reference */}
-          <div className="p-4 bg-success/10 border border-success/20 rounded-lg">
-            <div className="flex items-start gap-2 mb-2">
-              <CheckCircle className="h-4 w-4 text-success mt-0.5" />
-              <p className="text-sm font-medium text-success">Correct Information to Submit</p>
+          {/* Source Content Reference */}
+          {misinformationCase.source_content && (
+            <div className="p-4 bg-success/10 border border-success/20 rounded-lg">
+              <div className="flex items-start gap-2 mb-2">
+                <CheckCircle className="h-4 w-4 text-success mt-0.5" />
+                <p className="text-sm font-medium text-success">What the Source Actually Says</p>
+              </div>
+              <p className="text-sm pl-6">{misinformationCase.source_content}</p>
             </div>
-            <p className="text-sm pl-6">{misinformationCase.correctInfo}</p>
-          </div>
+          )}
+
+          {/* LLM Claim Reference */}
+          {misinformationCase.llm_claim && (
+            <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+              <div className="flex items-start gap-2 mb-2">
+                <AlertCircle className="h-4 w-4 text-destructive mt-0.5" />
+                <p className="text-sm font-medium text-destructive">What the LLM Claimed</p>
+              </div>
+              <p className="text-sm pl-6">{misinformationCase.llm_claim}</p>
+            </div>
+          )}
 
           {/* Additional Notes */}
           <div className="space-y-2">
@@ -171,7 +202,7 @@ export function MisinformationActionDialog({
                 <p className="font-medium">What happens next:</p>
                 {actionType === "submit-correction" && (
                   <p className="text-muted-foreground">
-                    A correction request will be automatically submitted to {misinformationCase.platform} with the accurate information and supporting documentation.
+                    A correction request will be documented with the accurate information and supporting documentation for follow-up with AI platforms.
                   </p>
                 )}
                 {actionType === "update-sources" && (
@@ -186,7 +217,7 @@ export function MisinformationActionDialog({
                 )}
                 {actionType === "monitor-only" && (
                   <p className="text-muted-foreground">
-                    This case will remain in monitoring status. You'll receive updates if the situation changes or spreads to more platforms.
+                    This case will remain in monitoring status. You'll receive updates if the situation changes.
                   </p>
                 )}
               </div>

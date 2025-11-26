@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { ProjectAccessManager } from "@/components/ProjectAccessManager";
+import { PageLoader } from "@/components/PageLoader";
 
 export default function OrganizationSettings() {
   const navigate = useNavigate();
@@ -1096,6 +1097,10 @@ export default function OrganizationSettings() {
   const getIntegrationsByDomain = (domainId: string) => {
     return integrations.filter(i => i.domainId === domainId);
   };
+
+  if (isLoading) {
+    return <PageLoader />;
+  }
 
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">

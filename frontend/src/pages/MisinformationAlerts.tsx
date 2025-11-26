@@ -650,30 +650,23 @@ const MisinformationAlerts = () => {
                           <div>
                             <div className="flex items-center gap-2">
                               <AlertTypeIcon className="h-4 w-4 text-muted-foreground" />
-                              <h4 className="font-medium">{item.title}</h4>
+                              <h4 className="font-medium">{alertTypeLabels[item.alert_type] || item.alert_type}</h4>
                             </div>
                             <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
-                              <Badge variant="secondary">
-                                {alertTypeLabels[item.alert_type] || item.alert_type}
+                              <Badge variant="secondary" className={item.status === 'resolved' ? 'bg-success/20 text-success' : ''}>
+                                {item.status}
                               </Badge>
-                              {item.platform && (
-                                <>
-                                  <span>•</span>
-                                  <span>{item.platform}</span>
-                                </>
-                              )}
                               <span>•</span>
-                              <span>Resolved {item.resolved_at ? formatTimeAgo(item.resolved_at) : 'recently'}</span>
+                              <span>Resolved {item.reviewed_at ? formatTimeAgo(item.reviewed_at) : 'recently'}</span>
                             </div>
+                            {item.explanation && (
+                              <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                                {item.explanation}
+                              </p>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-4">
-                          {item.resolution_notes && (
-                            <div className="text-right max-w-[200px]">
-                              <p className="text-sm font-medium">Resolution Notes</p>
-                              <p className="text-sm text-muted-foreground truncate">{item.resolution_notes}</p>
-                            </div>
-                          )}
                           <Button size="sm" variant="outline" onClick={() => handleViewDetails(item)}>
                             View Details
                           </Button>

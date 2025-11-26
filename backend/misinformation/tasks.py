@@ -437,7 +437,7 @@ class MisinformationScanner:
             source_content: Content from source
             explanation: Explanation of the issue
         """
-        # Check for duplicate alerts
+        # Check for duplicate alerts - same citation URL
         existing = MisinformationAlert.objects.filter(
             domain=self.domain,
             prompt_analytics=pa,
@@ -447,8 +447,24 @@ class MisinformationScanner:
         ).first()
 
         if existing:
-            logger.debug(f"Duplicate alert skipped for {alert_type}")
+            logger.debug(f"Duplicate alert skipped for {alert_type} (same citation URL)")
             return
+
+        # Also check for duplicate claims - same LLM claim regardless of citation URL
+        # This prevents the same claim being flagged multiple times against different sources
+        claim_prefix = llm_claim[:100] if llm_claim else ""  # Use first 100 chars for comparison
+        if claim_prefix:
+            existing_claim = MisinformationAlert.objects.filter(
+                domain=self.domain,
+                prompt_analytics=pa,
+                alert_type=alert_type,
+                llm_claim__startswith=claim_prefix,
+                status__in=['new', 'reviewed']
+            ).first()
+
+            if existing_claim:
+                logger.debug(f"Duplicate alert skipped for {alert_type} (same claim already exists)")
+                return
 
         MisinformationAlert.objects.create(
             domain=self.domain,
