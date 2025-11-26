@@ -48,12 +48,31 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
         return;
       }
 
-      // Fetch report data from the backend
+      // Determine report type from name or template
+      const reportNameLower = report.name.toLowerCase();
+      const templateNameLower = ((report as any).template_name || '').toLowerCase();
+
+      let reportType = 'Executive Dashboard'; // default
+      if (reportNameLower.includes('competitor') || templateNameLower.includes('competitor')) {
+        reportType = 'Competitor Focus';
+      } else if (reportNameLower.includes('content') || reportNameLower.includes('strategy') ||
+                 templateNameLower.includes('content') || templateNameLower.includes('strategy')) {
+        reportType = 'Content Strategy';
+      } else if (reportNameLower.includes('detailed') || reportNameLower.includes('analytics') ||
+                 templateNameLower.includes('detailed') || templateNameLower.includes('analytics')) {
+        reportType = 'Detailed Analytics';
+      } else if (reportNameLower.includes('executive') || templateNameLower.includes('executive')) {
+        reportType = 'Executive Dashboard';
+      }
+
+      console.log('[ReportPreviewDialog] Detected report type:', reportType);
+
+      // Fetch report data from the backend using the new preview-data endpoint
       const fetchReportData = async () => {
         setLoading(true);
         try {
           const token = localStorage.getItem('access_token');
-          const url = `http://localhost:8000/analytics/dashboard/summary/?domain_id=${domainId}&days=30`;
+          const url = `http://localhost:8000/reports/preview-data/?domain_id=${domainId}&report_type=${encodeURIComponent(reportType)}&days=30`;
           console.log('[ReportPreviewDialog] Fetching from:', url);
 
           const response = await fetch(url, {
@@ -63,12 +82,12 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
           });
 
           if (!response.ok) {
-            throw new Error('Failed to fetch report data');
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Failed to fetch report data');
           }
 
           const data = await response.json();
           console.log('[ReportPreviewDialog] Fetched report data:', data);
-          console.log('[ReportPreviewDialog] Metrics:', data?.metrics);
           setReportData(data);
         } catch (error) {
           console.error('Error fetching report data:', error);

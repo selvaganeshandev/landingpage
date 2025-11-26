@@ -81,7 +81,7 @@ def domain_list(request):
         }
         data['country'] = country_map.get(country_code.lower(), 'United States')
 
-        # Normalize domain name (strip scheme, www, path, port)
+        # Normalize domain and extract brand name
         raw_input = data.get('name') or data.get('url') or ''
         if isinstance(raw_input, str):
             normalized = raw_input.strip().lower()
@@ -100,7 +100,23 @@ def domain_list(request):
             # Remove port if present
             if ':' in normalized:
                 normalized = normalized.split(':', 1)[0]
-            data['name'] = normalized
+
+            # Extract brand name from domain (e.g., "airbnb.com" -> "Airbnb")
+            # Remove common TLDs and format as title case
+            brand_name = normalized
+            for tld in ['.com', '.io', '.org', '.net', '.co', '.ai', '.app', '.dev', '.in', '.uk', '.co.uk', '.co.in']:
+                if brand_name.endswith(tld):
+                    brand_name = brand_name[:-len(tld)]
+                    break
+            # Replace separators with spaces and title case
+            brand_name = brand_name.replace('-', ' ').replace('_', ' ').title()
+
+            # Use just the brand name (without country)
+            data['name'] = brand_name
+
+            # Store the normalized domain as URL if not already provided
+            if not data.get('url'):
+                data['url'] = f"https://{normalized}"
         
         # Validate keywords are provided (mandatory)
         keywords_str = data.get('keywords', '')

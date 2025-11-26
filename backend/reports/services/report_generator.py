@@ -133,39 +133,85 @@ class ReportDataService:
 
     def get_competitor_focus_data(self):
         """Fetch data for Competitor Focus report"""
-        from competitors.models import Competitor
+        from competitors.models import Competitor, CompetitorAnalytics, CompetitorPromptAnalytics
         from prompts.models import PromptAnalytics
+        from django.db.models import Sum, Avg, Count
 
-        # Get all competitors
-        competitors = Competitor.objects.filter(domain=self.domain)
+        # Get all competitors for this domain
+        competitors = Competitor.objects.filter(domain=self.domain).order_by('-share_of_voice_percentage')
 
+        # Calculate our brand metrics
+        our_analytics = PromptAnalytics.objects.filter(
+            prompt__group__domain=self.domain,
+            created_at__gte=self.start_date,
+            created_at__lte=self.end_date
+        )
+        our_mentions = our_analytics.filter(is_mention=True).count()
+        our_total_prompts = our_analytics.values('prompt').distinct().count()
+        our_avg_sentiment = our_analytics.aggregate(avg=Avg('sentiment_score'))['avg'] or 0
+        our_visibility = (our_mentions / our_total_prompts * 100) if our_total_prompts > 0 else 0
+
+        # Get competitor data with real metrics
         competitor_data = []
+        total_market_mentions = our_mentions
+
         for competitor in competitors:
-            # Get mention count for competitor
-            mentions = PromptAnalytics.objects.filter(
-                prompt__group__domain=self.domain,
-                created_at__gte=self.start_date,
-                created_at__lte=self.end_date,
-                response_text__icontains=competitor.name
-            ).count()
+            # Get competitor analytics for the period
+            comp_analytics = CompetitorPromptAnalytics.objects.filter(
+                competitor=competitor,
+                tracked_at__gte=self.start_date,
+                tracked_at__lte=self.end_date
+            )
+
+            # Use stored competitor metrics (updated from processing)
+            mentions = competitor.total_mentions
+            visibility = float(competitor.visibility_score)
+            sentiment = float(competitor.sentiment_score)
+            share_of_voice = float(competitor.share_of_voice_percentage)
+            avg_position = float(competitor.average_position)
+            trend = float(competitor.trend_percentage)
+
+            # If no stored data, calculate from analytics
+            if mentions == 0:
+                mentions = comp_analytics.filter(is_mentioned=True).count()
+                if mentions > 0:
+                    sentiment = float(comp_analytics.aggregate(avg=Avg('sentiment_score'))['avg'] or 0)
+
+            total_market_mentions += mentions
 
             competitor_data.append({
                 'name': competitor.name,
-                'website': competitor.website,
+                'url': competitor.url,
                 'mentions': mentions,
-                'description': competitor.description or '',
+                'visibility_score': round(visibility, 1),
+                'sentiment_score': round(sentiment, 2),
+                'share_of_voice': round(share_of_voice, 1),
+                'average_position': round(avg_position, 1),
+                'trend': round(trend, 1),
+                'status': competitor.track_status,
             })
 
-        # Sort by mentions
+        # Calculate share of voice for our brand
+        our_share_of_voice = (our_mentions / total_market_mentions * 100) if total_market_mentions > 0 else 0
+
+        # Sort by mentions (highest first)
         competitor_data.sort(key=lambda x: x['mentions'], reverse=True)
 
-        # Get our domain's mention count
-        our_mentions = PromptAnalytics.objects.filter(
-            prompt__group__domain=self.domain,
-            created_at__gte=self.start_date,
-            created_at__lte=self.end_date,
-            is_mention=True
-        ).count()
+        # Get platform breakdown for our brand
+        platform_breakdown = our_analytics.values('platform').annotate(
+            count=Count('id'),
+            mentions=Count('id', filter=Q(is_mention=True))
+        ).order_by('-mentions')
+
+        platform_data = [
+            {
+                'platform': p['platform'] or 'Unknown',
+                'total': p['count'],
+                'mentions': p['mentions'],
+                'mention_rate': round((p['mentions'] / p['count'] * 100) if p['count'] > 0 else 0, 1)
+            }
+            for p in platform_breakdown
+        ]
 
         return {
             'period': {
@@ -173,8 +219,18 @@ class ReportDataService:
                 'end': self.end_date,
             },
             'domain_name': self.domain.name,
-            'our_mentions': our_mentions,
+            'domain_url': self.domain.url,
+            'our_metrics': {
+                'mentions': our_mentions,
+                'visibility_score': round(our_visibility, 1),
+                'sentiment_score': round(our_avg_sentiment, 2),
+                'share_of_voice': round(our_share_of_voice, 1),
+                'total_prompts': our_total_prompts,
+            },
             'competitors': competitor_data,
+            'total_competitors': len(competitor_data),
+            'total_market_mentions': total_market_mentions,
+            'platform_breakdown': platform_data,
         }
 
     def get_content_strategy_data(self):
@@ -297,8 +353,8 @@ class ReportDataService:
 
         return {
             'period': {
-                'start': self.start_date.strftime('%Y-%m-%d'),
-                'end': self.end_date.strftime('%Y-%m-%d'),
+                'start': self.start_date,
+                'end': self.end_date,
             },
             'domain_name': self.domain.name,
             'domain_url': self.domain.url,

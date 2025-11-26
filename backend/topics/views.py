@@ -368,16 +368,22 @@ class TopicAnalyticsViewSet(viewsets.ModelViewSet):
     def trends(self, request):
         """Get time-series trends for topics."""
         topic_id = request.query_params.get('topic_id')
+        domain_id = request.query_params.get('domain_id')
         days = int(request.query_params.get('days', 30))
-        
+
         queryset = self.get_queryset()
+
+        # Filter by domain_id if provided
+        if domain_id:
+            queryset = queryset.filter(topic__domain_id=domain_id)
+
         if topic_id:
             queryset = queryset.filter(topic_id=topic_id)
-        
+
         # Get data for the last N days
         start_date = timezone.now().date() - timedelta(days=days)
         queryset = queryset.filter(timestamp__gte=start_date)
-        
+
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
     
@@ -473,18 +479,27 @@ class TopicAnalyticsViewSet(viewsets.ModelViewSet):
                 # Query existing prompts linked to topics in the domain
                 with connection.cursor() as cursor:
                     cursor.execute("""
-                        SELECT DISTINCT
-                            p.id,
-                            p.prompt as prompt_text,
-                            t.name as topic_name,
-                            k.keyword
-                        FROM prompts p
-                        INNER JOIN prompt_keywords pk ON p.id = pk.prompt_id
-                        INNER JOIN keywords k ON pk.keyword_id = k.id
-                        INNER JOIN topic_keywords tk ON k.id = tk.keyword_id
-                        INNER JOIN topics t ON tk.topic_id = t.id
-                        WHERE t.domain_id = %s
-                        ORDER BY p.created_at DESC
+                        SELECT
+                            sub.id,
+                            sub.prompt_text,
+                            sub.topic_name,
+                            sub.keyword
+                        FROM (
+                            SELECT DISTINCT ON (p.id)
+                                p.id,
+                                p.prompt as prompt_text,
+                                t.name as topic_name,
+                                k.keyword,
+                                p.created_at
+                            FROM prompts p
+                            INNER JOIN prompt_keywords pk ON p.id = pk.prompt_id
+                            INNER JOIN keywords k ON pk.keyword_id = k.id
+                            INNER JOIN topic_keywords tk ON k.id = tk.keyword_id
+                            INNER JOIN topics t ON tk.topic_id = t.id
+                            WHERE t.domain_id = %s
+                            ORDER BY p.id, p.created_at DESC
+                        ) sub
+                        ORDER BY sub.created_at DESC
                         LIMIT %s
                     """, [domain_id, limit])
                     

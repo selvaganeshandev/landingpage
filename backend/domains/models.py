@@ -9,6 +9,14 @@ class Domain(models.Model):
         ('COMP', 'Completed'),
         ('FAIL', 'Failed'),
     ]
+
+    MISINFO_SCAN_STATUS_CHOICES = [
+        ('NOT_READY', 'Not Ready'),      # No prompt analytics data yet
+        ('READY', 'Ready'),               # Has data, ready to scan
+        ('SCANNING', 'Scanning'),         # Scan in progress
+        ('SCANNED', 'Scanned'),           # Scan completed
+        ('NO_ISSUES', 'No Issues Found'), # Scan completed with no alerts
+    ]
     """
     Domain model representing websites or domains being monitored
     """
@@ -73,6 +81,17 @@ class Domain(models.Model):
         choices=PROCESSING_STATUS_CHOICES,
         default='INIT',
         help_text="Current processing status of the domain"
+    )
+    misinformation_scan_status = models.CharField(
+        max_length=15,
+        choices=MISINFO_SCAN_STATUS_CHOICES,
+        default='NOT_READY',
+        help_text="Misinformation scanning status for this domain"
+    )
+    last_misinformation_scan_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the last misinformation scan"
     )
     track_message = models.TextField(
         blank=True,

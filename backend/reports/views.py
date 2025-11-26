@@ -315,6 +315,83 @@ class ReportGenerationViewSet(viewsets.ViewSet):
         })
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_report_preview_data(request):
+    """
+    Get report preview data for frontend templates
+    Accepts: domain_id, report_type, days (optional, default 30)
+    """
+    domain_id = request.query_params.get('domain_id')
+    report_type = request.query_params.get('report_type')
+    days = int(request.query_params.get('days', 30))
+
+    if not domain_id or not report_type:
+        return Response(
+            {'error': 'domain_id and report_type are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Verify domain belongs to user's organisation
+    from domains.models import Domain
+    try:
+        domain = Domain.objects.get(
+            id=domain_id,
+            organisation=request.user.organisation
+        )
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': 'Domain not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Calculate date range
+    from datetime import datetime, time
+    end_date = timezone.now()
+    start_date = end_date - timedelta(days=days)
+
+    # Get report data based on type
+    from reports.services.report_generator import ReportDataService
+
+    data_service = ReportDataService(
+        domain=domain,
+        start_date=start_date,
+        end_date=end_date,
+        organisation=request.user.organisation
+    )
+
+    try:
+        if report_type == 'Competitor Focus':
+            data = data_service.get_competitor_focus_data()
+        elif report_type == 'Content Strategy':
+            data = data_service.get_content_strategy_data()
+        elif report_type == 'Executive Dashboard':
+            data = data_service.get_executive_summary_data()
+        elif report_type == 'Detailed Analytics':
+            data = data_service.get_detailed_analytics_data()
+        else:
+            return Response(
+                {'error': f'Unknown report type: {report_type}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Convert datetime objects to strings for JSON serialization
+        if 'period' in data:
+            if hasattr(data['period']['start'], 'strftime'):
+                data['period']['start'] = data['period']['start'].strftime('%Y-%m-%d')
+            if hasattr(data['period']['end'], 'strftime'):
+                data['period']['end'] = data['period']['end'].strftime('%Y-%m-%d')
+
+        return Response(data)
+
+    except Exception as e:
+        logger.error(f"Error getting report preview data: {str(e)}")
+        return Response(
+            {'error': f'Failed to get report data: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def convert_report_html_to_pdf(request):

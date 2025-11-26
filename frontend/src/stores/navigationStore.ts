@@ -20,6 +20,7 @@ import {
   Lightbulb,
   MessageSquarePlus,
   Clock,
+  Calendar,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -83,8 +84,9 @@ const allNavGroups: NavGroup[] = [
     name: "Strategy",
     icon: Lightbulb,
     items: [
-      { name: "Content Gaps", path: "/content-gaps", icon: Target, module: MODULES.CONTENT_GAPS },
       { name: "Competitors", path: "/competitors", icon: Users, module: MODULES.COMPETITORS },
+      { name: "Content Gaps", path: "/content-gaps", icon: Target, module: MODULES.CONTENT_GAPS },
+      { name: "Content Planner", path: "/content-calendar", icon: Calendar, module: MODULES.CONTENT_GAPS },
     ],
   },
   {
