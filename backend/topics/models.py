@@ -86,34 +86,6 @@ class TopicAnalytics(models.Model):
         return f"{self.topic.name} - {self.platform} - {self.timestamp}"
 
 
-class TopicPrompt(models.Model):
-    SEARCH_VOLUME_CHOICES = [
-        ('high', 'High'),
-        ('medium', 'Medium'),
-        ('low', 'Low'),
-    ]
-    
-    topic = models.ForeignKey(Topic, on_delete=models.CASCADE, related_name='topic_prompts')
-    prompt_text = models.TextField()
-    relevance_score = models.IntegerField(default=0)  # 0-100
-    search_volume = models.CharField(max_length=20, choices=SEARCH_VOLUME_CHOICES, default='medium')
-    platform_list = models.JSONField(default=list, blank=True)  # Array of platform names
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    class Meta:
-        db_table = 'topic_prompts'
-        indexes = [
-            models.Index(fields=['topic', '-relevance_score']),
-            # Additional indexes
-            models.Index(fields=['search_volume', '-relevance_score']),
-            models.Index(fields=['topic', 'search_volume']),
-        ]
-        ordering = ['-relevance_score']
-    
-    def __str__(self):
-        return f"{self.topic.name} - {self.prompt_text[:50]}..."
-
-
 class TopicKeyword(models.Model):
     """
     Linking table between Topics and Keywords

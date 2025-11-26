@@ -6,8 +6,8 @@ from datetime import timedelta
 from django.utils import timezone
 from django.db.models import Q, Sum, Avg
 from django.db import connection
-from .models import Topic, TopicAnalytics, TopicPrompt
-from .serializers import TopicSerializer, TopicAnalyticsSerializer, TopicPromptSerializer
+from .models import Topic, TopicAnalytics
+from .serializers import TopicSerializer, TopicAnalyticsSerializer
 
 
 class TopicViewSet(viewsets.ModelViewSet):
@@ -637,35 +637,4 @@ class TopicAnalyticsViewSet(viewsets.ModelViewSet):
                 {'error': f'Failed to generate prompts: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
-
-class TopicPromptViewSet(viewsets.ModelViewSet):
-    serializer_class = TopicPromptSerializer
-    permission_classes = [IsAuthenticated]
-    
-    def get_queryset(self):
-        user = self.request.user
-        queryset = TopicPrompt.objects.all() if user.role == 'super_admin' else TopicPrompt.objects.filter(
-            topic__domain__organisation=user.organisation
-        )
-        
-        # Support filtering by topic_id in query params
-        topic_id = self.request.query_params.get('topic_id')
-        if topic_id:
-            queryset = queryset.filter(topic_id=topic_id)
-        
-        return queryset
-    
-    @action(detail=False, methods=['get'])
-    def high_relevance(self, request):
-        """Get prompts with high relevance scores."""
-        topic_id = request.query_params.get('topic_id')
-        min_score = int(request.query_params.get('min_score', 80))
-        
-        queryset = self.get_queryset().filter(relevance_score__gte=min_score)
-        if topic_id:
-            queryset = queryset.filter(topic_id=topic_id)
-        
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
 

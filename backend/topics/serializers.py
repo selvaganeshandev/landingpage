@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Topic, TopicAnalytics, TopicPrompt
+from .models import Topic, TopicAnalytics
 
 
 class TopicSerializer(serializers.ModelSerializer):
@@ -25,18 +25,6 @@ class TopicAnalyticsSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'topic', 'topic_name', 'platform', 'total_mentions', 'visibility_score',
             'sentiment_score', 'timestamp', 'created_at'
-        ]
-        read_only_fields = ['id', 'created_at']
-
-
-class TopicPromptSerializer(serializers.ModelSerializer):
-    topic_name = serializers.CharField(source='topic.name', read_only=True)
-    
-    class Meta:
-        model = TopicPrompt
-        fields = [
-            'id', 'topic', 'topic_name', 'prompt_text', 'relevance_score',
-            'search_volume', 'platform_list', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']
 

@@ -13,7 +13,8 @@ import {
   TrendingUp,
   TrendingDown,
   Sparkles,
-  Target
+  Target,
+  Loader2
 } from "lucide-react";
 import { TopicDetailDialog } from "@/components/TopicDetailDialog";
 import { TopicOptimizeDialog } from "@/components/TopicOptimizeDialog";
@@ -70,6 +71,7 @@ const Topics = () => {
   const [topicDistributionData, setTopicDistributionData] = useState<any[]>([]);
   const [keywordPerformance, setKeywordPerformance] = useState<any[]>([]);
   const [promptSuggestions, setPromptSuggestions] = useState<any[]>([]);
+  const [promptLoading, setPromptLoading] = useState(false);
 
   const handleGenerateContent = (topic: typeof topics[0]) => {
     navigateToContentGeneration({
@@ -103,8 +105,8 @@ const Topics = () => {
     }
 
     try {
-      setLoading(true);
-      
+      setPromptLoading(true);
+
       // Generate new prompts using ChatGPT via the API (with higher limit and generateNew=true)
       const promptsData: any = await apiClient.getTopicPromptSuggestions(selectedDomain.id, 12, true);
       const promptsArray = Array.isArray(promptsData) ? promptsData : (promptsData?.results || []);
@@ -138,7 +140,7 @@ const Topics = () => {
         variant: "destructive"
       });
     } finally {
-      setLoading(false);
+      setPromptLoading(false);
     }
   };
 
@@ -512,39 +514,47 @@ const Topics = () => {
             variant="outline" 
             size="sm" 
             onClick={handleGenerateMore}
-            disabled={loading || !selectedDomain?.id}
+            disabled={promptLoading || !selectedDomain?.id}
           >
             <Sparkles className="h-3 w-3 mr-1" />
-            {loading ? "Loading..." : "Generate More"}
+            {promptLoading ? "Generating..." : "Generate More"}
           </Button>
         </div>
-        {promptSuggestions.length > 0 ? (
-          <div className="space-y-3">
-            {promptSuggestions.map((suggestion, idx) => (
-              <div key={idx} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
-                <div className="flex items-start justify-between mb-2">
-                  <p className="font-mono text-sm font-medium flex-1">{suggestion.prompt}</p>
+        <div className="relative min-h-[200px]">
+          {promptLoading && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-background/80 backdrop-blur-sm border border-dashed border-border">
+              <Loader2 className="h-5 w-5 animate-spin text-primary mb-2" />
+              <p className="text-sm text-muted-foreground">Generating fresh prompts…</p>
+            </div>
+          )}
+          {promptSuggestions.length > 0 ? (
+            <div className={`space-y-3 ${promptLoading ? "opacity-60 pointer-events-none" : ""}`}>
+              {promptSuggestions.map((suggestion, idx) => (
+                <div key={idx} className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors">
+                  <div className="flex items-start justify-between mb-2">
+                    <p className="font-mono text-sm font-medium flex-1">{suggestion.prompt}</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {suggestion.topics.map((topic) => (
+                      <Badge key={topic} variant="outline" className="text-xs">
+                        {topic}
+                      </Badge>
+                    ))}
+                    {suggestion.keyword && (
+                      <Badge variant="secondary" className="text-xs">
+                        {suggestion.keyword}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {suggestion.topics.map((topic) => (
-                    <Badge key={topic} variant="outline" className="text-xs">
-                      {topic}
-                    </Badge>
-                  ))}
-                  {suggestion.keyword && (
-                    <Badge variant="secondary" className="text-xs">
-                      {suggestion.keyword}
-                    </Badge>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="flex items-center justify-center h-[200px] text-muted-foreground">
-            <p>No prompt suggestions available yet</p>
-          </div>
-        )}
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full text-muted-foreground">
+              <p>No prompt suggestions available yet</p>
+            </div>
+          )}
+        </div>
       </Card>
 
       {/* Keyword Performance */}

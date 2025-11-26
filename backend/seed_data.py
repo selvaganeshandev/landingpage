@@ -19,7 +19,7 @@ from keywords.models import Keyword
 from prompts.models import PromptGroup, Prompt, PromptAnalytics
 from alerts.models import Alert, AlertRule, AlertNotification
 from competitors.models import Competitor, CompetitorAnalytics, CompetitorPrompt
-from topics.models import Topic, TopicAnalytics, TopicPrompt
+from topics.models import Topic, TopicAnalytics
 from analytics.models import SentimentAnalytics, ShareOfVoiceAnalytics
 from integrations.models import Integration
 
@@ -33,7 +33,6 @@ AlertNotification.objects.all().delete()
 CompetitorPrompt.objects.all().delete()
 CompetitorAnalytics.objects.all().delete()
 Competitor.objects.all().delete()
-TopicPrompt.objects.all().delete()
 TopicAnalytics.objects.all().delete()
 Topic.objects.all().delete()
 SentimentAnalytics.objects.all().delete()
@@ -410,18 +409,6 @@ for topic in topics:
         )
     print(f"  ✓ Created analytics for {topic.name}")
 
-print(f"\n💭 Creating topic prompts...")
-search_volumes = ['high', 'medium', 'low']
-for i, topic in enumerate(topics):
-    TopicPrompt.objects.create(
-        topic=topic,
-        prompt_text=f"What are the latest trends in {topic.name.lower()}?",
-        relevance_score=random.randint(70, 100),
-        search_volume=search_volumes[i % len(search_volumes)],
-        platform_list=random.sample(platforms, 2)
-    )
-    print(f"  ✓ Created prompt for {topic.name}")
-
 # ==================== ANALYTICS ====================
 print(f"\n😊 Creating sentiment analytics...")
 themes = ["Product Quality", "Customer Service", "Pricing", "Features", "User Experience"]
@@ -531,7 +518,6 @@ print(f"  • Competitor Analytics: {CompetitorAnalytics.objects.count()}")
 print(f"  • Competitor Prompts: {CompetitorPrompt.objects.count()}")
 print(f"  • Topics: {Topic.objects.count()}")
 print(f"  • Topic Analytics: {TopicAnalytics.objects.count()}")
-print(f"  • Topic Prompts: {TopicPrompt.objects.count()}")
 print(f"  • Sentiment Analytics: {SentimentAnalytics.objects.count()}")
 print(f"  • Share of Voice Analytics: {ShareOfVoiceAnalytics.objects.count()}")
 print(f"  • Integrations: {Integration.objects.count()}")

@@ -180,7 +180,7 @@ class ReportDataService:
     def get_content_strategy_data(self):
         """Fetch data for Content Strategy report"""
         from prompts.models import Prompt, PromptAnalytics, PromptGroup
-        from topics.models import Topic, TopicPrompt
+        from topics.models import Topic
         from keywords.models import Keyword
         from competitors.models import Competitor
         from django.db.models import Count, Avg, Sum, Q
@@ -217,7 +217,6 @@ class ReportDataService:
         topics = Topic.objects.filter(domain=self.domain).order_by('-total_mentions')
         topic_performance = []
         for topic in topics[:10]:
-            topic_analytics = TopicPrompt.objects.filter(topic=topic)
             coverage_score = min(topic.total_mentions / 10, 100) if topic.total_mentions > 0 else 0
 
             topic_performance.append({
