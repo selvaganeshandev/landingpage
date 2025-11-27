@@ -528,7 +528,6 @@ const CitationsTable = ({
             <TableHead className="py-2 px-2">Domain</TableHead>
             <TableHead className="text-center py-2 px-2">Mentions</TableHead>
             <TableHead className="py-2 px-2">Platform</TableHead>
-            <TableHead className="py-2 px-2">Type</TableHead>
             <TableHead className="py-2 px-2">Last Mentioned</TableHead>
             <TableHead className="w-[50px] py-2 px-2"></TableHead>
           </TableRow>
@@ -573,11 +572,6 @@ const CitationsTable = ({
                     {citation.platform}
                   </Badge>
                 )}
-              </TableCell>
-              <TableCell className="py-2 px-2">
-                <Badge className={citation.is_your_domain ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground hover:bg-muted hover:text-muted-foreground"}>
-                  {citation.is_your_domain ? "Your Domain" : "Third Party"}
-                </Badge>
               </TableCell>
               <TableCell className="text-sm text-muted-foreground py-2 px-2">
                 {formatDate(citation.last_mentioned_at || citation.created_at)}

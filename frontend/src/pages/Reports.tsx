@@ -338,6 +338,208 @@ const Reports = () => {
     return <FileText className="h-5 w-5 text-primary" />;
   };
 
+  // Helper function to render template thumbnails
+  const getTemplateThumbnail = (templateName: string) => {
+    switch (templateName) {
+      case 'Executive Dashboard':
+        return (
+          <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-blue-500/10 via-purple-500/10 to-pink-500/10 overflow-hidden relative">
+            <div className="absolute inset-0 p-4">
+              {/* Dashboard grid layout */}
+              <div className="grid grid-cols-2 gap-2 h-full">
+                {/* Top metric cards */}
+                <div className="bg-white/80 dark:bg-gray-800/80 rounded p-2 flex flex-col justify-between">
+                  <div className="h-1.5 w-8 bg-blue-500 rounded"></div>
+                  <div className="space-y-1">
+                    <div className="h-5 w-12 bg-blue-500/20 rounded"></div>
+                    <div className="h-1 w-full bg-gray-300 dark:bg-gray-600 rounded"></div>
+                  </div>
+                </div>
+                <div className="bg-white/80 dark:bg-gray-800/80 rounded p-2 flex flex-col justify-between">
+                  <div className="h-1.5 w-8 bg-purple-500 rounded"></div>
+                  <div className="space-y-1">
+                    <div className="h-5 w-12 bg-purple-500/20 rounded"></div>
+                    <div className="h-1 w-full bg-gray-300 dark:bg-gray-600 rounded"></div>
+                  </div>
+                </div>
+                {/* Chart area */}
+                <div className="col-span-2 bg-white/80 dark:bg-gray-800/80 rounded p-2">
+                  <div className="flex items-end justify-between h-full gap-1">
+                    <div className="w-full bg-gradient-to-t from-blue-500 to-blue-300 rounded-t" style={{ height: '60%' }}></div>
+                    <div className="w-full bg-gradient-to-t from-purple-500 to-purple-300 rounded-t" style={{ height: '80%' }}></div>
+                    <div className="w-full bg-gradient-to-t from-pink-500 to-pink-300 rounded-t" style={{ height: '45%' }}></div>
+                    <div className="w-full bg-gradient-to-t from-blue-500 to-blue-300 rounded-t" style={{ height: '70%' }}></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'Detailed Analytics':
+        return (
+          <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-green-500/10 via-teal-500/10 to-cyan-500/10 overflow-hidden relative">
+            <div className="absolute inset-0 p-4">
+              <div className="space-y-2 h-full">
+                {/* Header */}
+                <div className="h-2 w-20 bg-green-500 rounded"></div>
+                {/* Line chart */}
+                <div className="bg-white/80 dark:bg-gray-800/80 rounded p-2 flex-1 relative">
+                  <svg className="w-full h-full" viewBox="0 0 100 60" preserveAspectRatio="none">
+                    <path
+                      d="M 0 50 Q 10 45, 20 40 T 40 35 T 60 30 T 80 25 L 100 20"
+                      fill="none"
+                      stroke="rgb(34, 197, 94)"
+                      strokeWidth="2"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    <path
+                      d="M 0 55 Q 10 52, 20 48 T 40 45 T 60 42 T 80 38 L 100 35"
+                      fill="none"
+                      stroke="rgb(20, 184, 166)"
+                      strokeWidth="2"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </svg>
+                </div>
+                {/* Data rows */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1">
+                    <div className="h-1.5 w-1.5 bg-green-500 rounded-full"></div>
+                    <div className="h-1.5 flex-1 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                    <div className="h-1.5 w-6 bg-green-500/30 rounded"></div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="h-1.5 w-1.5 bg-teal-500 rounded-full"></div>
+                    <div className="h-1.5 flex-1 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                    <div className="h-1.5 w-6 bg-teal-500/30 rounded"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'Competitor Focus':
+        return (
+          <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-orange-500/10 via-red-500/10 to-rose-500/10 overflow-hidden relative">
+            <div className="absolute inset-0 p-4">
+              <div className="h-full flex flex-col justify-between">
+                {/* Title */}
+                <div className="h-2 w-16 bg-orange-500 rounded"></div>
+                {/* Comparison bars */}
+                <div className="space-y-2 flex-1 flex flex-col justify-center">
+                  {/* Bar 1 - You */}
+                  <div className="space-y-0.5">
+                    <div className="flex items-center justify-between">
+                      <div className="h-1 w-8 bg-gray-400 dark:bg-gray-600 rounded"></div>
+                      <div className="h-1 w-4 bg-orange-500/40 rounded"></div>
+                    </div>
+                    <div className="h-3 bg-gradient-to-r from-orange-500 to-orange-400 rounded" style={{ width: '85%' }}></div>
+                  </div>
+                  {/* Bar 2 - Competitor 1 */}
+                  <div className="space-y-0.5">
+                    <div className="flex items-center justify-between">
+                      <div className="h-1 w-8 bg-gray-400 dark:bg-gray-600 rounded"></div>
+                      <div className="h-1 w-4 bg-red-500/40 rounded"></div>
+                    </div>
+                    <div className="h-3 bg-gradient-to-r from-red-500 to-red-400 rounded" style={{ width: '65%' }}></div>
+                  </div>
+                  {/* Bar 3 - Competitor 2 */}
+                  <div className="space-y-0.5">
+                    <div className="flex items-center justify-between">
+                      <div className="h-1 w-8 bg-gray-400 dark:bg-gray-600 rounded"></div>
+                      <div className="h-1 w-4 bg-rose-500/40 rounded"></div>
+                    </div>
+                    <div className="h-3 bg-gradient-to-r from-rose-500 to-rose-400 rounded" style={{ width: '50%' }}></div>
+                  </div>
+                </div>
+                {/* Legend */}
+                <div className="flex gap-2">
+                  <div className="flex items-center gap-1">
+                    <div className="h-1.5 w-1.5 bg-orange-500 rounded-full"></div>
+                    <div className="h-1 w-6 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="h-1.5 w-1.5 bg-red-500 rounded-full"></div>
+                    <div className="h-1 w-6 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'Content Strategy':
+        return (
+          <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-violet-500/10 via-indigo-500/10 to-blue-500/10 overflow-hidden relative">
+            <div className="absolute inset-0 p-4">
+              <div className="h-full flex flex-col gap-2">
+                {/* Header */}
+                <div className="h-2 w-16 bg-violet-500 rounded"></div>
+                {/* Content cards */}
+                <div className="grid grid-cols-2 gap-2 flex-1">
+                  {/* Card 1 - Document with citation */}
+                  <div className="bg-white/80 dark:bg-gray-800/80 rounded p-2 space-y-1">
+                    <div className="flex items-center gap-1">
+                      <div className="h-1.5 w-1.5 bg-violet-500 rounded-full"></div>
+                      <div className="h-1 flex-1 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="h-0.5 w-full bg-gray-300 dark:bg-gray-600 rounded"></div>
+                      <div className="h-0.5 w-3/4 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                      <div className="h-0.5 w-full bg-gray-300 dark:bg-gray-600 rounded"></div>
+                    </div>
+                    <div className="h-1 w-10 bg-violet-500/30 rounded"></div>
+                  </div>
+                  {/* Card 2 - Keyword cloud */}
+                  <div className="bg-white/80 dark:bg-gray-800/80 rounded p-2 flex flex-wrap gap-1 content-start">
+                    <div className="h-1.5 w-6 bg-indigo-500/40 rounded"></div>
+                    <div className="h-1.5 w-8 bg-violet-500/40 rounded"></div>
+                    <div className="h-1.5 w-5 bg-blue-500/40 rounded"></div>
+                    <div className="h-1.5 w-7 bg-indigo-500/40 rounded"></div>
+                    <div className="h-1.5 w-6 bg-violet-500/40 rounded"></div>
+                    <div className="h-1.5 w-9 bg-blue-500/40 rounded"></div>
+                  </div>
+                  {/* Card 3 - Pie chart */}
+                  <div className="bg-white/80 dark:bg-gray-800/80 rounded p-2 flex items-center justify-center">
+                    <div className="relative w-12 h-12">
+                      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 32 32">
+                        <circle r="16" cx="16" cy="16" fill="transparent" stroke="rgb(139, 92, 246)" strokeWidth="32" strokeDasharray="60 100" />
+                        <circle r="16" cx="16" cy="16" fill="transparent" stroke="rgb(99, 102, 241)" strokeWidth="32" strokeDasharray="40 100" strokeDashoffset="-60" />
+                      </svg>
+                    </div>
+                  </div>
+                  {/* Card 4 - List with metrics */}
+                  <div className="bg-white/80 dark:bg-gray-800/80 rounded p-2 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="h-1 w-8 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                      <div className="h-1 w-3 bg-indigo-500 rounded"></div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="h-1 w-10 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                      <div className="h-1 w-3 bg-violet-500 rounded"></div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="h-1 w-6 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                      <div className="h-1 w-3 bg-blue-500 rounded"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      default:
+        return (
+          <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-primary/10 to-secondary/10 flex items-center justify-center">
+            <FileText className="h-12 w-12 text-muted-foreground" />
+          </div>
+        );
+    }
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -541,10 +743,8 @@ const Reports = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {templates.map((template: any) => (
             <div key={template.id} className="p-4 rounded-lg border border-border hover:border-primary transition-all duration-300">
-              <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-primary/10 to-secondary/10 mb-4 flex items-center justify-center">
-                <FileText className="h-12 w-12 text-muted-foreground" />
-              </div>
-              <h4 className="font-semibold mb-2">{template.name}</h4>
+              {getTemplateThumbnail(template.name)}
+              <h4 className="font-semibold mb-2 mt-4">{template.name}</h4>
               <p className="text-sm text-muted-foreground mb-3">{template.description}</p>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs text-muted-foreground">
