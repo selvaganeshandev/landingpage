@@ -46,7 +46,7 @@ export const MetricCard = ({ title, value, change, icon, trend, onClick, href, i
       <div className="flex items-start justify-between mb-4">
         <div>
           <p className="text-sm text-muted-foreground font-medium">{title}</p>
-          <h3 className="text-4xl font-bold mt-2">{value}</h3>
+          <h3 className="text-3xl font-bold mt-3">{value}</h3>
         </div>
         {icon && (
           <div className={`p-3 rounded-xl bg-${iconColor}/10`}>

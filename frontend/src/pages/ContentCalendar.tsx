@@ -287,7 +287,6 @@ const ContentCalendar = () => {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-3">
-                        <span className="text-2xl">{getContentIcon(item.type)}</span>
                         <div>
                           <h3 className="text-lg font-semibold">{item.title}</h3>
                           <p className="text-sm text-muted-foreground">
@@ -381,7 +380,6 @@ const ContentCalendar = () => {
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
-                              <span className="text-xl">{getContentIcon(item.type)}</span>
                               <h4 className="font-semibold">{item.title}</h4>
                             </div>
                             <div className="flex flex-wrap gap-2 mb-3">
