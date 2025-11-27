@@ -50,4 +50,9 @@ urlpatterns = [
     path('content/<int:content_id>/', views.get_generated_content, name='get_generated_content'),
     path('content/<int:content_id>/update/', views.update_generated_content, name='update_generated_content'),
     path('content/<int:content_id>/delete/', views.delete_generated_content, name='delete_generated_content'),
+    
+    # Integration Insights
+    path('integrations/scheduler/start/', views.start_integration_insights_scheduler, name='start_integration_insights_scheduler'),
+    path('integrations/process-pending/', views.process_pending_insights, name='process_pending_insights'),
+    path('integrations/pending-insights/', views.get_pending_insights, name='get_pending_insights'),
 ]

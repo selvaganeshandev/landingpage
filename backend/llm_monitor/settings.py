@@ -51,7 +51,7 @@ INSTALLED_APPS = [
     'competitors',
     'topics',
     'analytics',
-    'integrations',
+    'integrations.apps.IntegrationsConfig',
     'reports',
     'misinformation',
 ]
@@ -211,8 +211,8 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
 
 # Google OAuth Configuration
-GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default=None)
-GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default=None)
+GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='1080254283876-0o3ur4sr7ii1kh4ugaij4c7n1ptibn4j.apps.googleusercontent.com')
+GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='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')
 GOOGLE_OAUTH_REDIRECT_URI = config('GOOGLE_OAUTH_REDIRECT_URI', default='http://localhost:8000/integrations/google/callback/')
 
 # JWT Configuration

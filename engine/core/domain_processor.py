@@ -240,7 +240,7 @@ class DomainProcessor:
             
             # Store the mapping in domain for later use
             self._prompt_keyword_map = prompt_to_keyword_map
-            
+
             grouped_prompts = self._group_prompts_with_sentence_transformers(prompts)
             
             if not grouped_prompts:

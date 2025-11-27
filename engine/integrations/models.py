@@ -1,6 +1,5 @@
 from django.db import models
-from domains.models import Domain
-from authentication.models import Account
+from shared_models.models import Domain, Account
 
 
 class Integration(models.Model):
@@ -30,12 +29,13 @@ class Integration(models.Model):
     modified_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        app_label = 'integrations'
         db_table = 'integrations'
+        managed = False  # Table is managed by backend
         unique_together = [['domain', 'type', 'provider_id']]
         indexes = [
             models.Index(fields=['domain', 'type']),
             models.Index(fields=['status', 'last_sync_at']),
-            # Additional indexes
             models.Index(fields=['domain', 'status']),
             models.Index(fields=['type', 'status']),
             models.Index(fields=['last_sync_at']),
@@ -94,12 +94,11 @@ class GATrafficInsight(models.Model):
     class Meta:
         app_label = 'integrations'
         db_table = 'ga_traffic_insights'
-        unique_together = [['integration', 'start_date', 'end_date']]
+        managed = False  # Table is managed by backend
         indexes = [
             models.Index(fields=['domain', 'track_status']),
             models.Index(fields=['integration', 'start_date', 'end_date']),
             models.Index(fields=['start_date', 'end_date']),
-            models.Index(fields=['track_status', 'created_at']),  # For scheduler to find INIT records
         ]
         ordering = ['-end_date', '-created_at']
     
@@ -149,14 +148,14 @@ class GSCTrafficInsight(models.Model):
     class Meta:
         app_label = 'integrations'
         db_table = 'gsc_traffic_insights'
-        unique_together = [['integration', 'start_date', 'end_date']]
+        managed = False  # Table is managed by backend
         indexes = [
             models.Index(fields=['domain', 'track_status']),
             models.Index(fields=['integration', 'start_date', 'end_date']),
             models.Index(fields=['start_date', 'end_date']),
-            models.Index(fields=['track_status', 'created_at']),  # For scheduler to find INIT records
         ]
         ordering = ['-end_date', '-created_at']
     
     def __str__(self):
         return f"GSC Insight for {self.domain.name} ({self.start_date} to {self.end_date})"
+

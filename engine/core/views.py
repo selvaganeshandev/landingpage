@@ -1723,3 +1723,212 @@ def delete_generated_content(request, content_id):
             'status': 'error',
             'message': f'Error deleting generated content: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Integration Insights Endpoints
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def start_integration_insights_scheduler(request):
+    """
+    Manually trigger the integration insights scheduler to process INIT records.
+    POST /api/integrations/scheduler/start/
+    Body: {}  # No parameters needed - processes pending INIT records
+    
+    This will trigger the scheduler which picks up one GA and one GSC INIT record
+    and processes them. You can call this multiple times to process more records.
+    """
+    try:
+        from .processing_tasks import process_integration_insights_scheduler
+        task = process_integration_insights_scheduler.delay()
+        return Response({
+            'success': True,
+            'task_id': task.id,
+            'message': 'Scheduler triggered. It will process one GA and one GSC INIT record if available.'
+        })
+    except Exception as e:
+        logger.error(f"Error triggering scheduler: {str(e)}", exc_info=True)
+        return Response(
+            {'error': f'Failed to trigger scheduler: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def process_pending_insights(request):
+    """
+    Manually process specific pending INIT records.
+    POST /api/integrations/process-pending/
+    Body: {
+        "insight_id": 1,  # Optional - specific insight ID to process
+        "insight_type": "ga" or "gsc",  # Optional - filter by type
+        "process_all": false  # Optional - process all pending INIT records (use with caution)
+    }
+    """
+    try:
+        from integrations.models import GATrafficInsight, GSCTrafficInsight
+        from .processing_tasks import process_ga_insight_task, process_gsc_insight_task
+        
+        insight_id = request.data.get('insight_id')
+        insight_type = request.data.get('insight_type')  # 'ga' or 'gsc'
+        process_all = request.data.get('process_all', False)
+        
+        if insight_id:
+            # Process specific insight
+            insight = None
+            if insight_type == 'ga' or not insight_type:
+                try:
+                    insight = GATrafficInsight.objects.get(id=insight_id, track_status='INIT')
+                    task = process_ga_insight_task.delay(insight_id)
+                    return Response({
+                        'success': True,
+                        'task_id': task.id,
+                        'insight_id': insight_id,
+                        'type': 'ga'
+                    })
+                except GATrafficInsight.DoesNotExist:
+                    pass
+            
+            if insight_type == 'gsc' or not insight_type:
+                try:
+                    insight = GSCTrafficInsight.objects.get(id=insight_id, track_status='INIT')
+                    task = process_gsc_insight_task.delay(insight_id)
+                    return Response({
+                        'success': True,
+                        'task_id': task.id,
+                        'insight_id': insight_id,
+                        'type': 'gsc'
+                    })
+                except GSCTrafficInsight.DoesNotExist:
+                    pass
+            
+            return Response(
+                {'error': f'Insight {insight_id} not found or not in INIT status'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        elif process_all:
+            # Process all pending INIT records
+            task_ids = []
+            
+            if insight_type != 'gsc':
+                ga_insights = GATrafficInsight.objects.filter(
+                    track_status='INIT',
+                    integration__status='active',
+                    integration__provider_id__isnull=False
+                ).exclude(integration__provider_id='')
+                
+                for insight in ga_insights:
+                    # Check if not already processing
+                    if not GATrafficInsight.objects.filter(
+                        integration=insight.integration,
+                        track_status='PROC'
+                    ).exists():
+                        task = process_ga_insight_task.delay(insight.id)
+                        task_ids.append({'insight_id': insight.id, 'type': 'ga', 'task_id': task.id})
+            
+            if insight_type != 'ga':
+                gsc_insights = GSCTrafficInsight.objects.filter(
+                    track_status='INIT',
+                    integration__status='active',
+                    integration__provider_id__isnull=False
+                ).exclude(integration__provider_id='')
+                
+                for insight in gsc_insights:
+                    # Check if not already processing
+                    if not GSCTrafficInsight.objects.filter(
+                        integration=insight.integration,
+                        track_status='PROC'
+                    ).exists():
+                        task = process_gsc_insight_task.delay(insight.id)
+                        task_ids.append({'insight_id': insight.id, 'type': 'gsc', 'task_id': task.id})
+            
+            return Response({
+                'success': True,
+                'tasks_started': len(task_ids),
+                'tasks': task_ids
+            })
+        
+        else:
+            return Response(
+                {'error': 'Either insight_id or process_all=true is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    except Exception as e:
+        logger.error(f"Error processing insights: {str(e)}", exc_info=True)
+        return Response(
+            {'error': f'Failed to process insights: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_pending_insights(request):
+    """
+    Get list of pending INIT records.
+    GET /api/integrations/pending-insights/?type=ga|gsc
+    """
+    try:
+        from integrations.models import GATrafficInsight, GSCTrafficInsight
+        
+        insight_type = request.query_params.get('type')  # 'ga' or 'gsc'
+        
+        pending = {
+            'ga': [],
+            'gsc': []
+        }
+        
+        if insight_type != 'gsc':
+            ga_insights = GATrafficInsight.objects.filter(
+                track_status='INIT',
+                integration__status='active',
+                integration__provider_id__isnull=False
+            ).exclude(integration__provider_id='').select_related('integration', 'domain').order_by('created_at')
+            
+            for insight in ga_insights:
+                pending['ga'].append({
+                    'id': insight.id,
+                    'integration_id': insight.integration.id,
+                    'domain_id': insight.domain.id,
+                    'domain_name': insight.domain.name,
+                    'start_date': insight.start_date.isoformat(),
+                    'end_date': insight.end_date.isoformat(),
+                    'created_at': insight.created_at.isoformat(),
+                })
+        
+        if insight_type != 'ga':
+            gsc_insights = GSCTrafficInsight.objects.filter(
+                track_status='INIT',
+                integration__status='active',
+                integration__provider_id__isnull=False
+            ).exclude(integration__provider_id='').select_related('integration', 'domain').order_by('created_at')
+            
+            for insight in gsc_insights:
+                pending['gsc'].append({
+                    'id': insight.id,
+                    'integration_id': insight.integration.id,
+                    'domain_id': insight.domain.id,
+                    'domain_name': insight.domain.name,
+                    'start_date': insight.start_date.isoformat(),
+                    'end_date': insight.end_date.isoformat(),
+                    'created_at': insight.created_at.isoformat(),
+                })
+        
+        return Response({
+            'pending_count': {
+                'ga': len(pending['ga']),
+                'gsc': len(pending['gsc']),
+                'total': len(pending['ga']) + len(pending['gsc'])
+            },
+            'pending': pending
+        })
+    
+    except Exception as e:
+        logger.error(f"Error getting pending insights: {str(e)}", exc_info=True)
+        return Response(
+            {'error': f'Failed to get pending insights: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

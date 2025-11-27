@@ -1002,6 +1002,28 @@ export const apiClient = {
       body: JSON.stringify({ integration_id: integrationId, property_id: propertyId, property_name: propertyName }),
     }),
 
+  getGSCSites: (params: { integrationId?: number; domainId?: number }) => {
+    const queryParams = new URLSearchParams();
+    if (params.integrationId) queryParams.set('integration_id', String(params.integrationId));
+    if (params.domainId) queryParams.set('domain_id', String(params.domainId));
+    return apiRequest(`/integrations/google/search-console/sites/?${queryParams.toString()}`);
+  },
+
+  selectGSCSite: (integrationId: number, siteId: string, siteName: string) =>
+    apiRequest('/integrations/google/search-console/select-site/', {
+      method: 'POST',
+      body: JSON.stringify({ integration_id: integrationId, site_id: siteId, site_name: siteName }),
+    }),
+
+  startTrafficProcessing: (integrationId?: number, daysBack: number = 30) =>
+    apiRequest('/integrations/start/', {
+      method: 'POST',
+      body: JSON.stringify({ integration_id: integrationId, days_back: daysBack }),
+    }),
+
+  getTrafficInsights: (domainId: number) =>
+    apiRequest(`/integrations/traffic-insights/?domain_id=${domainId}`),
+
   getGAData: (domainId: number, startDate?: string, endDate?: string) => {
     const queryParams = new URLSearchParams({ domain_id: String(domainId) });
     if (startDate) queryParams.set('start_date', startDate);

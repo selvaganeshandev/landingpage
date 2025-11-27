@@ -11,7 +11,12 @@ app = Celery('llm_monitor_engine')
 app.config_from_object('django.conf:settings', namespace='CELERY')
 
 # Load task modules from all registered Django apps.
+# This will discover tasks in tasks.py files by default
+# We also explicitly import processing_tasks in core.apps.CoreConfig.ready()
 app.autodiscover_tasks()
+
+# Note: Explicit import of core.processing_tasks is done in core.apps.CoreConfig.ready()
+# to ensure Django apps are loaded before importing models
 
 
 @app.task(bind=True)

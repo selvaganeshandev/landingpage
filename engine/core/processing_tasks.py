@@ -6,8 +6,12 @@ from shared_models.models import Domain
 from .domain_processor import DomainProcessor
 from .prompt_analytics_processor import PromptAnalyticsProcessor
 from .competitor_processor import CompetitorProcessor
+from .ga_insights_processor import GAInsightsProcessor
+from .gsc_insights_processor import GSCInsightsProcessor
 import logging
 
+# Import from engine's integrations app
+from integrations.models import Integration
 
 logger = logging.getLogger(__name__)
 
@@ -216,4 +220,132 @@ def process_topic_analytics_scheduler(self):
         logger.error(f"Error in topic analytics scheduler: {str(e)}", exc_info=True)
         return {'scheduled': False, 'error': str(e)}
 
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_ga_insights_task(self, integration_id: int, days_back: int = 30):
+    """Process GA insights for an integration (legacy - kept for backward compatibility)"""
+    processor = GAInsightsProcessor()
+    return processor.process_integration(integration_id, days_back)
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_gsc_insights_task(self, integration_id: int, days_back: int = 30):
+    """Process GSC insights for an integration (legacy - kept for backward compatibility)"""
+    processor = GSCInsightsProcessor()
+    return processor.process_integration(integration_id, days_back)
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_ga_insight_task(self, insight_id: int):
+    """Process a single GA insight record"""
+    try:
+        logger.info(f"[GA Task] Starting processing for insight {insight_id}")
+        processor = GAInsightsProcessor()
+        result = processor.process_insight(insight_id)
+        logger.info(f"[GA Task] Completed processing for insight {insight_id}: {result.get('success', False)}")
+        return result
+    except Exception as e:
+        logger.error(f"[GA Task] Error processing insight {insight_id}: {str(e)}", exc_info=True)
+        raise
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_gsc_insight_task(self, insight_id: int):
+    """Process a single GSC insight record"""
+    try:
+        logger.info(f"[GSC Task] Starting processing for insight {insight_id}")
+        processor = GSCInsightsProcessor()
+        result = processor.process_insight(insight_id)
+        logger.info(f"[GSC Task] Completed processing for insight {insight_id}: {result.get('success', False)}")
+        return result
+    except Exception as e:
+        logger.error(f"[GSC Task] Error processing insight {insight_id}: {str(e)}", exc_info=True)
+        raise
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_integration_insights_scheduler(self):
+    """Scheduler to pick up INIT records and process them one by one"""
+    from integrations.models import GATrafficInsight, GSCTrafficInsight
+    
+    logger.info("[Integration Scheduler] Starting scheduler run")
+    processed = 0
+    
+    # Process GA insights with INIT status (one at a time)
+    # Use select_for_update to prevent race conditions
+    try:
+        # First, count how many INIT records match criteria
+        init_count = GATrafficInsight.objects.filter(
+            track_status='INIT',
+            integration__status='active',
+            integration__provider_id__isnull=False
+        ).exclude(integration__provider_id='').count()
+        logger.info(f"[Integration Scheduler] Found {init_count} GA INIT records matching criteria")
+        
+        with transaction.atomic():
+            # Change nowait=True to nowait=False to wait for locks instead of failing silently
+            ga_insight = GATrafficInsight.objects.select_for_update(nowait=False).filter(
+                track_status='INIT',
+                integration__status='active',  # Only process active integrations
+                integration__provider_id__isnull=False
+            ).exclude(integration__provider_id='').order_by('created_at').first()
+            
+            if ga_insight:
+                logger.info(f"[Integration Scheduler] Found GA insight {ga_insight.id} (domain {ga_insight.domain_id}, integration {ga_insight.integration.id})")
+                # Check if same integration is already processing
+                proc_exists = GATrafficInsight.objects.filter(
+                    integration=ga_insight.integration,
+                    track_status='PROC'
+                ).exists()
+                
+                if not proc_exists:
+                    logger.info(f"[Integration Scheduler] Dispatching process_ga_insight_task for insight {ga_insight.id}")
+                    process_ga_insight_task.delay(ga_insight.id)
+                    processed += 1
+                else:
+                    logger.info(f"[Integration Scheduler] Integration {ga_insight.integration.id} already has a PROC insight, skipping")
+            else:
+                logger.info("[Integration Scheduler] No GA insight found matching criteria")
+    except Exception as e:
+        logger.error(f"[Integration Scheduler] Error processing GA insights: {str(e)}", exc_info=True)
+    
+    # Process GSC insights with INIT status (one at a time)
+    try:
+        # Count GSC INIT records
+        gsc_init_count = GSCTrafficInsight.objects.filter(
+            track_status='INIT',
+            integration__status='active',
+            integration__provider_id__isnull=False
+        ).exclude(integration__provider_id='').count()
+        logger.info(f"[Integration Scheduler] Found {gsc_init_count} GSC INIT records matching criteria")
+        
+        with transaction.atomic():
+            # Change nowait=True to nowait=False to wait for locks instead of failing silently
+            gsc_insight = GSCTrafficInsight.objects.select_for_update(nowait=False).filter(
+                track_status='INIT',
+                integration__status='active',  # Only process active integrations
+                integration__provider_id__isnull=False
+            ).exclude(integration__provider_id='').order_by('created_at').first()
+            
+            if gsc_insight:
+                logger.info(f"[Integration Scheduler] Found GSC insight {gsc_insight.id} (domain {gsc_insight.domain_id}, integration {gsc_insight.integration.id})")
+                # Check if same integration is already processing
+                proc_exists = GSCTrafficInsight.objects.filter(
+                    integration=gsc_insight.integration,
+                    track_status='PROC'
+                ).exists()
+                
+                if not proc_exists:
+                    logger.info(f"[Integration Scheduler] Dispatching process_gsc_insight_task for insight {gsc_insight.id}")
+                    process_gsc_insight_task.delay(gsc_insight.id)
+                    processed += 1
+                else:
+                    logger.info(f"[Integration Scheduler] Integration {gsc_insight.integration.id} already has a PROC insight, skipping")
+            else:
+                logger.info("[Integration Scheduler] No GSC insight found matching criteria")
+    except Exception as e:
+        logger.error(f"[Integration Scheduler] Error processing GSC insights: {str(e)}", exc_info=True)
+    
+    logger.info(f"[Integration Scheduler] Scheduler run completed. Processed: {processed}")
+    return {'processed': processed}
 

@@ -370,7 +370,7 @@ class TopicAnalyticsViewSet(viewsets.ModelViewSet):
         topic_id = request.query_params.get('topic_id')
         domain_id = request.query_params.get('domain_id')
         days = int(request.query_params.get('days', 30))
-
+        
         queryset = self.get_queryset()
 
         # Filter by domain_id if provided
@@ -379,14 +379,14 @@ class TopicAnalyticsViewSet(viewsets.ModelViewSet):
 
         if topic_id:
             queryset = queryset.filter(topic_id=topic_id)
-
+        
         # Get data for the last N days
         start_date = timezone.now().date() - timedelta(days=days)
         queryset = queryset.filter(timestamp__gte=start_date)
-
+        
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
-    
+
     @action(detail=False, methods=['get'], url_path='distribution')
     def topic_distribution(self, request):
         """Get topic distribution data for pie chart (domain-based)."""

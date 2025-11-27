@@ -189,21 +189,46 @@ def google_callback(request):
             'expiry': credentials.expiry.isoformat() if credentials.expiry else None,
         }
 
-        # Get property info based on integration type
-        provider_id = ''
+        # Get property/site info based on integration type
+        provider_id = ''  # Empty until property/site is selected
+        integration_status = 'active'
+        
         if integration_type == 'google_analytics':
             # Try to get GA4 properties
             try:
                 properties = get_ga4_properties(credentials)
-                if properties:
-                    # For now, just store that we have access - user can select property later
-                    provider_id = 'pending_selection'
+                if properties and len(properties) > 0:
+                    # Properties found - store them, user will select one
                     credentials_data['available_properties'] = properties
+                    integration_status = 'active'  # Keep active, user can select property
+                else:
+                    # No properties found - mark as disconnected
+                    integration_status = 'disconnected'
+                    credentials_data['error_message'] = 'No Google Analytics properties found for this account'
+                    logger.warning(f"No GA4 properties found for user {user_id}")
             except Exception as e:
-                logger.warning(f"Could not fetch GA4 properties: {e}")
-                provider_id = 'pending_selection'
-        else:
-            provider_id = 'pending_selection'
+                # Error fetching properties - mark as disconnected
+                integration_status = 'disconnected'
+                credentials_data['error_message'] = f'Failed to fetch properties: {str(e)}'
+                logger.error(f"Error fetching GA4 properties: {e}")
+        elif integration_type == 'search_console':
+            # Try to get GSC sites
+            try:
+                sites = fetch_gsc_sites_from_api(credentials)
+                if sites and len(sites) > 0:
+                    # Sites found - store them, user will select one
+                    credentials_data['available_sites'] = sites
+                    integration_status = 'active'  # Keep active, user can select site
+                else:
+                    # No sites found - mark as disconnected
+                    integration_status = 'disconnected'
+                    credentials_data['error_message'] = 'No Google Search Console sites found for this account'
+                    logger.warning(f"No GSC sites found for user {user_id}")
+            except Exception as e:
+                # Error fetching sites - mark as disconnected
+                integration_status = 'disconnected'
+                credentials_data['error_message'] = f'Failed to fetch sites: {str(e)}'
+                logger.error(f"Error fetching GSC sites: {e}")
 
         # Create or update integration
         integration, created = Integration.objects.update_or_create(
@@ -212,9 +237,9 @@ def google_callback(request):
             defaults={
                 'provider_id': provider_id,
                 'credentials': credentials_data,
-                'status': 'active',
+                'status': integration_status,
                 'last_sync_at': timezone.now(),
-                'error_message': None,
+                'error_message': credentials_data.get('error_message'),
                 'created_by': user,
             }
         )
@@ -269,6 +294,27 @@ def get_ga4_properties(credentials):
         return properties
     except HttpError as e:
         logger.error(f"Error fetching GA4 properties: {e}")
+        raise
+
+
+def fetch_gsc_sites_from_api(credentials):
+    """Get list of Google Search Console sites the user has access to."""
+    try:
+        service = build('searchconsole', 'v1', credentials=credentials)
+        sites = service.sites().list().execute()
+        
+        site_list = []
+        for site in sites.get('siteEntry', []):
+            site_list.append({
+                'id': site.get('siteUrl', ''),  # e.g., 'sc-domain:example.com' or 'https://example.com/'
+                'display_name': site.get('siteUrl', '').replace('sc-domain:', '').replace('https://', '').replace('http://', '').rstrip('/'),
+                'permission_level': site.get('permissionLevel', ''),
+                'verification_status': site.get('verificationStatus', ''),
+            })
+        
+        return site_list
+    except HttpError as e:
+        logger.error(f"Error fetching GSC sites: {e}")
         raise
 
 
@@ -356,9 +402,137 @@ def select_ga_property(request):
         integration.credentials['selected_property_name'] = property_name
         integration.save()
 
+        # Create INIT record for processing
+        from datetime import date, timedelta
+        from .models import GATrafficInsight
+        
+        end_date = date.today()
+        start_date = end_date - timedelta(days=30)
+        GATrafficInsight.objects.get_or_create(
+            integration=integration,
+            domain=integration.domain,
+            start_date=start_date,
+            end_date=end_date,
+            defaults={
+                'track_status': 'INIT',
+            }
+        )
+
         return Response({
             'success': True,
             'message': f'Property {property_name} selected successfully'
+        })
+
+    except Integration.DoesNotExist:
+        return Response(
+            {'error': 'Integration not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_gsc_sites(request):
+    """Get list of Google Search Console sites for a connected integration."""
+    integration_id = request.query_params.get('integration_id')
+    domain_id = request.query_params.get('domain_id')
+
+    if not integration_id and not domain_id:
+        return Response(
+            {'error': 'integration_id or domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        if integration_id:
+            integration = Integration.objects.get(
+                pk=integration_id,
+                type='search_console'
+            )
+        else:
+            integration = Integration.objects.get(
+                domain_id=domain_id,
+                type='search_console'
+            )
+
+        # Check if we have cached sites
+        cached_sites = integration.credentials.get('available_sites')
+        if cached_sites:
+            return Response({'sites': cached_sites})
+
+        # Fetch fresh sites
+        credentials = get_credentials_from_integration(integration)
+        if not credentials:
+            return Response(
+                {'error': 'No valid credentials found'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        sites = fetch_gsc_sites_from_api(credentials)
+
+        # Cache the sites
+        integration.credentials['available_sites'] = sites
+        integration.save()
+
+        return Response({'sites': sites})
+
+    except Integration.DoesNotExist:
+        return Response(
+            {'error': 'Integration not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logger.error(f"Error fetching GSC sites: {str(e)}")
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def select_gsc_site(request):
+    """Select a Google Search Console site for the integration."""
+    integration_id = request.data.get('integration_id')
+    site_id = request.data.get('site_id')
+    site_name = request.data.get('site_name', '')
+
+    if not integration_id or not site_id:
+        return Response(
+            {'error': 'integration_id and site_id are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        integration = Integration.objects.get(
+            pk=integration_id,
+            type='search_console'
+        )
+
+        # Update the provider_id with the selected site
+        integration.provider_id = site_id
+        integration.credentials['selected_site_name'] = site_name
+        integration.save()
+
+        # Create INIT record for processing
+        from datetime import date, timedelta
+        from .models import GSCTrafficInsight
+        
+        end_date = date.today()
+        start_date = end_date - timedelta(days=30)
+        GSCTrafficInsight.objects.get_or_create(
+            integration=integration,
+            domain=integration.domain,
+            start_date=start_date,
+            end_date=end_date,
+            defaults={
+                'track_status': 'INIT',
+            }
+        )
+
+        return Response({
+            'success': True,
+            'message': f'Site {site_name} selected successfully'
         })
 
     except Integration.DoesNotExist:
@@ -402,7 +576,7 @@ def get_ga_data(request):
             status='active'
         )
 
-        if integration.provider_id == 'pending_selection':
+        if not integration.provider_id or integration.provider_id == '':
             return Response({
                 'error': 'Please select a GA4 property first',
                 'needs_property_selection': True,
@@ -509,7 +683,7 @@ def get_ai_referral_data(request):
             status='active'
         )
 
-        if integration.provider_id == 'pending_selection':
+        if not integration.provider_id or integration.provider_id == '':
             return Response({
                 'error': 'Please select a GA4 property first',
                 'needs_property_selection': True,

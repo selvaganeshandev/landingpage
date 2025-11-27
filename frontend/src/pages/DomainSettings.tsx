@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +16,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
 import {
@@ -34,6 +41,7 @@ import { PageLoader } from "@/components/PageLoader";
 export default function DomainSettings() {
   const { domainId } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
 
   // Domain state
@@ -86,6 +94,17 @@ export default function DomainSettings() {
   const [integrations, setIntegrations] = useState<any[]>([]);
   const [isLoadingIntegrations, setIsLoadingIntegrations] = useState(false);
   const [isConnectingGA, setIsConnectingGA] = useState(false);
+  const [isConnectingGSC, setIsConnectingGSC] = useState(false);
+  
+  // Property/Site selection state
+  const [showPropertySelection, setShowPropertySelection] = useState(false);
+  const [selectedIntegration, setSelectedIntegration] = useState<any>(null);
+  const [properties, setProperties] = useState<any[]>([]);
+  const [sites, setSites] = useState<any[]>([]);
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string>("");
+  const [selectedSiteId, setSelectedSiteId] = useState<string>("");
+  const [isLoadingProperties, setIsLoadingProperties] = useState(false);
+  const [isSelectingProperty, setIsSelectingProperty] = useState(false);
 
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
@@ -98,6 +117,23 @@ export default function DomainSettings() {
   const [showAddKeywords, setShowAddKeywords] = useState(false);
 
   const MAX_KEYWORD_LENGTH = 255;
+
+  const initialTab = searchParams.get("tab") || "basic-info";
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam && tabParam !== activeTab) {
+      setActiveTab(tabParam);
+    }
+  }, [searchParams, activeTab]);
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set("tab", value);
+    setSearchParams(newParams, { replace: true });
+  };
 
   // Load domain data
   useEffect(() => {
@@ -493,17 +529,43 @@ export default function DomainSettings() {
     }
   }, [domain?.id]);
 
-  // Check for OAuth success/error in URL params
+  // Auto-open property/site selection dialog after OAuth if needed
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const success = urlParams.get('success');
+    const type = urlParams.get('type');
+    
+    // If OAuth just completed, check if property/site selection is needed
+    if (success === 'google_connected' && integrations.length > 0 && !showPropertySelection) {
+      const integration = integrations.find(
+        (i: any) => i.type === type && 
+        i.status === 'active' && 
+        (!i.provider_id || i.provider_id === '' || i.provider_id === 'pending_selection')
+      );
+      
+      if (integration) {
+        // Small delay to ensure UI is ready and toast is shown
+        setTimeout(() => {
+          handleOpenPropertySelection(integration);
+        }, 1000);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [integrations]);
+
+  // Check for OAuth success/error in URL params and auto-open property selection if needed
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const success = urlParams.get('success');
     const error = urlParams.get('error');
+    const type = urlParams.get('type');
     const tab = urlParams.get('tab');
 
     if (success === 'google_connected') {
+      const integrationName = type === 'search_console' ? 'Google Search Console' : 'Google Analytics';
       toast({
-        title: "Google Analytics Connected",
-        description: "Your Google Analytics account has been successfully connected.",
+        title: `${integrationName} Connected`,
+        description: `Your ${integrationName} account has been successfully connected.`,
       });
       // Clean URL
       window.history.replaceState({}, '', window.location.pathname);
@@ -520,7 +582,7 @@ export default function DomainSettings() {
       };
       toast({
         title: "Connection Failed",
-        description: errorMessages[error] || 'Failed to connect Google Analytics.',
+        description: errorMessages[error] || 'Failed to connect Google service.',
         variant: "destructive",
       });
       // Clean URL
@@ -532,7 +594,7 @@ export default function DomainSettings() {
     if (!domain) return;
     try {
       setIsConnectingGA(true);
-      const response = await apiClient.getGoogleAuthUrl(domain.id, 'google_analytics');
+      const response: any = await apiClient.getGoogleAuthUrl(domain.id, 'google_analytics');
       if (response.authorization_url) {
         // Redirect to Google OAuth
         window.location.href = response.authorization_url;
@@ -544,6 +606,25 @@ export default function DomainSettings() {
         variant: "destructive",
       });
       setIsConnectingGA(false);
+    }
+  };
+
+  const handleConnectGoogleSearchConsole = async () => {
+    if (!domain) return;
+    try {
+      setIsConnectingGSC(true);
+      const response: any = await apiClient.getGoogleAuthUrl(domain.id, 'search_console');
+      if (response.authorization_url) {
+        // Redirect to Google OAuth
+        window.location.href = response.authorization_url;
+      }
+    } catch (error: any) {
+      toast({
+        title: "Connection Error",
+        description: error.message || "Failed to initiate Google Search Console connection.",
+        variant: "destructive",
+      });
+      setIsConnectingGSC(false);
     }
   };
 
@@ -564,9 +645,208 @@ export default function DomainSettings() {
     }
   };
 
-  // Get integration by type
+  const handleRemoveIntegration = async (integrationId: number) => {
+    try {
+      await apiClient.deleteIntegration(integrationId);
+      toast({
+        title: "Removed",
+        description: "Integration has been removed successfully.",
+      });
+      loadIntegrations();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to remove integration.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Get integration by type (includes active and disconnected)
   const getIntegration = (type: string) => {
-    return integrations.find(i => i.type === type && i.status === 'active');
+    return integrations.find(i => i.type === type);
+  };
+
+  // Check if integration needs property selection
+  const needsPropertySelection = (integration: any) => {
+    return integration && 
+           integration.status === 'active' && 
+           (!integration.provider_id || integration.provider_id === '' || integration.provider_id === 'pending_selection');
+  };
+
+  // Check if integration is properly connected (has provider_id)
+  const isProperlyConnected = (integration: any) => {
+    return integration && 
+           integration.status === 'active' && 
+           integration.provider_id && 
+           integration.provider_id !== '' && 
+           integration.provider_id !== 'pending_selection';
+  };
+
+  // Open property/site selection dialog
+  const handleOpenPropertySelection = async (integration: any) => {
+    if (!domain) return;
+    
+    setSelectedIntegration(integration);
+    setShowPropertySelection(true);
+    setSelectedPropertyId("");
+    setSelectedSiteId("");
+    setIsLoadingProperties(true);
+    setProperties([]);
+    setSites([]);
+
+    try {
+      if (integration.type === 'google_analytics') {
+        const response: any = await apiClient.getGAProperties({
+          integrationId: integration.id,
+          domainId: domain.id,
+        });
+        
+        if (response.properties && Array.isArray(response.properties)) {
+          setProperties(response.properties);
+        } else {
+          toast({
+            title: "No Properties Found",
+            description: "No Google Analytics properties were found for this account.",
+            variant: "destructive",
+          });
+        }
+      } else if (integration.type === 'search_console') {
+        const response: any = await apiClient.getGSCSites({
+          integrationId: integration.id,
+          domainId: domain.id,
+        });
+        
+        if (response.sites && Array.isArray(response.sites)) {
+          setSites(response.sites);
+        } else {
+          toast({
+            title: "No Sites Found",
+            description: "No Google Search Console sites were found for this account.",
+            variant: "destructive",
+          });
+        }
+      }
+    } catch (error: any) {
+      const errorType = integration.type === 'google_analytics' ? 'properties' : 'sites';
+      toast({
+        title: `Error Loading ${errorType === 'properties' ? 'Properties' : 'Sites'}`,
+        description: error.message || `Failed to load ${errorType === 'properties' ? 'Google Analytics properties' : 'Google Search Console sites'}.`,
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingProperties(false);
+    }
+  };
+
+  // Handle property/site selection
+  const handleSelectProperty = async () => {
+    if (!selectedIntegration) {
+      toast({
+        title: "Selection Required",
+        description: "Please select an item to continue.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (selectedIntegration.type === 'google_analytics') {
+      if (!selectedPropertyId) {
+        toast({
+          title: "Selection Required",
+          description: "Please select a property to continue.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const selectedProperty = properties.find((p: any) => p.id === selectedPropertyId);
+      if (!selectedProperty) {
+        toast({
+          title: "Invalid Property",
+          description: "The selected property is invalid.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setIsSelectingProperty(true);
+      try {
+        await apiClient.selectGAProperty(
+          selectedIntegration.id,
+          selectedProperty.id,
+          selectedProperty.display_name || selectedProperty.id
+        );
+        
+        toast({
+          title: "Property Selected",
+          description: `Successfully connected to ${selectedProperty.display_name || selectedProperty.id}`,
+        });
+        
+        // Reload integrations to get updated provider_id
+        await loadIntegrations();
+        setShowPropertySelection(false);
+        setSelectedIntegration(null);
+        setSelectedPropertyId("");
+        setProperties([]);
+      } catch (error: any) {
+        toast({
+          title: "Selection Failed",
+          description: error.message || "Failed to select property.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsSelectingProperty(false);
+      }
+    } else if (selectedIntegration.type === 'search_console') {
+      if (!selectedSiteId) {
+        toast({
+          title: "Selection Required",
+          description: "Please select a site to continue.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const selectedSite = sites.find((s: any) => s.id === selectedSiteId);
+      if (!selectedSite) {
+        toast({
+          title: "Invalid Site",
+          description: "The selected site is invalid.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setIsSelectingProperty(true);
+      try {
+        await apiClient.selectGSCSite(
+          selectedIntegration.id,
+          selectedSite.id,
+          selectedSite.display_name || selectedSite.id
+        );
+        
+        toast({
+          title: "Site Selected",
+          description: `Successfully connected to ${selectedSite.display_name || selectedSite.id}`,
+        });
+        
+        // Reload integrations to get updated provider_id
+        await loadIntegrations();
+        setShowPropertySelection(false);
+        setSelectedIntegration(null);
+        setSelectedSiteId("");
+        setSites([]);
+      } catch (error: any) {
+        toast({
+          title: "Selection Failed",
+          description: error.message || "Failed to select site.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsSelectingProperty(false);
+      }
+    }
   };
 
   if (isLoading) {
@@ -733,7 +1013,7 @@ export default function DomainSettings() {
       </Dialog>
 
       {/* Tabs */}
-      <Tabs defaultValue="basic-info" className="w-full">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         <TabsList className="bg-muted/50 p-1 border border-border">
           <TabsTrigger value="basic-info" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
             <Info className="h-4 w-4" />
@@ -971,7 +1251,7 @@ export default function DomainSettings() {
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Google Analytics */}
-              <div className={`p-4 border rounded-lg ${getIntegration('google_analytics') ? 'border-green-500 bg-green-50' : ''}`}>
+              <div className={`p-4 border rounded-lg ${isProperlyConnected(getIntegration('google_analytics')) ? 'border-green-500 bg-green-50' : getIntegration('google_analytics')?.status === 'disconnected' ? 'border-red-200 bg-red-50' : ''}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center">
@@ -985,23 +1265,61 @@ export default function DomainSettings() {
                     <div>
                       <p className="font-medium">Google Analytics</p>
                       <p className="text-sm text-muted-foreground">
-                        {getIntegration('google_analytics')
-                          ? 'Connected - Track AI referral traffic'
-                          : 'Track website traffic and AI platform referrals'}
+                        {getIntegration('google_analytics') ? (
+                          isProperlyConnected(getIntegration('google_analytics')) ? (
+                            <>
+                              Connected - Track AI referral traffic
+                              {(getIntegration('google_analytics')?.credentials?.selected_property_name || getIntegration('google_analytics')?.provider_id) && (
+                                <span className="block mt-1 text-xs font-medium text-gray-700">
+                                  Property: {getIntegration('google_analytics')?.credentials?.selected_property_name || 
+                                    getIntegration('google_analytics')?.provider_id?.replace('properties/', '') || 
+                                    getIntegration('google_analytics')?.provider_id}
+                                </span>
+                              )}
+                            </>
+                          ) : getIntegration('google_analytics')?.status === 'disconnected' ? (
+                            'Not connected - No properties found'
+                          ) : (
+                            'Please select a property to complete the connection'
+                          )
+                        ) : (
+                          'Track website traffic and AI platform referrals'
+                        )}
                       </p>
                     </div>
                   </div>
                   {getIntegration('google_analytics') ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-green-600 font-medium">Connected</span>
+                    isProperlyConnected(getIntegration('google_analytics')) ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-green-600 font-medium">Connected</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDisconnectIntegration(getIntegration('google_analytics')!.id)}
+                        >
+                          Disconnect
+                        </Button>
+                      </div>
+                    ) : getIntegration('google_analytics')?.status === 'disconnected' ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-red-600 font-medium">Not Connected</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRemoveIntegration(getIntegration('google_analytics')!.id)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ) : needsPropertySelection(getIntegration('google_analytics')) ? (
                       <Button
-                        variant="outline"
+                        variant="default"
                         size="sm"
-                        onClick={() => handleDisconnectIntegration(getIntegration('google_analytics').id)}
+                        onClick={() => handleOpenPropertySelection(getIntegration('google_analytics')!)}
                       >
-                        Disconnect
+                        Select Property
                       </Button>
-                    </div>
+                    ) : null
                   ) : (
                     <Button
                       variant="outline"
@@ -1022,7 +1340,7 @@ export default function DomainSettings() {
               </div>
 
               {/* Google Search Console */}
-              <div className="p-4 border rounded-lg opacity-60">
+              <div className={`p-4 border rounded-lg ${isProperlyConnected(getIntegration('search_console')) ? 'border-green-500 bg-green-50' : getIntegration('search_console')?.status === 'disconnected' ? 'border-red-200 bg-red-50' : ''}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-lg bg-green-100 flex items-center justify-center">
@@ -1035,10 +1353,78 @@ export default function DomainSettings() {
                     </div>
                     <div>
                       <p className="font-medium">Google Search Console</p>
-                      <p className="text-sm text-muted-foreground">Monitor search performance and queries</p>
+                      <p className="text-sm text-muted-foreground">
+                        {getIntegration('search_console') ? (
+                          isProperlyConnected(getIntegration('search_console')) ? (
+                            <>
+                              Connected - Monitor search performance
+                              {(getIntegration('search_console')?.credentials?.selected_site_name || getIntegration('search_console')?.provider_id) && (
+                                <span className="block mt-1 text-xs font-medium text-gray-700">
+                                  Site: {getIntegration('search_console')?.credentials?.selected_site_name || 
+                                    getIntegration('search_console')?.provider_id?.replace('sc-domain:', '')?.replace('https://', '')?.replace('http://', '')?.replace(/\/$/, '') || 
+                                    getIntegration('search_console')?.provider_id}
+                                </span>
+                              )}
+                            </>
+                          ) : getIntegration('search_console')?.status === 'disconnected' ? (
+                            'Not connected - No sites found'
+                          ) : (
+                            'Please select a site to complete the connection'
+                          )
+                        ) : (
+                          'Monitor search performance and queries'
+                        )}
+                      </p>
                     </div>
                   </div>
-                  <Button variant="outline" disabled>Coming Soon</Button>
+                  {getIntegration('search_console') ? (
+                    isProperlyConnected(getIntegration('search_console')) ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-green-600 font-medium">Connected</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDisconnectIntegration(getIntegration('search_console')!.id)}
+                        >
+                          Disconnect
+                        </Button>
+                      </div>
+                    ) : getIntegration('search_console')?.status === 'disconnected' ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-red-600 font-medium">Not Connected</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRemoveIntegration(getIntegration('search_console')!.id)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ) : needsPropertySelection(getIntegration('search_console')) ? (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => handleOpenPropertySelection(getIntegration('search_console')!)}
+                      >
+                        Select Site
+                      </Button>
+                    ) : null
+                  ) : (
+                    <Button
+                      variant="outline"
+                      onClick={handleConnectGoogleSearchConsole}
+                      disabled={isConnectingGSC}
+                    >
+                      {isConnectingGSC ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Connecting...
+                        </>
+                      ) : (
+                        'Connect'
+                      )}
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -1049,6 +1435,115 @@ export default function DomainSettings() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Property/Site Selection Dialog */}
+      <Dialog open={showPropertySelection} onOpenChange={setShowPropertySelection}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedIntegration?.type === 'google_analytics' 
+                ? 'Select Google Analytics Property' 
+                : 'Select Google Search Console Site'}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedIntegration?.type === 'google_analytics'
+                ? `Choose which Google Analytics property to connect for ${domain?.name}`
+                : `Choose which Google Search Console site to connect for ${domain?.name}`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {isLoadingProperties ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-sm text-muted-foreground">
+                  Loading {selectedIntegration?.type === 'google_analytics' ? 'properties' : 'sites'}...
+                </span>
+              </div>
+            ) : (selectedIntegration?.type === 'google_analytics' ? properties.length === 0 : sites.length === 0) ? (
+              <div className="text-center py-8">
+                <p className="text-sm text-muted-foreground">
+                  No {selectedIntegration?.type === 'google_analytics' ? 'properties' : 'sites'} found.
+                </p>
+              </div>
+            ) : selectedIntegration?.type === 'google_analytics' ? (
+              <div className="space-y-2">
+                <Label htmlFor="property-select">Property</Label>
+                <Select value={selectedPropertyId} onValueChange={setSelectedPropertyId}>
+                  <SelectTrigger id="property-select">
+                    <SelectValue placeholder="Select a property..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {properties.map((property: any) => (
+                      <SelectItem key={property.id} value={property.id}>
+                        <span className="font-medium">{property.display_name || property.id}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedPropertyId && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Selected: {properties.find((p: any) => p.id === selectedPropertyId)?.display_name || selectedPropertyId}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="site-select">Site</Label>
+                <Select value={selectedSiteId} onValueChange={setSelectedSiteId}>
+                  <SelectTrigger id="site-select">
+                    <SelectValue placeholder="Select a site..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sites.map((site: any) => (
+                      <SelectItem key={site.id} value={site.id}>
+                        <span className="font-medium">{site.display_name || site.id}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedSiteId && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Selected: {sites.find((s: any) => s.id === selectedSiteId)?.display_name || selectedSiteId}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowPropertySelection(false);
+                setSelectedPropertyId("");
+                setSelectedSiteId("");
+                setProperties([]);
+                setSites([]);
+                setSelectedIntegration(null);
+              }}
+              disabled={isSelectingProperty}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSelectProperty}
+              disabled={
+                (selectedIntegration?.type === 'google_analytics' ? !selectedPropertyId : !selectedSiteId) || 
+                isSelectingProperty || 
+                isLoadingProperties
+              }
+            >
+              {isSelectingProperty ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                `Connect ${selectedIntegration?.type === 'google_analytics' ? 'Property' : 'Site'}`
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

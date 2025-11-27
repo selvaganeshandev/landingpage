@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
+import { 
   Plus,
   TrendingUp,
   TrendingDown,
@@ -934,7 +934,7 @@ const Competitors = () => {
             return b.mentions - a.mentions;
           })
           .slice(0, 5); // Top 5 brands
-
+        
         if (tb.length) setTopBrands(tb);
 
         // Build dynamic prompt performance cards
@@ -1300,7 +1300,7 @@ const Competitors = () => {
   if ((realCompetitors.length === 0 || hasOnlyYouWithNoData) && !isPageLoading && hasLoadedData && !isAnalysisInProgress) {
     const isDomainCompleted = domainProcessingStatus === 'COMP';
     const isDomainProcessing = domainProcessingStatus && domainProcessingStatus !== 'COMP';
-
+    
     return (
       <div className="p-8 space-y-6 bg-background animate-fade-in">
         <div className="space-y-4">
@@ -1466,45 +1466,45 @@ const Competitors = () => {
                 {elapsedMinutes > 0 && ` Time elapsed: ${elapsedMinutes} minute${elapsedMinutes > 1 ? 's' : ''}.`}
               </p>
               <div className="flex flex-wrap gap-3 pt-2">
-                <Button
+              <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    setHasLoadedData(false);
-                    setIsPageLoading(true);
-                    if (domainId) {
-                      setDomainId(domainId);
-                    }
-                  }}
+                onClick={() => {
+                  setHasLoadedData(false);
+                  setIsPageLoading(true);
+                  if (domainId) {
+                    setDomainId(domainId);
+                  }
+                }}
                 >
                   Refresh Status
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
                   Go to Dashboard
-                </Button>
-              </div>
+              </Button>
+            </div>
             </div>
           </div>
         </Card>
 
-        {competitors.length > 0 && (
+            {competitors.length > 0 && (
           <Card className="p-6 mt-6">
             <div className="w-full max-w-md">
-              <p className="text-sm font-medium mb-3">Competitors being processed:</p>
-              <div className="space-y-2">
-                {competitors.map((comp: any) => (
-                  <div key={comp.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border">
-                    <span className="font-medium">{comp.name}</span>
-                    <Badge variant="outline" className="gap-1">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      Processing
-                    </Badge>
-                  </div>
-                ))}
+                <p className="text-sm font-medium mb-3">Competitors being processed:</p>
+                <div className="space-y-2">
+                  {competitors.map((comp: any) => (
+                    <div key={comp.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border">
+                      <span className="font-medium">{comp.name}</span>
+                      <Badge variant="outline" className="gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Processing
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
           </Card>
-        )}
+            )}
       </div>
     );
   }
@@ -1593,7 +1593,7 @@ const Competitors = () => {
                           <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                         </a>
                       </div>
-                      <div
+                      <div 
                         className="w-12 h-12 rounded-xl shadow-glow flex items-center justify-center font-bold text-white text-lg font-inter bg-primary"
                       >
                         #{idx + 1}
@@ -1635,14 +1635,14 @@ const Competitors = () => {
                           </span>
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-primary"
-                        onClick={() => navigate(`/competitors/${competitor.id}`)}
-                      >
-                        View Details →
-                      </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-primary"
+                          onClick={() => navigate(`/competitors/${competitor.id}`)}
+                        >
+                          View Details →
+                        </Button>
                     </div>
                   </div>
                 </Card>
@@ -1670,21 +1670,21 @@ const Competitors = () => {
                     </>
                   ) : (
                     <>
-                      <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
-                        <Target className="h-10 w-10 text-muted-foreground" />
-                      </div>
-                      <h3 className="text-xl font-semibold text-foreground">No Competitors Added Yet</h3>
-                      <p className="text-sm text-muted-foreground max-w-md text-center">
-                        Track your competitors to see how your brand performs against them in AI search results.
-                      </p>
-                      <Button
-                        onClick={() => setAddCompetitorDialogOpen(true)}
-                        className="mt-4 gradient-primary"
-                        size="lg"
-                      >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add Your Competitor
-                      </Button>
+                  <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
+                    <Target className="h-10 w-10 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-foreground">No Competitors Added Yet</h3>
+                  <p className="text-sm text-muted-foreground max-w-md text-center">
+                    Track your competitors to see how your brand performs against them in AI search results.
+                  </p>
+                  <Button
+                    onClick={() => setAddCompetitorDialogOpen(true)}
+                    className="mt-4 gradient-primary"
+                    size="lg"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Your Competitor
+                  </Button>
                     </>
                   )}
                 </div>
@@ -1945,14 +1945,14 @@ const Competitors = () => {
             <Card className="p-6">
               <div className="space-y-6">
                 <div className="flex items-center justify-between pb-4 border-b border-border">
-                  <div>
-                    <h3 className="text-lg font-semibold font-inter">Prompt Performance Analysis</h3>
-                    <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
-                  </div>
-                  <Badge variant="secondary">
-                    <MessageSquare className="h-3 w-3 mr-1" />
-                    {promptCards.length} Prompts Tracked
-                  </Badge>
+                      <div>
+                        <h3 className="text-lg font-semibold font-inter">Prompt Performance Analysis</h3>
+                        <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
+                      </div>
+                      <Badge variant="secondary">
+                        <MessageSquare className="h-3 w-3 mr-1" />
+                        {promptCards.length} Prompts Tracked
+                      </Badge>
                 </div>
 
                 <div className="space-y-4">
@@ -1992,7 +1992,7 @@ const Competitors = () => {
                             const citationCount = (prompt.citationCounts && prompt.citationCounts[idx]) || 0;
                             const brandColor = (prompt.colors && prompt.colors[idx]) || 'hsl(var(--muted))';
                             const percentage = prompt.total > 0 ? (mentionCount / prompt.total) * 100 : 0;
-
+                            
                             return (
                               <div key={brand} className="space-y-2">
                                 <div className="flex items-center justify-between text-sm">
@@ -2031,14 +2031,14 @@ const Competitors = () => {
                             Showing page {promptsCurrentPage} of {promptsTotalPages} ({promptsTotalCount} total results)
                           </div>
                           <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
+                          <Button 
+                            variant="outline" 
                               size="sm"
                               onClick={() => setPromptsCurrentPage(1)}
                               disabled={promptsCurrentPage === 1}
-                            >
+                          >
                               First
-                            </Button>
+                          </Button>
                             <Button
                               variant="outline"
                               size="sm"
@@ -2115,9 +2115,9 @@ const Competitors = () => {
                         </>
                       ) : (
                         <>
-                          <p className="text-sm text-muted-foreground text-center">
+                      <p className="text-sm text-muted-foreground text-center">
                             No prompt performance data available.
-                          </p>
+                      </p>
                           <p className="text-xs text-muted-foreground">Start analyzing prompts to see data here.</p>
                         </>
                       )}
@@ -2216,7 +2216,7 @@ const Competitors = () => {
                         </>
                       ) : (
                         <>
-                          <p className="text-sm text-muted-foreground">No answer gaps identified yet.</p>
+                      <p className="text-sm text-muted-foreground">No answer gaps identified yet.</p>
                           <p className="text-xs text-muted-foreground">Start analyzing competitors to identify gaps.</p>
                         </>
                       )}

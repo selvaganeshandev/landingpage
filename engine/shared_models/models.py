@@ -12,6 +12,7 @@ class Organisation(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the organisation was last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'organisations'
         managed = False  # Let backend manage this table
         verbose_name = 'Organisation'
@@ -79,6 +80,7 @@ class Account(AbstractUser):
     REQUIRED_FIELDS = ['username']
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'accounts'
         managed = False  # Let backend manage this table
         verbose_name = 'Account'
@@ -164,6 +166,7 @@ class Domain(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the domain was last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'domains'
         managed = False  # Let backend manage this table
         verbose_name = 'Domain'
@@ -208,6 +211,7 @@ class Keyword(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the keyword was last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'keywords'
         managed = False  # Let backend manage this table
         verbose_name = 'Keyword'
@@ -282,6 +286,7 @@ class PromptGroup(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the group was last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'prompt_groups'
         managed = False  # Let backend manage this table
         verbose_name = 'Prompt Group'
@@ -343,6 +348,7 @@ class Prompt(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the prompt was last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'prompts'
         managed = False  # Let backend manage this table
         verbose_name = 'Prompt'
@@ -452,6 +458,7 @@ class PromptAnalytics(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the analytics was last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'prompt_analytics'
         managed = False  # Let backend manage this table
         verbose_name = 'Prompt Analytics'
@@ -531,6 +538,7 @@ class Competitor(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'competitors'
         managed = False  # Let backend manage this table
         unique_together = [['name', 'domain']]
@@ -568,6 +576,7 @@ class CompetitorAnalytics(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when created")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'competitor_analytics'
         managed = False  # Let backend manage this table
         ordering = ['-timestamp']
@@ -643,6 +652,7 @@ class SentimentAnalytics(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when created")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'sentiment_analytics'
         managed = False  # Let backend manage this table
         unique_together = ['domain', 'theme', 'platform', 'snapshot_date', 'period_type']
@@ -708,6 +718,7 @@ class ShareOfVoiceAnalytics(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when created")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'share_of_voice_analytics'
         managed = False  # Let backend manage this table
         unique_together = [['domain', 'competitor', 'platform', 'timestamp']]
@@ -810,6 +821,7 @@ class CompetitorPromptAnalytics(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'competitor_prompt_analytics'
         managed = False  # Let backend manage this table
         unique_together = [['competitor', 'prompt']]
@@ -835,6 +847,7 @@ class CompetitorMetricSnapshot(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        app_label = 'shared_models'
         db_table = 'competitor_metric_snapshots'
         indexes = [
             models.Index(fields=['competitor', '-timestamp']),
@@ -867,6 +880,7 @@ class CompetitiveInsight(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        app_label = 'shared_models'
         db_table = 'competitive_insights'
         ordering = ['-generated_at']
         indexes = [
@@ -940,6 +954,7 @@ class PromptMetricSnapshot(models.Model):
     modified_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'prompt_metric_snapshots'
         managed = False  # Let backend manage this table
         unique_together = ['prompt', 'platform', 'snapshot_date', 'period_type']
@@ -1016,6 +1031,7 @@ class PromptGroupMetricSnapshot(models.Model):
     modified_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'prompt_group_metric_snapshots'
         managed = False  # Let backend manage this table
         unique_together = ['prompt_group', 'platform', 'snapshot_date', 'period_type']
@@ -1092,6 +1108,7 @@ class DomainMetricSnapshot(models.Model):
     modified_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'domain_metric_snapshots'
         managed = False  # Let backend manage this table
         unique_together = ['domain', 'platform', 'snapshot_date', 'period_type']
@@ -1185,6 +1202,7 @@ class Topic(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'topics'
         managed = False  # Let backend manage this table
         verbose_name = 'Topic'
@@ -1240,6 +1258,7 @@ class TopicKeyword(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'topic_keywords'
         managed = False  # Let backend manage this table
         verbose_name = 'Topic Keyword'
@@ -1282,6 +1301,7 @@ class PromptKeyword(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'prompt_keywords'
         managed = False  # Let backend manage this table
         verbose_name = 'Prompt Keyword'
@@ -1365,6 +1385,7 @@ class KeywordAnalytics(models.Model):
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when last modified")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'keyword_analytics'
         managed = False  # Let backend manage this table
         verbose_name = 'Keyword Analytics'
@@ -1413,6 +1434,7 @@ class TopicAnalytics(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when created")
     
     class Meta:
+        app_label = 'shared_models'
         db_table = 'topic_analytics'
         managed = False  # Let backend manage this table
         verbose_name = 'Topic Analytics'

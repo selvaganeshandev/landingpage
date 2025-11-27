@@ -34,15 +34,24 @@ echo ""
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_PYTHON="$SCRIPT_DIR/backend/.venv/bin/python3"
 ENGINE_DIR="$SCRIPT_DIR/engine"
+
+# Try to find Python environment - prefer shared env, fallback to backend venv
+if [ -f "/home/hts-005/Documents/python/v3.12/env/bin/python" ]; then
+    VENV_PYTHON="/home/hts-005/Documents/python/v3.12/env/bin/python"
+elif [ -f "$SCRIPT_DIR/backend/.venv/bin/python3" ]; then
+    VENV_PYTHON="$SCRIPT_DIR/backend/.venv/bin/python3"
+else
+    VENV_PYTHON="python3"
+fi
 
 # Check Python environment
 echo -e "${YELLOW}[2/5] Checking Python environment...${NC}"
-if [ -f "$VENV_PYTHON" ]; then
-    echo -e "${GREEN}✓ Python environment ready${NC}"
+if "$VENV_PYTHON" -c "import sys; print(sys.executable)" > /dev/null 2>&1; then
+    PYTHON_PATH=$("$VENV_PYTHON" -c "import sys; print(sys.executable)")
+    echo -e "${GREEN}✓ Python environment ready: $PYTHON_PATH${NC}"
 else
-    echo -e "${RED}✗ Virtual environment not found at $VENV_PYTHON${NC}"
+    echo -e "${RED}✗ Python not found or not working${NC}"
     exit 1
 fi
 echo ""
