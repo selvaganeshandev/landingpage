@@ -173,8 +173,8 @@ async function apiRequest<T>(
           headers: newHeaders,
         });
       } else {
-        // Refresh failed, redirect to login
-        window.location.href = '/signin';
+        // Refresh failed, redirect to session expired page
+        window.location.href = '/session-expired';
         throw new Error('Session expired. Please login again.');
       }
     } else {
@@ -182,7 +182,7 @@ async function apiRequest<T>(
       if (!endpoint.includes('/auth/login/')) {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
-        window.location.href = '/signin';
+        window.location.href = '/session-expired';
       }
       throw new Error('Unauthorized');
     }
@@ -414,6 +414,29 @@ export const apiClient = {
     method: 'POST',
     body: JSON.stringify({ domain_name: domainName, domain_url: domainUrl }),
   }),
+
+  fetchBrandNiches: (domainName: string, brandName?: string) => apiRequest('/domains/fetch-brand-niches/', {
+    method: 'POST',
+    body: JSON.stringify({ domain_name: domainName, brand_name: brandName }),
+  }),
+
+  generateSemanticKeywords: (data: { domain_name: string; brand_name: string; country: string; niches: string[]; approx_keywords?: number }) =>
+    apiRequest('/domains/generate-semantic-keywords/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  bulkCreateKeywords: (domainId: number, keywords: any[]) =>
+    apiRequest('/keywords/bulk-create/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId, keywords }),
+    }),
+
+  bulkCreateSecondaryKeywords: (domainId: number, keywords: any[]) =>
+    apiRequest('/keywords/secondary/bulk-create/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId, keywords }),
+    }),
 
   // ===== Domain Access =====
   getDomainAccess: (domainId: number) => 

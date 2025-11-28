@@ -3,14 +3,16 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  TrendingUp, 
+import {
+  TrendingUp,
   TrendingDown,
   Target,
   Award,
   ArrowUpRight,
   ArrowDownRight,
-  Crown
+  Crown,
+  Loader2,
+  Plus
 } from "lucide-react";
 import { 
   BarChart,
@@ -52,6 +54,9 @@ const ShareOfVoice = () => {
   const [latest, setLatest] = useState<LatestSov | null>(null);
   const [rows, setRows] = useState<SovRow[]>([]);
   const [opportunities, setOpportunities] = useState<any[]>([]);
+  const [competitors, setCompetitors] = useState<any[]>([]);
+  const [isLoadingCompetitors, setIsLoadingCompetitors] = useState(true);
+  const [isStarting, setIsStarting] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -60,9 +65,31 @@ const ShareOfVoice = () => {
     if (id) setDomainId(id);
   }, [user]);
 
+  // Load competitors first to check if any exist
+  useEffect(() => {
+    const loadCompetitors = async () => {
+      if (!domainId) return;
+      setIsLoadingCompetitors(true);
+      try {
+        const response = await apiClient.getCompetitorsEngine({ domain_id: domainId });
+        const competitorList = Array.isArray(response) ? response : response?.results || [];
+        setCompetitors(competitorList);
+      } catch (e: any) {
+        console.error('Failed to load competitors:', e);
+        setCompetitors([]);
+      } finally {
+        setIsLoadingCompetitors(false);
+      }
+    };
+    void loadCompetitors();
+  }, [domainId]);
+
   useEffect(() => {
     const load = async () => {
       if (!domainId) return;
+      // Don't load share of voice data if no competitors
+      if (competitors.length === 0) return;
+
       try {
         const [latestResp, byDomain, gaps] = await Promise.all([
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }),
@@ -77,7 +104,7 @@ const ShareOfVoice = () => {
         // Only show error for actual errors, not empty data
         const isNetworkError = errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Network');
         const isServerError = errorMessage.includes('500') || errorMessage.includes('503') || errorMessage.includes('502');
-        
+
         // Only show error toast for actual errors, not for empty data (404 is normal for empty data)
         if (isNetworkError || isServerError || (!errorMessage.includes('404') && !errorMessage.includes('Not Found'))) {
           toast({ title: 'Failed to load share of voice', description: errorMessage, variant: 'destructive' });
@@ -89,7 +116,7 @@ const ShareOfVoice = () => {
       }
     };
     void load();
-  }, [domainId, days]);
+  }, [domainId, days, competitors.length]);
 
   const ownBrandName = useMemo(() => (latest?.players?.find(p => !p.competitor)?.competitor?.name) || 'Your Brand', [latest]);
 
@@ -149,6 +176,168 @@ const ShareOfVoice = () => {
     return Math.max(1, sorted.findIndex(x => x.brand === ownBrandName) + 1);
   }, [overallShare, ownBrandName]);
   const dominanceScore = useMemo(() => Math.round(marketShareValue), [marketShareValue]);
+
+  // Filter out "You" competitor to check for real competitors
+  const realCompetitors = competitors.filter(c => !c.isYou && c.name !== 'You');
+
+  // Check if all competitors have zero data (still processing)
+  const allCompetitorsHaveZeroData = competitors.length > 0 && competitors.every(c =>
+    (c.mentions === 0 || !c.mentions) &&
+    (c.citations === 0 || !c.citations) &&
+    (c.visibility === 0 || !c.visibility)
+  );
+
+  // Show empty state when no competitors exist
+  if (!isLoadingCompetitors && realCompetitors.length === 0) {
+    return (
+      <div className="p-8 space-y-6 bg-background animate-fade-in">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold tracking-tight">Share of Voice</h1>
+              <p className="text-muted-foreground mt-2">
+                Competitive benchmarking and market position analysis
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <Card className="p-8 border border-border">
+          <div className="flex flex-col items-center text-center space-y-6 max-w-2xl mx-auto">
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold">Analyze Your Market Share</h2>
+              <p className="text-muted-foreground">
+                Share of Voice shows how your brand compares to competitors across AI platforms. To get started, you need to add competitors first.
+              </p>
+            </div>
+
+            <div className="space-y-4 w-full">
+              <div className="p-4 bg-muted/50 rounded-lg text-left space-y-2">
+                <h3 className="font-semibold text-sm">What you'll get:</h3>
+                <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                  <li>Market share percentage across all AI platforms</li>
+                  <li>Your competitive position and dominance score</li>
+                  <li>Platform-specific share of voice breakdown</li>
+                  <li>Trend analysis showing share changes over time</li>
+                  <li>Market opportunities to increase your visibility</li>
+                </ul>
+              </div>
+            </div>
+
+            <Button
+              onClick={async () => {
+                if (!domainId) {
+                  toast({
+                    title: "Error",
+                    description: "No domain selected. Please select a domain first.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+
+                setIsStarting(true);
+
+                try {
+                  const response: any = await apiClient.startCompetitorAnalysis(parseInt(domainId));
+
+                  if (response.success) {
+                    toast({
+                      title: "Competitor Discovery Started",
+                      description: `We found your top ${response.created_count || 5} competitors! Processing their data now...`,
+                    });
+
+                    // Reload competitors after a short delay
+                    setTimeout(() => {
+                      window.location.reload();
+                    }, 1500);
+                  } else {
+                    toast({
+                      title: "Analysis Failed",
+                      description: response.error || "Failed to start competitor analysis",
+                      variant: "destructive",
+                    });
+                  }
+                } catch (error: any) {
+                  console.error('Error starting competitor analysis:', error);
+                  toast({
+                    title: "Error",
+                    description: error?.message || "Failed to start competitor analysis. Please try again.",
+                    variant: "destructive",
+                  });
+                } finally {
+                  setIsStarting(false);
+                }
+              }}
+              disabled={isStarting}
+              size="lg"
+              className="gradient-primary"
+            >
+              {isStarting ? (
+                <>
+                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                  Discovering Competitors...
+                </>
+              ) : (
+                'Start Competitor Discovery'
+              )}
+            </Button>
+
+            <p className="text-sm text-muted-foreground">
+              We'll automatically discover your top 5 competitors and start analyzing their AI visibility. This typically takes 2-5 minutes.
+            </p>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  // Show processing state when competitors exist but have no data yet
+  if (allCompetitorsHaveZeroData || isLoadingCompetitors) {
+    return (
+      <div className="p-8 space-y-6 bg-background animate-fade-in">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight">Share of Voice</h1>
+            <p className="text-muted-foreground mt-2">
+              Competitive benchmarking and market position analysis
+            </p>
+          </div>
+          <Button
+            onClick={() => window.location.reload()}
+            variant="outline"
+            size="sm"
+          >
+            <Loader2 className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
+
+        <Card className="p-6 border-dashed border-primary/40 bg-card/70">
+          <div className="flex flex-col md:flex-row gap-4 items-start">
+            <div className="p-3 rounded-full bg-primary/10 text-primary">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+            <div className="flex-1 space-y-2">
+              <h3 className="text-lg font-semibold">
+                Processing competitor data...
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Your competitors have been discovered and are currently being analyzed. Share of voice data will appear here once processing is complete.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                This typically takes 2-5 minutes. The page will update automatically, or you can click Refresh to check for updates.
+              </p>
+              <div className="flex flex-wrap gap-3 pt-2">
+                <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+                  Refresh Status
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">

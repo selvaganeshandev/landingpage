@@ -287,6 +287,54 @@ const Topics = () => {
     return <PageLoader />;
   }
 
+  // Show processing card when no topics available
+  if (!error && selectedDomain && filteredTopics.length === 0) {
+    return (
+      <div className="p-8 space-y-6 bg-background animate-fade-in">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight">Topic-Based Tracking</h1>
+            <p className="text-muted-foreground mt-2">
+              Monitor performance across key topics and categories
+            </p>
+          </div>
+          <Button
+            onClick={() => window.location.reload()}
+            variant="outline"
+            size="sm"
+          >
+            <Loader2 className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
+
+        <Card className="p-6 border-dashed border-primary/40 bg-card/70">
+          <div className="flex flex-col md:flex-row gap-4 items-start">
+            <div className="p-3 rounded-full bg-primary/10 text-primary">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+            <div className="flex-1 space-y-2">
+              <h3 className="text-lg font-semibold">
+                Processing topic data...
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Topics are being generated based on your prompts and keywords. Topic data will appear here once processing is complete.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                This typically takes 2-5 minutes. The page will update automatically, or you can click Refresh to check for updates.
+              </p>
+              <div className="flex flex-wrap gap-3 pt-2">
+                <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+                  Refresh Status
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
       <div className="flex items-center justify-between">
@@ -311,15 +359,6 @@ const Topics = () => {
         <Card className="p-6 border border-border">
           <p className="text-muted-foreground text-center">
             Please select a domain to view topics.
-          </p>
-        </Card>
-      )}
-
-      {/* No Topics */}
-      {!error && selectedDomain && filteredTopics.length === 0 && (
-        <Card className="p-6 border border-border">
-          <p className="text-muted-foreground text-center">
-            No topics found for this domain. Topics will be created automatically when domain processing completes.
           </p>
         </Card>
       )}

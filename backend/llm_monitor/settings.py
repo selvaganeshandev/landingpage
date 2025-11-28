@@ -170,6 +170,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
     "http://localhost:8081",
     "http://127.0.0.1:8081",
     "http://localhost:8080",
@@ -213,6 +215,9 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # OpenAI API Configuration
 OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
+
+# Google Gemini API Configuration (for AI-powered features)
+GOOGLE_GEMINI_API_KEY = config('GOOGLE_GEMINI_API_KEY', default=None)
 
 # ScrapingDog API Configuration (for web crawling)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)

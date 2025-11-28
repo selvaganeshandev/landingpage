@@ -12,7 +12,7 @@ class DomainSerializer(serializers.ModelSerializer):
             'id', 'name', 'url', 'short_description',
             'tone_of_voice', 'content_style', 'key_messages', 'topics_to_avoid',
             'target_audience', 'brand_values', 'key_competitors',
-            'country', 'organisation', 'organisation_name',
+            'country', 'niches', 'organisation', 'organisation_name',
             'total_mentions', 'total_citations', 'visibility_score',
             'average_position', 'active_alerts', 'sentiment_category',
             'sentiment_score', 'processing_status', 'track_message', 'tracked_at',

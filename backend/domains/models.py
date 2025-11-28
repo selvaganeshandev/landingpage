@@ -42,9 +42,10 @@ class Domain(models.Model):
     key_competitors = models.TextField(blank=True, null=True, help_text="Main competitors")
 
     country = models.CharField(max_length=100, default='United States', help_text="Country name for domain context")
+    niches = models.JSONField(blank=True, null=True, help_text="List of industry niches/categories for the brand")
     organisation = models.ForeignKey(
-        'authentication.Organisation', 
-        on_delete=models.CASCADE, 
+        'authentication.Organisation',
+        on_delete=models.CASCADE,
         related_name='domains',
         help_text="Organisation this domain belongs to"
     )

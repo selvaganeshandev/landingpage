@@ -32,6 +32,19 @@ def get_openai_client():
         raise Exception(f"Failed to initialize OpenAI client: {e}")
 
 
+def get_google_genai_client():
+    """Return Google GenerativeAI client if configured in Django settings; else raise."""
+    api_key = getattr(settings, "GOOGLE_GEMINI_API_KEY", None)
+    if not api_key:
+        raise Exception("Google GenAI API key not configured")
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        return genai
+    except Exception as e:
+        raise Exception(f"Failed to initialize Google GenAI client: {e}")
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def domain_list(request):
@@ -141,41 +154,23 @@ def domain_list(request):
         
         serializer = DomainSerializer(data=data)
         if serializer.is_valid():
-            # Use transaction to ensure domain and keywords are created atomically
+            # Use transaction to ensure domain is created successfully
             try:
                 with transaction.atomic():
                     domain = serializer.save()
-                    
-                    # Create keywords in the same transaction
-                    from keywords.models import Keyword
-                    created_keywords = []
-                    for keyword_text in keywords_list:
-                        try:
-                            keyword, created = Keyword.objects.get_or_create(
-                                keyword=keyword_text,
-                                domain=domain,
-                                defaults={
-                                    'auto_generate_prompts': True,
-                                    'priority': 0
-                                }
-                            )
-                            if created:
-                                created_keywords.append(keyword_text)
-                        except IntegrityError:
-                            # Handle race condition - keyword already exists
-                            pass
-                    
-                    # Verify at least one keyword was created
-                    if not Keyword.objects.filter(domain=domain).exists():
-                        return Response(
-                            {'error': 'Failed to create keywords. Please try again.'},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                        )
-                    
+
+                    # NOTE: Keywords are NOT automatically created here anymore.
+                    # The frontend handles keyword creation separately via:
+                    # - /keywords/bulk-create/ for selected (primary) keywords
+                    # - /keywords/secondary/bulk-create/ for unselected keywords
+                    # This allows proper separation between primary and secondary keywords.
+
+                    # The keywords field in the domain stores the comma-separated list
+                    # for reference, but actual Keyword objects are created by the frontend.
+
                     return Response({
                         'message': 'Domain added successfully',
                         'domain': DomainSerializer(domain).data,
-                        'keywords_created': len(created_keywords)
                     }, status=status.HTTP_201_CREATED)
             except Exception as e:
                 return Response(
@@ -444,6 +439,215 @@ Provide helpful, realistic information that would be useful for brand monitoring
 
     except Exception as e:
         logger.error(f"Error fetching brand info from ChatGPT: {str(e)}")
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def fetch_brand_niches(request):
+    """
+    Fetch brand niches/categories using Google GenAI based on domain name and brand name.
+    Returns: A list of relevant industry niches/categories for the brand
+    """
+    domain_name = request.data.get('domain_name', '').strip()
+    brand_name = request.data.get('brand_name', '').strip()
+
+    if not domain_name and not brand_name:
+        return Response(
+            {'error': 'Either domain_name or brand_name is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Use brand_name if provided, otherwise extract from domain_name
+    if not brand_name:
+        brand_name = domain_name.replace('.com', '').replace('.io', '').replace('.org', '').replace('.net', '').replace('-', ' ').replace('_', ' ').title()
+
+    try:
+        genai = get_google_genai_client()
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+        prompt = f"""Analyze the brand "{brand_name}" (website: {domain_name}) and suggest relevant industry niches or categories.
+
+Return ONLY a JSON array of 5-8 specific industry niches/categories that best describe this brand's market positioning. Each niche should be:
+- Specific and descriptive (e.g., "Enterprise Cloud Security Solutions" not just "Security")
+- Industry-relevant
+- Useful for market positioning and competitive analysis
+
+Example format:
+["Enterprise SaaS", "Cloud Infrastructure", "DevOps Tools", "IT Security", "Business Intelligence"]
+
+Provide the response as a valid JSON array only, no additional text."""
+
+        response = model.generate_content(prompt)
+        result_text = response.text.strip()
+
+        # Try to parse the JSON response
+        try:
+            # Remove markdown code blocks if present
+            if result_text.startswith('```'):
+                result_text = result_text.split('```')[1]
+                if result_text.startswith('json'):
+                    result_text = result_text[4:]
+                result_text = result_text.strip()
+
+            niches = json.loads(result_text)
+
+            # Validate it's a list
+            if not isinstance(niches, list):
+                raise ValueError("Response is not a list")
+
+            # Filter to ensure all items are strings and limit to 10
+            niches = [str(n).strip() for n in niches if n][:10]
+
+            return Response({
+                'success': True,
+                'niches': niches
+            })
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Failed to parse Google GenAI response as JSON: {result_text}")
+            return Response({
+                'success': False,
+                'error': 'Failed to parse AI response',
+                'raw_response': result_text
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"Error fetching brand niches from Google GenAI: {str(e)}")
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_semantic_keywords(request):
+    """
+    Generate semantic keywords using Google GenAI based on domain info.
+    Returns: Top 100 keywords with semantic metadata
+    """
+    domain_name = request.data.get('domain_name', '').strip()
+    brand_name = request.data.get('brand_name', '').strip()
+    country = request.data.get('country', 'United States')
+    niches = request.data.get('niches', [])
+    approx_keywords = request.data.get('approx_keywords', 100)
+
+    if not domain_name or not brand_name:
+        return Response(
+            {'error': 'domain_name and brand_name are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        genai = get_google_genai_client()
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+        # Build niche description
+        niche_text = ", ".join(niches) if niches else "general business"
+
+        # Limit keywords to prevent response truncation
+        max_keywords = min(approx_keywords, 50)
+
+        # Build the prompt for semantic keyword generation
+        prompt = f"""You are an expert SEO keyword researcher. Generate a comprehensive keyword universe for:
+
+**Website:** {domain_name}
+**Brand Name:** {brand_name}
+**Country:** {country}
+**Industry Niches:** {niche_text}
+**Number of Keywords:** EXACTLY {max_keywords} unique, relevant keywords
+
+Generate keywords that cover:
+- Brand-related queries
+- Product/service queries
+- Informational queries
+- Commercial/transactional queries
+- Location-based queries (for {country})
+
+For each keyword, provide:
+1. **keyword**: The actual keyword phrase
+2. **volume_level**: Estimated search volume (very-low, low, medium, high, very-high)
+3. **intent**: Search intent type (informational, navigational, transactional, commercial)
+4. **entity**: Main subject/noun of the keyword
+5. **attribute**: Characteristic being queried (if applicable)
+6. **variable**: Modifier/qualifier (if applicable)
+7. **source**: Always set to "ai-generated"
+8. **topic**: Main topic/category
+9. **cluster_id**: Group identifier for related keywords
+
+Return ONLY a valid JSON object with this structure (no markdown, no commentary):
+{{
+  "project": {{
+    "country": "{country}",
+    "language": "en",
+    "website": "{domain_name}",
+    "niche": "{niche_text}",
+    "approx_keywords_requested": {max_keywords}
+  }},
+  "keywords": [
+    {{
+      "keyword": "example keyword",
+      "volume_level": "medium",
+      "intent": "informational",
+      "entity": "product",
+      "attribute": "price",
+      "variable": "cheap",
+      "source": "ai-generated",
+      "topic": "pricing",
+      "cluster_id": "cluster_1"
+    }}
+  ]
+}}"""
+
+        response = model.generate_content(prompt)
+        result_text = response.text.strip()
+
+        # Parse JSON response
+        try:
+            # Remove markdown code blocks if present
+            if result_text.startswith('```'):
+                result_text = result_text.split('```')[1]
+                if result_text.startswith('json'):
+                    result_text = result_text[4:]
+                result_text = result_text.strip()
+
+            # Try to find and extract just the JSON content
+            if not result_text.startswith('{'):
+                # Find the first { and last }
+                start = result_text.find('{')
+                if start != -1:
+                    result_text = result_text[start:]
+
+            data = json.loads(result_text)
+
+            # Validate structure
+            if 'keywords' not in data or not isinstance(data['keywords'], list):
+                raise ValueError("Invalid response structure")
+
+            keywords = data['keywords']  # Use all returned keywords
+
+            return Response({
+                'success': True,
+                'project': data.get('project', {}),
+                'keywords': keywords,
+                'total_keywords': len(keywords)
+            })
+
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Failed to parse semantic keywords response: {str(e)}")
+            logger.error(f"Response length: {len(result_text)}")
+            logger.error(f"Response preview: {result_text[:1000]}")
+            return Response({
+                'success': False,
+                'error': f'Failed to parse AI response: {str(e)}',
+                'raw_response': result_text[:500]
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"Error generating semantic keywords: {str(e)}")
         return Response({
             'success': False,
             'error': str(e)
