@@ -415,6 +415,11 @@ export const apiClient = {
     body: JSON.stringify({ domain_name: domainName, domain_url: domainUrl }),
   }),
 
+  fetchBrandNiches: (domainName: string, brandName?: string) => apiRequest('/domains/fetch-brand-niches/', {
+    method: 'POST',
+    body: JSON.stringify({ domain_name: domainName, brand_name: brandName }),
+  }),
+
   // ===== Domain Access =====
   getDomainAccess: (domainId: number) => 
     apiRequest(`/domains/${domainId}/access/`),

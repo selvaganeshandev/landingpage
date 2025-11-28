@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
+import { Navigate } from 'react-router-dom';
 import { AuthState, User, Permission, LoginRequest } from '@/types/auth';
 import { apiClient } from '@/services/api';
 import { PageLoader } from '@/components/PageLoader';
@@ -353,7 +354,7 @@ export function ProtectedRoute({
   }
 
   if (!isAuthenticated) {
-    return <div>Please log in to access this page</div>;
+    return <Navigate to="/session-expired" replace />;
   }
 
   if (requiredPermission && !checkPermission(requiredPermission, requiredLevel)) {

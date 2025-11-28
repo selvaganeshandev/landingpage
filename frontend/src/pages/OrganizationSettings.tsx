@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/services/api";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -78,10 +78,19 @@ export default function OrganizationSettings() {
   }>>([]);
 
   const [newDomain, setNewDomain] = useState("");
+  const [newBrandName, setNewBrandName] = useState("");
   const [newDomainCountry, setNewDomainCountry] = useState("us");
   const [newDomainKeywords, setNewDomainKeywords] = useState<string[]>([]);
   const [keywordInput, setKeywordInput] = useState("");
   const [isFetchingKeywords, setIsFetchingKeywords] = useState(false);
+
+  // Wizard state
+  const [wizardStep, setWizardStep] = useState(1);
+
+  // Niche state
+  const [suggestedNiches, setSuggestedNiches] = useState<string[]>([]);
+  const [selectedNiches, setSelectedNiches] = useState<string[]>([]);
+  const [isFetchingNiches, setIsFetchingNiches] = useState(false);
 
   // Team members state
   const [teamMembers, setTeamMembers] = useState<Array<{
@@ -262,31 +271,79 @@ export default function OrganizationSettings() {
 
   const cleanDomainInput = (input: string): string => {
     if (!input.trim()) return input;
-    
+
     try {
       // Remove everything after the first slash (including query params, fragments, etc.)
       let cleaned = input.trim();
-      
+
       // Remove protocol if present (https:// or http://)
       cleaned = cleaned.replace(/^https?:\/\//i, '');
-      
+
       // Remove www. prefix (optional - you can remove this line if you want to keep www)
       // cleaned = cleaned.replace(/^www\./i, '');
-      
+
       // Extract only the domain part (everything before first slash, question mark, or hash)
       const domainMatch = cleaned.match(/^([^\/\?#]+)/);
       if (domainMatch) {
         cleaned = domainMatch[1];
       }
-      
+
       // Remove trailing slash if present
       cleaned = cleaned.replace(/\/+$/, '');
-      
+
       return cleaned;
     } catch (error) {
       // If parsing fails, return original input
       return input;
     }
+  };
+
+  const handleFetchBrandNiches = async () => {
+    if (!newDomain.trim() && !newBrandName.trim()) {
+      toast({
+        title: "Domain or brand name required",
+        description: "Please enter a domain name or brand name first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setIsFetchingNiches(true);
+      const response: any = await apiClient.fetchBrandNiches(
+        newDomain.trim(),
+        newBrandName.trim()
+      );
+
+      if (response.success && response.niches) {
+        setSuggestedNiches(response.niches);
+        setSelectedNiches([]); // Reset selected niches
+      } else {
+        toast({
+          title: "Failed to fetch niches",
+          description: "Could not retrieve brand niches. Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error fetching niches",
+        description: error.message || "Failed to fetch brand niches from AI.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsFetchingNiches(false);
+    }
+  };
+
+  const handleToggleNiche = (niche: string) => {
+    setSelectedNiches((prev) => {
+      if (prev.includes(niche)) {
+        return prev.filter((n) => n !== niche);
+      } else {
+        return [...prev, niche];
+      }
+    });
   };
 
   const handleAddKeyword = () => {
@@ -835,9 +892,10 @@ export default function OrganizationSettings() {
       const domainUrl = domainName.startsWith('http') ? domainName : `https://${domainName}`;
 
       const response = await apiClient.createDomain({
-        name: domainName,
+        name: newBrandName.trim() || domainName,
         url: domainUrl,
         country: newDomainCountry,
+        niches: selectedNiches.length > 0 ? selectedNiches : null,
         keywords: newDomainKeywords.join(','), // Keywords are now mandatory, always send
       });
 
@@ -875,9 +933,13 @@ export default function OrganizationSettings() {
 
       // Reset form
       setNewDomain("");
+      setNewBrandName("");
       setNewDomainCountry("us");
       setNewDomainKeywords([]);
       setKeywordInput("");
+      setSuggestedNiches([]);
+      setSelectedNiches([]);
+      setWizardStep(1);
       setAddDomainDialogOpen(false);
 
       toast({
@@ -1532,43 +1594,71 @@ export default function OrganizationSettings() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={addDomainDialogOpen} onOpenChange={setAddDomainDialogOpen}>
-        <DialogContent className="max-w-2xl">
+      <Dialog open={addDomainDialogOpen} onOpenChange={(open) => {
+        setAddDomainDialogOpen(open);
+        if (!open) {
+          // Reset wizard on close
+          setWizardStep(1);
+          setNewDomain("");
+          setNewBrandName("");
+          setNewDomainCountry("us");
+          setSuggestedNiches([]);
+          setSelectedNiches([]);
+          setNewDomainKeywords([]);
+          setKeywordInput("");
+        }
+      }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add Domain</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              Add Domain {wizardStep === 1 && <Badge variant="outline">Step 1 of 2</Badge>}
+              {wizardStep === 2 && <Badge variant="outline">Step 2 of 2</Badge>}
+            </DialogTitle>
             <DialogDescription>
-              Add a new domain to monitor for your organization
+              {wizardStep === 1 && "Enter domain details and select industry niches"}
+              {wizardStep === 2 && "Additional configuration (Coming soon)"}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            {/* Domain Name */}
-            <div className="space-y-2">
-              <Label htmlFor="domain-name">Domain Name</Label>
-              <Input
-                id="domain-name"
-                placeholder="example.com"
-                value={newDomain}
-                onChange={(e) => setNewDomain(e.target.value)}
-                onBlur={(e) => {
-                  const cleaned = cleanDomainInput(e.target.value);
-                  if (cleaned !== e.target.value) {
-                    setNewDomain(cleaned);
-                  }
-                }}
-                onPaste={(e) => {
-                  // Get pasted text and clean it
-                  const pastedText = e.clipboardData.getData('text');
-                  const cleaned = cleanDomainInput(pastedText);
-                  if (cleaned !== pastedText) {
-                    e.preventDefault();
-                    setNewDomain(cleaned);
-                  }
-                }}
-              />
-              <p className="text-xs text-muted-foreground">
-                Enter the domain name without http:// or https://
-              </p>
-            </div>
+
+          <div className="space-y-6 py-4">
+            {/* Step 1: Domain Info & Niches */}
+            {wizardStep === 1 && (
+              <>
+                {/* Domain URL */}
+                <div className="space-y-2">
+                  <Label htmlFor="domain-url">Domain URL <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="domain-url"
+                    placeholder="example.com (without http:// or https://)"
+                    value={newDomain}
+                    onChange={(e) => setNewDomain(e.target.value)}
+                    onBlur={(e) => {
+                      const cleaned = cleanDomainInput(e.target.value);
+                      if (cleaned !== e.target.value) {
+                        setNewDomain(cleaned);
+                      }
+                    }}
+                    onPaste={(e) => {
+                      const pastedText = e.clipboardData.getData('text');
+                      const cleaned = cleanDomainInput(pastedText);
+                      if (cleaned !== pastedText) {
+                        e.preventDefault();
+                        setNewDomain(cleaned);
+                      }
+                    }}
+                  />
+                </div>
+
+                {/* Brand Name */}
+                <div className="space-y-2">
+                  <Label htmlFor="brand-name">Brand Name <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="brand-name"
+                    placeholder="Enter official brand name (e.g., Acme Inc)"
+                    value={newBrandName}
+                    onChange={(e) => setNewBrandName(e.target.value)}
+                  />
+                </div>
 
             {/* Country Selector - Searchable */}
             <div className="space-y-2">
@@ -1582,7 +1672,7 @@ export default function OrganizationSettings() {
                     className="w-full justify-between"
                     id="domain-country"
                   >
-                    {selectedCountry ? selectedCountry.label : "Select country..."}
+                    {selectedCountry ? selectedCountry.label : "Select primary country for this brand"}
                     <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
@@ -1615,123 +1705,108 @@ export default function OrganizationSettings() {
                   </Command>
                 </PopoverContent>
               </Popover>
-              <p className="text-xs text-muted-foreground">
-                Select the primary country for this brand
-              </p>
             </div>
 
-            {/* Keywords Input */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="domain-keywords">
-                  Keywords <span className="text-destructive">*</span> (Required)
-                </Label>
-                <Button
-                  type="button"
-                  variant="default"
-                  size="sm"
-                  onClick={handleFetchKeywordsFromGSC}
-                  disabled={isFetchingKeywords}
-                  className="gap-2"
-                >
-                  {isFetchingKeywords ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                    </svg>
-                  )}
-                  Fetch from GSC
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {/* Tag Input - styled like textarea */}
-                <div
-                  id="domain-keywords"
-                  className="flex flex-wrap gap-2 min-h-[100px] max-h-[300px] overflow-y-auto p-3 border border-input rounded-md bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
-                >
-                  {newDomainKeywords.map((keyword, index) => (
-                    <Badge
-                      key={index}
-                      variant="default"
-                      className="gap-1 pr-1 h-7"
-                    >
-                      {keyword}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-4 w-4 p-0 hover:bg-background/20"
-                        onClick={() => handleRemoveKeyword(keyword)}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </Badge>
-                  ))}
-                  <Input
-                    type="text"
-                    placeholder={newDomainKeywords.length === 0 ? "Enter keywords and press Enter (e.g., seo, digital marketing)" : "Add more keywords..."}
-                    value={keywordInput}
-                    onChange={(e) => setKeywordInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === ",") {
-                        e.preventDefault();
-                        handleAddKeyword();
-                      }
-                    }}
-                    className="flex-1 min-w-[200px] border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 h-7"
-                  />
-                  <input
-                    type="file"
-                    accept=".csv,.xlsx,.xls"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                    id="keyword-file-upload"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 shrink-0"
-                    onClick={() => document.getElementById('keyword-file-upload')?.click()}
-                    title="Upload keywords from CSV or XLSX"
-                  >
-                    <Upload className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="flex justify-between items-center">
-                  <p className="text-xs text-muted-foreground">
-                    💡 Type keywords and press Enter, or upload CSV/XLSX files. Max 100 keywords per upload. Each cell = one keyword.
-                  </p>
-                  {newDomainKeywords.length > 0 && (
+                {/* Niche Selection with AI */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label>Industry Niches</Label>
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="default"
                       size="sm"
-                      onClick={() => {
-                        setNewDomainKeywords([]);
-                        setKeywordInput("");
-                      }}
-                      className="h-8 text-xs"
+                      onClick={handleFetchBrandNiches}
+                      disabled={isFetchingNiches || (!newDomain.trim() && !newBrandName.trim())}
+                      className="gap-2"
                     >
-                      Clear all
+                      {isFetchingNiches ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                      {isFetchingNiches ? "Fetching..." : "Fetch Niches with AI"}
                     </Button>
+                  </div>
+
+                  {suggestedNiches.length > 0 && (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Select one or more industry niches that best describe your brand:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {suggestedNiches.map((niche, index) => (
+                          <Badge
+                            key={index}
+                            variant={selectedNiches.includes(niche) ? "default" : "outline"}
+                            className="cursor-pointer gap-1.5 px-3 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                            onClick={() => handleToggleNiche(niche)}
+                          >
+                            {selectedNiches.includes(niche) && (
+                              <Check className="h-3.5 w-3.5" />
+                            )}
+                            {niche}
+                          </Badge>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedNiches.length} niche{selectedNiches.length !== 1 ? 's' : ''} selected
+                      </p>
+                    </div>
+                  )}
+
+                  {!suggestedNiches.length && (
+                    <p className="text-sm text-muted-foreground italic">
+                      Click "Fetch Niches with AI" to get AI-powered suggestions
+                    </p>
                   )}
                 </div>
+
+                {/* Close Step 1 */}
+              </>
+            )}
+
+            {/* Step 2: Placeholder for future */}
+            {wizardStep === 2 && (
+              <div className="py-12 text-center text-muted-foreground">
+                <p>Step 2 content will be added here</p>
               </div>
-            </div>
+            )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddDomainDialogOpen(false)}>
+
+          <DialogFooter className="gap-2">
+            {wizardStep === 2 && (
+              <Button
+                variant="outline"
+                onClick={() => setWizardStep(1)}
+              >
+                <ChevronLeft className="h-4 w-4 mr-2" />
+                Back
+              </Button>
+            )}
+
+            <Button
+              variant="outline"
+              onClick={() => setAddDomainDialogOpen(false)}
+            >
               Cancel
             </Button>
-            <Button onClick={handleAddDomain} disabled={isAddingDomain}>
-              {isAddingDomain ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
-              Add Domain
-            </Button>
+
+            {wizardStep === 1 && (
+              <Button
+                onClick={() => setWizardStep(2)}
+                disabled={!newDomain.trim() || !newBrandName.trim()}
+              >
+                Next
+                <ChevronRight className="h-4 w-4 ml-2" />
+              </Button>
+            )}
+
+            {wizardStep === 2 && (
+              <Button onClick={handleAddDomain} disabled={isAddingDomain}>
+                {isAddingDomain ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+                Add Domain
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

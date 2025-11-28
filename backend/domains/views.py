@@ -32,6 +32,19 @@ def get_openai_client():
         raise Exception(f"Failed to initialize OpenAI client: {e}")
 
 
+def get_google_genai_client():
+    """Return Google GenerativeAI client if configured in Django settings; else raise."""
+    api_key = getattr(settings, "GOOGLE_GEMINI_API_KEY", None)
+    if not api_key:
+        raise Exception("Google GenAI API key not configured")
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        return genai
+    except Exception as e:
+        raise Exception(f"Failed to initialize Google GenAI client: {e}")
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def domain_list(request):
@@ -444,6 +457,83 @@ Provide helpful, realistic information that would be useful for brand monitoring
 
     except Exception as e:
         logger.error(f"Error fetching brand info from ChatGPT: {str(e)}")
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def fetch_brand_niches(request):
+    """
+    Fetch brand niches/categories using Google GenAI based on domain name and brand name.
+    Returns: A list of relevant industry niches/categories for the brand
+    """
+    domain_name = request.data.get('domain_name', '').strip()
+    brand_name = request.data.get('brand_name', '').strip()
+
+    if not domain_name and not brand_name:
+        return Response(
+            {'error': 'Either domain_name or brand_name is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Use brand_name if provided, otherwise extract from domain_name
+    if not brand_name:
+        brand_name = domain_name.replace('.com', '').replace('.io', '').replace('.org', '').replace('.net', '').replace('-', ' ').replace('_', ' ').title()
+
+    try:
+        genai = get_google_genai_client()
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+        prompt = f"""Analyze the brand "{brand_name}" (website: {domain_name}) and suggest relevant industry niches or categories.
+
+Return ONLY a JSON array of 5-8 specific industry niches/categories that best describe this brand's market positioning. Each niche should be:
+- Specific and descriptive (e.g., "Enterprise Cloud Security Solutions" not just "Security")
+- Industry-relevant
+- Useful for market positioning and competitive analysis
+
+Example format:
+["Enterprise SaaS", "Cloud Infrastructure", "DevOps Tools", "IT Security", "Business Intelligence"]
+
+Provide the response as a valid JSON array only, no additional text."""
+
+        response = model.generate_content(prompt)
+        result_text = response.text.strip()
+
+        # Try to parse the JSON response
+        try:
+            # Remove markdown code blocks if present
+            if result_text.startswith('```'):
+                result_text = result_text.split('```')[1]
+                if result_text.startswith('json'):
+                    result_text = result_text[4:]
+                result_text = result_text.strip()
+
+            niches = json.loads(result_text)
+
+            # Validate it's a list
+            if not isinstance(niches, list):
+                raise ValueError("Response is not a list")
+
+            # Filter to ensure all items are strings and limit to 10
+            niches = [str(n).strip() for n in niches if n][:10]
+
+            return Response({
+                'success': True,
+                'niches': niches
+            })
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Failed to parse Google GenAI response as JSON: {result_text}")
+            return Response({
+                'success': False,
+                'error': 'Failed to parse AI response',
+                'raw_response': result_text
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"Error fetching brand niches from Google GenAI: {str(e)}")
         return Response({
             'success': False,
             'error': str(e)
