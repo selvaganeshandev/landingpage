@@ -13,6 +13,11 @@ import json
 import logging
 import statistics
 from dateutil.relativedelta import relativedelta
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from openpyxl.utils import get_column_letter
+from django.http import HttpResponse
+import io
 
 logger = logging.getLogger(__name__)
 
@@ -856,6 +861,349 @@ def export_mentions(request):
         )
 
 
+def _format_mention_for_export(analytics_record):
+    """
+    Format a PromptAnalytics record into the export format
+    Returns a dictionary matching the specified JSON structure
+    """
+    prompt = analytics_record.prompt
+    group = prompt.group if prompt.group else None
+    
+    # Helper function to extract domain name from URL
+    def _extract_domain_name(url):
+        """Extract a readable domain name from URL"""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            domain = parsed.netloc or parsed.path
+            if domain.startswith('www.'):
+                domain = domain[4:]
+            # Capitalize and format
+            parts = domain.split('.')
+            if len(parts) >= 2:
+                return parts[0].capitalize() + ' ' + parts[1].capitalize()
+            return domain.capitalize()
+        except:
+            return 'Source'
+    
+    # Helper function to extract headline from context around URL
+    def _extract_headline_from_context(url, context_summary):
+        """Extract a headline/quote from context around the URL"""
+        if not context_summary or not url:
+            return None
+        try:
+            import re
+            # Find the URL in the context
+            url_lower = url.lower()
+            context_lower = context_summary.lower()
+            idx = context_lower.find(url_lower)
+            if idx == -1:
+                return None
+            
+            # Extract text around the URL (300 chars before and after)
+            start = max(0, idx - 300)
+            end = min(len(context_summary), idx + len(url) + 300)
+            snippet = context_summary[start:end]
+            url_pos_in_snippet = snippet.lower().find(url_lower)
+            
+            if url_pos_in_snippet == -1:
+                return None
+            
+            # Get text before the URL
+            text_before = snippet[:url_pos_in_snippet].strip()
+            
+            # Strategy 1: Look for quoted text (text in quotes)
+            quoted_matches = re.findall(r'["\']([^"\']{10,100})["\']', text_before)
+            if quoted_matches:
+                return quoted_matches[-1].strip()
+            
+            # Strategy 2: Look for sentences ending with punctuation before the URL
+            sentences = re.split(r'[.!?]\s+', text_before)
+            if sentences:
+                last_sentence = sentences[-1].strip()
+                last_sentence = re.sub(r'^(For|As|According to|In|On|The|A|An)\s+', '', last_sentence, flags=re.IGNORECASE)
+                if len(last_sentence) > 10 and len(last_sentence) < 150:
+                    return last_sentence.strip()
+            
+            # Strategy 3: Extract last 5-15 words as fallback
+            words = text_before.split()
+            if len(words) >= 5:
+                phrase = ' '.join(words[-15:]).strip()
+                phrase = re.sub(r'^(For|As|According to|In|On|The|A|An)\s+', '', phrase, flags=re.IGNORECASE)
+                if len(phrase) > 10 and len(phrase) < 150:
+                    return phrase.strip()
+        except Exception as e:
+            logger.warning(f"Error extracting headline from context: {e}")
+        return None
+    
+    # Extract and format citations from citation_list
+    citations_data = []
+    citation_list = getattr(analytics_record, 'citation_list', None) or []
+    context_summary = analytics_record.context_summary or ''
+    
+    if citation_list and isinstance(citation_list, list):
+        for idx, citation_url in enumerate(citation_list):
+            if not citation_url or not isinstance(citation_url, str):
+                continue
+            
+            # Extract headline from context around this URL
+            headline = _extract_headline_from_context(citation_url, context_summary)
+            
+            # Extract source name from URL
+            source_name = _extract_domain_name(citation_url)
+            
+            # Generate description based on source type
+            url_lower = citation_url.lower()
+            if 'product' in url_lower or 'shop' in url_lower or 'store' in url_lower:
+                description = 'Product page citing key benefits and features'
+            elif 'review' in url_lower or 'rating' in url_lower:
+                description = 'Third-party review and analysis'
+            elif 'blog' in url_lower or 'article' in url_lower:
+                description = 'Article discussing key features'
+            elif 'healthline' in url_lower or 'medical' in url_lower or 'health' in url_lower:
+                description = 'Third-party nutritional analysis'
+            elif 'official' in url_lower or 'site' in url_lower:
+                description = 'Official site with product information'
+            else:
+                description = 'Source providing relevant information'
+            
+            citations_data.append({
+                'id': idx + 1,
+                'text': headline or f'Citation from {source_name}',
+                'source': source_name,
+                'source_name': source_name,
+                'url': citation_url,
+                'source_url': citation_url,
+                'description': description,
+                'reliability': 'Verified',
+                'referenced_at': analytics_record.created_at.isoformat()
+            })
+    
+    # Format the mention data according to the specified structure
+    formatted_data = {
+        'mention_id': analytics_record.id,
+        'platform': analytics_record.platform,
+        'sentiment': getattr(analytics_record, 'sentiment_category', 'neutral'),
+        'sentiment_score': float(analytics_record.sentiment_score),
+        'prompt_text': prompt.prompt,
+        'full_ai_response': analytics_record.context_summary or '',
+        'total_mentions': analytics_record.total_mentions,
+        'total_citations': analytics_record.total_citations,
+        'position': float(analytics_record.position),
+        'created_at': analytics_record.created_at.isoformat(),
+        'domain_name': (group.domain.name if group else ''),
+        'citations': citations_data,
+        'key_topics': (getattr(analytics_record, 'topic_list', None) or getattr(analytics_record, 'key_topics', []) or [])
+    }
+    
+    return formatted_data
+
+
+def _create_excel_from_mentions(mentions_data, sheet_name='Mentions'):
+    """
+    Create an Excel workbook from mentions data
+    Returns a BytesIO buffer with the Excel file
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    
+    # Define styles
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Headers
+    headers = [
+        'Mention ID', 'Platform', 'Sentiment', 'Sentiment Score', 'Prompt Text',
+        'Full AI Response', 'Total Mentions', 'Total Citations', 'Position',
+        'Created At', 'Domain Name', 'Citations (JSON)', 'Key Topics (JSON)'
+    ]
+    
+    # Write headers
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.value = header
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = border
+    
+    # Write data
+    logger.info(f"Writing {len(mentions_data)} mentions to Excel")
+    for row_num, mention in enumerate(mentions_data, 2):
+        # Convert citations and key_topics to JSON strings for Excel
+        citations_json = json.dumps(mention.get('citations', []), indent=2) if mention.get('citations') else ''
+        key_topics_json = json.dumps(mention.get('key_topics', []), indent=2) if mention.get('key_topics') else ''
+        
+        data_row = [
+            mention.get('mention_id', ''),
+            mention.get('platform', ''),
+            mention.get('sentiment', ''),
+            mention.get('sentiment_score', 0),
+            mention.get('prompt_text', ''),
+            mention.get('full_ai_response', ''),
+            mention.get('total_mentions', 0),
+            mention.get('total_citations', 0),
+            mention.get('position', 0),
+            mention.get('created_at', ''),
+            mention.get('domain_name', ''),
+            citations_json,
+            key_topics_json
+        ]
+        
+        for col_num, value in enumerate(data_row, 1):
+            cell = ws.cell(row=row_num, column=col_num)
+            cell.value = value
+            cell.border = border
+            cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+    
+    logger.info(f"Excel file created with {len(mentions_data)} rows of data")
+    
+    # Auto-adjust column widths
+    for col_num in range(1, len(headers) + 1):
+        column_letter = get_column_letter(col_num)
+        max_length = 0
+        for row in ws[column_letter]:
+            try:
+                if len(str(row.value)) > max_length:
+                    max_length = len(str(row.value))
+            except:
+                pass
+        # Set width with some padding, but cap at 50 for very long content
+        adjusted_width = min(max_length + 2, 50)
+        ws.column_dimensions[column_letter].width = adjusted_width
+    
+    # Save to BytesIO
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])  # Temporarily allow all for testing
+def export_mentions_list(request):
+    """
+    Export all mentions to Excel file
+    Supports the same filters as get_mentions
+    """
+    try:
+        # Get filter parameters (same as get_mentions)
+        domain_id = request.GET.get('domain_id')
+        if not domain_id:
+            return Response(
+                {'error': 'domain_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get mentions with same filtering logic as get_mentions
+        show_all = request.GET.get('show_all', 'false').lower() == 'true'
+        if show_all:
+            mentions = PromptAnalytics.objects.filter(is_published=True, prompt__group__domain_id=domain_id)
+        else:
+            mentions = PromptAnalytics.objects.filter(is_mention=True, is_published=True, prompt__group__domain_id=domain_id)
+        
+        # Apply search filter
+        search_query = request.GET.get('search', '')
+        if search_query:
+            mentions = mentions.filter(
+                Q(prompt__prompt__icontains=search_query) |
+                Q(context_summary__icontains=search_query) |
+                Q(prompt__group__domain__name__icontains=search_query)
+            )
+        
+        # Apply platform filter
+        platform = request.GET.get('platform', '')
+        if platform and platform != 'all' and platform != 'All Platforms':
+            mentions = mentions.filter(platform__icontains=platform)
+        
+        # Apply sentiment filter
+        sentiment = request.GET.get('sentiment', '')
+        if sentiment and sentiment.lower() != 'all' and sentiment.lower() != 'all sentiments':
+            mentions = mentions.filter(sentiment_category__iexact=sentiment)
+        
+        # Order by most recent first
+        mentions = mentions.order_by('-created_at')
+        
+        # Get count for logging
+        mentions_count = mentions.count()
+        logger.info(f"Exporting {mentions_count} mentions for domain_id={domain_id}")
+        
+        # Format mentions data - explicitly evaluate queryset to ensure all results are processed
+        # Convert to list first to ensure all results are fetched
+        mentions_list = list(mentions)
+        logger.info(f"Fetched {len(mentions_list)} mentions from database")
+        
+        mentions_data = []
+        for mention in mentions_list:
+            try:
+                formatted = _format_mention_for_export(mention)
+                mentions_data.append(formatted)
+            except Exception as e:
+                logger.error(f"Error formatting mention {mention.id}: {str(e)}")
+                continue
+        
+        logger.info(f"Formatted {len(mentions_data)} mentions for export")
+        
+        # Create Excel file
+        excel_file = _create_excel_from_mentions(mentions_data, 'Mentions Export')
+        
+        # Create HTTP response
+        response = HttpResponse(
+            excel_file.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="mentions_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error exporting mentions list: {str(e)}")
+        return Response(
+            {'error': f'Failed to export mentions: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])  # Temporarily allow all for testing
+def export_mention_detail(request, analytics_id):
+    """
+    Export a single mention to Excel file
+    """
+    try:
+        # Get the specific analytics record
+        analytics_record = get_object_or_404(PromptAnalytics, id=analytics_id)
+        
+        # Format the mention data
+        mention_data = _format_mention_for_export(analytics_record)
+        
+        # Create Excel file with single mention
+        excel_file = _create_excel_from_mentions([mention_data], f'Mention {analytics_id}')
+        
+        # Create HTTP response
+        response = HttpResponse(
+            excel_file.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="mention_{analytics_id}_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error exporting mention detail: {str(e)}")
+        return Response(
+            {'error': f'Failed to export mention: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 # ==================== PROMPTS APIs ====================
 
 @api_view(['GET', 'POST'])
@@ -1159,6 +1507,33 @@ def prompt_group_detail(request, group_id):
                 group.prompts.filter(type='secondary').order_by('created_at').values_list('prompt', flat=True)
             )
             
+            # Get full_ai_response from latest analytics for primary prompt
+            # Try multiple fallbacks to find the best available response
+            primary_full_ai_response = ''
+            if primary_prompt_obj:
+                # First try: Get latest published mention analytics
+                latest_primary_analytic = PromptAnalytics.objects.filter(
+                    prompt=primary_prompt_obj,
+                    is_mention=True,
+                    is_published=True
+                ).order_by('-created_at').first()
+                
+                # Fallback 1: If no mention found, try any published analytics
+                if not latest_primary_analytic:
+                    latest_primary_analytic = PromptAnalytics.objects.filter(
+                        prompt=primary_prompt_obj,
+                        is_published=True
+                    ).order_by('-created_at').first()
+                
+                # Fallback 2: If still nothing, try any analytics record (even if not published)
+                if not latest_primary_analytic:
+                    latest_primary_analytic = PromptAnalytics.objects.filter(
+                        prompt=primary_prompt_obj
+                    ).order_by('-created_at').first()
+                
+                if latest_primary_analytic and latest_primary_analytic.context_summary:
+                    primary_full_ai_response = latest_primary_analytic.context_summary
+            
             prompts_data = []
             for prompt in prompts:
                 # Get all analytics for this prompt (for platforms list)
@@ -1446,6 +1821,7 @@ def prompt_group_detail(request, group_id):
                     'domain_name': group.domain.name,
                     'theme': group.theme or '',
                     'primary_prompt': primary_prompt_text,
+                    'primary_full_ai_response': primary_full_ai_response,
                     'secondary_prompts': secondary_prompts_list,
                     'total_mentions': group.total_mentions,
                     'total_citations': group.total_citations,

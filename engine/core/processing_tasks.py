@@ -66,12 +66,20 @@ def process_prompt_analytics_scheduler(self):
 @shared_task(bind=True, ignore_result=True, max_retries=3)
 def process_competitor_scheduler(self):
     """
-    DEPRECATED: Competitor processing scheduler - no longer used.
-    Competitor processing is now manual-only via process_single_competitor_task.
-    This task is kept for backward compatibility but is not scheduled in Celery Beat.
+    Periodic scheduler for competitor processing.
+    Processes competitors with status INIT or FAIL.
+    Runs every 15 seconds (configurable via CELERY_BEAT_SCHEDULE_COMPETITOR).
     """
-    logger.warning("process_competitor_scheduler is deprecated. Use manual processing via POST /api/competitors/{id}/process/")
-    return {'scheduled': False, 'reason': 'deprecated', 'message': 'Use manual processing instead'}
+    try:
+        processor = CompetitorProcessor(
+            max_concurrent_prompts=getattr(settings, 'MAX_CONCURRENT_COMPETITOR_PROMPTS', 10)
+        )
+        result = processor.schedule_tick()
+        logger.info(f"Competitor scheduler tick completed: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error in competitor scheduler: {str(e)}", exc_info=True)
+        raise self.retry(exc=e, countdown=60)  # Retry after 60 seconds on error
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)

@@ -2,15 +2,15 @@
 Competitor Processing Module
 Handles end-to-end competitor tracking and analytics
 
-Flow (Manual Processing Only):
+Flow:
 1. Competitor created with track_status='INIT'
-2. User triggers processing via POST /api/competitors/{id}/process/
+2. Automatic scheduler (Celery Beat) or manual trigger via POST /api/competitors/{id}/process/
 3. Links all prompts with completed PromptAnalytics to competitor (creates CompetitorPromptAnalytics records)
 4. Extracts competitor mentions from existing PromptAnalytics.context_summary (no new API calls)
 5. Aggregates results into Competitor and ShareOfVoiceAnalytics
 
 Note: 
-- Processing is manual-only (no automatic scheduler)
+- Processing can be automatic (via Celery Beat scheduler) or manual (via API)
 - Uses existing PromptAnalytics data instead of making new API calls to save costs and ensure consistency
 """
 
@@ -168,16 +168,46 @@ class CompetitorProcessor:
     
     def schedule_tick(self) -> Dict[str, Any]:
         """
-        DEPRECATED: Automatic scheduling method - no longer used.
-        Competitor processing is now manual-only via process_single_competitor_task.
-        
-        This method is kept for backward compatibility but should not be called.
+        Process competitors that are ready (INIT or FAIL status).
+        Called by Celery Beat scheduler periodically.
         
         Returns:
-            dict: Status information indicating manual processing is required
+            dict: Summary of processing results
         """
-        logger.warning("schedule_tick is deprecated. Use manual processing via POST /api/competitors/{id}/process/")
-        return {'scheduled': False, 'reason': 'deprecated', 'message': 'Use manual processing instead'}
+        try:
+            # Get competitors ready for processing (INIT or FAIL status)
+            ready_competitors = Competitor.objects.filter(
+                track_status__in=['INIT', 'FAIL']
+            ).order_by('created_at')[:5]  # Process max 5 at a time per tick
+            
+            if not ready_competitors.exists():
+                return {'scheduled': False, 'reason': 'no_competitors_ready', 'count': 0}
+            
+            processed_count = 0
+            failed_count = 0
+            
+            for competitor in ready_competitors:
+                try:
+                    # Process each competitor
+                    result = self.process_competitor(competitor)
+                    if result.get('scheduled') or result.get('status') == 'completed':
+                        processed_count += 1
+                    elif result.get('status') == 'failed':
+                        failed_count += 1
+                except Exception as e:
+                    logger.error(f"Error processing competitor {competitor.id} in schedule_tick: {str(e)}", exc_info=True)
+                    failed_count += 1
+                    continue
+            
+            return {
+                'scheduled': True,
+                'processed': processed_count,
+                'failed': failed_count,
+                'total_ready': ready_competitors.count()
+            }
+        except Exception as e:
+            logger.error(f"Error in competitor schedule_tick: {str(e)}", exc_info=True)
+            return {'scheduled': False, 'error': str(e)}
     
     def _link_prompts_to_competitor(self, competitor: Competitor) -> int:
         """

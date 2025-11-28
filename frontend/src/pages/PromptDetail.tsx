@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
+import DOMPurify from 'dompurify';
 import {
   LineChart,
   Line,
@@ -65,6 +66,12 @@ const PromptDetail = () => {
       setPromptGroup(response.group);
       const promptsData = response.group?.prompts || [];
       setPrompts(promptsData);
+      // Debug: Log the full AI response availability
+      console.log('Prompt Group Response:', {
+        hasPrimaryFullAiResponse: !!response.group?.primary_full_ai_response,
+        primaryFullAiResponseLength: response.group?.primary_full_ai_response?.length || 0,
+        primaryFullAiResponsePreview: response.group?.primary_full_ai_response?.substring(0, 100) || 'N/A'
+      });
       // Debug: Log prompts and their platforms
       console.log('Loaded prompts:', promptsData.length, 'for platform:', selectedPlatform);
       promptsData.forEach((p: any, idx: number) => {
@@ -164,6 +171,47 @@ const PromptDetail = () => {
     } catch {
       return dateString;
     }
+  };
+
+  // Function to process content and convert markdown-like syntax to HTML
+  const processContent = (content: string) => {
+    if (!content) return '';
+    
+    let processedContent = content;
+    
+    // Replace ### with <h3> tags
+    processedContent = processedContent.replace(/^###\s*(.+)$/gm, '<h3>$1</h3>');
+    
+    // Replace **text** with <strong>text</strong> for bold
+    processedContent = processedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // Convert markdown links [text](url) to HTML links first
+    processedContent = processedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    
+    // Convert standalone URLs to clickable links
+    const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/g;
+    processedContent = processedContent.replace(urlRegex, (match, url) => {
+      // Check if this URL is already inside an HTML tag
+      if (processedContent.includes(`href="${url}"`) || processedContent.includes(`href='${url}'`)) {
+        return match; // Don't process if already in an href attribute
+      }
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    });
+    
+    // Also handle www. links
+    const wwwRegex = /(www\.[^\s<>"{}|\\^`\[\]]+)/g;
+    processedContent = processedContent.replace(wwwRegex, (match, url) => {
+      // Check if this www. URL is already inside an HTML tag
+      if (processedContent.includes(`href="https://${url}"`) || processedContent.includes(`href='https://${url}'`)) {
+        return match; // Don't process if already in an href attribute
+      }
+      return `<a href="https://${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    });
+    
+    // Convert line breaks to <br> tags
+    processedContent = processedContent.replace(/\n/g, '<br>');
+    
+    return processedContent;
   };
 
   const getSentimentColor = (sentiment: string) => {
@@ -320,6 +368,32 @@ const PromptDetail = () => {
           </div>
         </div>
       </Card>
+
+      {/* Full AI Response Section */}
+      {promptGroup?.primary_full_ai_response && promptGroup.primary_full_ai_response.trim() && (
+        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold font-inter">Full AI Response</h3>
+              <Button variant="ghost" size="sm" onClick={() => handleCopy(promptGroup?.primary_full_ai_response || '')}>
+                <Copy className="h-4 w-4 mr-1" />
+                Copy
+              </Button>
+            </div>
+            <div className="bg-gradient-to-br from-muted/30 to-muted/50 p-6 rounded-xl border border-border/50 backdrop-blur-sm">
+              <div 
+                className="text-sm leading-relaxed prose prose-sm max-w-none [&_h1]:font-semibold [&_h1]:text-lg [&_h1]:mt-4 [&_h1]:mb-2 [&_h1]:text-foreground [&_h2]:font-semibold [&_h2]:text-base [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-foreground [&_h3]:font-semibold [&_h3]:text-sm [&_h3]:mt-4 [&_h3]:mb-2 [&_h3]:text-foreground [&_a]:text-primary [&_a]:underline [&_a]:hover:no-underline [&_strong]:font-semibold [&_strong]:text-foreground [&_b]:font-semibold [&_b]:text-foreground"
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(processContent(promptGroup?.primary_full_ai_response || ''), {
+                    ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'blockquote', 'code', 'pre', 'br', 'div', 'span'],
+                    ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'id']
+                  })
+                }}
+              />
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Mention Volume Trend - Full Width */}
       <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">

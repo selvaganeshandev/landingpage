@@ -212,15 +212,33 @@ const Mentions = () => {
 
   const handleExport = async () => {
     try {
-      const response = await apiClient.exportMentions({
+      const activeDomainId = selectedDomain?.id ?? getActiveDomainIdNumber(user);
+      
+      if (!activeDomainId) {
+        toast({
+          title: "Export Failed",
+          description: "Please select a domain first",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Exporting...",
+        description: "Preparing Excel file with mentions data...",
+      });
+
+      await apiClient.exportMentionsListExcel({
+        domain_id: activeDomainId,
+        search: searchQuery || undefined,
         platform: selectedPlatform !== "all" ? selectedPlatform : undefined,
         sentiment: selectedSentiment !== "all" ? selectedSentiment : undefined,
-        format: "csv"
+        show_all: showAll,
       });
       
       toast({
         title: "Export Complete",
-        description: `Exported ${response.count} mentions successfully.`,
+        description: "Mentions exported to Excel file successfully.",
       });
     } catch (error: any) {
       toast({

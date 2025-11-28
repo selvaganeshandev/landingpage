@@ -196,6 +196,8 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'core.processing_tasks.process_integration_insights_scheduler',
         'schedule': config('CELERY_BEAT_SCHEDULE_INTEGRATION_INSIGHTS', default=15.0, cast=float),  # Every 15 seconds for testing (change to 3600.0 for production)
     },
-    # Competitor processing is now manual-only (removed automatic scheduler)
-    # Users can trigger processing via POST /api/competitors/{id}/process/
+    'competitor-scheduler-every-15s': {
+        'task': 'core.processing_tasks.process_competitor_scheduler',
+        'schedule': config('CELERY_BEAT_SCHEDULE_COMPETITOR', default=15.0, cast=float),
+    },
 }

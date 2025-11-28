@@ -10,9 +10,11 @@ urlpatterns = [
     path('mentions/filters/', views.get_mention_filters, name='get_mention_filters'),
     path('mentions/<int:analytics_id>/', views.get_mention_detail, name='get_mention_detail'),
     path('mentions/<int:analytics_id>/related/', views.get_related_mentions, name='get_related_mentions'),
+    path('mentions/<int:analytics_id>/export/', views.export_mention_detail, name='export_mention_detail'),
     path('mentions/trends/', views.get_mention_trends, name='get_mention_trends'),
     path('mentions/analytics/', views.get_mention_analytics, name='get_mention_analytics'),
-    path('mentions/export/', views.export_mentions, name='export_mentions'),
+    path('mentions/export/', views.export_mentions_list, name='export_mentions_list'),
+    path('mentions/export/old/', views.export_mentions, name='export_mentions'),  # Keep old endpoint for backward compatibility
     path('historical-trends/', views.get_historical_trends, name='get_historical_trends'),
     
     # Prompt Groups endpoints

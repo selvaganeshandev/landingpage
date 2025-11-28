@@ -233,39 +233,28 @@ const MentionDetail = () => {
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (!mention) return;
     
-    const exportData = {
-      mention_id: mention.id,
-      platform: mention.platform,
-      sentiment: mention.sentiment,
-      sentiment_score: mention.sentiment_score,
-      prompt_text: mention.prompt_text,
-      full_ai_response: mention.full_ai_response,
-      total_mentions: mention.total_mentions,
-      total_citations: mention.total_citations,
-      position: mention.position,
-      created_at: mention.created_at,
-      domain_name: mention.domain_name,
-      citations: mention.citations || [],
-      key_topics: mention.key_topics || []
-    };
-    
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `mention-${mention.id}-${mention.platform.toLowerCase()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    toast({
-      title: "Export Successful",
-      description: "Mention data has been exported.",
-    });
+    try {
+      toast({
+        title: "Exporting...",
+        description: "Preparing Excel file with mention data...",
+      });
+
+      await apiClient.exportMentionDetailExcel(mention.id);
+      
+      toast({
+        title: "Export Successful",
+        description: "Mention data exported to Excel file successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export Failed",
+        description: error.message || "Failed to export mention",
+        variant: "destructive",
+      });
+    }
   };
 
   const getSentimentColor = (sentiment: string) => {

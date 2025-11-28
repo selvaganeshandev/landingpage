@@ -489,6 +489,32 @@ export const apiClient = {
     body: JSON.stringify(data),
   }),
 
+  // Export mentions list to Excel
+  exportMentionsListExcel: async (params: {
+    domain_id?: number;
+    search?: string;
+    platform?: string;
+    sentiment?: string;
+    show_all?: boolean;
+  }) => {
+    const queryParams = new URLSearchParams();
+    if (params.domain_id) queryParams.set('domain_id', String(params.domain_id));
+    if (params.search) queryParams.set('search', params.search);
+    if (params.platform && params.platform !== 'all') queryParams.set('platform', params.platform);
+    if (params.sentiment && params.sentiment !== 'all') queryParams.set('sentiment', params.sentiment);
+    if (params.show_all) queryParams.set('show_all', 'true');
+    
+    const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    return downloadFile(`/prompts/mentions/export/${queryString}`, `mentions_export_${timestamp}.xlsx`);
+  },
+
+  // Export single mention to Excel
+  exportMentionDetailExcel: async (mentionId: number) => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    return downloadFile(`/prompts/mentions/${mentionId}/export/`, `mention_${mentionId}_export_${timestamp}.xlsx`);
+  },
+
   // ===== Prompt Groups =====
   getPromptGroups: (params?: any) => {
     const cleaned: Record<string, string> = {};

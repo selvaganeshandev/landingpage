@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TimeFilter } from "@/components/TimeFilter";
 import { PageLoader } from "@/components/PageLoader";
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -14,8 +13,7 @@ import {
   Frown,
   ArrowUpRight,
   ArrowDownRight,
-  FileText,
-  RefreshCw
+  FileText
 } from "lucide-react";
 import { 
   LineChart, 
@@ -50,8 +48,7 @@ const Sentiment = () => {
   const { toast } = useToast();
   const { user } = useAuth();
   const { selectedDomain } = useDomainStore();
-  const [timePeriod, setTimePeriod] = useState<string>("30");
-  const [days, setDays] = useState<number>(30);
+  const DAYS = 30;
   const [domainId, setDomainId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
@@ -80,25 +77,14 @@ const Sentiment = () => {
     }
   }, [user, selectedDomain?.id, domainId]);
 
-  // Update days when timePeriod changes
-  useEffect(() => {
-    const daysMap: Record<string, number> = {
-      '7': 7,
-      '30': 30,
-      '90': 90,
-      '365': 365,
-    };
-    setDays(daysMap[timePeriod] || 30);
-  }, [timePeriod]);
-
   useEffect(() => {
     const load = async () => {
       if (!domainId) return;
       setLoading(true);
       try {
         const [sum, list] = await Promise.all([
-          apiClient.getSentimentSummary({ domain_id: domainId, days }),
-          apiClient.getSentimentByDomain({ domain_id: domainId, days })
+          apiClient.getSentimentSummary({ domain_id: domainId, days: DAYS }),
+          apiClient.getSentimentByDomain({ domain_id: domainId, days: DAYS })
         ]);
         setSummary(sum as any);
         setRows(Array.isArray(list) ? list : []);
@@ -134,7 +120,7 @@ const Sentiment = () => {
       }
     };
     void load();
-  }, [domainId, days]);
+  }, [domainId]);
 
   const handleExportReport = () => {
     toast({
@@ -263,28 +249,6 @@ const Sentiment = () => {
     });
   }, [competitorRows, summary]);
 
-  const handleRefresh = () => {
-    if (domainId) {
-      const load = async () => {
-        setLoading(true);
-        try {
-          const [sum, list] = await Promise.all([
-            apiClient.getSentimentSummary({ domain_id: domainId, days }),
-            apiClient.getSentimentByDomain({ domain_id: domainId, days })
-          ]);
-          setSummary(sum as any);
-          setRows(Array.isArray(list) ? list : []);
-          toast({ title: 'Data refreshed', description: 'Sentiment data has been updated.' });
-        } catch (e: any) {
-          toast({ title: 'Failed to refresh', description: String(e.message || e), variant: 'destructive' });
-        } finally {
-          setLoading(false);
-        }
-      };
-      void load();
-    }
-  };
-
   if (loading) {
     return <PageLoader />;
   }
@@ -299,16 +263,6 @@ const Sentiment = () => {
           </p>
         </div>
         <div className="flex items-center gap-4">
-          <TimeFilter selected={timePeriod} onSelect={setTimePeriod} />
-          <Button
-            onClick={handleRefresh}
-            variant="outline"
-            disabled={loading}
-            className="border-border"
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
           <Button onClick={handleExportReport} className="gradient-primary shadow-md shadow-primary/20">
             <FileText className="h-4 w-4 mr-2" />
             Export Sentiment Report

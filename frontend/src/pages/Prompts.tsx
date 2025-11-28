@@ -2,9 +2,8 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, FolderOpen, TrendingUp, Eye, Edit, Sparkles, Loader2, Clock, CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { Plus, FolderOpen, TrendingUp, Eye, Edit, Sparkles, Loader2, Clock, CheckCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Breadcrumb,
@@ -33,7 +32,6 @@ const Prompts = () => {
   const [offset, setOffset] = useState(0);
   const limit = 20;
   const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
 
   const { selectedDomain } = useDomainStore();
   const { user } = useAuth();
@@ -44,7 +42,7 @@ const Prompts = () => {
     setTotalCount(0);
     void loadPromptGroups(0, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, selectedDomain?.id]);
+  }, [selectedDomain?.id]);
 
   const loadPromptGroups = async (startOffset: number = offset, replace: boolean = false) => {
     try {
@@ -57,7 +55,6 @@ const Prompts = () => {
         return;
       }
       const response = await apiClient.getPromptGroups({
-        search: searchQuery || undefined,
         domain_id: activeDomainId,
         limit,
         offset: startOffset,
@@ -115,10 +112,6 @@ const Prompts = () => {
     setGenerateDialogOpen(true);
   };
 
-  const handleOrganizeGroups = () => {
-    toast({ title: "Organize Groups", description: "Opening group organization panel..." });
-  };
-
   const getStatusBadge = (trackStatus: string) => {
     const status = trackStatus?.toUpperCase();
     
@@ -158,24 +151,7 @@ const Prompts = () => {
         </Button>
       </div>
 
-      <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-        <div className="flex gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input 
-              placeholder="Search prompt groups..." 
-              className="pl-10 border border-border"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-          {/* Organize Groups button hidden */}
-          {/* <Button variant="outline" onClick={handleOrganizeGroups} className="border border-border">
-            <FolderOpen className="h-4 w-4 mr-2" />
-            Organize Groups
-          </Button> */}
-        </div>
-      </Card>
+      {/* Search and organize controls removed as per requirements */}
 
       <div className="grid gap-6">
         {isLoading ? (
@@ -262,14 +238,12 @@ const Prompts = () => {
             <FolderOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <h3 className="text-lg font-semibold mb-2">No Prompt Groups Found</h3>
             <p className="text-muted-foreground mb-4">
-              {searchQuery ? "No groups match your search criteria." : "Create your first prompt group to get started."}
+              Create your first prompt group to get started.
             </p>
-            {!searchQuery && (
-              <Button onClick={() => setAddDialogOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Add Prompt Group
-              </Button>
-            )}
+            <Button onClick={() => setAddDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Prompt Group
+            </Button>
           </Card>
         )}
       </div>

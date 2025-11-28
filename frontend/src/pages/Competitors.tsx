@@ -1479,8 +1479,8 @@ const Competitors = () => {
                 >
                   Refresh Status
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
-                  Go to Dashboard
+                <Button variant="ghost" size="sm" onClick={() => navigate('/insights')}>
+                  Go to Insights
               </Button>
             </div>
             </div>

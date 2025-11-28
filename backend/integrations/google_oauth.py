@@ -30,7 +30,7 @@ SCOPES = [
 ]
 
 # Frontend URL for redirect after OAuth
-FRONTEND_URL = 'http://localhost:8080'
+FRONTEND_URL = getattr(settings, 'SITE_URL', '')
 
 
 def get_google_oauth_config():

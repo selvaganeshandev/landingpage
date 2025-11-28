@@ -897,7 +897,7 @@ class DomainProcessor:
         - Considers semantic relationships
         - Minimum min_words (default 2) - ensures title is not one word
         - Maximum max_words (default 4)
-        - Join multiple words with spaces (or "&" for 2-word pairs)
+        - Join multiple words with spaces
         """
         if not text or not text.strip():
             return "General"
@@ -1026,8 +1026,8 @@ class DomainProcessor:
                 _, word1, word2 = phrase_scores[0]
                 # Always use both words (minimum 2 words requirement)
                 capitalized = [word1.capitalize(), word2.capitalize()]
-                # Use "&" for 2-word pairs, space for more words
-                return f"{capitalized[0]} & {capitalized[1]}"
+                # Use space to join words
+                return f"{capitalized[0]} {capitalized[1]}"
         
         # Strategy 4: If no good phrases, take top words by score (minimum min_words)
         sorted_words = sorted(word_scores.items(), key=lambda x: x[1], reverse=True)
@@ -1038,11 +1038,8 @@ class DomainProcessor:
             words_to_use = top_words[:min_words] if len(top_words) >= min_words else top_words
             capitalized = [word.capitalize() for word in words_to_use]
             
-            # For 2 words, use "&" separator; for more words, use space
-            if len(capitalized) == 2:
-                return f"{capitalized[0]} & {capitalized[1]}"
-            else:
-                return " ".join(capitalized)
+            # Use space to join all words
+            return " ".join(capitalized)
         elif len(top_words) == 1:
             # If only one word found, add a generic second word to meet minimum requirement
             return f"{top_words[0].capitalize()} Topic"
@@ -1298,22 +1295,31 @@ class DomainProcessor:
             cluster_vecs = embeddings[inds]
             dists = np.linalg.norm(cluster_vecs - centroid, axis=1)
 
-            # Get all prompts in this cluster for smart title extraction
+            # Get ALL prompts in this cluster (both primary and secondary) for title generation
+            # Note: Primary/secondary split happens AFTER title generation, so this includes all prompts
             cluster_prompts = [texts[i] for i in inds]
 
-            # Use smart NLP-based title extraction
-            smart_title = self._extract_smart_title_from_prompts(cluster_prompts)
-            # Normalize to term format (minimum 2 words, max 4 words)
-            if smart_title:
-                normalized_title = self._normalize_to_term(smart_title, min_words=2, max_words=4)
-                # Remove any numbers from the title
+            normalized_title = None
+
+            # Prefer ChatGPT-generated titles when available (uses ALL prompts in the cluster)
+            chatgpt_title = self._generate_title_with_chatgpt(cluster_prompts)
+            if chatgpt_title:
+                normalized_title = self._normalize_to_term(chatgpt_title, min_words=2, max_words=4)
                 normalized_title = self._remove_numbers_from_text(normalized_title)
-            else:
-                # Use descriptive fallback instead of "Cluster 1", "Cluster 2"
-                fallback_titles = ['General Topics', 'Core Concepts', 'Key Themes', 
-                                  'Main Topics', 'Primary Themes', 'Essential Topics',
-                                  'Important Concepts', 'Central Themes', 'Key Topics',
-                                  'Main Concepts']
+
+            if not normalized_title:
+                # Use smart NLP-based title extraction as fallback
+                smart_title = self._extract_smart_title_from_prompts(cluster_prompts)
+                if smart_title:
+                    normalized_title = self._normalize_to_term(smart_title, min_words=2, max_words=4)
+                    normalized_title = self._remove_numbers_from_text(normalized_title)
+
+            if not normalized_title:
+                # Final fallback titles
+                fallback_titles = ['General Topics', 'Core Concepts', 'Key Themes',
+                                   'Main Topics', 'Primary Themes', 'Essential Topics',
+                                   'Important Concepts', 'Central Themes', 'Key Topics',
+                                   'Main Concepts']
                 fallback_index = label % len(fallback_titles)
                 normalized_title = fallback_titles[fallback_index]
             info['title'] = normalized_title
@@ -1342,6 +1348,23 @@ class DomainProcessor:
             })
         return result
 
+    def _generate_title_with_chatgpt(self, prompts_texts: List[str]) -> str:
+        """
+        Try to generate a prompt-group title using ChatGPT with ALL prompts in the group.
+        Returns empty string if not available.
+        """
+        if not prompts_texts:
+            return ''
+        try:
+            print(f"Generating ChatGPT title using {len(prompts_texts)} prompts (all prompts in group)")
+            title = self.chatgpt_client.generate_group_title(prompts_texts)
+            if title:
+                print(f"ChatGPT group title generated: {title} (from {len(prompts_texts)} prompts)")
+                return title
+        except Exception as exc:
+            print(f"ChatGPT title generation failed: {exc}")
+        return ''
+
     def _extract_smart_title_from_prompts(self, prompts_texts: List[str]) -> str:
         """
         Extract a smart, concise title from a list of prompts using improved NLP techniques.
@@ -1352,7 +1375,7 @@ class DomainProcessor:
             prompts_texts: List of prompt text strings from a cluster
 
         Returns:
-            A clean, professional term (max 2 words joined with &)
+            A clean, professional term (max 2 words joined with space)
         """
         from collections import Counter
         import re
@@ -1468,7 +1491,7 @@ class DomainProcessor:
                     # Additional validation: both words should be meaningful
                     if len(words[0]) > 2 and len(words[1]) > 2:
                         # Always use both words (minimum 2 words requirement)
-                        return f"{words[0].capitalize()} & {words[1].capitalize()}"
+                        return f"{words[0].capitalize()} {words[1].capitalize()}"
                 elif len(words) == 1:
                     # If only one word, add a generic second word
                     return f"{words[0].capitalize()} Topic"
@@ -1490,7 +1513,7 @@ class DomainProcessor:
                 # Ensure both words are different and meaningful
                 if word1 != word2 and len(word1) > 2 and len(word2) > 2:
                     # Always use both words (minimum 2 words requirement)
-                    return f"{word1.capitalize()} & {word2.capitalize()}"
+                    return f"{word1.capitalize()} {word2.capitalize()}"
             elif len(common_words) == 1:
                 word, count = common_words[0]
                 if len(word) > 2:
@@ -1505,7 +1528,7 @@ class DomainProcessor:
             if len(top_words) >= 2:
                 word1, word2 = top_words[0], top_words[1]
                 # Always use both words (minimum 2 words requirement)
-                return f"{word1.capitalize()} & {word2.capitalize()}"
+                return f"{word1.capitalize()} {word2.capitalize()}"
             elif len(top_words) == 1:
                 # If only one word, add a generic second word
                 return f"{top_words[0].capitalize()} Topic"
@@ -1519,7 +1542,7 @@ class DomainProcessor:
             if len(meaningful) >= 2:
                 word1, word2 = meaningful[0], meaningful[1]
                 # Always use both words (minimum 2 words requirement)
-                return f"{word1.capitalize()} & {word2.capitalize()}"
+                return f"{word1.capitalize()} {word2.capitalize()}"
             elif len(meaningful) == 1:
                 # If only one word, add a generic second word
                 return f"{meaningful[0].capitalize()} Topic"

@@ -1,5 +1,4 @@
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,7 +8,6 @@ import {
   TrendingDown,
   Target,
   Award,
-  FileText,
   ArrowUpRight,
   ArrowDownRight,
   Crown
@@ -54,13 +52,6 @@ const ShareOfVoice = () => {
   const [latest, setLatest] = useState<LatestSov | null>(null);
   const [rows, setRows] = useState<SovRow[]>([]);
   const [opportunities, setOpportunities] = useState<any[]>([]);
-
-  const handleExportReport = () => {
-    toast({
-      title: "Exporting Report",
-      description: "Your market report is being generated...",
-    });
-  };
 
   useEffect(() => {
     if (!user) return;
@@ -168,10 +159,6 @@ const ShareOfVoice = () => {
             Competitive benchmarking and market position analysis
           </p>
         </div>
-        <Button onClick={handleExportReport} className="gradient-primary shadow-md shadow-primary/20">
-          <FileText className="h-4 w-4 mr-2" />
-          Export Market Report
-        </Button>
       </div>
 
       {/* Key Metrics */}
@@ -394,10 +381,10 @@ const ShareOfVoice = () => {
       {/* Platform-Specific Share */}
       <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Platform-Specific Share of Voice</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="space-y-6">
           {Object.entries(platformShare).map(([platform, data]) => (
             <div key={platform} className="space-y-4">
-              <h4 className="font-medium text-center">{platform}</h4>
+              <h4 className="font-medium">{platform}</h4>
               <div className="space-y-3">
                 {data.map((brand, idx) => (
                   <div key={brand.brand} className="space-y-1">

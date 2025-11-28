@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import random
 import json
 import re
@@ -317,6 +317,54 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         
         return prompts
 
+    def generate_group_title(self, prompts_texts: List[str]) -> Optional[str]:
+        """
+        Generate a concise title (2-4 words) for a cluster of prompts using ALL prompts in the group.
+        Returns None if the OpenAI client is unavailable or the call fails.
+        """
+        if not prompts_texts:
+            return None
+
+        self._ensure_client()
+        if not self.client:
+            return None
+
+        # Use ALL prompts (not just a sample) to generate a comprehensive title
+        # Limit to 50 prompts to avoid extremely long requests, but use all available if less
+        all_prompts = prompts_texts[:50] if len(prompts_texts) > 50 else prompts_texts
+        prompts_block = "\n".join([f"{idx + 1}. {text}" for idx, text in enumerate(all_prompts)])
+
+        system_prompt = (
+            "You create concise, professional topic titles. "
+            "Output only the title, no explanations. "
+            "Title must be 2-4 words, noun-based, no numbers, no questions."
+        )
+        user_prompt = (
+            f"Generate a short, descriptive title that represents ALL {len(all_prompts)} prompts in this group:\n\n"
+            f"{prompts_block}\n\n"
+            "Consider all prompts (both primary and secondary) when generating the title. "
+            "Return only the title."
+        )
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+                max_tokens=50,
+                timeout=30,
+            )
+            title = response.choices[0].message.content.strip()
+            # Use first line only and strip quotes
+            title = title.splitlines()[0].strip().strip('"').strip("'")
+            return title or None
+        except Exception as exc:
+            logger.warning(f"Failed to generate group title with ChatGPT: {exc}")
+            return None
+
     def _local_generate_prompts(self, keywords: List[str], domain_name: str) -> List[Dict[str, Any]]:
         # Generate short, natural prompts like real ChatGPT users write
         prompts: List[Dict[str, Any]] = []
@@ -387,8 +435,8 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         For each group, provide:
         1. A descriptive group title (as a TERM, NOT a question or incomplete sentence)
            - Use noun phrases with MAXIMUM 2 words that represent the MAIN TOPIC/SUBJECT
-           - Focus on the actual subject matter (e.g., "Medicine & Apps", "Purchase & Delivery")
-           - If 2 words, join them with "&" symbol ONLY if both are meaningful nouns (e.g., "Product & Features", "Medicine & Purchase")
+           - Focus on the actual subject matter (e.g., "Medicine Apps", "Purchase Delivery")
+           - If 2 words, join them with a space (e.g., "Product Features", "Medicine Purchase")
            - If 1 word, use just that word if it's the main topic (e.g., "Medicines", "Pricing")
            - Avoid questions like "What is...", "How to...", "Tell me about..."
            - Avoid incomplete sentences or phrases
@@ -396,7 +444,7 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
            - NEVER use descriptive/qualitative words like "good", "best", "there", "here" in titles
            - NEVER use verbs like "buy", "purchase" alone - combine with nouns or use the noun instead
            - Each group title must be UNIQUE and DISTINCT from other groups
-           - Examples: "Medicine & Apps", "Purchase & Delivery", "Pricing", "Support & Resources"
+           - Examples: "Medicine Apps", "Purchase Delivery", "Pricing", "Support Resources"
         2. Primary prompts (1-3 most important prompts in the group)
         3. Secondary prompts (supporting prompts in the group)
         4. Group description explaining the common theme
@@ -408,7 +456,7 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         - Can be used together in a content strategy
         
         Ensure each group has at least 1 primary prompt.
-        IMPORTANT: Group titles must be TERMS (1-2 words max, joined with "&" if 2 words), never questions or incomplete sentences.
+        IMPORTANT: Group titles must be TERMS (1-2 words max, joined with space if 2 words), never questions or incomplete sentences.
         """
         
         # Prepare the user message with prompts
@@ -424,12 +472,12 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         
         Please organize them into groups with clear themes. 
         IMPORTANT: Group titles must be TERMS with MAXIMUM 2 words:
-        - If 2 words: join with "&" (e.g., "Product & Features", "Pricing & Information")
+        - If 2 words: join with space (e.g., "Product Features", "Pricing Information")
         - If 1 word: use just that word (e.g., "Features", "Pricing")
         - NOT questions or incomplete sentences
         - NEVER include numbers in titles (no "1", "2", "Cluster 1", etc.)
         - Each group title must be UNIQUE and DISTINCT from other groups
-        - Examples: "Product & Features", "User Guide", "Pricing", "Support & Resources"
+        - Examples: "Product Features", "User Guide", "Pricing", "Support Resources"
         
         Provide a group title, primary prompts, secondary prompts, and description for each group.
         """
@@ -512,7 +560,7 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
     def _ensure_term_based_title(self, title: str) -> str:
         """
         Ensure a group title is term-based (not a question or incomplete sentence)
-        Converts to max 2 words, joined with "&" if 2 words
+        Converts to max 2 words, joined with space if 2 words
         """
         if not title or not title.strip():
             return 'General'
@@ -572,9 +620,9 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
             # Capitalize first letter of each word
         capitalized = [word.capitalize() for word in meaningful_words]
         
-        # Join with "&" if 2 words, otherwise return single word
+        # Join with space if 2 words, otherwise return single word
         if len(capitalized) == 2:
-            return f"{capitalized[0]} & {capitalized[1]}"
+            return f"{capitalized[0]} {capitalized[1]}"
         else:
             return capitalized[0]
     
@@ -617,12 +665,12 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
     
     def _category_to_term(self, category: str) -> str:
         """
-        Convert a category name to a term-based group title (max 2 words, joined with &)
+        Convert a category name to a term-based group title (max 2 words, joined with space)
         Examples:
         - "General" -> "General"
         - "Product" -> "Product"
-        - "Product Features" -> "Product & Features"
-        - "Pricing Information" -> "Pricing & Information"
+        - "Product Features" -> "Product Features"
+        - "Pricing Information" -> "Pricing Information"
         """
         # Use the same normalization logic as _ensure_term_based_title
         return self._ensure_term_based_title(category)

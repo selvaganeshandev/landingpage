@@ -172,7 +172,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://localhost:8081",
     "http://127.0.0.1:8081",
-    "https://localhost:8080",
+    "http://localhost:8080",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -190,6 +190,13 @@ CORS_ALLOWED_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
 ]
+
+# SSL/TLS Configuration - Disabled for development
+# Set USE_TLS=True in .env to enable SSL (requires SSL certificates)
+USE_TLS = config('USE_TLS', default=False, cast=bool)
+SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
+SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=False, cast=bool)
+CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=False, cast=bool)
 
 # Email Configuration
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
