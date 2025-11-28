@@ -42,6 +42,7 @@ import Citations from "./pages/Citations";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
 import Profile from "./pages/Profile";
+import SessionExpired from "./pages/SessionExpired";
 import { MODULES } from "@/types/auth";
 
 const queryClient = new QueryClient();
@@ -59,6 +60,7 @@ const App = () => (
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password/:tokenId" element={<ResetPassword />} />
             <Route path="/accept-invitation/:invitationId" element={<AcceptInvitation />} />
+            <Route path="/session-expired" element={<SessionExpired />} />
             <Route element={<Layout />}>
               {/* Chat - Landing Page */}
               <Route path="/" element={

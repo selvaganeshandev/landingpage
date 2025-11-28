@@ -173,8 +173,8 @@ async function apiRequest<T>(
           headers: newHeaders,
         });
       } else {
-        // Refresh failed, redirect to login
-        window.location.href = '/signin';
+        // Refresh failed, redirect to session expired page
+        window.location.href = '/session-expired';
         throw new Error('Session expired. Please login again.');
       }
     } else {
@@ -182,7 +182,7 @@ async function apiRequest<T>(
       if (!endpoint.includes('/auth/login/')) {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
-        window.location.href = '/signin';
+        window.location.href = '/session-expired';
       }
       throw new Error('Unauthorized');
     }
