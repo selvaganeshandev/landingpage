@@ -106,6 +106,7 @@ export default function OrganizationSettings() {
   const [selectedKeywordIndices, setSelectedKeywordIndices] = useState<Set<number>>(new Set());
   const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
   const [keywordSearchQuery, setKeywordSearchQuery] = useState("");
+  const [useManualKeywords, setUseManualKeywords] = useState(false);
 
   // Team members state
   const [teamMembers, setTeamMembers] = useState<Array<{
@@ -952,10 +953,21 @@ export default function OrganizationSettings() {
     }
 
     // Validate keywords are provided (mandatory)
-    // If using semantic keywords wizard, use generated keywords; otherwise use manual keywords
-    const keywordsToSend = generatedKeywords.length > 0
-      ? generatedKeywords.map(kw => kw.keyword).join(',')
-      : newDomainKeywords.join(',');
+    // If using manual keywords, parse from textarea; otherwise use AI-generated keywords
+    let keywordsToSend = '';
+    let manualKeywordsArray: string[] = [];
+
+    if (useManualKeywords) {
+      // Manual mode: parse comma-separated keywords from textarea
+      manualKeywordsArray = keywordInput
+        .split(',')
+        .map(k => k.trim())
+        .filter(k => k.length > 0);
+      keywordsToSend = manualKeywordsArray.join(',');
+    } else {
+      // AI mode: use all generated keywords
+      keywordsToSend = generatedKeywords.map(kw => kw.keyword).join(',');
+    }
 
     if (!keywordsToSend || keywordsToSend.trim() === '') {
       toast({
@@ -966,11 +978,41 @@ export default function OrganizationSettings() {
       return;
     }
 
-    // Validate maximum 10 keywords selected for semantic keywords wizard
-    if (generatedKeywords.length > 0 && selectedKeywordIndices.size > 10) {
+    // Validate maximum 10 keywords selected for semantic keywords wizard (AI mode only)
+    if (!useManualKeywords && generatedKeywords.length > 0 && selectedKeywordIndices.size > 10) {
       toast({
         title: "Too many keywords selected",
         description: "Please select a maximum of 10 keywords. You have selected " + selectedKeywordIndices.size + " keywords.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate at least 1 keyword for manual mode
+    if (useManualKeywords && manualKeywordsArray.length === 0) {
+      toast({
+        title: "Keywords required",
+        description: "Please enter at least one keyword.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate maximum 10 keywords for manual mode
+    if (useManualKeywords && manualKeywordsArray.length > 10) {
+      toast({
+        title: "Too many keywords",
+        description: "Please enter a maximum of 10 keywords. You have entered " + manualKeywordsArray.length + " keywords.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate at least 1 keyword selected for AI mode
+    if (!useManualKeywords && generatedKeywords.length > 0 && selectedKeywordIndices.size === 0) {
+      toast({
+        title: "No keywords selected",
+        description: "Please select at least one keyword from the generated list.",
         variant: "destructive",
       });
       return;
@@ -995,23 +1037,45 @@ export default function OrganizationSettings() {
 
       const createdDomainId = response.domain?.id;
 
-      // Save selected keywords with semantic metadata if available
-      if (createdDomainId && selectedKeywordIndices.size > 0) {
-        try {
-          const selectedKeywords = Array.from(selectedKeywordIndices).map(index => generatedKeywords[index]);
-          await apiClient.bulkCreateKeywords(createdDomainId, selectedKeywords);
-        } catch (keywordError) {
-          console.error('Failed to save generated keywords:', keywordError);
+      if (useManualKeywords) {
+        // Manual mode: Save manual keywords as primary, all AI-generated keywords as secondary
+        if (createdDomainId && manualKeywordsArray.length > 0) {
+          try {
+            // Create simple keyword objects for manual keywords
+            const manualKeywordObjects = manualKeywordsArray.map(kw => ({ keyword: kw }));
+            await apiClient.bulkCreateKeywords(createdDomainId, manualKeywordObjects);
+          } catch (keywordError) {
+            console.error('Failed to save manual keywords:', keywordError);
+          }
         }
-      }
 
-      // Save unselected keywords to secondary_keywords table
-      if (createdDomainId && generatedKeywords.length > selectedKeywordIndices.size) {
-        try {
-          const unselectedKeywords = generatedKeywords.filter((_, index) => !selectedKeywordIndices.has(index));
-          await apiClient.bulkCreateSecondaryKeywords(createdDomainId, unselectedKeywords);
-        } catch (keywordError) {
-          console.error('Failed to save secondary keywords:', keywordError);
+        // Save ALL generated keywords to secondary_keywords table
+        if (createdDomainId && generatedKeywords.length > 0) {
+          try {
+            await apiClient.bulkCreateSecondaryKeywords(createdDomainId, generatedKeywords);
+          } catch (keywordError) {
+            console.error('Failed to save generated keywords to secondary:', keywordError);
+          }
+        }
+      } else {
+        // AI mode: Save selected keywords as primary, unselected as secondary
+        if (createdDomainId && selectedKeywordIndices.size > 0) {
+          try {
+            const selectedKeywords = Array.from(selectedKeywordIndices).map(index => generatedKeywords[index]);
+            await apiClient.bulkCreateKeywords(createdDomainId, selectedKeywords);
+          } catch (keywordError) {
+            console.error('Failed to save generated keywords:', keywordError);
+          }
+        }
+
+        // Save unselected keywords to secondary_keywords table
+        if (createdDomainId && generatedKeywords.length > selectedKeywordIndices.size) {
+          try {
+            const unselectedKeywords = generatedKeywords.filter((_, index) => !selectedKeywordIndices.has(index));
+            await apiClient.bulkCreateSecondaryKeywords(createdDomainId, unselectedKeywords);
+          } catch (keywordError) {
+            console.error('Failed to save secondary keywords:', keywordError);
+          }
         }
       }
 
@@ -1056,6 +1120,7 @@ export default function OrganizationSettings() {
       setGeneratedKeywords([]);
       setSelectedKeywordIndices(new Set());
       setKeywordSearchQuery("");
+      setUseManualKeywords(false);
       setWizardStep(1);
       setAddDomainDialogOpen(false);
 
@@ -1897,121 +1962,165 @@ export default function OrganizationSettings() {
             {wizardStep === 2 && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold">Generated Keywords</h3>
-                    <div className="flex items-center gap-3 mt-1">
-                      <p className="text-sm text-muted-foreground">
-                        {generatedKeywords.length} keywords generated
-                      </p>
-                      <Badge variant="default" className="gap-1.5">
-                        {selectedKeywordIndices.size} selected
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleSelectAllKeywords}
-                      disabled={selectedKeywordIndices.size === generatedKeywords.length}
-                    >
-                      Select All
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleDeselectAllKeywords}
-                      disabled={selectedKeywordIndices.size === 0}
-                    >
-                      Deselect All
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Search Input */}
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search keywords..."
-                    value={keywordSearchQuery}
-                    onChange={(e) => setKeywordSearchQuery(e.target.value)}
-                    className="pl-9"
-                  />
-                </div>
-
-                <div className="border rounded-lg max-h-96 overflow-y-auto">
-                  <Table>
-                    <TableHeader className="sticky top-0 bg-background z-10">
-                      <TableRow>
-                        <TableHead className="w-[50px]"></TableHead>
-                        <TableHead className="w-[250px]">Keyword</TableHead>
-                        <TableHead className="w-[120px]">Volume</TableHead>
-                        <TableHead className="w-[130px]">Intent</TableHead>
-                        <TableHead className="w-[180px]">Topic</TableHead>
-                        <TableHead>Entity</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {generatedKeywords
-                        .map((keyword, index) => ({ keyword, index }))
-                        .filter(({ keyword }) =>
-                          keywordSearchQuery === "" ||
-                          keyword.keyword.toLowerCase().includes(keywordSearchQuery.toLowerCase()) ||
-                          (keyword.topic && keyword.topic.toLowerCase().includes(keywordSearchQuery.toLowerCase())) ||
-                          (keyword.entity && keyword.entity.toLowerCase().includes(keywordSearchQuery.toLowerCase()))
-                        )
-                        .map(({ keyword, index }) => (
-                        <TableRow
-                          key={index}
-                          className="cursor-pointer hover:bg-muted/50"
-                          onClick={() => handleToggleKeyword(index)}
+                  {!useManualKeywords ? (
+                    <>
+                      <div>
+                        <h3 className="text-lg font-semibold">Generated Keywords</h3>
+                        <div className="flex items-center gap-3 mt-1">
+                          <p className="text-sm text-muted-foreground">
+                            {generatedKeywords.length} keywords generated
+                          </p>
+                          <Badge variant="default" className="gap-1.5">
+                            {selectedKeywordIndices.size} selected
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleSelectAllKeywords}
+                          disabled={selectedKeywordIndices.size === generatedKeywords.length}
                         >
-                          <TableCell>
-                            <Checkbox
-                              checked={selectedKeywordIndices.has(index)}
-                              onCheckedChange={() => handleToggleKeyword(index)}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          </TableCell>
-                          <TableCell className="font-medium">{keyword.keyword}</TableCell>
-                          <TableCell>
-                            <Badge variant={
-                              keyword.volume_level === 'very-high' ? 'default' :
-                              keyword.volume_level === 'high' ? 'secondary' :
-                              'outline'
-                            } className="text-xs">
-                              {keyword.volume_level || 'N/A'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {keyword.intent || 'N/A'}
-                          </TableCell>
-                          <TableCell className="text-sm">{keyword.topic || 'N/A'}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {keyword.entity || 'N/A'}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                          Select All
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDeselectAllKeywords}
+                          disabled={selectedKeywordIndices.size === 0}
+                        >
+                          Deselect All
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div>
+                      <h3 className="text-lg font-semibold">Manual Keywords</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Enter keywords separated by commas
+                      </p>
+                    </div>
+                  )}
                 </div>
 
-                <p className="text-xs text-muted-foreground">
-                  Selected keywords will be saved when you add the domain. You can edit them later from the domain settings.
-                </p>
+                {!useManualKeywords ? (
+                  <>
+                    {/* Search Input */}
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search keywords..."
+                        value={keywordSearchQuery}
+                        onChange={(e) => setKeywordSearchQuery(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+
+                    <div className="border rounded-lg max-h-96 overflow-y-auto">
+                      <Table>
+                        <TableHeader className="sticky top-0 bg-background z-10">
+                          <TableRow>
+                            <TableHead className="w-[50px]"></TableHead>
+                            <TableHead className="w-[250px]">Keyword</TableHead>
+                            <TableHead className="w-[120px]">Volume</TableHead>
+                            <TableHead className="w-[130px]">Intent</TableHead>
+                            <TableHead className="w-[180px]">Topic</TableHead>
+                            <TableHead>Entity</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {generatedKeywords
+                            .map((keyword, index) => ({ keyword, index }))
+                            .filter(({ keyword }) =>
+                              keywordSearchQuery === "" ||
+                              keyword.keyword.toLowerCase().includes(keywordSearchQuery.toLowerCase()) ||
+                              (keyword.topic && keyword.topic.toLowerCase().includes(keywordSearchQuery.toLowerCase())) ||
+                              (keyword.entity && keyword.entity.toLowerCase().includes(keywordSearchQuery.toLowerCase()))
+                            )
+                            .map(({ keyword, index }) => (
+                            <TableRow
+                              key={index}
+                              className="cursor-pointer hover:bg-muted/50"
+                              onClick={() => handleToggleKeyword(index)}
+                            >
+                              <TableCell>
+                                <Checkbox
+                                  checked={selectedKeywordIndices.has(index)}
+                                  onCheckedChange={() => handleToggleKeyword(index)}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">{keyword.keyword}</TableCell>
+                              <TableCell>
+                                <Badge variant={
+                                  keyword.volume_level === 'very-high' ? 'default' :
+                                  keyword.volume_level === 'high' ? 'secondary' :
+                                  'outline'
+                                } className="text-xs">
+                                  {keyword.volume_level || 'N/A'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {keyword.intent || 'N/A'}
+                              </TableCell>
+                              <TableCell className="text-sm">{keyword.topic || 'N/A'}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {keyword.entity || 'N/A'}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Selected keywords will be saved when you add the domain. You can edit them later from the domain settings.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    {/* Manual Keyword Input */}
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="manualKeywords">Keywords (comma separated, max 10)</Label>
+                        <Textarea
+                          id="manualKeywords"
+                          placeholder="mobile app development, app design, iOS development, Android development..."
+                          value={keywordInput}
+                          onChange={(e) => setKeywordInput(e.target.value)}
+                          className="min-h-[200px] mt-2"
+                        />
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Enter up to 10 keywords separated by commas. These will be added as primary keywords.
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
 
           <DialogFooter className="gap-2">
             {wizardStep === 2 && (
-              <Button
-                variant="outline"
-                onClick={() => setWizardStep(1)}
-              >
-                <ChevronLeft className="h-4 w-4 mr-2" />
-                Back
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => setWizardStep(1)}
+                >
+                  <ChevronLeft className="h-4 w-4 mr-2" />
+                  Back
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setUseManualKeywords(!useManualKeywords)}
+                  className="mr-auto"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  {useManualKeywords ? "Use AI Keywords" : "Add Manually"}
+                </Button>
+              </>
             )}
 
             <Button
