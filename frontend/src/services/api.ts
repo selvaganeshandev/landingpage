@@ -420,6 +420,24 @@ export const apiClient = {
     body: JSON.stringify({ domain_name: domainName, brand_name: brandName }),
   }),
 
+  generateSemanticKeywords: (data: { domain_name: string; brand_name: string; country: string; niches: string[]; approx_keywords?: number }) =>
+    apiRequest('/domains/generate-semantic-keywords/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  bulkCreateKeywords: (domainId: number, keywords: any[]) =>
+    apiRequest('/keywords/bulk-create/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId, keywords }),
+    }),
+
+  bulkCreateSecondaryKeywords: (domainId: number, keywords: any[]) =>
+    apiRequest('/keywords/secondary/bulk-create/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId, keywords }),
+    }),
+
   // ===== Domain Access =====
   getDomainAccess: (domainId: number) => 
     apiRequest(`/domains/${domainId}/access/`),

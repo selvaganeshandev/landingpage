@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/services/api";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -42,6 +42,15 @@ import {
 import { cn } from "@/lib/utils";
 import { ProjectAccessManager } from "@/components/ProjectAccessManager";
 import { PageLoader } from "@/components/PageLoader";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export default function OrganizationSettings() {
   const navigate = useNavigate();
@@ -91,6 +100,12 @@ export default function OrganizationSettings() {
   const [suggestedNiches, setSuggestedNiches] = useState<string[]>([]);
   const [selectedNiches, setSelectedNiches] = useState<string[]>([]);
   const [isFetchingNiches, setIsFetchingNiches] = useState(false);
+
+  // Semantic keyword state
+  const [generatedKeywords, setGeneratedKeywords] = useState<any[]>([]);
+  const [selectedKeywordIndices, setSelectedKeywordIndices] = useState<Set<number>>(new Set());
+  const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
+  const [keywordSearchQuery, setKeywordSearchQuery] = useState("");
 
   // Team members state
   const [teamMembers, setTeamMembers] = useState<Array<{
@@ -344,6 +359,66 @@ export default function OrganizationSettings() {
         return [...prev, niche];
       }
     });
+  };
+
+  const handleGenerateKeywords = async () => {
+    try {
+      setIsGeneratingKeywords(true);
+
+      // Find the selected country name
+      const selectedCountryObj = countries.find(c => c.value === newDomainCountry);
+      const countryName = selectedCountryObj ? selectedCountryObj.label : 'United States';
+
+      const response: any = await apiClient.generateSemanticKeywords({
+        domain_name: newDomain.trim(),
+        brand_name: newBrandName.trim(),
+        country: countryName,
+        niches: selectedNiches,
+        approx_keywords: 100,
+      });
+
+      if (response.success && response.keywords) {
+        setGeneratedKeywords(response.keywords);
+        // Keep all keywords unselected by default
+        setSelectedKeywordIndices(new Set());
+        setWizardStep(2);
+      } else {
+        toast({
+          title: "Failed to generate keywords",
+          description: "Could not generate semantic keywords. Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error generating keywords",
+        description: error.message || "Failed to generate keywords from AI.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingKeywords(false);
+    }
+  };
+
+  const handleToggleKeyword = (index: number) => {
+    setSelectedKeywordIndices((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(index)) {
+        newSet.delete(index);
+      } else {
+        newSet.add(index);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAllKeywords = () => {
+    const allIndices = new Set(generatedKeywords.map((_: any, index: number) => index));
+    setSelectedKeywordIndices(allIndices);
+  };
+
+  const handleDeselectAllKeywords = () => {
+    setSelectedKeywordIndices(new Set());
   };
 
   const handleAddKeyword = () => {
@@ -877,10 +952,25 @@ export default function OrganizationSettings() {
     }
 
     // Validate keywords are provided (mandatory)
-    if (newDomainKeywords.length === 0) {
+    // If using semantic keywords wizard, use generated keywords; otherwise use manual keywords
+    const keywordsToSend = generatedKeywords.length > 0
+      ? generatedKeywords.map(kw => kw.keyword).join(',')
+      : newDomainKeywords.join(',');
+
+    if (!keywordsToSend || keywordsToSend.trim() === '') {
       toast({
         title: "Keywords required",
         description: "Please add at least one keyword before creating the domain. Keywords are mandatory.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate maximum 10 keywords selected for semantic keywords wizard
+    if (generatedKeywords.length > 0 && selectedKeywordIndices.size > 10) {
+      toast({
+        title: "Too many keywords selected",
+        description: "Please select a maximum of 10 keywords. You have selected " + selectedKeywordIndices.size + " keywords.",
         variant: "destructive",
       });
       return;
@@ -891,15 +981,39 @@ export default function OrganizationSettings() {
       const domainName = newDomain.trim();
       const domainUrl = domainName.startsWith('http') ? domainName : `https://${domainName}`;
 
+      console.log('Creating domain with keywords:', keywordsToSend);
+      console.log('Keywords length:', keywordsToSend.length);
+      console.log('Generated keywords count:', generatedKeywords.length);
+
       const response = await apiClient.createDomain({
         name: newBrandName.trim() || domainName,
         url: domainUrl,
         country: newDomainCountry,
         niches: selectedNiches.length > 0 ? selectedNiches : null,
-        keywords: newDomainKeywords.join(','), // Keywords are now mandatory, always send
+        keywords: keywordsToSend, // Keywords are now mandatory, always send
       });
 
       const createdDomainId = response.domain?.id;
+
+      // Save selected keywords with semantic metadata if available
+      if (createdDomainId && selectedKeywordIndices.size > 0) {
+        try {
+          const selectedKeywords = Array.from(selectedKeywordIndices).map(index => generatedKeywords[index]);
+          await apiClient.bulkCreateKeywords(createdDomainId, selectedKeywords);
+        } catch (keywordError) {
+          console.error('Failed to save generated keywords:', keywordError);
+        }
+      }
+
+      // Save unselected keywords to secondary_keywords table
+      if (createdDomainId && generatedKeywords.length > selectedKeywordIndices.size) {
+        try {
+          const unselectedKeywords = generatedKeywords.filter((_, index) => !selectedKeywordIndices.has(index));
+          await apiClient.bulkCreateSecondaryKeywords(createdDomainId, unselectedKeywords);
+        } catch (keywordError) {
+          console.error('Failed to save secondary keywords:', keywordError);
+        }
+      }
 
       // Fetch brand info from ChatGPT in the background
       if (createdDomainId) {
@@ -939,6 +1053,9 @@ export default function OrganizationSettings() {
       setKeywordInput("");
       setSuggestedNiches([]);
       setSelectedNiches([]);
+      setGeneratedKeywords([]);
+      setSelectedKeywordIndices(new Set());
+      setKeywordSearchQuery("");
       setWizardStep(1);
       setAddDomainDialogOpen(false);
 
@@ -948,9 +1065,17 @@ export default function OrganizationSettings() {
         duration: 5000,
       });
     } catch (error: any) {
+      // Parse the error message for better UX
+      let errorMessage = error.message || "Failed to add domain. Please try again.";
+
+      // Check for duplicate domain error
+      if (error.message && error.message.includes("must make a unique set")) {
+        errorMessage = `This domain (${domainName}) already exists in your organization. Please use a different domain or delete the existing one first.`;
+      }
+
       toast({
         title: "Error adding domain",
-        description: error.message || "Failed to add domain. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -1604,6 +1729,9 @@ export default function OrganizationSettings() {
           setNewDomainCountry("us");
           setSuggestedNiches([]);
           setSelectedNiches([]);
+          setGeneratedKeywords([]);
+          setSelectedKeywordIndices(new Set());
+          setKeywordSearchQuery("");
           setNewDomainKeywords([]);
           setKeywordInput("");
         }
@@ -1765,10 +1893,112 @@ export default function OrganizationSettings() {
               </>
             )}
 
-            {/* Step 2: Placeholder for future */}
+            {/* Step 2: Generated Keywords */}
             {wizardStep === 2 && (
-              <div className="py-12 text-center text-muted-foreground">
-                <p>Step 2 content will be added here</p>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold">Generated Keywords</h3>
+                    <div className="flex items-center gap-3 mt-1">
+                      <p className="text-sm text-muted-foreground">
+                        {generatedKeywords.length} keywords generated
+                      </p>
+                      <Badge variant="default" className="gap-1.5">
+                        {selectedKeywordIndices.size} selected
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSelectAllKeywords}
+                      disabled={selectedKeywordIndices.size === generatedKeywords.length}
+                    >
+                      Select All
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDeselectAllKeywords}
+                      disabled={selectedKeywordIndices.size === 0}
+                    >
+                      Deselect All
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Search Input */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search keywords..."
+                    value={keywordSearchQuery}
+                    onChange={(e) => setKeywordSearchQuery(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+
+                <div className="border rounded-lg max-h-96 overflow-y-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-background z-10">
+                      <TableRow>
+                        <TableHead className="w-[50px]"></TableHead>
+                        <TableHead className="w-[250px]">Keyword</TableHead>
+                        <TableHead className="w-[120px]">Volume</TableHead>
+                        <TableHead className="w-[130px]">Intent</TableHead>
+                        <TableHead className="w-[180px]">Topic</TableHead>
+                        <TableHead>Entity</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {generatedKeywords
+                        .map((keyword, index) => ({ keyword, index }))
+                        .filter(({ keyword }) =>
+                          keywordSearchQuery === "" ||
+                          keyword.keyword.toLowerCase().includes(keywordSearchQuery.toLowerCase()) ||
+                          (keyword.topic && keyword.topic.toLowerCase().includes(keywordSearchQuery.toLowerCase())) ||
+                          (keyword.entity && keyword.entity.toLowerCase().includes(keywordSearchQuery.toLowerCase()))
+                        )
+                        .map(({ keyword, index }) => (
+                        <TableRow
+                          key={index}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => handleToggleKeyword(index)}
+                        >
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedKeywordIndices.has(index)}
+                              onCheckedChange={() => handleToggleKeyword(index)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </TableCell>
+                          <TableCell className="font-medium">{keyword.keyword}</TableCell>
+                          <TableCell>
+                            <Badge variant={
+                              keyword.volume_level === 'very-high' ? 'default' :
+                              keyword.volume_level === 'high' ? 'secondary' :
+                              'outline'
+                            } className="text-xs">
+                              {keyword.volume_level || 'N/A'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {keyword.intent || 'N/A'}
+                          </TableCell>
+                          <TableCell className="text-sm">{keyword.topic || 'N/A'}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {keyword.entity || 'N/A'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Selected keywords will be saved when you add the domain. You can edit them later from the domain settings.
+                </p>
               </div>
             )}
           </div>
@@ -1793,11 +2023,20 @@ export default function OrganizationSettings() {
 
             {wizardStep === 1 && (
               <Button
-                onClick={() => setWizardStep(2)}
-                disabled={!newDomain.trim() || !newBrandName.trim()}
+                onClick={handleGenerateKeywords}
+                disabled={!newDomain.trim() || !newBrandName.trim() || isGeneratingKeywords}
               >
-                Next
-                <ChevronRight className="h-4 w-4 ml-2" />
+                {isGeneratingKeywords ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Finding Keywords...
+                  </>
+                ) : (
+                  <>
+                    Next
+                    <ChevronRight className="h-4 w-4 ml-2" />
+                  </>
+                )}
               </Button>
             )}
 
