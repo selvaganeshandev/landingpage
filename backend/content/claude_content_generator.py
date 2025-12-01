@@ -244,3 +244,4 @@ Return ONLY the regenerated HTML content for this specific section."""
 
         except Exception as e:
             raise Exception(f"Claude API error during regeneration: {str(e)}")
+

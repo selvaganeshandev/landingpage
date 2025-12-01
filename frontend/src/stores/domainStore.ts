@@ -23,6 +23,8 @@ export interface Domain {
   sentiment: string;
   sentiment_score: string;
   processing_status?: 'INIT' | 'SCHD' | 'PROC' | 'COMP' | 'FAIL';
+  competitor_analysis_status?: 'NOT_READY' | 'READY' | 'ANALYZING' | 'COMPLETED';
+  misinformation_scan_status?: 'NOT_READY' | 'READY' | 'SCANNING' | 'SCANNED' | 'NO_ISSUES';
   track_message?: string | null;
   tracked_at?: string | null;
   created_at: string;

@@ -1165,11 +1165,10 @@ export const apiClient = {
     return apiRequest(`/reports/generation/task_status/${queryParams}`);
   },
 
-  // Content Generation (Engine API)
-  generateContent: (data: any) => apiRequest('/api/content/generate/', {
+  // Content Generation (Backend API)
+  generateContent: (data: any) => apiRequest('/content/generate/', {
     method: 'POST',
     body: JSON.stringify(data),
-    useEngine: true,
   }),
 
   getGeneratedContents: (params?: { domain_id?: string; status?: string; source_type?: string; page?: number; page_size?: string }, options?: RequestOptions) => {
@@ -1180,25 +1179,18 @@ export const apiClient = {
       ...(params.page ? { page: String(params.page) } : {}),
       ...(params.page_size ? { page_size: params.page_size } : {}),
     }).toString()}` : '';
-    return apiRequest(`/api/content/${queryParams}`, {
-      ...options,
-      useEngine: true,
-    });
+    return apiRequest(`/content/${queryParams}`, options);
   },
 
-  getGeneratedContent: (contentId: number) => apiRequest(`/api/content/${contentId}/`, {
-    useEngine: true,
-  }),
+  getGeneratedContent: (contentId: number) => apiRequest(`/content/${contentId}/`),
 
-  updateGeneratedContent: (contentId: number, data: any) => apiRequest(`/api/content/${contentId}/update/`, {
+  updateGeneratedContent: (contentId: number, data: any) => apiRequest(`/content/${contentId}/update/`, {
     method: 'PATCH',
     body: JSON.stringify(data),
-    useEngine: true,
   }),
 
-  deleteGeneratedContent: (contentId: number) => apiRequest(`/api/content/${contentId}/delete/`, {
+  deleteGeneratedContent: (contentId: number) => apiRequest(`/content/${contentId}/delete/`, {
     method: 'DELETE',
-    useEngine: true,
   }),
 
   // ===== Misinformation Alerts =====

@@ -1,14 +1,19 @@
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, CheckCircle2, Clock } from "lucide-react";
+import { Loader2, CheckCircle2, Clock, Users, Shield } from "lucide-react";
 import { Domain } from "@/stores/domainStore";
 
 interface ProcessingStateCardProps {
   domain: Domain;
 }
 
-const getProcessingProgress = (status: string, message?: string | null): number => {
-  // Calculate progress based on status and message content
+const getProcessingProgress = (
+  status: string,
+  message?: string | null,
+  competitorStatus?: string,
+  misinfoStatus?: string
+): number => {
+  // Prompt processing (0-60%)
   if (status === 'INIT') return 10;
   if (status === 'SCHD') return 20;
 
@@ -17,12 +22,27 @@ const getProcessingProgress = (status: string, message?: string | null): number 
 
     // Parse message to determine current step
     const lowerMessage = message.toLowerCase();
-    if (lowerMessage.includes('keyword') || lowerMessage.includes('scraping')) return 40;
-    if (lowerMessage.includes('prompt') && lowerMessage.includes('generat')) return 60;
-    if (lowerMessage.includes('group') || lowerMessage.includes('cluster')) return 75;
-    if (lowerMessage.includes('analytic')) return 85;
+    if (lowerMessage.includes('keyword') || lowerMessage.includes('scraping')) return 35;
+    if (lowerMessage.includes('prompt') && lowerMessage.includes('generat')) return 45;
+    if (lowerMessage.includes('group') || lowerMessage.includes('cluster')) return 55;
+    if (lowerMessage.includes('analytic')) return 60;
 
-    return 50; // Default for PROC
+    return 40; // Default for PROC
+  }
+
+  // After prompt processing completes (60-100%)
+  if (status === 'COMP') {
+    // Competitor analysis (60-80%)
+    if (competitorStatus === 'ANALYZING' || competitorStatus === 'READY') return 70;
+
+    // Misinformation scanning (80-100%)
+    if (competitorStatus === 'COMPLETED') {
+      if (misinfoStatus === 'SCANNING' || misinfoStatus === 'READY') return 90;
+      if (misinfoStatus === 'SCANNED' || misinfoStatus === 'NO_ISSUES') return 100;
+    }
+
+    // Default after COMP
+    return 65;
   }
 
   return 30;
@@ -35,8 +55,14 @@ const getEstimatedTime = (progress: number): string => {
   return "1-2 minutes";
 };
 
-const getProcessingSteps = (status: string, message?: string | null) => {
+const getProcessingSteps = (
+  status: string,
+  message?: string | null,
+  competitorStatus?: string,
+  misinfoStatus?: string
+) => {
   const lowerMessage = message?.toLowerCase() || '';
+  const isPromptComplete = status === 'COMP';
 
   return [
     {
@@ -46,31 +72,51 @@ const getProcessingSteps = (status: string, message?: string | null) => {
     },
     {
       label: "Scraping keywords",
-      completed: lowerMessage.includes('prompt') || lowerMessage.includes('group') || lowerMessage.includes('analytic'),
+      completed: lowerMessage.includes('prompt') || lowerMessage.includes('group') || lowerMessage.includes('analytic') || isPromptComplete,
       current: status === 'PROC' && (lowerMessage.includes('keyword') || lowerMessage.includes('scraping')),
     },
     {
       label: "Generating prompts",
-      completed: lowerMessage.includes('group') || lowerMessage.includes('analytic'),
+      completed: lowerMessage.includes('group') || lowerMessage.includes('analytic') || isPromptComplete,
       current: status === 'PROC' && lowerMessage.includes('prompt') && lowerMessage.includes('generat'),
     },
     {
       label: "Grouping & clustering",
-      completed: lowerMessage.includes('analytic'),
+      completed: lowerMessage.includes('analytic') || isPromptComplete,
       current: status === 'PROC' && (lowerMessage.includes('group') || lowerMessage.includes('cluster')),
     },
     {
       label: "Processing analytics",
-      completed: false,
+      completed: isPromptComplete,
       current: status === 'PROC' && lowerMessage.includes('analytic'),
+    },
+    {
+      label: "Analyzing competitors",
+      completed: competitorStatus === 'COMPLETED',
+      current: competitorStatus === 'ANALYZING' || competitorStatus === 'READY',
+    },
+    {
+      label: "Scanning misinformation",
+      completed: misinfoStatus === 'SCANNED' || misinfoStatus === 'NO_ISSUES',
+      current: misinfoStatus === 'SCANNING' || misinfoStatus === 'READY',
     },
   ];
 };
 
 export const ProcessingStateCard = ({ domain }: ProcessingStateCardProps) => {
-  const progress = getProcessingProgress(domain.processing_status || 'INIT', domain.track_message);
+  const progress = getProcessingProgress(
+    domain.processing_status || 'INIT',
+    domain.track_message,
+    domain.competitor_analysis_status,
+    domain.misinformation_scan_status
+  );
   const estimatedTime = getEstimatedTime(progress);
-  const steps = getProcessingSteps(domain.processing_status || 'INIT', domain.track_message);
+  const steps = getProcessingSteps(
+    domain.processing_status || 'INIT',
+    domain.track_message,
+    domain.competitor_analysis_status,
+    domain.misinformation_scan_status
+  );
 
   console.log('📊 ProcessingStateCard rendered:', {
     domain: domain.name,

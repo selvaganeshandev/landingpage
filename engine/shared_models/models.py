@@ -152,6 +152,26 @@ class Domain(models.Model):
         default='INIT',
         help_text="Current processing status of the domain"
     )
+    misinformation_scan_status = models.CharField(
+        max_length=15,
+        default='NOT_READY',
+        help_text="Misinformation scanning status for this domain"
+    )
+    last_misinformation_scan_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the last misinformation scan"
+    )
+    competitor_analysis_status = models.CharField(
+        max_length=15,
+        default='NOT_READY',
+        help_text="Competitor analysis status for this domain"
+    )
+    last_competitor_analysis_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the last competitor analysis"
+    )
     track_message = models.TextField(
         blank=True,
         null=True,

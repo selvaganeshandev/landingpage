@@ -4,8 +4,9 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
-from django.db import transaction
+from django.db import transaction, connection
 from django.db import IntegrityError
+from django.db.utils import ProgrammingError
 from django.conf import settings
 from .models import Domain, DomainAccess
 from .serializers import (
@@ -14,6 +15,7 @@ from .serializers import (
 )
 from authentication.serializers import AccountSerializer
 from authentication.models import Account
+from keywords.models import SecondaryKeyword
 import json
 import logging
 
@@ -230,10 +232,82 @@ def domain_detail(request, pk):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        domain.delete()
-        return Response({
-            'message': 'Domain deleted successfully'
-        })
+        # Explicitly delete SecondaryKeyword records first to avoid SQL cascade errors
+        # Handle case where table might not exist (migrations not run)
+        try:
+            with transaction.atomic():
+                domain_id = domain.id
+                
+                # Try to delete secondary keywords if table exists
+                # This prevents SQL errors from cascade deletion
+                # First check if the table exists in the database
+                table_exists = False
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute("""
+                            SELECT EXISTS (
+                                SELECT FROM information_schema.tables 
+                                WHERE table_schema = 'public' 
+                                AND table_name = 'secondary_keywords'
+                            );
+                        """)
+                        table_exists = cursor.fetchone()[0]
+                except Exception as check_error:
+                    logger.warning(f"Could not check if secondary_keywords table exists: {str(check_error)}")
+                    # Try to proceed with deletion anyway
+                    table_exists = True
+                
+                if table_exists:
+                    try:
+                        deleted_count = SecondaryKeyword.objects.filter(domain_id=domain_id).delete()[0]
+                        if deleted_count > 0:
+                            logger.info(f"Deleted {deleted_count} secondary keywords for domain {domain_id}")
+                    except (ProgrammingError, Exception) as secondary_keyword_error:
+                        # Table might have been deleted between check and deletion
+                        error_msg = str(secondary_keyword_error).lower()
+                        if 'does not exist' in error_msg or 'relation' in error_msg:
+                            logger.info(f"secondary_keywords table does not exist, skipping deletion")
+                        else:
+                            # Re-raise if it's a different error
+                            logger.warning(f"Could not delete secondary keywords for domain {domain_id}: {str(secondary_keyword_error)}")
+                            raise
+                else:
+                    logger.info(f"secondary_keywords table does not exist, skipping deletion")
+                
+                # Now delete the domain (cascade will handle other related records)
+                # If table doesn't exist, Django's cascade might still try to delete from it
+                # So we catch ProgrammingError related to secondary_keywords
+                try:
+                    domain.delete()
+                except ProgrammingError as cascade_error:
+                    error_msg = str(cascade_error).lower()
+                    if 'secondary_keywords' in error_msg and ('does not exist' in error_msg or 'relation' in error_msg):
+                        # Table doesn't exist - this is a migration issue
+                        # Delete domain using raw SQL to bypass ORM cascade
+                        logger.warning(f"Cascade deletion failed due to missing secondary_keywords table, using raw SQL deletion")
+                        try:
+                            with connection.cursor() as cursor:
+                                cursor.execute("DELETE FROM domains WHERE id = %s", [domain_id])
+                            logger.info(f"Domain {domain_id} deleted successfully using raw SQL")
+                        except Exception as raw_sql_error:
+                            logger.error(f"Raw SQL deletion also failed: {str(raw_sql_error)}")
+                            raise Exception(
+                                "Cannot delete domain: secondary_keywords table is missing. "
+                                "Please run migrations: python manage.py migrate keywords"
+                            )
+                    else:
+                        # Different ProgrammingError - re-raise
+                        raise
+                
+            return Response({
+                'message': 'Domain deleted successfully'
+            })
+        except Exception as e:
+            logger.error(f"Error deleting domain {domain.id}: {str(e)}", exc_info=True)
+            return Response(
+                {'error': f'Error deleting domain: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 @api_view(['GET'])

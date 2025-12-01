@@ -8,9 +8,10 @@ import { useToast } from "@/hooks/use-toast";
 import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
 import { PageLoader } from "@/components/PageLoader";
+import { ProcessingStateCard } from "@/components/ProcessingStateCard";
 import { MisinformationDetailDialog } from "@/components/MisinformationDetailDialog";
+import { isDomainProcessing, isMisinformationProcessing } from "@/utils/processingStatus";
 import { ConfigureDetectionDialog } from "@/components/ConfigureDetectionDialog";
-import { StartScanDialog } from "@/components/StartScanDialog";
 import { ContentComparisonDialog } from "@/components/ContentComparisonDialog";
 import {
   AlertTriangle,
@@ -163,7 +164,6 @@ const MisinformationAlerts = () => {
   const [selectedTab, setSelectedTab] = useState("active");
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [configureDialogOpen, setConfigureDialogOpen] = useState(false);
-  const [startScanDialogOpen, setStartScanDialogOpen] = useState(false);
   const [comparisonDialogOpen, setComparisonDialogOpen] = useState(false);
   const [selectedCase, setSelectedCase] = useState<MisinformationAlert | null>(null);
 
@@ -321,6 +321,11 @@ const MisinformationAlerts = () => {
     return <PageLoader />;
   }
 
+  // Show ProcessingStateCard when domain or misinformation scan is processing
+  if (isDomainProcessing(selectedDomain) || isMisinformationProcessing(selectedDomain)) {
+    return <ProcessingStateCard domain={selectedDomain!} />;
+  }
+
   const handleExportReport = () => {
     toast({
       title: "Exporting Report",
@@ -328,7 +333,8 @@ const MisinformationAlerts = () => {
     });
   };
 
-  // Show "Start Scan" card when status is NOT_READY (first time / no data)
+  // Misinformation scan runs automatically after prompt processing
+  // No manual "Start Scan" needed - just show appropriate message if not ready
   if (dashboardData?.scan_status === 'NOT_READY' && !scanning) {
     return (
       <div className="p-8 space-y-6 bg-background animate-fade-in">
@@ -346,36 +352,17 @@ const MisinformationAlerts = () => {
         <Card className="p-8 border border-border">
           <div className="flex flex-col items-center text-center space-y-6 max-w-2xl mx-auto">
             <div className="p-4 rounded-full bg-muted/50">
-              <Shield className="h-12 w-12 text-primary" />
+              <Info className="h-12 w-12 text-primary" />
             </div>
             <div className="space-y-2">
-              <h2 className="text-2xl font-bold">Start Misinformation Detection</h2>
+              <h2 className="text-2xl font-bold">Awaiting Prompt Analytics</h2>
               <p className="text-muted-foreground">
-                Our AI will scan all citations and links from your prompt analytics to detect misinformation, broken links, and outdated content about your brand.
+                Misinformation detection will automatically start once your prompt analytics are complete. The system will scan all citations and links to detect misinformation, broken links, and outdated content about your brand.
               </p>
             </div>
 
-            <Button
-              onClick={handleTriggerScan}
-              disabled={scanning || !selectedDomain}
-              size="lg"
-              className="gradient-primary"
-            >
-              {scanning ? (
-                <>
-                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                  Starting Scan...
-                </>
-              ) : (
-                <>
-                  <Play className="h-5 w-5 mr-2" />
-                  Start Scan
-                </>
-              )}
-            </Button>
-
             <p className="text-sm text-muted-foreground">
-              Scan typically takes 2-5 minutes depending on the number of citations.
+              Automatic scanning begins after prompt processing completes.
             </p>
           </div>
         </Card>
@@ -383,41 +370,12 @@ const MisinformationAlerts = () => {
     );
   }
 
-  // Show scanning progress state
+  // Show scanning progress state (fallback if ProcessingStateCard didn't catch it)
+  // This should rarely be needed since ProcessingStateCard handles SCANNING status
   if (dashboardData?.scan_status === 'SCANNING' || scanning) {
-    return (
-      <div className="p-8 space-y-6 bg-background animate-fade-in">
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-4xl font-bold tracking-tight">Misinformation Alerts</h1>
-              <p className="text-muted-foreground mt-2">
-                Detect and correct AI hallucinations about your brand
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <Card className="p-8 border border-border">
-          <div className="flex flex-col items-center text-center space-y-6 max-w-2xl mx-auto">
-            <div className="p-4 rounded-full bg-primary/10">
-              <Loader2 className="h-12 w-12 text-primary animate-spin" />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-bold">Scanning in Progress</h2>
-              <p className="text-muted-foreground">
-                We're analyzing citations and comparing content to detect any misinformation about your brand. This may take a few minutes.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Clock className="h-4 w-4" />
-              <span>Please wait while we complete the scan...</span>
-            </div>
-          </div>
-        </Card>
-      </div>
-    );
+    if (selectedDomain) {
+      return <ProcessingStateCard domain={selectedDomain} />;
+    }
   }
 
   return (
@@ -428,16 +386,6 @@ const MisinformationAlerts = () => {
           <p className="text-muted-foreground mt-2">
             Detect and correct AI hallucinations about your brand
           </p>
-        </div>
-        <div className="flex gap-3">
-          <Button onClick={handleStartMonitoring} disabled={scanning || !selectedDomain}>
-            {scanning ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Play className="h-4 w-4 mr-2" />
-            )}
-            {scanning ? 'Scanning...' : 'Start Scan'}
-          </Button>
         </div>
       </div>
 
@@ -720,10 +668,6 @@ const MisinformationAlerts = () => {
     <ConfigureDetectionDialog
       open={configureDialogOpen}
       onOpenChange={setConfigureDialogOpen}
-    />
-    <StartScanDialog
-      open={startScanDialogOpen}
-      onOpenChange={setStartScanDialogOpen}
     />
     <ContentComparisonDialog
       open={comparisonDialogOpen}

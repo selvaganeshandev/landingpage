@@ -1,5 +1,5 @@
 from django.db import models
-from shared_models.models import Domain
+from domains.models import Domain
 
 
 class GeneratedContent(models.Model):
@@ -165,3 +165,4 @@ class GeneratedContent(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.status})"
+

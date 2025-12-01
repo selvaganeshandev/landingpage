@@ -760,14 +760,32 @@ class PromptAnalyticsProcessor:
                         
                         domain_fresh.tracked_at = timezone.now()
                         domain_fresh.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
-                        
+
                         # Trigger topic processing when domain completes
                         from core.processing_tasks import process_topics_for_domain_task
                         process_topics_for_domain_task.delay(domain.id)
                         logger.info(f"Scheduled topic processing for domain {domain.id}")
-                        
-                        # Competitor extraction is now manual-only (removed auto-extraction)
-                        # Users can manually extract competitors via the frontend or API
+
+                        # Auto-trigger competitor analysis
+                        logger.info(f"🎯 Auto-triggering competitor analysis for domain {domain.id}")
+                        domain_fresh.competitor_analysis_status = 'READY'
+                        domain_fresh.save(update_fields=['competitor_analysis_status', 'modified_at'])
+
+                        # Extract and create competitors automatically
+                        try:
+                            created_count, competitor_names = _extract_competitors_for_domain(domain_fresh)
+                            if created_count > 0:
+                                logger.info(f"✅ Auto-extracted {created_count} competitors for domain {domain.id}: {', '.join(competitor_names)}")
+                                # Competitors will be picked up by competitor scheduler
+                            else:
+                                logger.info(f"No new competitors extracted for domain {domain.id}")
+                        except Exception as comp_error:
+                            logger.error(f"Error auto-extracting competitors for domain {domain.id}: {str(comp_error)}")
+
+                        # Auto-trigger misinformation scan
+                        logger.info(f"🔍 Auto-triggering misinformation scan for domain {domain.id}")
+                        domain_fresh.misinformation_scan_status = 'READY'
+                        domain_fresh.save(update_fields=['misinformation_scan_status', 'modified_at'])
                     else:
                         logger.info(f"Domain {domain.id} already in status {domain_fresh.processing_status}, skipping")
             else:

@@ -21,7 +21,9 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/PageLoader";
+import { ProcessingStateCard } from "@/components/ProcessingStateCard";
 import { useDomainStore } from "@/stores/domainStore";
+import { isDomainProcessing, isMisinformationProcessing } from "@/utils/processingStatus";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -118,6 +120,18 @@ const Citations = () => {
     return <PageLoader />;
   }
 
+  // Show ProcessingStateCard when:
+  // 1. Domain is processing prompts (INIT, SCHD, PROC)
+  // 2. Misinformation is still processing (READY or SCANNING)
+  // Otherwise (misinformation is done - SCANNED/NO_ISSUES, or not started), show page with empty data
+  const isPromptProcessing = selectedDomain?.processing_status && 
+    ['INIT', 'SCHD', 'PROC'].includes(selectedDomain.processing_status);
+  const isMisinfoStillProcessing = isMisinformationProcessing(selectedDomain);
+  
+  if (isPromptProcessing || isMisinfoStillProcessing) {
+    return <ProcessingStateCard domain={selectedDomain!} />;
+  }
+
   const summary = dashboardData?.summary || {
     total_citations: 0,
     unique_sources: 0,
@@ -135,54 +149,6 @@ const Citations = () => {
   const citations = citationsData?.results || [];
   const totalCitations = citationsData?.total || 0;
   const totalPages = Math.ceil(totalCitations / pageSize);
-
-  // Show processing card when no citations available
-  if (selectedDomain && summary.total_citations === 0 && citations.length === 0) {
-    return (
-      <div className="p-8 space-y-6 bg-background animate-fade-in">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight">Citations</h1>
-            <p className="text-muted-foreground mt-2">
-              Track and verify citations from AI platforms
-            </p>
-          </div>
-          <Button
-            onClick={() => window.location.reload()}
-            variant="outline"
-            size="sm"
-          >
-            <Loader2 className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-        </div>
-
-        <Card className="p-6 border-dashed border-primary/40 bg-card/70">
-          <div className="flex flex-col md:flex-row gap-4 items-start">
-            <div className="p-3 rounded-full bg-primary/10 text-primary">
-              <Loader2 className="h-6 w-6 animate-spin" />
-            </div>
-            <div className="flex-1 space-y-2">
-              <h3 className="text-lg font-semibold">
-                Processing citation data...
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                Citations are being extracted and verified from AI responses. Citation data will appear here once processing is complete.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                This typically takes 2-5 minutes. The page will update automatically, or you can click Refresh to check for updates.
-              </p>
-              <div className="flex flex-wrap gap-3 pt-2">
-                <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
-                  Refresh Status
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Card>
-      </div>
-    );
-  }
 
   const getStatusIcon = (status: string) => {
     switch (status) {

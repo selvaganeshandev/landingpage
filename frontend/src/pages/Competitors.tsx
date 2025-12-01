@@ -12,7 +12,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useContentGeneration } from "@/hooks/useContentGeneration";
 import { AddCompetitorDialog } from "@/components/AddCompetitorDialog";
 import { PageLoader } from "@/components/PageLoader";
+import { ProcessingStateCard } from "@/components/ProcessingStateCard";
 import { GenerateContentDialog } from "@/components/GenerateContentDialog";
+import { isDomainProcessing, isCompetitorProcessing } from "@/utils/processingStatus";
 import {
   Select,
   SelectContent,
@@ -169,7 +171,8 @@ const Competitors = () => {
   const [strengthDisabledBrands, setStrengthDisabledBrands] = useState<string[]>([]);
   const loadAbortRef = useRef<AbortController | null>(null);
   const domainProcessingStatus = selectedDomain?.processing_status || null;
-  const isDomainProcessing = Boolean(selectedDomain && domainProcessingStatus && domainProcessingStatus !== 'COMP');
+  // Use utility function to check if domain or competitor analysis is processing
+  const isProcessing = isDomainProcessing(selectedDomain) || isCompetitorProcessing(selectedDomain);
 
   // Persistent analysis state - stored in localStorage
   const [isAnalysisInProgress, setIsAnalysisInProgress] = useState<boolean>(false);
@@ -200,16 +203,16 @@ const Competitors = () => {
     'hsl(var(--destructive))',
   ];
 
-  // Poll for status updates every 10 seconds when domain is processing
+  // Poll for status updates every 10 seconds when domain or competitor analysis is processing
   useEffect(() => {
-    if (!isDomainProcessing) return;
+    if (!isProcessing) return;
 
     const interval = setInterval(() => {
       loadDomains(); // Refresh domain status from server
     }, 10000); // Poll every 10 seconds
 
     return () => clearInterval(interval);
-  }, [isDomainProcessing, loadDomains]);
+  }, [isProcessing, loadDomains]);
 
   // Poll for competitor analysis completion when analysis is in progress
   useEffect(() => {
@@ -1226,66 +1229,9 @@ const Competitors = () => {
     return <PageLoader sidebarOpen />;
   }
 
-  if (isDomainProcessing && selectedDomain) {
-    const processingNote = selectedDomain.track_message || "We're generating prompts and discovering competitors for this brand.";
-    return (
-      <div className="p-8 space-y-6 bg-background animate-fade-in">
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-4xl font-bold tracking-tight">Competitor Analysis</h1>
-              <p className="text-muted-foreground mt-2">
-                Compare your brand's AI visibility against competitors
-              </p>
-            </div>
-            <div className="flex gap-3">
-              {/* <Button variant="outline" onClick={handleExportReport}>
-                <FileText className="h-4 w-4 mr-2" />
-                Export Report
-              </Button> */}
-              <Button onClick={handleAddCompetitor} className="gradient-primary shadow-md shadow-primary/20">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Competitor
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        <Card className="p-6 border-dashed border-primary/40 bg-card/70">
-          <div className="flex flex-col md:flex-row gap-4 items-start">
-            <div className="p-3 rounded-full bg-primary/10 text-primary">
-              <Loader2 className="h-6 w-6 animate-spin" />
-            </div>
-            <div className="flex-1 space-y-2">
-              <h3 className="text-lg font-semibold">
-                Setting up competitor tracking for {selectedDomain.name}
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                {processingNote}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                This can take a few minutes while we gather keywords, generate prompts, and auto-discover competitors.
-                We'll kick off competitor analytics automatically once this stage is complete.
-              </p>
-              <div className="flex flex-wrap gap-3 pt-2">
-                <Button variant="outline" size="sm" onClick={() => void loadDomains()}>
-                  Refresh Status
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
-                  Go to Dashboard
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        <AddCompetitorDialog
-          open={addCompetitorDialogOpen}
-          onOpenChange={setAddCompetitorDialogOpen}
-          onAdd={handleAddCompetitorSubmit}
-        />
-      </div>
-    );
+  // Show ProcessingStateCard when domain or competitor analysis is processing
+  if (isProcessing && selectedDomain) {
+    return <ProcessingStateCard domain={selectedDomain} />;
   }
 
   // Check if we should show "You" as a competitor or filter it out

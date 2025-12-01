@@ -5,7 +5,7 @@ import { ProcessingStateCard } from "./ProcessingStateCard";
 import { Outlet, useLocation } from "react-router-dom";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useDomainStore } from "@/stores/domainStore";
-import { isDomainProcessing } from "@/utils/processingStatus";
+import { isDomainProcessing, isCompetitorProcessing, isMisinformationProcessing } from "@/utils/processingStatus";
 
 export const Layout = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -13,8 +13,8 @@ export const Layout = () => {
   const { isOpen: sidebarOpen } = useSidebar();
   const { selectedDomain, isDomainSwitching } = useDomainStore();
 
-  // List of pages that should show processing state when domain is processing
-  const dataRequiredPages = [
+  // Pages that require completed prompt processing
+  const promptDataPages = [
     '/insights',
     '/mentions',
     '/prompts',
@@ -23,12 +23,22 @@ export const Layout = () => {
     '/share-of-voice',
     '/trends',
     '/alerts',
-    '/competitors',
     '/content-gaps',
     '/reports',
-    '/misinformation',
     '/traffic',
     '/multilingual',
+  ];
+
+  // Pages that specifically need competitor analysis
+  const competitorPages = [
+    '/competitors',
+    '/content-gaps',
+    '/share-of-voice',
+  ];
+
+  // Pages that specifically need misinformation scanning
+  const misinformationPages = [
+    '/misinformation',
   ];
 
   // Pages that don't require domain data (have their own loading states)
@@ -37,10 +47,31 @@ export const Layout = () => {
     '/profile',
   ];
 
-  const shouldShowProcessingState =
-    selectedDomain &&
-    isDomainProcessing(selectedDomain) &&
-    dataRequiredPages.some(page => location.pathname.startsWith(page));
+  // Determine if we should show processing state based on current page
+  const shouldShowProcessingState = () => {
+    if (!selectedDomain) return false;
+
+    const currentPath = location.pathname;
+
+    // Check if on a competitor-specific page and competitor analysis is processing
+    if (competitorPages.some(page => currentPath.startsWith(page))) {
+      return isCompetitorProcessing(selectedDomain) ||
+             (selectedDomain.processing_status !== 'COMP');
+    }
+
+    // Check if on misinformation page and scan is processing
+    if (misinformationPages.some(page => currentPath.startsWith(page))) {
+      return isMisinformationProcessing(selectedDomain) ||
+             (selectedDomain.processing_status !== 'COMP');
+    }
+
+    // For all other data pages, show processing if prompt processing is not complete
+    if (promptDataPages.some(page => currentPath.startsWith(page))) {
+      return isDomainProcessing(selectedDomain);
+    }
+
+    return false;
+  };
 
   // Don't show domain switching loader on pages that don't require domain data
   const shouldShowDomainSwitchingLoader =
@@ -64,8 +95,8 @@ export const Layout = () => {
       {(isLoading || shouldShowDomainSwitchingLoader) && <PageLoader sidebarOpen={sidebarOpen} />}
       <Sidebar />
       <main className="flex-1 overflow-auto">
-        {shouldShowProcessingState ? (
-          <ProcessingStateCard domain={selectedDomain} />
+        {shouldShowProcessingState() ? (
+          <ProcessingStateCard domain={selectedDomain!} />
         ) : (
           <Outlet />
         )}

@@ -17,6 +17,13 @@ class Domain(models.Model):
         ('SCANNED', 'Scanned'),           # Scan completed
         ('NO_ISSUES', 'No Issues Found'), # Scan completed with no alerts
     ]
+
+    COMPETITOR_ANALYSIS_STATUS_CHOICES = [
+        ('NOT_READY', 'Not Ready'),      # No prompt analytics data yet
+        ('READY', 'Ready'),               # Has data, ready to analyze
+        ('ANALYZING', 'Analyzing'),       # Analysis in progress
+        ('COMPLETED', 'Completed'),       # Analysis completed
+    ]
     """
     Domain model representing websites or domains being monitored
     """
@@ -93,6 +100,17 @@ class Domain(models.Model):
         null=True,
         blank=True,
         help_text="Timestamp of the last misinformation scan"
+    )
+    competitor_analysis_status = models.CharField(
+        max_length=15,
+        choices=COMPETITOR_ANALYSIS_STATUS_CHOICES,
+        default='NOT_READY',
+        help_text="Competitor analysis status for this domain"
+    )
+    last_competitor_analysis_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the last competitor analysis"
     )
     track_message = models.TextField(
         blank=True,
