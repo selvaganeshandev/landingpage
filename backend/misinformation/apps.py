@@ -7,5 +7,6 @@ class MisinformationConfig(AppConfig):
     verbose_name = 'Misinformation Detection'
 
     def ready(self):
-        # Import signals when app is ready
-        import misinformation.signals  # noqa: F401
+        # Signals removed - misinformation processing now handled by engine
+        # import misinformation.signals  # noqa: F401
+        pass

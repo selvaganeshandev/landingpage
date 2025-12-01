@@ -307,3 +307,4 @@ def delete_generated_content(request, content_id):
             'message': f'Error deleting generated content: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+

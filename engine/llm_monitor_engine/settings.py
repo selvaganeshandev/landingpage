@@ -162,6 +162,9 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 GEMINI_API_KEY = config('GEMINI_API_KEY', default=None)
 PERPLEXITY_API_KEY = config('PERPLEXITY_API_KEY', default=None)
 
+# ScrapingDog API Configuration (for web crawling in misinformation detection)
+SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
+
 # Platform tracking settings (lowercase keys, converted to proper case in code)
 ENABLED_PLATFORMS = config('ENABLED_PLATFORMS', default='chatgpt', cast=lambda v: [p.strip() for p in v.split(',')])
 

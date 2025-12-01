@@ -6,6 +6,7 @@ from shared_models.models import Domain
 from .domain_processor import DomainProcessor
 from .prompt_analytics_processor import PromptAnalyticsProcessor
 from .competitor_processor import CompetitorProcessor
+from .misinformation_processor import MisinformationProcessor
 from .ga_insights_processor import GAInsightsProcessor
 from .gsc_insights_processor import GSCInsightsProcessor
 import logging
@@ -227,6 +228,25 @@ def process_topic_analytics_scheduler(self):
     except Exception as e:
         logger.error(f"Error in topic analytics scheduler: {str(e)}", exc_info=True)
         return {'scheduled': False, 'error': str(e)}
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_misinformation_scan_task(self, domain_id: int, prompt_analytics_ids: list = None):
+    """
+    Process misinformation scan for a domain.
+    
+    Args:
+        domain_id: ID of the domain to scan
+        prompt_analytics_ids: Optional list of specific prompt analytics IDs to scan
+    """
+    try:
+        processor = MisinformationProcessor()
+        scan = processor.process_domain(domain_id, prompt_analytics_ids)
+        logger.info(f"Misinformation scan completed for domain {domain_id}: scan_id={scan.id}")
+        return {'scan_id': scan.id, 'status': 'completed'}
+    except Exception as e:
+        logger.error(f"Error processing misinformation scan for domain {domain_id}: {str(e)}", exc_info=True)
+        raise self.retry(exc=e, countdown=60)
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)

@@ -31,3 +31,4 @@ class GeneratedContentAdmin(admin.ModelAdmin):
         }),
     )
 
+

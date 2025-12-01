@@ -44,6 +44,9 @@ urlpatterns = [
     # Reset track status (for testing)
     path('reset-track-status/', views.reset_track_status, name='reset_track_status'),
     
+    # Misinformation scanning
+    path('misinformation/scan/', views.start_misinformation_scan, name='start_misinformation_scan'),
+    
     # Integration Insights
     path('integrations/scheduler/start/', views.start_integration_insights_scheduler, name='start_integration_insights_scheduler'),
     path('integrations/process-pending/', views.process_pending_insights, name='process_pending_insights'),

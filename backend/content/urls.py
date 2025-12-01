@@ -11,3 +11,4 @@ urlpatterns = [
     path('<int:content_id>/delete/', views.delete_generated_content, name='delete_generated_content'),
 ]
 
+

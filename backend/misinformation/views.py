@@ -32,7 +32,8 @@ from .serializers import (
     TriggerScanSerializer,
     CitationURLSerializer,
 )
-from .tasks import run_misinformation_scan
+import requests
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -325,10 +326,53 @@ def trigger_scan(request):
         domain.save(update_fields=['misinformation_scan_status'])
 
     try:
-        scan = run_misinformation_scan(domain_id, prompt_analytics_ids)
+        # Call engine API to start misinformation scan
+        engine_api_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001').rstrip('/')
+        scan_endpoint = f"{engine_api_url}/api/misinformation/scan/"
+        
+        payload = {
+            'domain_id': domain_id
+        }
+        if prompt_analytics_ids:
+            payload['prompt_analytics_ids'] = prompt_analytics_ids
+        
+        response = requests.post(
+            scan_endpoint,
+            json=payload,
+            timeout=10
+        )
+        
+        if response.status_code == 202:
+            # Scan started successfully
+            return Response(
+                {
+                    'status': 'started',
+                    'message': 'Misinformation scan started in engine',
+                    'task_id': response.json().get('task_id'),
+                    'domain_id': domain_id
+                },
+                status=status.HTTP_202_ACCEPTED
+            )
+        elif response.status_code == 409:
+            # Scan already running
+            return Response(
+                response.json(),
+                status=status.HTTP_409_CONFLICT
+            )
+        else:
+            # Error from engine
+            error_data = response.json() if response.content else {'error': 'Unknown error'}
+            logger.error(f"Engine API error: {error_data}")
+            return Response(
+                error_data,
+                status=response.status_code
+            )
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error calling engine API: {e}")
         return Response(
-            MisinformationScanSerializer(scan).data,
-            status=status.HTTP_201_CREATED
+            {'error': f'Failed to connect to engine: {str(e)}'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
         )
     except Exception as e:
         logger.error(f"Error triggering scan: {e}")

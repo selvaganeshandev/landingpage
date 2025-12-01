@@ -60,3 +60,4 @@ class ContentGenerationRequestSerializer(serializers.Serializer):
             raise serializers.ValidationError("Domain with this ID does not exist")
         return value
 
+

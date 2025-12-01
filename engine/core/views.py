@@ -15,7 +15,7 @@ from shared_models.models import (
     Topic, TopicKeyword, KeywordAnalytics, TopicAnalytics
 )
 from .domain_processor import DomainProcessor
-from .processing_tasks import process_domain_task, process_prompt_analytics_task, process_single_competitor_task, process_topics_for_domain_task
+from .processing_tasks import process_domain_task, process_prompt_analytics_task, process_single_competitor_task, process_topics_for_domain_task, process_misinformation_scan_task
 from .serializers import (
     DomainSerializer, ProcessingStatusSerializer,
     CompetitorSerializer, CompetitorPromptAnalyticsSerializer,
@@ -1090,6 +1090,64 @@ def competitor_process(request, competitor_id):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def start_misinformation_scan(request):
+    """
+    Start misinformation scan for a domain.
+    
+    Body:
+        domain_id: Required - ID of the domain to scan
+        prompt_analytics_ids: Optional - List of specific prompt analytics IDs to scan
+    """
+    try:
+        domain_id = request.data.get('domain_id')
+        prompt_analytics_ids = request.data.get('prompt_analytics_ids')
+        
+        if not domain_id:
+            return Response(
+                {'error': 'domain_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Ensure domain exists
+        domain = get_object_or_404(Domain, id=domain_id)
+        
+        # Check for running scan
+        from shared_models.models import MisinformationScan
+        running_scan = MisinformationScan.objects.filter(
+            domain=domain,
+            status='running'
+        ).first()
+        
+        if running_scan:
+            return Response(
+                {
+                    'error': 'A scan is already running for this domain',
+                    'scan_id': running_scan.id
+                },
+                status=status.HTTP_409_CONFLICT
+            )
+        
+        # Trigger the Celery task
+        task = process_misinformation_scan_task.delay(domain_id, prompt_analytics_ids)
+        
+        return Response({
+            'success': True,
+            'message': f'Misinformation scan started for domain {domain.name}',
+            'domain_id': domain_id,
+            'task_id': task.id,
+            'mode': 'async'
+        }, status=status.HTTP_202_ACCEPTED)
+        
+    except Exception as e:
+        logger.error(f"Error starting misinformation scan: {str(e)}", exc_info=True)
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 @api_view(['GET'])

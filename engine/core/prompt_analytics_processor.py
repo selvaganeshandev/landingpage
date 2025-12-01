@@ -786,6 +786,10 @@ class PromptAnalyticsProcessor:
                         logger.info(f"🔍 Auto-triggering misinformation scan for domain {domain.id}")
                         domain_fresh.misinformation_scan_status = 'READY'
                         domain_fresh.save(update_fields=['misinformation_scan_status', 'modified_at'])
+                        
+                        # Trigger the scan via Celery task
+                        from .processing_tasks import process_misinformation_scan_task
+                        process_misinformation_scan_task.delay(domain.id)
                     else:
                         logger.info(f"Domain {domain.id} already in status {domain_fresh.processing_status}, skipping")
             else:
