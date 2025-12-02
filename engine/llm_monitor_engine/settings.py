@@ -87,6 +87,11 @@ DATABASES = {
         'PASSWORD': config('DB_PASSWORD', default='admin'),
         'HOST': config('DB_HOST', default='localhost'),
         'PORT': config('DB_PORT', default='5432'),
+        'OPTIONS': {
+            'gssencmode': 'disable',  # Disable GSSAPI to prevent macOS fork crashes
+            'connect_timeout': 10,
+        },
+        'CONN_MAX_AGE': 600,  # Connection pooling to reduce reconnections
     }
 }
 
