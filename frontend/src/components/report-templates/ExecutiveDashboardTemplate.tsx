@@ -15,23 +15,11 @@ import {
   FileText,
   PieChart
 } from "lucide-react";
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 interface ExecutiveDashboardTemplateProps {
   data: any;
 }
-
-// Helper function to get favicon URL with proper protocol
-const getFaviconUrl = (url: string, size: number = 64) => {
-  try {
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
-      ? url
-      : `https://${url}`;
-    const parsedUrl = new URL(fullUrl);
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
-  } catch {
-    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
-  }
-};
 
 export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateProps) => {
   // Extract metrics from the API response structure
@@ -266,13 +254,7 @@ export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateP
                       src={getFaviconUrl(domainUrl, 64)}
                       alt={domainName}
                       className="w-5 h-5"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                        const parent = e.currentTarget.parentElement;
-                        if (parent) {
-                          parent.innerHTML = '<span class="text-sm font-bold text-primary">1</span>';
-                        }
-                      }}
+                      onError={(e) => handleFaviconError(e, domainUrl, domainName, 64)}
                     />
                   </div>
                   <span className="font-semibold">{domainName}</span>
@@ -291,13 +273,7 @@ export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateP
                           src={getFaviconUrl(competitor.url, 64)}
                           alt={competitor.name}
                           className="w-5 h-5"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                            const parent = e.currentTarget.parentElement;
-                            if (parent) {
-                              parent.innerHTML = `<span class="text-sm font-bold">${competitor.market_position || (index + 2)}</span>`;
-                            }
-                          }}
+                          onError={(e) => handleFaviconError(e, competitor.url, competitor.name, 64)}
                         />
                       </div>
                       <span className="font-medium">{competitor.name}</span>

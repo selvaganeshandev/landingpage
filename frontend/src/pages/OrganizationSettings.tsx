@@ -51,19 +51,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-
-// Helper function to get favicon URL with proper protocol
-const getFaviconUrl = (url: string, size: number = 32) => {
-  try {
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
-      ? url
-      : `https://${url}`;
-    const parsedUrl = new URL(fullUrl);
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
-  } catch {
-    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
-  }
-};
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 export default function OrganizationSettings() {
   const navigate = useNavigate();
@@ -1447,11 +1435,7 @@ export default function OrganizationSettings() {
                         src={getFaviconUrl(domain.url, 32)}
                         alt={`${domain.name} favicon`}
                         className="h-5 w-5 rounded"
-                        onError={(e) => {
-                          // Fallback to Globe icon if favicon fails to load
-                          e.currentTarget.style.display = 'none';
-                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                        }}
+                        onError={(e) => handleFaviconError(e, domain.url, domain.name, 32)}
                       />
                       <Globe className="h-5 w-5 text-muted-foreground hidden" />
                       <div>

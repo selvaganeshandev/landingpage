@@ -9,21 +9,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
 import { FileText, Loader2, Download } from "lucide-react";
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
-// Helper function to get favicon URL with proper protocol
-const getFaviconUrl = (url: string, size: number = 64) => {
-  try {
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
-      ? url
-      : `https://${url}`;
-    const parsedUrl = new URL(fullUrl);
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
-  } catch {
-    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
-  }
-};
-
-interface GenerateNowDialogProps {
+interface GenerateNowDialogProps{
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -119,9 +107,7 @@ export const GenerateNowDialog = ({ open, onOpenChange }: GenerateNowDialogProps
                   src={getFaviconUrl(selectedDomain.url, 64)}
                   alt="Domain favicon"
                   className="h-6 w-6"
-                  onError={(e) => {
-                    e.currentTarget.src = '/favicon.ico';
-                  }}
+                  onError={(e) => handleFaviconError(e, selectedDomain.url, selectedDomain.name, 64)}
                 />
                 <div>
                   <p className="font-medium text-sm">{selectedDomain.name}</p>

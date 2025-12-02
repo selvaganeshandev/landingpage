@@ -28,19 +28,7 @@ import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
 import { useDomainStore } from "@/stores/domainStore";
-// Helper function to get favicon URL with proper protocol
-const getFaviconUrl = (url: string, size: number = 64) => {
-  try {
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
-      ? url
-      : `https://${url}`;
-    const parsedUrl = new URL(fullUrl);
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
-  } catch {
-    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
-  }
-};
-
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 import {
   LineChart,
   Line,
@@ -518,10 +506,7 @@ const CompetitorDetail = () => {
                     src={getFaviconUrl(competitor.url, 64)}
                     alt={`${competitor.name} favicon`}
                     className="w-10 h-10 object-contain"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                      e.currentTarget.parentElement!.innerHTML = `<span class="text-3xl font-bold text-primary">${competitor.logo}</span>`;
-                    }}
+                    onError={(e) => handleFaviconError(e, competitor.url, competitor.name, 64)}
                   />
                 ) : (
                   <span className="text-3xl font-bold text-primary">{competitor.logo}</span>

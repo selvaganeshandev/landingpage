@@ -2,6 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Building2, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 interface HeatmapData {
   competitor: string;
@@ -16,23 +17,6 @@ interface CompetitorHeatmapProps {
   data: HeatmapData[];
   platforms: string[];
 }
-
-const getFaviconUrl = (url?: string) => {
-  if (!url) return "";
-  try {
-    const normalized = url.startsWith("http") ? url : `https://${url}`;
-    const parsed = new URL(normalized);
-    // Pass the full URL with https:// protocol to ensure Google uses HTTPS
-    return `https://www.google.com/s2/favicons?domain=${parsed.protocol}//${parsed.hostname}&sz=64`;
-  } catch (e) {
-    try {
-      const parsed = new URL(`https://${url}`);
-      return `https://www.google.com/s2/favicons?domain=${parsed.protocol}//${parsed.hostname}&sz=64`;
-    } catch {
-      return "";
-    }
-  }
-};
 
 const getHeatmapColor = (value: number) => {
   if (value >= 30) return "bg-emerald-600 text-white";
@@ -140,15 +124,11 @@ export const CompetitorHeatmap = ({ data, platforms }: CompetitorHeatmapProps) =
                     <div className="w-9 h-9 rounded-xl bg-white border border-border shadow-sm flex items-center justify-center overflow-hidden">
                       {row.url ? (
                         <img
-                          src={getFaviconUrl(row.url)}
+                          src={getFaviconUrl(row.url, 64)}
                           alt={`${row.competitor} favicon`}
                           className="h-full w-full object-contain p-1"
                           loading="lazy"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                            const fallbackIcon = e.currentTarget.parentElement?.querySelector('.heatmap-fallback-icon');
-                            if (fallbackIcon) fallbackIcon.classList.remove('hidden');
-                          }}
+                          onError={(e) => handleFaviconError(e, row.url || '', row.competitor, 64)}
                         />
                       ) : null}
                       <Building2 className={cn("heatmap-fallback-icon h-4 w-4 text-primary", row.url && "hidden")} />

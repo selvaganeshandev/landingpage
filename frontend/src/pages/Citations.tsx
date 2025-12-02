@@ -43,19 +43,7 @@ import {
   LinkIcon,
   TrendingUp,
 } from "lucide-react";
-
-// Helper function to get favicon URL with proper protocol
-const getFaviconUrl = (url: string, size: number = 32) => {
-  try {
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
-      ? url
-      : `https://${url}`;
-    const parsedUrl = new URL(fullUrl);
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
-  } catch {
-    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
-  }
-};
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 const Citations = () => {
   const { selectedDomain } = useDomainStore();
@@ -376,9 +364,7 @@ const Citations = () => {
                       src={getFaviconUrl(source.source_domain || source.domain, 32)}
                       alt=""
                       className="w-4 h-4"
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none";
-                      }}
+                      onError={(e) => handleFaviconError(e, source.source_domain || source.domain, '', 32)}
                     />
                     <div className="flex flex-col">
                       <span className="text-sm truncate max-w-[160px] font-medium">{source.source_domain || source.domain}</span>
@@ -570,9 +556,7 @@ const CitationsTable = ({
                       src={getFaviconUrl(citation.source_domain, 32)}
                       alt=""
                       className="w-4 h-4 flex-shrink-0"
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none";
-                      }}
+                      onError={(e) => handleFaviconError(e, citation.source_domain, '', 32)}
                     />
                     <span className="text-sm" title={citation.url}>
                       {truncateUrl(citation.url, 50)}

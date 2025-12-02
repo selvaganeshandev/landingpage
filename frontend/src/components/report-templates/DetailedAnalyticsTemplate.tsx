@@ -25,6 +25,7 @@ import {
   FileText,
   CheckCircle2
 } from "lucide-react";
+import { getFaviconUrl } from "@/utils/faviconHelper";
 
 interface DetailedAnalyticsTemplateProps {
   data: any;
@@ -40,18 +41,6 @@ export const DetailedAnalyticsTemplate = ({ data }: DetailedAnalyticsTemplatePro
   // Extract domain information
   const domainName = data?.domain_name || 'Your Brand';
   const domainUrl = data?.domain_url || '';
-
-  // Helper function to get favicon URL
-  const getFaviconUrl = (url: string) => {
-    try {
-      const fullUrl = url.startsWith('http') ? url : `https://${url}`;
-      const parsedUrl = new URL(fullUrl);
-      // Pass the full URL with https:// protocol to ensure Google uses HTTPS
-      return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=128`;
-    } catch {
-      return `https://ui-avatars.com/api/?name=${encodeURIComponent(url)}&background=random`;
-    }
-  };
 
   // Calculate metrics from data
   const totalMentions = metrics.total_mentions || 0;
@@ -490,7 +479,7 @@ export const DetailedAnalyticsTemplate = ({ data }: DetailedAnalyticsTemplatePro
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center border-2 border-primary shadow-sm overflow-hidden">
                       <img
-                        src={getFaviconUrl(domainUrl || domainName)}
+                        src={getFaviconUrl(domainUrl || domainName, 128)}
                         alt={domainName}
                         className="w-6 h-6 object-contain"
                         onError={(e) => {
@@ -513,7 +502,7 @@ export const DetailedAnalyticsTemplate = ({ data }: DetailedAnalyticsTemplatePro
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center border border-muted-foreground/20 shadow-sm overflow-hidden">
                         <img
-                          src={getFaviconUrl(competitor.url || competitor.name)}
+                          src={getFaviconUrl(competitor.url || competitor.name, 128)}
                           alt={competitor.name}
                           className="w-6 h-6 object-contain"
                           onError={(e) => {

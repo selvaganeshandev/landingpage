@@ -4,6 +4,7 @@
 
 /**
  * Generate favicon URL with protocol
+ * Automatically adds www. if domain doesn't have it (improves success rate)
  */
 export const getFaviconUrl = (url: string, size: number = 32): string => {
   try {
@@ -13,12 +14,20 @@ export const getFaviconUrl = (url: string, size: number = 32): string => {
       : `https://${url}`;
 
     const parsedUrl = new URL(fullUrl);
+    let hostname = parsedUrl.hostname;
+
+    // If hostname doesn't start with www., try adding it
+    // Many sites work with www but not without (e.g., www.edelweisslife.in works, edelweisslife.in doesn't)
+    if (!hostname.startsWith('www.') && !hostname.match(/^[0-9.]+$/)) { // Don't add www to IP addresses
+      hostname = `www.${hostname}`;
+    }
 
     // Pass the full URL with protocol to Google's favicon service
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
+    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${hostname}&sz=${size}`;
   } catch {
-    // Fallback if URL parsing fails
-    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
+    // Fallback if URL parsing fails - add www if not present
+    const normalizedUrl = url.startsWith('www.') ? url : `www.${url}`;
+    return `https://www.google.com/s2/favicons?domain=${normalizedUrl}&sz=${size}`;
   }
 };
 
@@ -36,16 +45,15 @@ export const getAlternativeFaviconUrl = (url: string, size: number = 32): string
     const parsedUrl = new URL(fullUrl);
     let hostname = parsedUrl.hostname;
 
-    // Toggle www
+    // Since getFaviconUrl already tries www., this should try non-www
+    // Remove www if present (toggle opposite of what getFaviconUrl does)
     if (hostname.startsWith('www.')) {
-      // Remove www
       hostname = hostname.substring(4);
-    } else {
-      // Add www
-      hostname = `www.${hostname}`;
     }
+    // If www was already added by getFaviconUrl and failed, don't add it again
+    // Just return empty to skip to fallback
 
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${hostname}&sz=${size}`;
+    return hostname === parsedUrl.hostname ? '' : `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${hostname}&sz=${size}`;
   } catch {
     return '';
   }

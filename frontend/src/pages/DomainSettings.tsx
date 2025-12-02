@@ -37,19 +37,7 @@ import {
   Info,
 } from "lucide-react";
 import { PageLoader } from "@/components/PageLoader";
-
-// Helper function to get favicon URL with proper protocol
-const getFaviconUrl = (url: string, size: number = 32) => {
-  try {
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
-      ? url
-      : `https://${url}`;
-    const parsedUrl = new URL(fullUrl);
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
-  } catch {
-    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
-  }
-};
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 export default function DomainSettings() {
   const { domainId } = useParams();
@@ -896,9 +884,7 @@ export default function DomainSettings() {
               src={getFaviconUrl(domain.url, 32)}
               alt={`${domain.name} favicon`}
               className="h-8 w-8 rounded"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
+              onError={(e) => handleFaviconError(e, domain.url, domain.name, 32)}
             />
             <div>
               <h1 className="text-3xl font-bold capitalize">{domain.name}</h1>

@@ -25,19 +25,7 @@ import {
   Table,
   Presentation
 } from "lucide-react";
-
-// Helper function to get favicon URL with proper protocol
-const getFaviconUrl = (url: string, size: number = 64) => {
-  try {
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
-      ? url
-      : `https://${url}`;
-    const parsedUrl = new URL(fullUrl);
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
-  } catch {
-    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
-  }
-};
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 const Reports = () => {
   const { toast } = useToast();
@@ -618,9 +606,7 @@ const Reports = () => {
                       src={getFaviconUrl(report.domain_url || selectedDomain?.url || '', 64)}
                       alt="Domain favicon"
                       className="h-6 w-6"
-                      onError={(e) => {
-                        e.currentTarget.src = '/favicon.ico';
-                      }}
+                      onError={(e) => handleFaviconError(e, report.domain_url || selectedDomain?.url || '', selectedDomain?.name || '', 64)}
                     />
                   </div>
 
