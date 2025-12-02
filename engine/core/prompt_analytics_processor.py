@@ -712,6 +712,66 @@ class PromptAnalyticsProcessor:
             #     logger.error(f"Error extracting competitors for domain {domain.id}: {str(comp_error)}")
             #     # Don't fail the entire aggregation if competitor extraction fails
 
+            # ============ ALERT EVALUATION ============
+            try:
+                from .alert_evaluator import AlertEvaluator
+                from datetime import timedelta
+
+                logger.info(f"Evaluating alert rules for domain {domain.id} ({domain.name})")
+
+                # Get previous metrics for comparison (7 days ago)
+                previous_date = timezone.now() - timedelta(days=7)
+
+                # Get previous snapshot if exists
+                from shared_models.models import DomainMetricSnapshot
+                previous_snapshot = DomainMetricSnapshot.objects.filter(
+                    domain_id=domain.id,
+                    period_type='weekly',
+                    start_date__lte=previous_date
+                ).order_by('-start_date').first()
+
+                # Calculate negative sentiment percentage
+                negative_sentiment_percent = 0
+                previous_negative_sentiment_percent = 0
+
+                if domain_analytics.exists():
+                    # Calculate average negative percentage across all platform analytics
+                    neg_avg = domain_analytics.aggregate(
+                        avg_neg=Avg('negative_sentiment_percentage')
+                    )
+                    negative_sentiment_percent = float(neg_avg['avg_neg'] or 0)
+
+                if previous_snapshot:
+                    previous_negative_sentiment_percent = float(previous_snapshot.negative_sentiment_percentage or 0)
+
+                # Prepare metrics dict
+                metrics = {
+                    'visibility_score': float(domain.visibility_score or 0),
+                    'previous_visibility_score': float(previous_snapshot.visibility_score if previous_snapshot else domain.visibility_score or 0),
+                    'sentiment_score': float(domain.sentiment_score or 0),
+                    'previous_sentiment_score': float(previous_snapshot.sentiment_score if previous_snapshot else domain.sentiment_score or 0),
+                    'negative_sentiment_percent': negative_sentiment_percent,
+                    'previous_negative_sentiment_percent': previous_negative_sentiment_percent,
+                    'average_position': float(domain.average_position or 0),
+                    'previous_average_position': float(previous_snapshot.average_position if previous_snapshot else domain.average_position or 0),
+                    'total_mentions': int(domain.total_mentions or 0),
+                    'previous_total_mentions': int(previous_snapshot.total_mentions if previous_snapshot else domain.total_mentions or 0),
+                    'time_window_hours': 168,  # 7 days
+                }
+
+                # Evaluate alert rules
+                evaluator = AlertEvaluator(domain)
+                alerts = evaluator.evaluate_all_rules(metrics)
+
+                if alerts:
+                    logger.info(f"Created {len(alerts)} alerts for domain {domain.name}")
+                else:
+                    logger.debug(f"No alerts triggered for domain {domain.name}")
+
+            except Exception as e:
+                logger.error(f"Error evaluating alerts for domain {domain.id}: {e}", exc_info=True)
+                # Don't fail the whole processing if alerts fail
+
             # Check if ALL groups for this domain are now complete
             # If so, mark the domain as COMP
             self._check_and_complete_domain(domain)

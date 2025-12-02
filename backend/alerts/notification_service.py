@@ -1,3 +1,10 @@
+"""
+DEPRECATED: This notification service is no longer used.
+Email notifications are now sent directly from the engine's AlertEvaluator
+at engine/core/alert_evaluator.py
+
+This file is kept for reference only.
+"""
 import logging
 from django.core.mail import send_mail
 from django.conf import settings

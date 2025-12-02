@@ -1908,3 +1908,136 @@ class MisinformationAnalytics(models.Model):
 
     def __str__(self):
         return f"{self.domain.name} - {self.date}"
+
+
+# ============ ALERTS (Read-Only from Engine) ============
+class Alert(models.Model):
+    """Alert model - READ ONLY from engine"""
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE)
+    type = models.CharField(max_length=50)
+    severity = models.CharField(max_length=20)
+    title = models.CharField(max_length=255)
+    message = models.TextField()
+    platform = models.CharField(max_length=100, null=True, blank=True)
+    metric = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    status = models.CharField(max_length=20, default='active')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(Account, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        managed = False
+        db_table = 'alerts'
+
+    def __str__(self):
+        return f"{self.title} - {self.severity}"
+
+
+class AlertRule(models.Model):
+    """AlertRule model - READ ONLY from engine"""
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE)
+    name = models.CharField(max_length=255)
+    description = models.TextField()
+    enabled = models.BooleanField(default=True)
+    conditions = models.JSONField(default=dict)
+    notification_channel_list = models.JSONField(default=list, blank=True)
+    detection_count = models.IntegerField(default=0)
+    last_triggered_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(Account, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        managed = False
+        db_table = 'alert_rules'
+
+    def __str__(self):
+        return f"{self.name} - {'Enabled' if self.enabled else 'Disabled'}"
+
+
+# ============ REPORTS (Read-Only from Engine) ============
+class ReportTemplate(models.Model):
+    """ReportTemplate model - READ ONLY from engine"""
+    name = models.CharField(max_length=100)
+    description = models.TextField()
+    sections = models.JSONField(default=list)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        managed = False
+        db_table = 'report_templates'
+
+    def __str__(self):
+        return self.name
+
+
+class ScheduledReport(models.Model):
+    """ScheduledReport model - READ ONLY from engine"""
+    organisation = models.ForeignKey(Organisation, on_delete=models.CASCADE)
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE)
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    template = models.ForeignKey(ReportTemplate, on_delete=models.PROTECT, null=True, blank=True)
+    frequency = models.CharField(max_length=20)
+    schedule_day = models.IntegerField(null=True, blank=True)
+    schedule_time = models.TimeField()
+    sections = models.JSONField(default=list)
+    formats = models.JSONField(default=list)
+    recipients = models.JSONField(default=list)
+    status = models.CharField(max_length=20)
+    last_generated_at = models.DateTimeField(null=True, blank=True)
+    next_run_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(Account, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        managed = False
+        db_table = 'scheduled_reports'
+
+    def __str__(self):
+        return f"{self.name} - {self.frequency}"
+
+
+class GeneratedReport(models.Model):
+    """GeneratedReport model - READ ONLY from engine"""
+    scheduled_report = models.ForeignKey(
+        'ScheduledReport',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='generated_reports'
+    )
+    organisation = models.ForeignKey(Organisation, on_delete=models.CASCADE)
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE)
+    name = models.CharField(max_length=200)
+    report_type = models.CharField(max_length=50)
+    format = models.CharField(max_length=20)
+    file_path = models.FileField(upload_to='reports/', null=True, blank=True)
+    file_size = models.BigIntegerField(default=0)
+    page_count = models.IntegerField(default=0)
+    data_period_start = models.DateField()
+    data_period_end = models.DateField()
+    generated_at = models.DateTimeField(auto_now_add=True)
+    generated_by = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+    summary_data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        managed = False
+        db_table = 'generated_reports'
+
+    def __str__(self):
+        return f"{self.name} - {self.generated_at.strftime('%Y-%m-%d')}"

@@ -363,7 +363,6 @@ const Alerts = () => {
       'sentiment_positive': 'Sentiment',
       'position_drop': 'Position',
       'mention_spike': 'Mentions',
-      'anomaly': 'Anomaly',
     };
 
     const metricName = metricNames[triggerType] || 'Metric';
@@ -371,14 +370,11 @@ const Alerts = () => {
     // Determine operator and threshold format
     let operator = '<';
     let thresholdDisplay = `-${threshold}%`;
-    
+
     if (triggerType === 'visibility_increase' || triggerType === 'sentiment_positive' || triggerType === 'mention_spike') {
       operator = '>';
       thresholdDisplay = `${threshold}%`;
     } else if (triggerType === 'position_drop') {
-      operator = '>';
-      thresholdDisplay = `${threshold}%`;
-    } else if (triggerType === 'anomaly') {
       operator = '>';
       thresholdDisplay = `${threshold}%`;
     }

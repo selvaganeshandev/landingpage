@@ -170,8 +170,36 @@ PERPLEXITY_API_KEY = config('PERPLEXITY_API_KEY', default=None)
 # ScrapingDog API Configuration (for web crawling in misinformation detection)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
 
+# ==================== EMAIL CONFIGURATION (MAILGUN SMTP) ====================
+# Mailgun SMTP Configuration for report email delivery
+EMAIL_HOST = config('EMAIL_HOST', default='smtp.mailgun.org')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
+
+# Mailgun SMTP Credentials
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+
+# Sender Email
+DEFAULT_FROM_EMAIL = config(
+    'DEFAULT_FROM_EMAIL',
+    default='LLM Monitor <noreply@sandbox.mailgun.org>'
+)
+
+# Frontend URL for email links
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:8080')
+
+# Email timeout
+EMAIL_TIMEOUT = config('EMAIL_TIMEOUT', default=10, cast=int)
+# ==================== END EMAIL CONFIGURATION ====================
+
+# Backend API URL for report generation
+BACKEND_API_URL = config('BACKEND_API_URL', default='http://localhost:8000')
+
 # Platform tracking settings (lowercase keys, converted to proper case in code)
-ENABLED_PLATFORMS = config('ENABLED_PLATFORMS', default='chatgpt', cast=lambda v: [p.strip() for p in v.split(',')])
+# Default: 'chatgpt,gemini' - enables both ChatGPT and Google Gemini
+ENABLED_PLATFORMS = config('ENABLED_PLATFORMS', default='chatgpt,gemini', cast=lambda v: [p.strip() for p in v.split(',')])
 
 # Celery settings (for background processing)
 # Use a dedicated Redis DB index for engine tasks (e.g., DB 5)
@@ -207,5 +235,9 @@ CELERY_BEAT_SCHEDULE = {
     'competitor-scheduler-every-15s': {
         'task': 'core.processing_tasks.process_competitor_scheduler',
         'schedule': config('CELERY_BEAT_SCHEDULE_COMPETITOR', default=15.0, cast=float),
+    },
+    'report-email-scheduler-every-15s': {
+        'task': 'core.processing_tasks.process_report_email_scheduler',
+        'schedule': config('CELERY_BEAT_SCHEDULE_REPORT_EMAIL', default=15.0, cast=float),
     },
 }

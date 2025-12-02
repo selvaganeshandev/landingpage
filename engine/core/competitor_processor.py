@@ -585,7 +585,94 @@ class CompetitorProcessor:
                 analytics_qs=analytics_qs
             )
             self._maybe_generate_competitive_insights(competitor.domain)
-            
+
+            # ============ COMPETITOR SURGE ALERT ============
+            try:
+                from datetime import timedelta
+
+                logger.info(f"Checking competitor surge alert for competitor {competitor.id}")
+
+                # Get previous metrics (7 days ago)
+                previous_date = timezone.now() - timedelta(days=7)
+
+                from shared_models.models import CompetitorMetricSnapshot, AlertRule, Alert
+                previous_snapshot = CompetitorMetricSnapshot.objects.filter(
+                    competitor=competitor,
+                    period_type='weekly',
+                    start_date__lte=previous_date
+                ).order_by('-start_date').first()
+
+                current_mentions = int(competitor.total_mentions or 0)
+                previous_mentions = int(previous_snapshot.total_mentions if previous_snapshot else current_mentions)
+
+                if previous_mentions > 0:
+                    change_percent = ((current_mentions - previous_mentions) / previous_mentions) * 100
+
+                    # Check if competitor surged
+                    rules = AlertRule.objects.filter(
+                        domain=competitor.domain,
+                        enabled=True,
+                        conditions__trigger_type='competitor_surge'
+                    )
+
+                    for rule in rules:
+                        threshold = rule.conditions.get('threshold_percent', 20)
+
+                        if change_percent > threshold:
+                            # Check for duplicate recent alerts (avoid spam)
+                            recent_cutoff = timezone.now() - timedelta(hours=24)
+                            duplicate = Alert.objects.filter(
+                                domain=competitor.domain,
+                                type='competitor_surge',
+                                status='active',
+                                created_at__gte=recent_cutoff,
+                                message__contains=competitor.name
+                            ).first()
+
+                            if not duplicate:
+                                # Create alert
+                                severity = 'high' if change_percent > threshold * 3 else 'medium' if change_percent > threshold * 2 else 'low'
+
+                                alert = Alert.objects.create(
+                                    domain=competitor.domain,
+                                    type='competitor_surge',
+                                    severity=severity,
+                                    title=f'Competitor {competitor.name} Surged by {change_percent:.1f}%',
+                                    message=f'Competitor {competitor.name} mentions increased from {previous_mentions} to {current_mentions} ({change_percent:.1f}% increase) in the last 7 days.',
+                                    platform=None,
+                                    metric=change_percent,
+                                    status='active'
+                                )
+
+                                # Update rule
+                                rule.detection_count = (rule.detection_count or 0) + 1
+                                rule.last_triggered_at = timezone.now()
+                                rule.save(update_fields=['detection_count', 'last_triggered_at'])
+
+                                logger.info(f"Created competitor surge alert {alert.id} for {competitor.name}")
+
+                                # Send notification
+                                try:
+                                    import sys
+                                    import os
+
+                                    backend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'backend')
+                                    if backend_path not in sys.path:
+                                        sys.path.insert(0, backend_path)
+
+                                    from alerts.notification_service import NotificationService
+                                    NotificationService.send_alert_notifications(alert, rule)
+
+                                    logger.info(f"Notification sent for competitor surge alert {alert.id}")
+                                except Exception as e:
+                                    logger.error(f"Failed to send competitor alert notification: {e}", exc_info=True)
+                            else:
+                                logger.debug(f"Skipping duplicate competitor surge alert for {competitor.name}")
+
+            except Exception as e:
+                logger.error(f"Error creating competitor surge alert: {e}", exc_info=True)
+                # Don't fail the whole processing if alerts fail
+
             logger.info(f"Successfully aggregated analytics for competitor {competitor.id}")
         
         except Exception as e:

@@ -145,7 +145,6 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewA
                 <SelectItem value="competitor_surge">Competitor Mention Surge</SelectItem>
                 <SelectItem value="position_drop">Position Drop</SelectItem>
                 <SelectItem value="mention_spike">Mention Volume Spike</SelectItem>
-                <SelectItem value="anomaly">Anomaly Detection</SelectItem>
               </SelectContent>
             </Select>
           </div>

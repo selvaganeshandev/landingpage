@@ -9,9 +9,7 @@ class Alert(models.Model):
         ('visibility_drop', 'Visibility Drop'),
         ('sentiment_negative', 'Negative Sentiment'),
         ('competitor_surge', 'Competitor Surge'),
-        ('anomaly', 'Anomaly'),
         ('position_loss', 'Position Loss'),
-        ('new_platform', 'New Platform'),
         ('misinformation', 'Misinformation'),
     ]
     

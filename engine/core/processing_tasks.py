@@ -377,3 +377,58 @@ def process_integration_insights_scheduler(self):
     logger.info(f"[Integration Scheduler] Scheduler run completed. Processed: {processed}")
     return {'processed': processed}
 
+
+# ==================== REPORT EMAIL PROCESSING ====================
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_report_email_scheduler(self):
+    """
+    Periodic scheduler for report email delivery.
+    Checks for due scheduled reports and sends them via email.
+    Runs every 15 seconds (configurable via CELERY_BEAT_SCHEDULE_REPORT_EMAIL).
+    """
+    try:
+        from .report_email_processor import ReportEmailProcessor
+        
+        processor = ReportEmailProcessor()
+        result = processor.process_due_reports()
+        
+        logger.info(
+            f"Report email scheduler tick completed: "
+            f"processed={result['processed']}, "
+            f"successful={result['successful']}, "
+            f"failed={result['failed']}"
+        )
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error in report email scheduler: {str(e)}", exc_info=True)
+        raise self.retry(exc=e, countdown=60)  # Retry after 60 seconds on error
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_single_report_email_task(self, scheduled_report_id: int):
+    """
+    Process a single scheduled report immediately (manual trigger).
+    
+    Args:
+        scheduled_report_id: ID of scheduled report to process
+    """
+    from shared_models.models import ScheduledReport
+    from .report_email_processor import ReportEmailProcessor
+    
+    try:
+        scheduled_report = ScheduledReport.objects.get(id=scheduled_report_id)
+        
+        processor = ReportEmailProcessor()
+        result = processor._process_single_scheduled_report(scheduled_report)
+        
+        logger.info(f"Processed scheduled report {scheduled_report_id}: {result['message']}")
+        return result
+    except ScheduledReport.DoesNotExist:
+        logger.error(f"Scheduled report {scheduled_report_id} not found")
+        return {'success': False, 'message': 'Scheduled report not found'}
+    except Exception as e:
+        logger.error(f"Error processing scheduled report {scheduled_report_id}: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=60)
+

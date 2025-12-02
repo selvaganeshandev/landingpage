@@ -276,6 +276,16 @@ class ReportGenerationViewSet(viewsets.ViewSet):
     Generate reports on-demand
     """
     permission_classes = [IsAuthenticated]
+    
+    def get_permissions(self):
+        """
+        Allow unauthenticated access for generate_by_id (internal engine endpoint).
+        TODO: Add service token authentication for production.
+        """
+        if self.action == 'generate_by_id':
+            from rest_framework.permissions import AllowAny
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     @action(detail=False, methods=['post'])
     def generate_now(self, request):
@@ -378,6 +388,55 @@ class ReportGenerationViewSet(viewsets.ViewSet):
             'status': 'SUCCESS',
             'result': {'message': 'Report generation will be implemented in Phase 2'}
         })
+
+    @action(detail=False, methods=['post'])
+    def generate_by_id(self, request):
+        """
+        Generate a report by GeneratedReport ID.
+        Internal API endpoint for engine to trigger report generation.
+        """
+        generated_report_id = request.data.get('generated_report_id')
+        
+        if not generated_report_id:
+            return Response(
+                {'error': 'generated_report_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            generated_report = GeneratedReport.objects.get(id=generated_report_id)
+        except GeneratedReport.DoesNotExist:
+            return Response(
+                {'error': 'GeneratedReport not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Generate report synchronously
+        from reports.services.main import generate_report
+        try:
+            success = generate_report(generated_report.id)
+            if not success:
+                return Response(
+                    {'error': 'Report generation failed'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        except Exception as e:
+            logger.error(f"Error generating report {generated_report.id}: {str(e)}", exc_info=True)
+            return Response(
+                {'error': f'Report generation error: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Refresh from database to get updated file info
+        generated_report.refresh_from_db()
+
+        return Response({
+            'success': True,
+            'message': 'Report generated successfully',
+            'report_id': generated_report.id,
+            'file_path': str(generated_report.file_path) if generated_report.file_path else None,
+            'file_size': generated_report.file_size
+        }, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
