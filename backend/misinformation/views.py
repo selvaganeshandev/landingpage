@@ -4,6 +4,7 @@ API Views for Misinformation Module
 import logging
 from datetime import date, timedelta
 from urllib.parse import urlparse
+from collections import Counter
 from django.db.models import Sum, Count, Q, F
 from django.db.models.functions import TruncDate
 from django.utils import timezone
@@ -514,6 +515,7 @@ def extract_domain_from_url(url):
 def citations_dashboard(request):
     """
     Get citations dashboard summary with metrics.
+    Reads directly from PromptAnalytics.citation_list.
 
     Query params:
         domain_id: Required - ID of the domain
@@ -538,92 +540,94 @@ def citations_dashboard(request):
 
     start_date = timezone.now() - timedelta(days=days)
 
-    # Get all citation URLs for the domain
-    all_citations = CitationURL.objects.filter(domain=domain)
-    recent_citations = all_citations.filter(created_at__gte=start_date)
+    # Get all completed prompt analytics
+    all_analytics = PromptAnalytics.objects.filter(
+        prompt__group__domain=domain,
+        track_status='COMP'
+    )
+
+    recent_analytics = all_analytics.filter(created_at__gte=start_date)
+
+    # Extract all URLs from citation_list
+    all_urls = []
+    url_to_analytics_map = {}  # Track which analytics has which URL
+    domain_url_clean = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
+
+    for pa in all_analytics:
+        if pa.citation_list and isinstance(pa.citation_list, list):
+            for url in pa.citation_list:
+                all_urls.append({
+                    'url': url,
+                    'platform': pa.platform,
+                    'created_at': pa.created_at,
+                    'prompt_analytics_id': pa.id
+                })
+                if url not in url_to_analytics_map:
+                    url_to_analytics_map[url] = []
+                url_to_analytics_map[url].append(pa)
 
     # Total citations count
-    total_citations = all_citations.count()
+    total_citations = len(all_urls)
 
     # Unique sources (unique domains from URLs)
     unique_sources = set()
-    for citation in all_citations.values_list('url', flat=True):
-        unique_sources.add(extract_domain_from_url(citation))
+    for url_data in all_urls:
+        unique_sources.add(extract_domain_from_url(url_data['url']))
     unique_sources_count = len(unique_sources)
 
     # Your domain citations (citations pointing to your domain)
-    domain_url = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
-    your_domain_citations = all_citations.filter(
-        Q(url__icontains=domain_url)
-    ).count()
+    your_domain_citations = sum(1 for url_data in all_urls if domain_url_clean in url_data['url'])
 
-    # Competitor citations (would need competitor data - placeholder for now)
-    competitor_citations = 0
+    # Competitor citations
+    competitor_citations = total_citations - your_domain_citations
 
     # Citation rate (% of prompts with citations)
-    total_prompts = PromptAnalytics.objects.filter(
-        prompt__group__domain=domain,
-        track_status='COMP'
-    ).count()
-    prompts_with_citations = PromptAnalytics.objects.filter(
-        prompt__group__domain=domain,
-        track_status='COMP',
-        total_citations__gt=0
-    ).count()
+    total_prompts = all_analytics.count()
+    prompts_with_citations = all_analytics.exclude(citation_list=[]).count()
     citation_rate = round((prompts_with_citations / total_prompts * 100), 1) if total_prompts > 0 else 0
 
     # Average citations per response
-    avg_citations = PromptAnalytics.objects.filter(
-        prompt__group__domain=domain,
-        track_status='COMP'
-    ).aggregate(avg=Sum('total_citations'))['avg'] or 0
-    avg_citations_per_response = round(avg_citations / total_prompts, 1) if total_prompts > 0 else 0
+    total_citation_count = sum(len(pa.citation_list) if pa.citation_list else 0 for pa in all_analytics)
+    avg_citations_per_response = round(total_citation_count / total_prompts, 1) if total_prompts > 0 else 0
 
-    # Broken links count
-    broken_links = all_citations.filter(
+    # For crawl status, check CitationURL table if data exists
+    crawled_urls = CitationURL.objects.filter(domain=domain)
+    broken_links = crawled_urls.filter(
         Q(http_status_code__gte=400) | Q(crawl_status='failed')
     ).count()
 
     # New sources in last 7 days
     seven_days_ago = timezone.now() - timedelta(days=7)
-    new_sources_7d = all_citations.filter(created_at__gte=seven_days_ago).count()
+    recent_urls = [u for u in all_urls if u['created_at'] >= seven_days_ago]
+    new_sources_7d = len(set(extract_domain_from_url(u['url']) for u in recent_urls))
 
-    # Status breakdown
+    # Status breakdown (only if misinformation scan has run)
     status_breakdown = {
-        'valid': all_citations.filter(crawl_status='success', http_status_code__lt=400).count(),
+        'valid': crawled_urls.filter(crawl_status='success', http_status_code__lt=400).count(),
         'broken': broken_links,
-        'pending': all_citations.filter(crawl_status='pending').count(),
-        'blocked': all_citations.filter(crawl_status='blocked').count(),
+        'pending': total_citations - crawled_urls.count(),  # URLs not yet crawled
+        'blocked': crawled_urls.filter(crawl_status='blocked').count(),
     }
 
     # Citations by platform
     platform_breakdown = {}
-    for pa in PromptAnalytics.objects.filter(
-        prompt__group__domain=domain,
-        track_status='COMP',
-        total_citations__gt=0
-    ).values('platform').annotate(count=Sum('total_citations')):
-        platform_breakdown[pa['platform']] = pa['count']
+    for url_data in all_urls:
+        platform = url_data['platform']
+        platform_breakdown[platform] = platform_breakdown.get(platform, 0) + 1
 
     # Citations trend (last N days)
     trend_data = []
     for i in range(days):
         day = timezone.now().date() - timedelta(days=days - i - 1)
-        day_count = all_citations.filter(
-            created_at__date=day
-        ).count()
+        day_count = sum(1 for u in all_urls if u['created_at'].date() == day)
         trend_data.append({
             'date': day.isoformat(),
             'count': day_count
         })
 
     # Top cited domains
-    domain_counts = {}
-    for url in all_citations.values_list('url', flat=True):
-        source_domain = extract_domain_from_url(url)
-        domain_counts[source_domain] = domain_counts.get(source_domain, 0) + 1
-
-    top_domains = sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    domain_counts = Counter(extract_domain_from_url(u['url']) for u in all_urls)
+    top_domains = [{'domain': d, 'count': c} for d, c in domain_counts.most_common(10)]
 
     return Response({
         'summary': {
@@ -639,7 +643,7 @@ def citations_dashboard(request):
         'status_breakdown': status_breakdown,
         'platform_breakdown': platform_breakdown,
         'trend_data': trend_data,
-        'top_domains': [{'domain': d, 'count': c} for d, c in top_domains],
+        'top_domains': top_domains,
     })
 
 
@@ -648,10 +652,10 @@ def citations_dashboard(request):
 def citations_list(request):
     """
     List all citations with filtering and pagination.
+    Reads directly from PromptAnalytics.citation_list.
 
     Query params:
         domain_id: Required - ID of the domain
-        status: Optional - Filter by crawl_status (pending, success, failed, blocked)
         source_type: Optional - your_domain, competitor, third_party
         platform: Optional - Filter by AI platform
         search: Optional - Search in URL
@@ -674,34 +678,85 @@ def citations_list(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    citations = CitationURL.objects.filter(domain=domain).select_related(
-        'prompt_analytics', 'content'
-    )
-
-    # Apply filters
-    crawl_status = request.query_params.get('status')
-    if crawl_status:
-        statuses = [s.strip() for s in crawl_status.split(',')]
-        citations = citations.filter(crawl_status__in=statuses)
-
-    # Source type filter
-    source_type = request.query_params.get('source_type')
-    if source_type:
-        domain_url = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
-        if source_type == 'your_domain':
-            citations = citations.filter(url__icontains=domain_url)
-        elif source_type == 'third_party':
-            citations = citations.exclude(url__icontains=domain_url)
+    # Get all completed prompt analytics
+    analytics_qs = PromptAnalytics.objects.filter(
+        prompt__group__domain=domain,
+        track_status='COMP'
+    ).exclude(citation_list=[])
 
     # Platform filter
     platform = request.query_params.get('platform')
     if platform:
-        citations = citations.filter(prompt_analytics__platform=platform)
+        analytics_qs = analytics_qs.filter(platform=platform)
 
-    # Search filter
-    search = request.query_params.get('search')
-    if search:
-        citations = citations.filter(url__icontains=search)
+    # Extract all citations with metadata
+    all_citations = []
+    domain_url_clean = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
+
+    for pa in analytics_qs:
+        if pa.citation_list and isinstance(pa.citation_list, list):
+            for idx, url in enumerate(pa.citation_list):
+                source_domain = extract_domain_from_url(url)
+                is_your_domain = domain_url_clean in url
+
+                # Source type filter
+                source_type_filter = request.query_params.get('source_type')
+                if source_type_filter:
+                    if source_type_filter == 'your_domain' and not is_your_domain:
+                        continue
+                    elif source_type_filter == 'third_party' and is_your_domain:
+                        continue
+
+                # Search filter
+                search = request.query_params.get('search')
+                if search and search.lower() not in url.lower():
+                    continue
+
+                # Check if this URL has been crawled by misinformation scan
+                crawled_citation = CitationURL.objects.filter(
+                    domain=domain,
+                    url=url
+                ).first()
+
+                display_status = 'pending'
+                http_status_code = None
+                crawl_status = 'pending'
+
+                if crawled_citation:
+                    crawl_status = crawled_citation.crawl_status
+                    http_status_code = crawled_citation.http_status_code
+
+                    if crawl_status == 'success' and http_status_code and http_status_code < 400:
+                        display_status = 'valid'
+                    elif http_status_code and http_status_code >= 400:
+                        display_status = 'broken'
+                    elif crawl_status == 'blocked':
+                        display_status = 'blocked'
+                    elif crawl_status == 'failed':
+                        display_status = 'failed'
+
+                all_citations.append({
+                    'url': url,
+                    'source_domain': source_domain,
+                    'is_your_domain': is_your_domain,
+                    'source_type': 'your_domain' if is_your_domain else 'third_party',
+                    'platform': pa.platform,
+                    'created_at': pa.created_at,
+                    'prompt_analytics_id': pa.id,
+                    'display_status': display_status,
+                    'crawl_status': crawl_status,
+                    'http_status_code': http_status_code,
+                    'position_in_response': idx + 1,
+                    'context_snippet': None,  # Could extract from context_summary if needed
+                })
+
+    # Status filter (after extraction)
+    status_filter = request.query_params.get('status')
+    if status_filter:
+        all_citations = [c for c in all_citations if c['display_status'] == status_filter]
+
+    # Sort by created_at descending
+    all_citations.sort(key=lambda x: x['created_at'], reverse=True)
 
     # Pagination
     page = int(request.query_params.get('page', 1))
@@ -709,58 +764,13 @@ def citations_list(request):
     start = (page - 1) * page_size
     end = start + page_size
 
-    total = citations.count()
-    citations = citations.order_by('-created_at')[start:end]
+    total = len(all_citations)
+    results = all_citations[start:end]
 
-    # Build response data with additional computed fields
-    results = []
-    domain_url = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
-
-    for citation in citations:
-        source_domain = extract_domain_from_url(citation.url)
-        is_your_domain = domain_url in citation.url
-
-        # Determine status
-        if citation.crawl_status == 'success' and citation.http_status_code and citation.http_status_code < 400:
-            display_status = 'valid'
-        elif citation.http_status_code and citation.http_status_code >= 400:
-            display_status = 'broken'
-        elif citation.crawl_status == 'blocked':
-            display_status = 'blocked'
-        elif citation.crawl_status == 'failed':
-            display_status = 'failed'
-        else:
-            display_status = 'pending'
-
-        # Get mention count and latest context snippet using CitationMention
-        mention_count = CitationMention.objects.filter(citation_url=citation).count()
-        latest_mention = CitationMention.objects.filter(
-            citation_url=citation
-        ).order_by('-mentioned_at').first()
-
-        context_snippet = None
-        if latest_mention and latest_mention.context_snippet:
-            context_snippet = latest_mention.context_snippet[:300]
-
-        results.append({
-            'id': citation.id,
-            'url': citation.url,
-            'source_domain': source_domain,
-            'crawl_status': citation.crawl_status,
-            'http_status_code': citation.http_status_code,
-            'display_status': display_status,
-            'is_your_domain': is_your_domain,
-            'source_type': 'your_domain' if is_your_domain else 'third_party',
-            'platform': citation.prompt_analytics.platform if citation.prompt_analytics else None,
-            'page_title': citation.content.page_title if hasattr(citation, 'content') and citation.content else None,
-            'last_crawled_at': citation.last_crawled_at,
-            'created_at': citation.created_at,
-            'prompt_analytics_id': citation.prompt_analytics_id,
-            # New enriched fields from CitationMention
-            'mention_count': mention_count,
-            'context_snippet': context_snippet,
-            'last_mentioned_at': latest_mention.mentioned_at if latest_mention else citation.created_at,
-        })
+    # Group by URL to get mention counts
+    url_mention_counts = Counter(c['url'] for c in all_citations)
+    for result in results:
+        result['mention_count'] = url_mention_counts[result['url']]
 
     return Response({
         'total': total,
@@ -768,6 +778,81 @@ def citations_list(request):
         'page_size': page_size,
         'results': results
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def citations_by_source(request):
+    """
+    Get citations grouped by source domain.
+    Reads directly from PromptAnalytics.citation_list.
+
+    Query params:
+        domain_id: Required - ID of the domain
+        limit: Optional - Number of sources to return (default: 20)
+    """
+    domain_id = request.query_params.get('domain_id')
+    limit = int(request.query_params.get('limit', 20))
+
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        domain = Domain.objects.get(id=domain_id)
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': 'Domain not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    domain_url_clean = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
+
+    # Get all completed prompt analytics
+    all_analytics = PromptAnalytics.objects.filter(
+        prompt__group__domain=domain,
+        track_status='COMP'
+    ).exclude(citation_list=[])
+
+    # Extract and group by source domain
+    source_data = {}
+
+    for pa in all_analytics:
+        if pa.citation_list and isinstance(pa.citation_list, list):
+            for url in pa.citation_list:
+                source = extract_domain_from_url(url)
+
+                if source not in source_data:
+                    source_data[source] = {
+                        'source_domain': source,
+                        'mention_count': 0,
+                        'is_your_domain': domain_url_clean in url,
+                        'platforms': set(),
+                        'last_cited': None,
+                    }
+
+                source_data[source]['mention_count'] += 1
+                source_data[source]['platforms'].add(pa.platform)
+
+                if not source_data[source]['last_cited'] or pa.created_at > source_data[source]['last_cited']:
+                    source_data[source]['last_cited'] = pa.created_at
+
+    # Convert to list and format
+    results = []
+    for source, data in source_data.items():
+        data['platforms'] = list(data['platforms'])
+        results.append(data)
+
+    # Sort by mention_count
+    results.sort(key=lambda x: x['mention_count'], reverse=True)
+
+    return Response({
+        'total': len(results),
+        'results': results[:limit]
+    })
+
 
 
 @api_view(['GET'])
@@ -936,85 +1021,3 @@ def alert_full_comparison(request, alert_id):
 
     return Response(data)
 
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def citations_by_source(request):
-    """
-    Get citations grouped by source domain.
-
-    Query params:
-        domain_id: Required - ID of the domain
-        limit: Optional - Number of sources to return (default: 20)
-    """
-    domain_id = request.query_params.get('domain_id')
-    limit = int(request.query_params.get('limit', 20))
-
-    if not domain_id:
-        return Response(
-            {'error': 'domain_id is required'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    try:
-        domain = Domain.objects.get(id=domain_id)
-    except Domain.DoesNotExist:
-        return Response(
-            {'error': 'Domain not found'},
-            status=status.HTTP_404_NOT_FOUND
-        )
-
-    domain_url = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
-
-    # Group by source domain using CitationMention for accurate counts
-    citations = CitationURL.objects.filter(domain=domain).select_related('prompt_analytics')
-
-    domain_data = {}
-    for citation in citations:
-        source = extract_domain_from_url(citation.url)
-        if source not in domain_data:
-            domain_data[source] = {
-                'source_domain': source,
-                'citation_count': 0,
-                'mention_count': 0,  # Total mentions using CitationMention
-                'valid_count': 0,
-                'broken_count': 0,
-                'is_your_domain': domain_url in citation.url,
-                'platforms': set(),
-                'last_cited': None,
-            }
-
-        domain_data[source]['citation_count'] += 1
-
-        # Get actual mention count from CitationMention table
-        mention_count = CitationMention.objects.filter(citation_url=citation).count()
-        domain_data[source]['mention_count'] += mention_count if mention_count else 1
-
-        if citation.crawl_status == 'success' and (not citation.http_status_code or citation.http_status_code < 400):
-            domain_data[source]['valid_count'] += 1
-        elif citation.http_status_code and citation.http_status_code >= 400:
-            domain_data[source]['broken_count'] += 1
-
-        if citation.prompt_analytics:
-            domain_data[source]['platforms'].add(citation.prompt_analytics.platform)
-
-        # Get latest mention date
-        latest_mention = CitationMention.objects.filter(citation_url=citation).order_by('-mentioned_at').first()
-        citation_date = latest_mention.mentioned_at if latest_mention else citation.created_at
-
-        if not domain_data[source]['last_cited'] or citation_date > domain_data[source]['last_cited']:
-            domain_data[source]['last_cited'] = citation_date
-
-    # Convert to list and sort
-    results = []
-    for source, data in domain_data.items():
-        data['platforms'] = list(data['platforms'])
-        results.append(data)
-
-    # Sort by mention_count (actual mentions) rather than just citation_count
-    results.sort(key=lambda x: x['mention_count'], reverse=True)
-
-    return Response({
-        'total': len(results),
-        'results': results[:limit]
-    })

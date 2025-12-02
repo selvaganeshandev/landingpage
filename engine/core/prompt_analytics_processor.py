@@ -533,13 +533,13 @@ class PromptAnalyticsProcessor:
                     defaults={
                         'is_mention': bool(result.get('is_mention') or (result.get('mention_count', 0) or 0) > 0),
                         'total_mentions': int(result.get('mention_count', 0) or 0),
-                        # citation_count is now consistent: only domain URLs (same as citations list)
+                        # total_citations is domain-specific URLs, citation_list contains all URLs for misinformation scan
                         'total_citations': int(result.get('citation_count', 0) or 0),
                         'position': float(extracted_position or 0),
                         'sentiment_category': str(result.get('sentiment') or 'neutral'),
                         'sentiment_score': float(result.get('sentiment_score', 0.0) or 0.0),
                         'context_summary': result.get('context_summary') or result.get('response_text') or '',
-                        'citation_list': result.get('citations') or [],
+                        'citation_list': result.get('all_urls') or [],
                         'competitor_mention_list': result.get('competitor_mention_list') or [],  # Save extracted competitors
                         'track_status': 'COMP',  # Mark as completed
                         'tracked_at': timezone.now(),
