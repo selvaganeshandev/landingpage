@@ -28,6 +28,19 @@ import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
 import { useDomainStore } from "@/stores/domainStore";
+// Helper function to get favicon URL with proper protocol
+const getFaviconUrl = (url: string, size: number = 64) => {
+  try {
+    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
+      ? url
+      : `https://${url}`;
+    const parsedUrl = new URL(fullUrl);
+    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
+  } catch {
+    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
+  }
+};
+
 import {
   LineChart,
   Line,
@@ -502,7 +515,7 @@ const CompetitorDetail = () => {
               <div className="w-16 h-16 rounded-2xl border-2 border-border shadow-lg flex items-center justify-center bg-card overflow-hidden">
                 {competitor.url ? (
                   <img
-                    src={`https://www.google.com/s2/favicons?domain=${competitor.url}&sz=64`}
+                    src={getFaviconUrl(competitor.url, 64)}
                     alt={`${competitor.name} favicon`}
                     className="w-10 h-10 object-contain"
                     onError={(e) => {

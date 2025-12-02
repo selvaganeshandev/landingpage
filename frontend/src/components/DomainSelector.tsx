@@ -22,8 +22,13 @@ import { useToast } from "@/hooks/use-toast";
 // Helper function to get favicon URL from domain URL
 const getFaviconUrl = (url: string) => {
   try {
-    const domain = new URL(url).hostname;
-    return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+    // Ensure URL has protocol
+    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
+      ? url
+      : `https://${url}`;
+    const parsedUrl = new URL(fullUrl);
+    // Pass the full URL with https:// protocol to ensure Google uses HTTPS
+    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=32`;
   } catch {
     return null;
   }

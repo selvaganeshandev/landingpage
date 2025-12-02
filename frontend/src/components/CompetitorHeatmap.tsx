@@ -22,11 +22,12 @@ const getFaviconUrl = (url?: string) => {
   try {
     const normalized = url.startsWith("http") ? url : `https://${url}`;
     const parsed = new URL(normalized);
-    return `https://www.google.com/s2/favicons?domain=${parsed.hostname}&sz=64`;
+    // Pass the full URL with https:// protocol to ensure Google uses HTTPS
+    return `https://www.google.com/s2/favicons?domain=${parsed.protocol}//${parsed.hostname}&sz=64`;
   } catch (e) {
     try {
       const parsed = new URL(`https://${url}`);
-      return `https://www.google.com/s2/favicons?domain=${parsed.hostname}&sz=64`;
+      return `https://www.google.com/s2/favicons?domain=${parsed.protocol}//${parsed.hostname}&sz=64`;
     } catch {
       return "";
     }

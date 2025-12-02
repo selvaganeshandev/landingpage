@@ -20,6 +20,19 @@ interface ExecutiveDashboardTemplateProps {
   data: any;
 }
 
+// Helper function to get favicon URL with proper protocol
+const getFaviconUrl = (url: string, size: number = 64) => {
+  try {
+    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
+      ? url
+      : `https://${url}`;
+    const parsedUrl = new URL(fullUrl);
+    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
+  } catch {
+    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
+  }
+};
+
 export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateProps) => {
   // Extract metrics from the API response structure
   const metrics = data?.metrics || {};
@@ -250,7 +263,7 @@ export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateP
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center border-2 border-primary overflow-hidden">
                     <img
-                      src={`https://www.google.com/s2/favicons?domain=${domainUrl}&sz=64`}
+                      src={getFaviconUrl(domainUrl, 64)}
                       alt={domainName}
                       className="w-5 h-5"
                       onError={(e) => {
@@ -275,7 +288,7 @@ export const ExecutiveDashboardTemplate = ({ data }: ExecutiveDashboardTemplateP
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-full bg-white dark:bg-gray-800 flex items-center justify-center border border-muted-foreground/20 overflow-hidden">
                         <img
-                          src={`https://www.google.com/s2/favicons?domain=${competitor.url}&sz=64`}
+                          src={getFaviconUrl(competitor.url, 64)}
                           alt={competitor.name}
                           className="w-5 h-5"
                           onError={(e) => {

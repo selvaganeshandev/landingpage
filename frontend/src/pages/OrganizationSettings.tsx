@@ -52,6 +52,19 @@ import {
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 
+// Helper function to get favicon URL with proper protocol
+const getFaviconUrl = (url: string, size: number = 32) => {
+  try {
+    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
+      ? url
+      : `https://${url}`;
+    const parsedUrl = new URL(fullUrl);
+    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
+  } catch {
+    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
+  }
+};
+
 export default function OrganizationSettings() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -1431,7 +1444,7 @@ export default function OrganizationSettings() {
                   >
                     <div className="flex items-center gap-3">
                       <img
-                        src={`https://www.google.com/s2/favicons?domain=${domain.url}&sz=32`}
+                        src={getFaviconUrl(domain.url, 32)}
                         alt={`${domain.name} favicon`}
                         className="h-5 w-5 rounded"
                         onError={(e) => {

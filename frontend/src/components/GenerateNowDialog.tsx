@@ -10,6 +10,19 @@ import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
 import { FileText, Loader2, Download } from "lucide-react";
 
+// Helper function to get favicon URL with proper protocol
+const getFaviconUrl = (url: string, size: number = 64) => {
+  try {
+    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
+      ? url
+      : `https://${url}`;
+    const parsedUrl = new URL(fullUrl);
+    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
+  } catch {
+    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
+  }
+};
+
 interface GenerateNowDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -103,7 +116,7 @@ export const GenerateNowDialog = ({ open, onOpenChange }: GenerateNowDialogProps
             <div className="p-3 border rounded-lg bg-muted/30">
               <div className="flex items-center gap-3">
                 <img
-                  src={`https://www.google.com/s2/favicons?domain=${selectedDomain.url}&sz=64`}
+                  src={getFaviconUrl(selectedDomain.url, 64)}
                   alt="Domain favicon"
                   className="h-6 w-6"
                   onError={(e) => {

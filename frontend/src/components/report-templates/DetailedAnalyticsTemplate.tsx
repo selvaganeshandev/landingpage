@@ -44,8 +44,10 @@ export const DetailedAnalyticsTemplate = ({ data }: DetailedAnalyticsTemplatePro
   // Helper function to get favicon URL
   const getFaviconUrl = (url: string) => {
     try {
-      const domain = new URL(url.startsWith('http') ? url : `https://${url}`).hostname;
-      return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+      const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+      const parsedUrl = new URL(fullUrl);
+      // Pass the full URL with https:// protocol to ensure Google uses HTTPS
+      return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=128`;
     } catch {
       return `https://ui-avatars.com/api/?name=${encodeURIComponent(url)}&background=random`;
     }
