@@ -355,17 +355,25 @@ export const Sidebar = () => {
                 <ChevronsRight className="h-5 w-5" />
               </Button>
               {selectedDomain && getFaviconUrl(selectedDomain.url, 32) && (
-                <Popover open={domainPopoverOpen} onOpenChange={setDomainPopoverOpen}>
-                  <PopoverTrigger asChild>
-                    <button className="rounded-md overflow-hidden shadow-sm bg-background hover:ring-2 hover:ring-primary/50 transition-all" style={{ width: '36px', height: '36px' }}>
-                      <img
-                        src={getFaviconUrl(selectedDomain.url, 32) || ''}
-                        alt={selectedDomain.name}
-                        className="w-full h-full object-cover"
-                        onError={(e) => handleFaviconError(e, selectedDomain.url, selectedDomain.name, 32)}
-                      />
-                    </button>
-                  </PopoverTrigger>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div>
+                      <Popover open={domainPopoverOpen} onOpenChange={setDomainPopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <button className="relative rounded-md overflow-hidden shadow-sm bg-background hover:ring-2 hover:ring-primary/50 transition-all" style={{ width: '36px', height: '36px' }}>
+                            <img
+                              src={getFaviconUrl(selectedDomain.url, 32) || ''}
+                              alt={selectedDomain.name}
+                              className={cn("w-full h-full object-cover", isDomainProcessing && "opacity-60")}
+                              onError={(e) => handleFaviconError(e, selectedDomain.url, selectedDomain.name, 32)}
+                            />
+                            {isDomainProcessing && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-background/30">
+                                <Activity className="h-4 w-4 text-orange-500 animate-pulse" />
+                              </div>
+                            )}
+                          </button>
+                        </PopoverTrigger>
                   <PopoverContent className="w-[240px] p-0" side="right" align="start">
                     <Command>
                       <CommandInput placeholder="Search domains..." />
@@ -425,6 +433,23 @@ export const Sidebar = () => {
                     </Command>
                   </PopoverContent>
                 </Popover>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {isDomainProcessing ? (
+                <div className="flex items-center gap-2">
+                  <Activity className="h-3 w-3 text-orange-500 animate-pulse" />
+                  <span>
+                    {domainProcessingStatus === 'INIT' ? 'Initializing...' :
+                     domainProcessingStatus === 'SCHD' ? 'Scheduled...' :
+                     domainProcessingStatus === 'PROC' ? 'Processing...' : 'Processing...'}
+                  </span>
+                </div>
+              ) : (
+                <p>{selectedDomain.name}</p>
+              )}
+            </TooltipContent>
+          </Tooltip>
               )}
             </div>
           )}
