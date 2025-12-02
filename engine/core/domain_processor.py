@@ -1551,11 +1551,11 @@ class DomainProcessor:
 
     def _extract_theme_from_group(self, group_data: Dict[str, Any]) -> str:
         """
-        Extract a concise theme from the prompt group using NLP
-        Uses the primary prompt text to identify the common theme
-        Returns a normalized term (minimum 2 words, max 4 words)
+        Extract a concise theme from the primary prompt.
+        Simple extraction: remove question words and keep key nouns/verbs.
+        Example: "What helps with relieving vaginal dryness?" -> "vaginal dryness relief"
         """
-        # Priority 1: Use primary prompt text (closest to actual prompt)
+        # Priority 1: Use primary prompt text
         primary_prompts = group_data.get('primary_prompts', [])
         if primary_prompts:
             # Get the first primary prompt
@@ -1564,23 +1564,100 @@ class DomainProcessor:
                 prompt_text = (prompt_item.get('prompt_text') or prompt_item.get('prompt') or '').strip()
             else:
                 prompt_text = str(prompt_item).strip()
-            
+
             if prompt_text:
-                # Normalize to term format (minimum 2 words, max 4 words)
-                theme = self._normalize_to_term(prompt_text, min_words=2, max_words=4)
+                # Simple extraction from prompt
+                theme = self._extract_key_terms_from_prompt(prompt_text)
                 if theme and theme != "General":
                     return theme
-        
+
         # Priority 2: Fallback to title if no primary prompt available
         title = group_data.get('title', '').strip()
         if title and title != 'Untitled':
-            # Normalize to term format (minimum 2 words, max 4 words)
-            theme = self._normalize_to_term(title, min_words=2, max_words=4)
+            theme = self._extract_key_terms_from_prompt(title)
             if theme and theme != "General":
                 return theme
 
         # Fallback: if no meaningful theme, use "General Topic"
         return "General Topic"
+
+    def _extract_key_terms_from_prompt(self, prompt: str) -> str:
+        """
+        Extract key terms from a prompt question.
+        Example: "What helps with relieving vaginal dryness?" -> "Vaginal Dryness Relief"
+        """
+        if not prompt or not prompt.strip():
+            return "General"
+
+        text = prompt.strip().lower()
+
+        # Remove question mark
+        text = text.rstrip('?').strip()
+
+        # Words to remove (question starters, helping verbs, articles)
+        remove_patterns = [
+            'what is', 'what are', 'what', 'how to', 'how do', 'how does', 'how can', 'how',
+            'why is', 'why are', 'why', 'when to', 'when is', 'when', 'where to', 'where is', 'where',
+            'who is', 'who are', 'who', 'tell me about', 'tell me', 'explain', 'describe',
+            'can you suggest', 'can you', 'could you', 'would you', 'should i', 'can i', 'do i',
+            'the best way to', 'the best', 'best way to', 'good way to',
+            'helps with', 'help with', 'help me',
+        ]
+
+        # Remove patterns from start
+        for pattern in remove_patterns:
+            if text.startswith(pattern + ' '):
+                text = text[len(pattern):].strip()
+                break
+
+        # Remove common filler words, helping verbs, and qualifiers
+        filler_words = {
+            'the', 'a', 'an', 'is', 'are', 'be', 'for', 'to', 'with', 'in', 'on', 'at', 'of',
+            'some', 'any', 'best', 'good', 'great', 'helps', 'help', 'suggest', 'give', 'show',
+            'way', 'ways', 'save',  # Additional common filler words
+        }
+        words = text.split()
+
+        # Keep words that are meaningful (not filler words)
+        key_words = []
+        action_words = []  # Words converted from verbs (e.g., "relief", "purchase")
+
+        for word in words:
+            word_clean = word.strip('.,!?;:\'"()[]{}')
+            if word_clean and word_clean not in filler_words and len(word_clean) > 2:
+                # Convert verbs ending in -ing to noun form where appropriate
+                if word_clean.endswith('ing'):
+                    # relieving -> relief, buying -> purchase (simple mapping)
+                    verb_to_noun = {
+                        'relieving': 'relief',
+                        'buying': 'purchase',
+                        'planning': 'plan',
+                        'saving': 'savings',
+                        'investing': 'investment',
+                        'learning': 'learning',
+                        'training': 'training',
+                    }
+                    converted = verb_to_noun.get(word_clean, word_clean)
+                    # If converted, it's an action word - put it at the end
+                    if converted != word_clean:
+                        action_words.append(converted)
+                        continue
+
+                key_words.append(word_clean)
+
+        # Combine nouns first, then action words: "vaginal dryness" + "relief" = "Vaginal Dryness Relief"
+        all_words = key_words + action_words
+
+        if not all_words:
+            return "General Topic"
+
+        # Take first 3-4 words maximum
+        result = ' '.join(all_words[:4])
+
+        # Capitalize first letter of each word
+        result = ' '.join(word.capitalize() for word in result.split())
+
+        return result if len(result.split()) >= 2 else f"{result} Topic"
     
     def _build_expert_prompt_template(self, keyword: str, domain_name: str) -> str:
         return (

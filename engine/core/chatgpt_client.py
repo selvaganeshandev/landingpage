@@ -95,9 +95,9 @@ Generate exactly {total_prompts} distinct short prompts ({prompts_per_keyword} p
 Make them like real ChatGPT user queries - short and conversational. Return ONLY JSON array."""
         
         try:
-            logger.info(f"Generating prompts using ChatGPT for {len(keywords)} keywords, domain: {domain_name}")
+            logger.info(f"Generating prompts using ChatGPT (gpt-4o-mini) for {len(keywords)} keywords, domain: {domain_name}")
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",  # Using cheaper mini model
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
