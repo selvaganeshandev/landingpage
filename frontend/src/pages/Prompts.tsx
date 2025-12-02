@@ -32,14 +32,17 @@ const Prompts = () => {
   const [offset, setOffset] = useState(0);
   const limit = 20;
   const [isLoading, setIsLoading] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
-  const { selectedDomain } = useDomainStore();
+  const { selectedDomain, setDomainSwitching } = useDomainStore();
   const { user } = useAuth();
 
   useEffect(() => {
     setPromptGroups([]);
     setOffset(0);
     setTotalCount(0);
+    setIsInitialLoad(true);
+    setDomainSwitching(true); // Show page loader
     void loadPromptGroups(0, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDomain?.id]);
@@ -51,6 +54,10 @@ const Prompts = () => {
       const activeDomainId = selectedDomain?.id ?? getActiveDomainIdNumber(user);
       if (!activeDomainId) {
         setIsLoading(false);
+        if (isInitialLoad) {
+          setDomainSwitching(false);
+          setIsInitialLoad(false);
+        }
         toast({ title: 'No domain selected', description: 'Please select a domain to view prompt groups.', variant: 'destructive' });
         return;
       }
@@ -86,6 +93,10 @@ const Prompts = () => {
       }
     } finally {
       setIsLoading(false);
+      if (isInitialLoad) {
+        setDomainSwitching(false);
+        setIsInitialLoad(false);
+      }
     }
   };
 
@@ -154,11 +165,7 @@ const Prompts = () => {
       {/* Search and organize controls removed as per requirements */}
 
       <div className="grid gap-6">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin" />
-          </div>
-        ) : promptGroups.length > 0 ? (
+        {promptGroups.length > 0 ? (
           <>
           {promptGroups.map((group) => (
           <Card key={group.id} className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
@@ -228,7 +235,7 @@ const Prompts = () => {
         {canLoadMore && (
           <div className="flex justify-center">
             <Button variant="outline" onClick={handleLoadMore} disabled={isLoading} className="border border-border">
-              {isLoading ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin"/> Loading...</>) : 'Load More'}
+              Load More
             </Button>
           </div>
         )}
