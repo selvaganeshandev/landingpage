@@ -382,11 +382,30 @@ export const Sidebar = () => {
                         <CommandGroup heading="Your Domains">
                           {domains.map((domain) => {
                             const faviconUrl = getFaviconUrl(domain.url, 32);
+                            const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
+                            const isFailed = domain.processing_status === 'FAIL';
+                            const isDisabled = isProcessing || isFailed;
+                            const processingLabel = domain.processing_status === 'INIT' ? 'Initializing...' :
+                                                   domain.processing_status === 'SCHD' ? 'Scheduled...' :
+                                                   domain.processing_status === 'PROC' ? 'Processing...' : 'Processing...';
+
                             return (
                               <CommandItem
                                 key={domain.id}
                                 value={domain.name}
                                 onSelect={async () => {
+                                  // Don't allow selecting processing or failed domains
+                                  if (isDisabled) {
+                                    toast({
+                                      title: isFailed ? "Domain Processing Failed" : "Domain Processing",
+                                      description: isFailed
+                                        ? `Processing failed: ${domain.track_message || 'Unknown error'}. Please try re-adding this domain.`
+                                        : "This domain is still being processed. Please wait until processing completes.",
+                                      variant: isFailed ? "destructive" : "default",
+                                    });
+                                    return;
+                                  }
+
                                   setDomainSwitching(true);
                                   setSelectedDomain(domain);
                                   setDomainPopoverOpen(false);
@@ -400,7 +419,11 @@ export const Sidebar = () => {
                                     setDomainSwitching(false);
                                   }, 1000);
                                 }}
-                                className="flex items-center justify-between gap-2"
+                                className={cn(
+                                  "flex items-center justify-between gap-2",
+                                  isDisabled && "opacity-60 cursor-not-allowed"
+                                )}
+                                disabled={isDisabled}
                               >
                                 <div className="flex items-center gap-2 flex-1 min-w-0">
                                   {faviconUrl ? (
@@ -414,17 +437,35 @@ export const Sidebar = () => {
                                   <Globe className={cn("h-4 w-4 flex-shrink-0", faviconUrl && "hidden")} />
                                   <div className="flex flex-col flex-1 min-w-0">
                                     <span className="truncate">{domain.name}</span>
-                                    <span className="text-xs text-muted-foreground">
-                                      {domain.total_mentions} mentions
-                                    </span>
+                                    {isProcessing ? (
+                                      <span className="text-xs text-orange-500 flex items-center gap-1">
+                                        <Activity className="h-3 w-3 animate-pulse" />
+                                        {processingLabel}
+                                      </span>
+                                    ) : isFailed ? (
+                                      <span className="text-xs text-red-500 flex items-center gap-1">
+                                        <AlertTriangle className="h-3 w-3" />
+                                        Failed
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">
+                                        {domain.total_mentions} mentions
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
-                                <Check
-                                  className={cn(
-                                    "h-4 w-4 flex-shrink-0",
-                                    selectedDomain?.id === domain.id ? "opacity-100" : "opacity-0"
-                                  )}
-                                />
+                                {isProcessing ? (
+                                  <AlertTriangle className="h-4 w-4 flex-shrink-0 text-orange-500" />
+                                ) : isFailed ? (
+                                  <AlertTriangle className="h-4 w-4 flex-shrink-0 text-red-500" />
+                                ) : (
+                                  <Check
+                                    className={cn(
+                                      "h-4 w-4 flex-shrink-0",
+                                      selectedDomain?.id === domain.id ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                )}
                               </CommandItem>
                             );
                           })}
