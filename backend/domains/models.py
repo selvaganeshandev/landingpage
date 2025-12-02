@@ -129,7 +129,7 @@ class Domain(models.Model):
         db_table = 'domains'
         verbose_name = 'Domain'
         verbose_name_plural = 'Domains'
-        ordering = ['name']
+        ordering = ['-created_at']  # Most recently added first
         unique_together = ['url', 'organisation']
         indexes = [
             models.Index(fields=['organisation', 'processing_status']),

@@ -191,15 +191,6 @@ export const DomainSelector = () => {
 
   const selectedFaviconUrl = selectedDomain ? getFaviconUrl(selectedDomain.url, 32) : null;
 
-  // Sort domains to put the selected domain first
-  const sortedDomains = [...domains].sort((a, b) => {
-    // Selected domain always comes first
-    if (selectedDomain?.id === a.id) return -1;
-    if (selectedDomain?.id === b.id) return 1;
-    // Then sort by name
-    return a.name.localeCompare(b.name);
-  });
-
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -230,7 +221,7 @@ export const DomainSelector = () => {
           <CommandList>
             <CommandEmpty>No domains found.</CommandEmpty>
             <CommandGroup heading="Your Domains">
-              {sortedDomains.map((domain) => {
+              {domains.map((domain) => {
                 const faviconUrl = getFaviconUrl(domain.url, 32);
                 const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
                 const isFailed = domain.processing_status === 'FAIL';
