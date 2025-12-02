@@ -1583,81 +1583,47 @@ class DomainProcessor:
 
     def _extract_key_terms_from_prompt(self, prompt: str) -> str:
         """
-        Extract key terms from a prompt question.
+        Extract key terms from a prompt question using GPT-4o-mini.
         Example: "What helps with relieving vaginal dryness?" -> "Vaginal Dryness Relief"
         """
         if not prompt or not prompt.strip():
-            return "General"
-
-        text = prompt.strip().lower()
-
-        # Remove question mark
-        text = text.rstrip('?').strip()
-
-        # Words to remove (question starters, helping verbs, articles)
-        remove_patterns = [
-            'what is', 'what are', 'what', 'how to', 'how do', 'how does', 'how can', 'how',
-            'why is', 'why are', 'why', 'when to', 'when is', 'when', 'where to', 'where is', 'where',
-            'who is', 'who are', 'who', 'tell me about', 'tell me', 'explain', 'describe',
-            'can you suggest', 'can you', 'could you', 'would you', 'should i', 'can i', 'do i',
-            'the best way to', 'the best', 'best way to', 'good way to',
-            'helps with', 'help with', 'help me',
-        ]
-
-        # Remove patterns from start
-        for pattern in remove_patterns:
-            if text.startswith(pattern + ' '):
-                text = text[len(pattern):].strip()
-                break
-
-        # Remove common filler words, helping verbs, and qualifiers
-        filler_words = {
-            'the', 'a', 'an', 'is', 'are', 'be', 'for', 'to', 'with', 'in', 'on', 'at', 'of',
-            'some', 'any', 'best', 'good', 'great', 'helps', 'help', 'suggest', 'give', 'show',
-            'way', 'ways', 'save',  # Additional common filler words
-        }
-        words = text.split()
-
-        # Keep words that are meaningful (not filler words)
-        key_words = []
-        action_words = []  # Words converted from verbs (e.g., "relief", "purchase")
-
-        for word in words:
-            word_clean = word.strip('.,!?;:\'"()[]{}')
-            if word_clean and word_clean not in filler_words and len(word_clean) > 2:
-                # Convert verbs ending in -ing to noun form where appropriate
-                if word_clean.endswith('ing'):
-                    # relieving -> relief, buying -> purchase (simple mapping)
-                    verb_to_noun = {
-                        'relieving': 'relief',
-                        'buying': 'purchase',
-                        'planning': 'plan',
-                        'saving': 'savings',
-                        'investing': 'investment',
-                        'learning': 'learning',
-                        'training': 'training',
-                    }
-                    converted = verb_to_noun.get(word_clean, word_clean)
-                    # If converted, it's an action word - put it at the end
-                    if converted != word_clean:
-                        action_words.append(converted)
-                        continue
-
-                key_words.append(word_clean)
-
-        # Combine nouns first, then action words: "vaginal dryness" + "relief" = "Vaginal Dryness Relief"
-        all_words = key_words + action_words
-
-        if not all_words:
             return "General Topic"
 
-        # Take first 3-4 words maximum
-        result = ' '.join(all_words[:4])
+        # Use GPT-4o-mini to extract key terms intelligently
+        try:
+            title = self.chatgpt_client._extract_title_from_prompt(prompt)
+            if title and title != "General":
+                return title
+        except Exception as e:
+            logger.warning(f"Failed to extract title using GPT-4o-mini: {e}, using fallback")
 
-        # Capitalize first letter of each word
+        # Fallback: Simple extraction (if GPT fails)
+        return self._simple_title_extraction(prompt)
+
+    def _simple_title_extraction(self, prompt: str) -> str:
+        """
+        Fallback: Simple rule-based title extraction.
+        Used only if GPT-4o-mini API fails.
+        """
+        text = prompt.strip().lower()
+        text = text.rstrip('?').strip()
+
+        # Remove common question starters
+        question_starters = ['what is', 'what are', 'what', 'how to', 'how', 'why', 'when', 'where', 'who']
+        for starter in question_starters:
+            if text.startswith(starter + ' '):
+                text = text[len(starter):].strip()
+                break
+
+        # Remove filler words
+        filler_words = {'the', 'a', 'an', 'is', 'are', 'some', 'best', 'good'}
+        words = [w for w in text.split() if w not in filler_words and len(w) > 2]
+
+        # Take first 4 words
+        result = ' '.join(words[:4])
         result = ' '.join(word.capitalize() for word in result.split())
 
-        return result if len(result.split()) >= 2 else f"{result} Topic"
+        return result if len(result.split()) >= 2 else "General Topic"
     
     def _build_expert_prompt_template(self, keyword: str, domain_name: str) -> str:
         return (

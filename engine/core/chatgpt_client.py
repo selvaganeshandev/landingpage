@@ -365,6 +365,53 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
             logger.warning(f"Failed to generate group title with ChatGPT: {exc}")
             return None
 
+    def _extract_title_from_prompt(self, prompt: str) -> str:
+        """
+        Extract key terms from a single prompt to create a title.
+        Uses GPT-4o-mini for intelligent extraction.
+
+        Example:
+            Input: "What helps with relieving vaginal dryness?"
+            Output: "Vaginal Dryness Relief"
+        """
+        self._ensure_client()
+        if not self.client:
+            raise Exception("OpenAI client not available")
+
+        system_prompt = (
+            "You are a keyword extraction expert. Extract the main topic/subject from the user's question. "
+            "Return 2-4 words that capture the essence of the question. "
+            "Remove question words (what, how, why, etc.) and filler words (the, a, some, best, etc.). "
+            "Keep only the core subject matter. "
+            "Format: Title Case (e.g., 'Vaginal Dryness Relief', 'Employee Rewards Program'). "
+            "Return ONLY the extracted keywords, nothing else."
+        )
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Extract key terms from: {prompt}"},
+                ],
+                temperature=0.1,  # Low temperature for consistent extraction
+                max_tokens=20,    # Short response
+                timeout=10,
+            )
+            title = response.choices[0].message.content.strip()
+            # Clean up the response
+            title = title.strip('"').strip("'").strip('.')
+
+            # Validate: should be 2-4 words
+            word_count = len(title.split())
+            if word_count < 2 or word_count > 6:
+                logger.warning(f"GPT returned {word_count} words for '{prompt}': '{title}'")
+
+            return title if title else "General"
+        except Exception as exc:
+            logger.warning(f"Failed to extract title from prompt using GPT: {exc}")
+            raise  # Re-raise to trigger fallback in caller
+
     def _local_generate_prompts(self, keywords: List[str], domain_name: str) -> List[Dict[str, Any]]:
         # Generate short, natural prompts like real ChatGPT users write
         prompts: List[Dict[str, Any]] = []
