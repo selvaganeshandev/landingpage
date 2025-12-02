@@ -18,21 +18,7 @@ import { cn } from "@/lib/utils";
 import { useDomainStore } from "@/stores/domainStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-
-// Helper function to get favicon URL from domain URL
-const getFaviconUrl = (url: string) => {
-  try {
-    // Ensure URL has protocol
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
-      ? url
-      : `https://${url}`;
-    const parsedUrl = new URL(fullUrl);
-    // Pass the full URL with https:// protocol to ensure Google uses HTTPS
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=32`;
-  } catch {
-    return null;
-  }
-};
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 export const DomainSelector = () => {
   const [open, setOpen] = useState(false);
@@ -203,7 +189,7 @@ export const DomainSelector = () => {
     );
   }
 
-  const selectedFaviconUrl = selectedDomain ? getFaviconUrl(selectedDomain.url) : null;
+  const selectedFaviconUrl = selectedDomain ? getFaviconUrl(selectedDomain.url, 32) : null;
 
   // Sort domains to put the selected domain first
   const sortedDomains = [...domains].sort((a, b) => {
@@ -228,10 +214,7 @@ export const DomainSelector = () => {
               src={selectedFaviconUrl}
               alt=""
               className="h-4 w-4 flex-shrink-0 rounded"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                e.currentTarget.nextElementSibling?.classList.remove('hidden');
-              }}
+              onError={(e) => handleFaviconError(e, selectedDomain?.url || '', selectedDomain?.name, 32)}
             />
           ) : null}
           <Globe className={cn("h-4 w-4 flex-shrink-0", selectedFaviconUrl && "hidden")} />
@@ -248,7 +231,7 @@ export const DomainSelector = () => {
             <CommandEmpty>No domains found.</CommandEmpty>
             <CommandGroup heading="Your Domains">
               {sortedDomains.map((domain) => {
-                const faviconUrl = getFaviconUrl(domain.url);
+                const faviconUrl = getFaviconUrl(domain.url, 32);
                 const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
                 const isFailed = domain.processing_status === 'FAIL';
                 const isDisabled = isProcessing || isFailed;
@@ -273,10 +256,7 @@ export const DomainSelector = () => {
                           src={faviconUrl}
                           alt=""
                           className="h-4 w-4 flex-shrink-0 rounded"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                            e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                          }}
+                          onError={(e) => handleFaviconError(e, domain.url, domain.name, 32)}
                         />
                       ) : null}
                       <Globe className={cn("h-4 w-4 flex-shrink-0", faviconUrl && "hidden")} />

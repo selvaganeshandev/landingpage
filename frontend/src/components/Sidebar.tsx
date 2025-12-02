@@ -61,6 +61,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
 
@@ -289,21 +290,6 @@ export const Sidebar = () => {
   const domainProcessingStatus = selectedDomain?.processing_status || null;
   const isDomainProcessing = Boolean(selectedDomain && domainProcessingStatus && ['INIT', 'SCHD', 'PROC'].includes(domainProcessingStatus));
 
-  // Helper function to get favicon URL
-  const getFaviconUrl = (url: string) => {
-    try {
-      // Ensure URL has protocol
-      const fullUrl = url.startsWith('http://') || url.startsWith('https://')
-        ? url
-        : `https://${url}`;
-      const parsedUrl = new URL(fullUrl);
-      // Pass the full URL with https:// protocol to ensure Google uses HTTPS
-      return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=32`;
-    } catch {
-      return null;
-    }
-  };
-
   // Filter navigation based on user permissions
   useEffect(() => {
     if (user && checkPermission) {
@@ -368,17 +354,15 @@ export const Sidebar = () => {
               >
                 <ChevronsRight className="h-5 w-5" />
               </Button>
-              {selectedDomain && getFaviconUrl(selectedDomain.url) && (
+              {selectedDomain && getFaviconUrl(selectedDomain.url, 32) && (
                 <Popover open={domainPopoverOpen} onOpenChange={setDomainPopoverOpen}>
                   <PopoverTrigger asChild>
                     <button className="rounded-md overflow-hidden shadow-sm bg-background hover:ring-2 hover:ring-primary/50 transition-all" style={{ width: '36px', height: '36px' }}>
                       <img
-                        src={getFaviconUrl(selectedDomain.url) || ''}
+                        src={getFaviconUrl(selectedDomain.url, 32) || ''}
                         alt={selectedDomain.name}
                         className="w-full h-full object-cover"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                        }}
+                        onError={(e) => handleFaviconError(e, selectedDomain.url, selectedDomain.name, 32)}
                       />
                     </button>
                   </PopoverTrigger>
@@ -389,7 +373,7 @@ export const Sidebar = () => {
                         <CommandEmpty>No domains found.</CommandEmpty>
                         <CommandGroup heading="Your Domains">
                           {domains.map((domain) => {
-                            const faviconUrl = getFaviconUrl(domain.url);
+                            const faviconUrl = getFaviconUrl(domain.url, 32);
                             return (
                               <CommandItem
                                 key={domain.id}
@@ -416,10 +400,7 @@ export const Sidebar = () => {
                                       src={faviconUrl}
                                       alt=""
                                       className="h-4 w-4 flex-shrink-0 rounded"
-                                      onError={(e) => {
-                                        e.currentTarget.style.display = 'none';
-                                        e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                                      }}
+                                      onError={(e) => handleFaviconError(e, domain.url, domain.name, 32)}
                                     />
                                   ) : null}
                                   <Globe className={cn("h-4 w-4 flex-shrink-0", faviconUrl && "hidden")} />
