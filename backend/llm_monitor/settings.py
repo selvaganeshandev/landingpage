@@ -27,7 +27,8 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-1^ql#^w)r=70(!w2s-m9(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver']
+# ALLOWED_HOSTS - can be comma-separated list in .env
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,testserver', cast=lambda v: [s.strip() for s in v.split(',')] if v else [])
 
 
 # Application definition
@@ -58,6 +59,17 @@ INSTALLED_APPS = [
 ]
 # Site URL for building absolute links in emails
 SITE_URL = config('SITE_URL', default='http://localhost:8080')
+
+# CORS allowed origins - can be comma-separated list in .env
+# Default includes common development ports
+CORS_ALLOWED_ORIGINS_ENV = config(
+    'CORS_ALLOWED_ORIGINS',
+    default='http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8081,http://127.0.0.1:8081',
+    cast=lambda v: [s.strip() for s in v.split(',')] if v else []
+)
+
+# Combine CORS_ALLOWED_ORIGINS from env with SITE_URL (if not already present)
+CORS_ALLOWED_ORIGINS = list(set(CORS_ALLOWED_ORIGINS_ENV + ([SITE_URL] if SITE_URL and SITE_URL not in CORS_ALLOWED_ORIGINS_ENV else [])))
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -171,18 +183,6 @@ REST_FRAMEWORK = {
 }
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-    "http://localhost:8081",
-    "http://127.0.0.1:8081",
-    "http://localhost:8080",
-]
-
 CORS_ALLOW_CREDENTIALS = True
 
 # Additional CORS settings for development
@@ -231,7 +231,11 @@ SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
 # Google OAuth Configuration
 GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='1080254283876-0o3ur4sr7ii1kh4ugaij4c7n1ptibn4j.apps.googleusercontent.com')
 GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='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')
-GOOGLE_OAUTH_REDIRECT_URI = config('GOOGLE_OAUTH_REDIRECT_URI', default='http://localhost:8000/integrations/google/callback/')
+# GOOGLE_OAUTH_REDIRECT_URI - can be set in .env, or will be constructed from SITE_URL
+GOOGLE_OAUTH_REDIRECT_URI = config('GOOGLE_OAUTH_REDIRECT_URI', default=None)
+if not GOOGLE_OAUTH_REDIRECT_URI:
+    # Auto-construct from SITE_URL if not explicitly set
+    GOOGLE_OAUTH_REDIRECT_URI = f"{SITE_URL.rstrip('/')}/integrations/google/callback/"
 
 # JWT Configuration
 from datetime import timedelta
