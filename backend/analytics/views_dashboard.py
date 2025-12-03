@@ -190,11 +190,11 @@ def dashboard_summary(request):
     # Normalize platform name if provided (e.g., 'chatgpt' -> 'ChatGPT')
     platform_filter = None
     if llm_model and llm_model != 'all':
-        # Map lowercase to proper case platform names
+        # Map lowercase to proper case platform names (must match DB values exactly)
         platform_map = {
             'chatgpt': 'ChatGPT',
             'claude': 'Claude',
-            'gemini': 'Gemini',
+            'gemini': 'Google Gemini',  # Fixed: DB stores as "Google Gemini" not "Gemini"
             'perplexity': 'Perplexity',
             'grok': 'Grok'
         }
@@ -490,6 +490,10 @@ def dashboard_summary(request):
     # Build platforms list with weighted averages
     platforms = []
     for platform, agg in platform_aggregates.items():
+        # Skip Claude platform
+        if platform == 'Claude':
+            continue
+
         avg_pos = (agg['position_sum'] / agg['position_weight']) if agg['position_weight'] > 0 else 0
         platforms.append({
             'platform': platform,
@@ -497,7 +501,7 @@ def dashboard_summary(request):
             'avg_position': int(round(avg_pos)),
             'citations': agg['citations']
         })
-    
+
     # Sort by mention count
     platforms.sort(key=lambda x: x['mention_count'], reverse=True)
     

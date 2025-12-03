@@ -10,9 +10,8 @@ interface Mention {
 
 const defaultPlatforms: Mention[] = [
   { platform: "ChatGPT", count: 0, avgPosition: 0, color: "bg-chart-1" },
-  { platform: "Claude", count: 0, avgPosition: 0, color: "bg-chart-2" },
   { platform: "Perplexity", count: 0, avgPosition: 0, color: "bg-chart-3" },
-  { platform: "Gemini", count: 0, avgPosition: 0, color: "bg-chart-4" },
+  { platform: "Google Gemini", count: 0, avgPosition: 0, color: "bg-chart-4" },
 ];
 
 export interface PlatformMentionsProps {
@@ -22,16 +21,15 @@ export interface PlatformMentionsProps {
 export const PlatformMentions = ({ data }: PlatformMentionsProps) => {
   const map: Record<string, Mention> = {
     ChatGPT: { platform: "ChatGPT", count: 0, avgPosition: 0, color: "bg-chart-1" },
-    Claude: { platform: "Claude", count: 0, avgPosition: 0, color: "bg-chart-2" },
     Perplexity: { platform: "Perplexity", count: 0, avgPosition: 0, color: "bg-chart-3" },
-    Gemini: { platform: "Gemini", count: 0, avgPosition: 0, color: "bg-chart-4" },
+    "Google Gemini": { platform: "Google Gemini", count: 0, avgPosition: 0, color: "bg-chart-4" },
   };
   const platforms: Mention[] = (data && data.length)
     ? data.map((p, idx) => ({
         platform: p.platform,
         count: p.count,
         avgPosition: typeof p.avg_position === 'number' ? p.avg_position : 0,
-        color: Object.values(map)[idx % 4].color,
+        color: Object.values(map)[idx % 3].color,
       }))
     : defaultPlatforms;
   const maxCount = Math.max(1, ...platforms.map(p => p.count));

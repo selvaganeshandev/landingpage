@@ -18,11 +18,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { 
-  ArrowLeft, 
+import {
+  ArrowLeft,
   TrendingUp,
-  Share2,
-  FileText,
   Copy,
   Loader2
 } from "lucide-react";
@@ -49,20 +47,29 @@ const PromptDetail = () => {
   const [promptGroup, setPromptGroup] = useState<any>(null);
   const [prompts, setPrompts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingPrompts, setIsLoadingPrompts] = useState(false);
   const [selectedPlatform, setSelectedPlatform] = useState<string>("ChatGPT");
 
+  // Initial load - load everything once
   useEffect(() => {
     if (id) {
       loadPromptGroupDetail();
     }
-  }, [id, selectedPlatform]);
+  }, [id]);
+
+  // When platform filter changes, only reload prompts
+  useEffect(() => {
+    if (id && promptGroup) {
+      loadPrompts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPlatform]);
 
   const loadPromptGroupDetail = async () => {
     try {
       setIsLoading(true);
-      // Include platform filter in API call
-      const params = selectedPlatform ? { platform: selectedPlatform } : undefined;
-      const response = await apiClient.getPromptGroupDetail(parseInt(id!), params);
+      // Initial load without platform filter to get all data
+      const response = await apiClient.getPromptGroupDetail(parseInt(id!));
       setPromptGroup(response.group);
       const promptsData = response.group?.prompts || [];
       setPrompts(promptsData);
@@ -72,6 +79,29 @@ const PromptDetail = () => {
         primaryFullAiResponseLength: response.group?.primary_full_ai_response?.length || 0,
         primaryFullAiResponsePreview: response.group?.primary_full_ai_response?.substring(0, 100) || 'N/A'
       });
+    } catch (error: any) {
+      const errorMessage = error.message || "Failed to load prompt group details";
+      // Only show error for actual errors, not empty data
+      const isNetworkError = errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Network');
+      const isServerError = errorMessage.includes('500') || errorMessage.includes('503') || errorMessage.includes('502');
+
+      // Only show error toast for actual errors, not for empty data (404 is normal for empty data)
+      if (isNetworkError || isServerError || (!errorMessage.includes('404') && !errorMessage.includes('Not Found'))) {
+        toast({ title: "Error loading prompt group", description: errorMessage, variant: "destructive" });
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadPrompts = async () => {
+    try {
+      setIsLoadingPrompts(true);
+      // Load only prompts with platform filter
+      const params = selectedPlatform ? { platform: selectedPlatform } : undefined;
+      const response = await apiClient.getPromptGroupDetail(parseInt(id!), params);
+      const promptsData = response.group?.prompts || [];
+      setPrompts(promptsData);
       // Debug: Log prompts and their platforms
       console.log('Loaded prompts:', promptsData.length, 'for platform:', selectedPlatform);
       promptsData.forEach((p: any, idx: number) => {
@@ -84,31 +114,15 @@ const PromptDetail = () => {
         });
       });
     } catch (error: any) {
-      const errorMessage = error.message || "Failed to load prompt group details";
-      // Only show error for actual errors, not empty data
-      const isNetworkError = errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Network');
-      const isServerError = errorMessage.includes('500') || errorMessage.includes('503') || errorMessage.includes('502');
-      
-      // Only show error toast for actual errors, not for empty data (404 is normal for empty data)
-      if (isNetworkError || isServerError || (!errorMessage.includes('404') && !errorMessage.includes('Not Found'))) {
-        toast({ title: "Error loading prompt group", description: errorMessage, variant: "destructive" });
-      }
+      console.error('Error loading prompts:', error);
     } finally {
-      setIsLoading(false);
+      setIsLoadingPrompts(false);
     }
   };
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
     toast({ title: "Copied to Clipboard", description: "Prompt has been copied." });
-  };
-
-  const handleShare = () => {
-    toast({ title: "Share Link Generated", description: "Prompt group link copied to clipboard." });
-  };
-
-  const handleExport = () => {
-    toast({ title: "Exporting Report", description: "Prompt group report is being generated..." });
   };
 
   // Calculate trend metrics - avoid showing 100% unless there's historical data
@@ -272,13 +286,13 @@ const PromptDetail = () => {
   const trendsData = (promptGroup.mention_trends || []).map((t: any) => ({
     month: t.date,
     mentions: t.mentions,
-    avgPosition: t.avg_position,
+    avgPosition: Math.round(t.avg_position || 0),
   }));
 
   const platformBreakdown = (promptGroup.platform_distribution || []).map((p: any) => ({
     platform: p.platform,
     mentions: p.count,
-    avg_position: p.avg_position,
+    avg_position: Math.round(p.avg_position || 0),
   }));
 
   // Calculate max mentions for bar width calculation
@@ -305,16 +319,6 @@ const PromptDetail = () => {
               {promptGroup?.theme || promptGroup?.primary_prompt || 'No description available'}
             </p>
           </div>
-        </div>
-        <div className="flex gap-3">
-          <Button variant="outline" onClick={handleShare} className="border-border/50">
-            <Share2 className="h-4 w-4 mr-2" />
-            Share
-          </Button>
-          <Button variant="outline" onClick={handleExport} className="border-border/50">
-            <FileText className="h-4 w-4 mr-2" />
-            Export
-          </Button>
         </div>
       </div>
 
@@ -347,7 +351,7 @@ const PromptDetail = () => {
         <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground uppercase tracking-wider">Avg Position</p>
-            <p className="text-4xl font-bold font-inter">{promptGroup?.average_position || 0}</p>
+            <p className="text-4xl font-bold font-inter">{Math.round(promptGroup?.average_position || 0)}</p>
             <p className="text-sm text-muted-foreground">Across all platforms</p>
           </div>
         </Card>
@@ -446,7 +450,12 @@ const PromptDetail = () => {
           </div>
 
           {/* Variants Table */}
-          {filteredVariants.length === 0 ? (
+          {isLoadingPrompts ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <span className="ml-3 text-muted-foreground">Loading variants...</span>
+            </div>
+          ) : filteredVariants.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No variants found for the selected platform.
             </div>

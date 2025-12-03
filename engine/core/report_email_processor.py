@@ -254,15 +254,36 @@ class ReportEmailProcessor:
         attachments = []
         if generated_report.file_path:
             try:
-                file_content = generated_report.file_path.read()
+                # Get the absolute path to the file
+                # file_path is a FileField, so we need to get the actual file system path
+                import os
+
+                # Construct the full path to the reports directory
+                # The file_path is stored as a relative path like 'reports/filename.pdf'
+                backend_root = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                    'backend'
+                )
+
+                full_file_path = os.path.join(backend_root, str(generated_report.file_path))
+
+                logger.info(f"Reading report file from: {full_file_path}")
+
+                # Read the file content
+                with open(full_file_path, 'rb') as f:
+                    file_content = f.read()
+
                 filename = f"{generated_report.name}.{generated_report.format.lower()}"
                 attachments.append({
                     'filename': filename,
                     'content': file_content,
                     'content_type': self._get_content_type(generated_report.format)
                 })
+
+                logger.info(f"Successfully read report file: {filename} ({len(file_content)} bytes)")
+
             except Exception as e:
-                logger.error(f"Error reading report file for attachment: {e}")
+                logger.error(f"Error reading report file for attachment: {e}", exc_info=True)
 
         # Send email
         result = self.email_service.send_report_email(
