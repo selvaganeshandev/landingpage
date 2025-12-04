@@ -2075,9 +2075,8 @@ const Competitors = () => {
                         <div className="space-y-4">
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Search className="h-4 w-4 text-muted-foreground" />
-                                <h4 className="font-medium text-sm leading-snug">{gap.query}</h4>
+                              <div className="mb-2">
+                                <h4 className="font-bold text-sm leading-snug">{gap.query}</h4>
                               </div>
                               <div className="flex items-center gap-3 text-sm text-muted-foreground">
                                 <span>{gap.competitor} has {gap.mentions} mentions</span>
