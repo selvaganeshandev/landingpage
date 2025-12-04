@@ -2045,14 +2045,16 @@ const Competitors = () => {
                 <div className="flex items-center justify-between pb-4 border-b border-border">
                   <div>
                     <h3 className="text-lg font-semibold font-inter">Answer Gap Analysis</h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Queries where competitors appear but you don't
-                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className="text-sm text-muted-foreground">
+                        Queries where competitors appear but you don't
+                      </p>
+                      <Badge variant="destructive" className="text-xs">
+                        <AlertCircle className="h-3 w-3 mr-1" />
+                        {answerGapData && answerGapData.length > 0 ? answerGapData.length : 0} Gaps Identified
+                      </Badge>
+                    </div>
                   </div>
-                  <Badge variant="destructive">
-                    <AlertCircle className="h-3 w-3 mr-1" />
-                    {answerGapData && answerGapData.length > 0 ? answerGapData.length : 0} Gaps Identified
-                  </Badge>
                 </div>
 
                 <div className="space-y-4">
