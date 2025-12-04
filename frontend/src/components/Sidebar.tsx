@@ -61,6 +61,16 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
@@ -285,6 +295,7 @@ export const Sidebar = () => {
   const { isOpen, toggleSidebar } = useSidebar();
   const { selectedDomain, domains, setSelectedDomain, setDomainSwitching } = useDomainStore();
   const [domainPopoverOpen, setDomainPopoverOpen] = useState(false);
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
 
   // Check if domain is currently processing
   const domainProcessingStatus = selectedDomain?.processing_status || null;
@@ -301,7 +312,11 @@ export const Sidebar = () => {
     // Close any open popovers when clicking on items
   };
 
-  const handleLogout = async () => {
+  const handleLogoutClick = () => {
+    setLogoutDialogOpen(true);
+  };
+
+  const confirmLogout = async () => {
     try {
       await logout();
       toast({
@@ -315,6 +330,8 @@ export const Sidebar = () => {
         description: "There was an error signing you out. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setLogoutDialogOpen(false);
     }
   };
 
@@ -640,7 +657,7 @@ export const Sidebar = () => {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={handleLogout}
+                  onClick={handleLogoutClick}
                   className={cn(
                     "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                     "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
@@ -655,7 +672,7 @@ export const Sidebar = () => {
             </Tooltip>
           ) : (
             <button
-              onClick={handleLogout}
+              onClick={handleLogoutClick}
               className={cn(
                 "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                 "w-full gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
@@ -667,6 +684,24 @@ export const Sidebar = () => {
           )}
       </div>
     </aside>
+
+    {/* Sign Out Confirmation Dialog */}
+    <AlertDialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Sign Out</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to sign out? You will need to sign in again to access your account.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={confirmLogout}>
+            Sign Out
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </TooltipProvider>
   );
 };
