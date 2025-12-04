@@ -736,8 +736,8 @@ const Reports = () => {
         )}
       </Card> */}
 
-      {/* Templates */}
-      <Card className="p-6">
+      {/* Templates - Hidden for now */}
+      {/* <Card className="p-6">
         <h3 className="text-lg font-semibold mb-6">Report Templates</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {templates.map((template: any) => (
@@ -777,7 +777,7 @@ const Reports = () => {
             </div>
           ))}
         </div>
-      </Card>
+      </Card> */}
 
       {/* API Access - Commented out for now */}
       {/* <Card className="p-6">
