@@ -61,16 +61,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
@@ -686,22 +677,14 @@ export const Sidebar = () => {
     </aside>
 
     {/* Sign Out Confirmation Dialog */}
-    <AlertDialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Sign Out</AlertDialogTitle>
-          <AlertDialogDescription>
-            Are you sure you want to sign out? You will need to sign in again to access your account.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={confirmLogout}>
-            Sign Out
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmDialog
+      open={logoutDialogOpen}
+      onOpenChange={setLogoutDialogOpen}
+      title="Sign Out"
+      description="Are you sure you want to sign out? You will need to sign in again to access your account."
+      confirmText="Sign Out"
+      onConfirm={confirmLogout}
+    />
     </TooltipProvider>
   );
 };
