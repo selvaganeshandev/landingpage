@@ -311,21 +311,8 @@ const Competitors = () => {
   const promptCards = useMemo(() => {
     if (!promptRows.length) return [];
 
-    // Map filter values to actual platform names in database
-    const platformMapping: Record<string, string> = {
-      'chatgpt': 'ChatGPT',
-      'gemini': 'Google Gemini',
-      'perplexity': 'Perplexity',
-      'claude': 'Claude'
-    };
-
-    // Filter by platform if a specific LLM is selected
-    const filteredRows = promptsLLMFilter !== 'all'
-      ? promptRows.filter(row => {
-          const expectedPlatform = platformMapping[promptsLLMFilter.toLowerCase()];
-          return row.platform === expectedPlatform || row.platform.toLowerCase() === promptsLLMFilter.toLowerCase();
-        })
-      : promptRows;
+    // No need for client-side filtering - backend already filters by platform
+    const filteredRows = promptRows;
 
     if (!filteredRows.length) {
       return [];
@@ -513,7 +500,7 @@ const Competitors = () => {
       });
 
     return cards;
-  }, [promptRows, competitors, promptsLLMFilter]);
+  }, [promptRows, competitors]);
 
   const sortHeatmapRows = (rows: any[], platformKeys: string[]) => {
     if (!Array.isArray(rows) || rows.length === 0) return rows;
@@ -1049,10 +1036,23 @@ const Competitors = () => {
       if (!domainId || !hasLoadedData) return; // Only run if initial data is loaded
 
       try {
+        // Map filter values to actual platform names for API
+        const platformMapping: Record<string, string> = {
+          'chatgpt': 'ChatGPT',
+          'gemini': 'Google Gemini',
+          'perplexity': 'Perplexity',
+          'claude': 'Claude'
+        };
+
+        const platformParam = promptsLLMFilter !== 'all'
+          ? platformMapping[promptsLLMFilter.toLowerCase()] || promptsLLMFilter
+          : undefined;
+
         const compPromptAnalytics = await apiClient.getCompetitorPromptAnalyticsEngine({
           domain_id: domainId,
           page_size: '20',
-          page: promptsCurrentPage
+          page: promptsCurrentPage,
+          ...(platformParam && { platform: platformParam })
         }, { signal: controller.signal });
 
         if (didAbort || controller.signal.aborted) return;
@@ -1126,7 +1126,7 @@ const Competitors = () => {
       didAbort = true;
       controller.abort();
     };
-  }, [promptsCurrentPage, domainId, hasLoadedData, competitors, selectedDomain]);
+  }, [promptsCurrentPage, domainId, hasLoadedData, competitors, selectedDomain, promptsLLMFilter]);
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
