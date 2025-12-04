@@ -5,6 +5,16 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { CreateReportDialog } from "@/components/CreateReportDialog";
 import { ReportPreviewDialog } from "@/components/ReportPreviewDialog";
 import { EditReportDialog } from "@/components/EditReportDialog";
@@ -38,8 +48,10 @@ const Reports = () => {
   const [generateNowDialogOpen, setGenerateNowDialogOpen] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<any>(null);
   const [viewingReportId, setViewingReportId] = useState<number | null>(null);
+  const [reportToDelete, setReportToDelete] = useState<number | null>(null);
 
   // Get domain ID for filtering
   const domainId = selectedDomain?.id;
@@ -280,9 +292,16 @@ const Reports = () => {
     }
   };
 
-  const handleDeleteReport = async (reportId: number) => {
-    if (confirm('Are you sure you want to delete this scheduled report?')) {
-      deleteReportMutation.mutate(reportId);
+  const handleDeleteReport = (reportId: number) => {
+    setReportToDelete(reportId);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (reportToDelete) {
+      deleteReportMutation.mutate(reportToDelete);
+      setDeleteDialogOpen(false);
+      setReportToDelete(null);
     }
   };
 
@@ -642,7 +661,7 @@ const Reports = () => {
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => handleDelete(report)}
+                      onClick={() => handleDeleteReport(report.id)}
                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -812,6 +831,24 @@ const Reports = () => {
         reportId={viewingReportId}
         reportName={selectedReport?.name || "Report"}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Scheduled Report</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this scheduled report? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
