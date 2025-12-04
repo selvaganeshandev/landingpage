@@ -671,7 +671,9 @@ class PDFReportGenerator:
                     f"{stats.get('avg_sentiment', 0):.2f}"
                 ])
 
-            llm_table = Table(llm_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+            # Full width table with dynamic columns
+            llm_col_widths = [self.usable_width * 0.30, self.usable_width * 0.25, self.usable_width * 0.25, self.usable_width * 0.20]
+            llm_table = Table(llm_data, colWidths=llm_col_widths)
             llm_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['dark']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
@@ -682,8 +684,10 @@ class PDFReportGenerator:
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['light_gray']]),
                 ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
-                ('TOPPADDING', (0, 1), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ]))
 
             self.story.append(llm_table)
@@ -702,16 +706,23 @@ class PDFReportGenerator:
                     str(stat.get('mentions', 0))
                 ])
 
-            daily_table = Table(daily_data, colWidths=[2*inch, 2*inch, 2*inch])
+            # Full width table with dynamic columns
+            daily_col_widths = [self.usable_width * 0.40, self.usable_width * 0.30, self.usable_width * 0.30]
+            daily_table = Table(daily_data, colWidths=daily_col_widths)
             daily_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['primary']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('TOPPADDING', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
                 ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['primary_light']]),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ]))
 
             self.story.append(daily_table)
