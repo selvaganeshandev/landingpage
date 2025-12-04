@@ -563,8 +563,8 @@ const Reports = () => {
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* Quick Actions - Hidden for now */}
+      {/* <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Button variant="outline" className="h-24 flex flex-col gap-2" onClick={handleGenerateNow}>
           <FileText className="h-6 w-6" />
           <span className="font-medium">Generate Now</span>
@@ -581,7 +581,7 @@ const Reports = () => {
           <Share2 className="h-6 w-6" />
           <span className="font-medium">Share Report</span>
         </Button>
-      </div>
+      </div> */}
 
       {/* Scheduled Reports */}
       <Card className="p-6">
