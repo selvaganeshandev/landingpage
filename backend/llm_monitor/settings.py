@@ -49,7 +49,7 @@ INSTALLED_APPS = [
     'keywords',
     'prompts',
     'alerts',
-    'competitors',
+    'competitors.apps.CompetitorsConfig',
     'topics',
     'analytics',
     'integrations.apps.IntegrationsConfig',
