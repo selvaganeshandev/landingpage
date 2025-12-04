@@ -1,9 +1,12 @@
-import { useState } from "react";
-import { Send, Sparkles, TrendingUp, Lightbulb, Users, Search } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Send, Sparkles, TrendingUp, Lightbulb, Users, Search, BarChart3, MessageSquare, Bell, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDomainStore } from "@/stores/domainStore";
+import { useNavigationStore } from "@/stores/navigationStore";
+import { api } from "@/services/api";
+import { useSearchParams } from "react-router-dom";
 import {
   Popover,
   PopoverContent,
@@ -13,28 +16,100 @@ import {
 export const Chat = () => {
   const { user } = useAuth();
   const { selectedDomain } = useDomainStore();
+  const { updateRecentChats } = useNavigationStore();
+  const [searchParams] = useSearchParams();
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [openPopover, setOpenPopover] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<number | null>(null);
+
+  // Load recent conversations on mount
+  useEffect(() => {
+    loadRecentConversations();
+  }, [selectedDomain]);
+
+  // Load conversation from URL params
+  useEffect(() => {
+    const convId = searchParams.get('conversation');
+    if (convId && selectedDomain) {
+      loadConversation(parseInt(convId));
+    }
+  }, [searchParams, selectedDomain]);
+
+  const loadRecentConversations = async () => {
+    if (!selectedDomain) return;
+
+    try {
+      const response = await api.getChatConversations({
+        domain_id: selectedDomain.id
+      });
+
+      if (response.conversations) {
+        // Sort by updated_at descending and take first 20
+        const sorted = [...response.conversations].sort((a: any, b: any) =>
+          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+        );
+        updateRecentChats(sorted.slice(0, 20));
+      }
+    } catch (error) {
+      console.error('Failed to load recent conversations:', error);
+    }
+  };
+
+  const loadConversation = async (convId: number) => {
+    try {
+      const response = await api.getChatConversationDetail(convId);
+
+      if (response.messages) {
+        setMessages(response.messages.map((m: any) => ({
+          role: m.role,
+          content: m.content
+        })));
+        setConversationId(convId);
+      }
+    } catch (error) {
+      console.error('Failed to load conversation:', error);
+    }
+  };
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || !selectedDomain) return;
 
     const userMessage = input.trim();
     setInput("");
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setIsLoading(true);
 
-    // TODO: Integrate with your AI backend
-    // For now, just a placeholder response
-    setTimeout(() => {
+    try {
+      // Call Agentic ChatBot API
+      const response = await api.sendChatMessage({
+        message: userMessage,
+        domain_id: selectedDomain.id,
+        conversation_id: conversationId || undefined
+      });
+
+      // Add assistant response
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: "I'm your AI assistant. How can I help you today?"
+        content: response.message
       }]);
+
+      // Save conversation ID for subsequent messages
+      if (response.conversation_id) {
+        setConversationId(response.conversation_id);
+        // Refresh recent conversations after first message
+        loadRecentConversations();
+      }
+    } catch (error: any) {
+      console.error('ChatBot error:', error);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: error.response?.data?.error || "Sorry, I encountered an error. Please try again."
+      }]);
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -66,14 +141,15 @@ export const Chat = () => {
     return null;
   };
 
-  // Fallback to initials if favicon fails
+  // Fallback to user initials (not domain)
   const getUserInitials = () => {
     if (user?.first_name && user?.last_name) {
       return `${user.first_name.charAt(0)}${user.last_name.charAt(0)}`.toUpperCase();
     } else if (user?.first_name) {
-      return user.first_name.charAt(0).toUpperCase();
+      return user.first_name.substring(0, 2).toUpperCase();
     } else if (user?.email) {
-      return user.email.charAt(0).toUpperCase();
+      const emailName = user.email.split('@')[0];
+      return emailName.substring(0, 2).toUpperCase();
     }
     return "U";
   };
@@ -116,161 +192,171 @@ export const Chat = () => {
 
               {/* Quick actions - below input */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4" style={{ animation: 'none' }}>
-                <Popover open={openPopover === 'performance'} onOpenChange={(open) => setOpenPopover(open ? 'performance' : null)}>
+                {/* Analytics & Insights */}
+                <Popover open={openPopover === 'analytics'} onOpenChange={(open) => setOpenPopover(open ? 'analytics' : null)}>
                   <PopoverTrigger asChild>
                     <button className="p-3 rounded-lg border border-border hover:bg-accent text-left">
                       <div className="flex items-center gap-2">
-                        <TrendingUp className="h-4 w-4" />
-                        <div className="text-sm font-medium">Analyze Performance</div>
+                        <BarChart3 className="h-4 w-4" />
+                        <div className="text-sm font-medium">Analytics & Insights</div>
                       </div>
                     </button>
                   </PopoverTrigger>
                   <PopoverContent className="w-80 p-0" align="start">
                     <div className="p-2">
-                      <p className="text-xs font-semibold text-muted-foreground px-3 py-2">Performance Analysis</p>
+                      <p className="text-xs font-semibold text-muted-foreground px-3 py-2">Analytics & Insights</p>
                       <button
-                        onClick={() => { setInput("Analyze my domain's mention trends over the past month"); setOpenPopover(null); }}
+                        onClick={() => { setInput("Give me a complete dashboard overview"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Analyze mention trends
+                        Dashboard overview
                       </button>
                       <button
-                        onClick={() => { setInput("Review sentiment analysis across all AI platforms"); setOpenPopover(null); }}
+                        onClick={() => { setInput("Show historical trends for the last 6 months"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Review sentiment analysis
+                        Historical trends
                       </button>
                       <button
-                        onClick={() => { setInput("Compare my share of voice with competitors"); setOpenPopover(null); }}
+                        onClick={() => { setInput("Analyze sentiment breakdown by platform"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Compare share of voice
+                        Sentiment analysis
                       </button>
                       <button
-                        onClick={() => { setInput("Identify top performing prompts"); setOpenPopover(null); }}
+                        onClick={() => { setInput("What topics am I mentioned in?"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Identify top prompts
+                        Topic analysis
+                      </button>
+                      <button
+                        onClick={() => { setInput("Show platform breakdown for all metrics"); setOpenPopover(null); }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
+                      >
+                        Platform breakdown
                       </button>
                     </div>
                   </PopoverContent>
                 </Popover>
 
-                <Popover open={openPopover === 'content'} onOpenChange={(open) => setOpenPopover(open ? 'content' : null)}>
+                {/* Mentions & Citations */}
+                <Popover open={openPopover === 'mentions'} onOpenChange={(open) => setOpenPopover(open ? 'mentions' : null)}>
                   <PopoverTrigger asChild>
                     <button className="p-3 rounded-lg border border-border hover:bg-accent text-left">
                       <div className="flex items-center gap-2">
-                        <Lightbulb className="h-4 w-4" />
-                        <div className="text-sm font-medium">Content Ideas</div>
+                        <MessageSquare className="h-4 w-4" />
+                        <div className="text-sm font-medium">Mentions & Citations</div>
                       </div>
                     </button>
                   </PopoverTrigger>
                   <PopoverContent className="w-80 p-0" align="start">
                     <div className="p-2">
-                      <p className="text-xs font-semibold text-muted-foreground px-3 py-2">Content Strategy</p>
+                      <p className="text-xs font-semibold text-muted-foreground px-3 py-2">Mentions & Citations</p>
                       <button
-                        onClick={() => { setInput("Suggest content topics based on content gaps"); setOpenPopover(null); }}
+                        onClick={() => { setInput("Show me recent mentions from all platforms"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Suggest content topics
+                        Recent mentions
                       </button>
                       <button
-                        onClick={() => { setInput("Generate blog article ideas to improve visibility"); setOpenPopover(null); }}
+                        onClick={() => { setInput("List negative mentions from ChatGPT"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Generate blog ideas
+                        Negative mentions
                       </button>
                       <button
-                        onClick={() => { setInput("Create content calendar based on trending topics"); setOpenPopover(null); }}
+                        onClick={() => { setInput("What sources cite my domain?"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Create content calendar
+                        Citation sources
                       </button>
                       <button
-                        onClick={() => { setInput("Develop content templates for my domain"); setOpenPopover(null); }}
+                        onClick={() => { setInput("Show top mentions sorted by position"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Develop templates
+                        Top mentions
                       </button>
                     </div>
                   </PopoverContent>
                 </Popover>
 
+                {/* Competitors & Strategy */}
                 <Popover open={openPopover === 'competitors'} onOpenChange={(open) => setOpenPopover(open ? 'competitors' : null)}>
                   <PopoverTrigger asChild>
                     <button className="p-3 rounded-lg border border-border hover:bg-accent text-left">
                       <div className="flex items-center gap-2">
                         <Users className="h-4 w-4" />
-                        <div className="text-sm font-medium">Competitor Analysis</div>
+                        <div className="text-sm font-medium">Competitors & Strategy</div>
                       </div>
                     </button>
                   </PopoverTrigger>
                   <PopoverContent className="w-80 p-0" align="start">
                     <div className="p-2">
-                      <p className="text-xs font-semibold text-muted-foreground px-3 py-2">Competitor Insights</p>
+                      <p className="text-xs font-semibold text-muted-foreground px-3 py-2">Competitors & Strategy</p>
                       <button
-                        onClick={() => { setInput("Compare my visibility with top competitors"); setOpenPopover(null); }}
+                        onClick={() => { setInput("Compare my performance with competitors"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Compare visibility
+                        Competitor analysis
                       </button>
                       <button
-                        onClick={() => { setInput("Analyze competitor mention frequency"); setOpenPopover(null); }}
+                        onClick={() => { setInput("What's my share of voice in the market?"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Analyze mention frequency
+                        Share of voice
                       </button>
                       <button
-                        onClick={() => { setInput("Identify gaps in competitor coverage"); setOpenPopover(null); }}
+                        onClick={() => { setInput("Identify content gaps and opportunities"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Identify coverage gaps
+                        Content gaps
                       </button>
                       <button
-                        onClick={() => { setInput("Review competitor sentiment trends"); setOpenPopover(null); }}
+                        onClick={() => { setInput("Suggest content topics to improve visibility"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Review sentiment trends
+                        Content strategy
                       </button>
                     </div>
                   </PopoverContent>
                 </Popover>
 
+                {/* Prompts & Alerts */}
                 <Popover open={openPopover === 'prompts'} onOpenChange={(open) => setOpenPopover(open ? 'prompts' : null)}>
                   <PopoverTrigger asChild>
                     <button className="p-3 rounded-lg border border-border hover:bg-accent text-left">
                       <div className="flex items-center gap-2">
-                        <Search className="h-4 w-4" />
-                        <div className="text-sm font-medium">Optimize Prompts</div>
+                        <Bell className="h-4 w-4" />
+                        <div className="text-sm font-medium">Prompts & Alerts</div>
                       </div>
                     </button>
                   </PopoverTrigger>
                   <PopoverContent className="w-80 p-0" align="start">
                     <div className="p-2">
-                      <p className="text-xs font-semibold text-muted-foreground px-3 py-2">Prompt Optimization</p>
+                      <p className="text-xs font-semibold text-muted-foreground px-3 py-2">Prompts & Alerts</p>
                       <button
-                        onClick={() => { setInput("Suggest new prompts to track for my domain"); setOpenPopover(null); }}
+                        onClick={() => { setInput("Show my prompt groups and their performance"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Suggest new prompts
+                        Prompt groups
                       </button>
                       <button
-                        onClick={() => { setInput("Optimize existing prompts for better coverage"); setOpenPopover(null); }}
+                        onClick={() => { setInput("Suggest new prompts to track"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Optimize existing prompts
+                        Suggest prompts
                       </button>
                       <button
-                        onClick={() => { setInput("Group prompts by topic clusters"); setOpenPopover(null); }}
+                        onClick={() => { setInput("What active alerts do I have?"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Group by topics
+                        Active alerts
                       </button>
                       <button
-                        onClick={() => { setInput("Identify underperforming prompt categories"); setOpenPopover(null); }}
+                        onClick={() => { setInput("Any misinformation alerts for my domain?"); setOpenPopover(null); }}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors"
                       >
-                        Identify underperforming prompts
+                        Misinformation alerts
                       </button>
                     </div>
                   </PopoverContent>
@@ -303,27 +389,9 @@ export const Chat = () => {
                         <Sparkles className="h-4 w-4 text-white" />
                       </div>
                     ) : (
-                      <>
-                        {getDomainFavicon() ? (
-                          <img
-                            src={getDomainFavicon()!}
-                            alt="Domain favicon"
-                            className="w-9 h-9 rounded-full object-cover"
-                            onError={(e) => {
-                              // Fallback to initials on error
-                              e.currentTarget.style.display = 'none';
-                              const parent = e.currentTarget.parentElement;
-                              if (parent) {
-                                parent.innerHTML = `<div class="w-9 h-9 rounded-full bg-muted-foreground/70 flex items-center justify-center"><span class="text-sm font-semibold text-white">${getUserInitials()}</span></div>`;
-                              }
-                            }}
-                          />
-                        ) : (
-                          <div className="w-9 h-9 rounded-full bg-muted-foreground/70 flex items-center justify-center">
-                            <span className="text-sm font-semibold text-white">{getUserInitials()}</span>
-                          </div>
-                        )}
-                      </>
+                      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
+                        <span className="text-sm font-semibold text-primary">{getUserInitials()}</span>
+                      </div>
                     )}
                   </div>
                   <div className="flex-1 min-w-0 py-1">

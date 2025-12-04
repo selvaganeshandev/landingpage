@@ -1300,6 +1300,34 @@ export const apiClient = {
     }).toString()}`;
     return apiRequest(`/misinformation/citations/by-source/${queryParams}`);
   },
+
+  // ===== Agentic ChatBot =====
+  sendChatMessage: (data: {
+    message: string;
+    domain_id: number;
+    conversation_id?: number;
+  }) => apiRequest('/chat/send_message/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  getChatConversations: (params?: { domain_id?: number }) => {
+    const queryParams = params ? `?${new URLSearchParams(
+      Object.entries(params).reduce((acc, [k, v]) => {
+        if (v !== undefined) acc[k] = String(v);
+        return acc;
+      }, {} as Record<string, string>)
+    ).toString()}` : '';
+    return apiRequest(`/chat/conversations/${queryParams}`);
+  },
+
+  getChatConversationDetail: (conversationId: number) =>
+    apiRequest(`/chat/${conversationId}/conversation_detail/`),
+
+  deleteChatConversation: (conversationId: number) =>
+    apiRequest(`/chat/${conversationId}/delete_conversation/`, {
+      method: 'DELETE',
+    }),
 };
 
 // Also export as 'api' for flexibility
