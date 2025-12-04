@@ -30,19 +30,26 @@ Django 5.2 backend for the LLM Monitor application with PostgreSQL database and 
 
 5. **Run migrations:**
    ```bash
-   python manage.py makemigrations
-   python manage.py migrate
+   python3 manage.py makemigrations
+   python3 manage.py migrate
    ```
 
 6. **Create superuser (optional):**
    ```bash
-   python manage.py createsuperuser
+   python3 manage.py createsuperuser
    ```
 
 7. **Run development server:**
    ```bash
-   python manage.py runserver
+   python3 manage.py runserver
    ```
+
+## Important Notes
+
+**Always use `python3` instead of `python`:**
+- All Django management commands should use `python3`
+- This ensures compatibility with Python 3.x
+- Example: `python3 manage.py shell` instead of `python manage.py shell`
 
 ## API Endpoints
 
