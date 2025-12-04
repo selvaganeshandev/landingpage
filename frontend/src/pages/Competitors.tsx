@@ -311,9 +311,20 @@ const Competitors = () => {
   const promptCards = useMemo(() => {
     if (!promptRows.length) return [];
 
+    // Map filter values to actual platform names in database
+    const platformMapping: Record<string, string> = {
+      'chatgpt': 'ChatGPT',
+      'gemini': 'Google Gemini',
+      'perplexity': 'Perplexity',
+      'claude': 'Claude'
+    };
+
     // Filter by platform if a specific LLM is selected
     const filteredRows = promptsLLMFilter !== 'all'
-      ? promptRows.filter(row => row.platform.toLowerCase() === promptsLLMFilter.toLowerCase())
+      ? promptRows.filter(row => {
+          const expectedPlatform = platformMapping[promptsLLMFilter.toLowerCase()];
+          return row.platform === expectedPlatform || row.platform.toLowerCase() === promptsLLMFilter.toLowerCase();
+        })
       : promptRows;
 
     if (!filteredRows.length) {
