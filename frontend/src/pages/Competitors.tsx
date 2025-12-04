@@ -2104,7 +2104,7 @@ const Competitors = () => {
                             <Button
                               variant="default"
                               size="sm"
-                              className="gradient-primary text-xs px-3 py-1 h-7"
+                              className="gradient-primary shadow-md shadow-primary/20 text-xs px-3 py-1 h-7"
                               onClick={() => handleGenerateForGap(gap)}
                             >
                               <Sparkles className="h-3 w-3 mr-1" />
