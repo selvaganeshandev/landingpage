@@ -2102,13 +2102,12 @@ const Competitors = () => {
                               ))}
                             </div>
                             <Button
-                              variant="default"
                               size="sm"
-                              className="gradient-primary shadow-md shadow-primary/20 text-xs px-3 py-1 h-7"
+                              variant="default"
                               onClick={() => handleGenerateForGap(gap)}
                             >
                               <Sparkles className="h-3 w-3 mr-1" />
-                              Generate
+                              Generate Content
                             </Button>
                           </div>
                         </div>
