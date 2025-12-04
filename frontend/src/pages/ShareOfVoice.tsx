@@ -96,7 +96,25 @@ const ShareOfVoice = () => {
           apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days }),
           apiClient.getCompetitorGapsEngine({ domain_id: domainId })
         ]);
-        setLatest(latestResp as any);
+
+        // Transform latestResp array into expected format with players
+        const transformedLatest = Array.isArray(latestResp) && latestResp.length > 0
+          ? {
+              domain_id: Number(domainId),
+              timestamp: latestResp[0].timestamp,
+              platform: latestResp[0].platform || 'Overall',
+              players: latestResp.map((item: any) => ({
+                competitor: item.competitor ? { id: item.competitor, name: item.competitor_name || item.brand_name } : null,
+                share_percentage: item.share_percentage,
+                mention_count: item.mention_count,
+                market_position: item.market_position,
+                brand_name: item.brand_name,
+                is_you: item.is_you || false
+              }))
+            }
+          : null;
+
+        setLatest(transformedLatest as any);
         setRows(byDomain as any);
         setOpportunities(Array.isArray(gaps) ? gaps : gaps?.results || []);
       } catch (e:any) {
@@ -120,12 +138,16 @@ const ShareOfVoice = () => {
     void load();
   }, [domainId, days]);
 
-  const ownBrandName = useMemo(() => (latest?.players?.find(p => !p.competitor)?.competitor?.name) || 'Your Brand', [latest]);
+  const ownBrandName = useMemo(() => {
+    if (!latest?.players) return 'Your Brand';
+    const yourBrand = latest.players.find(p => p.is_you || !p.competitor);
+    return yourBrand?.brand_name || 'Your Brand';
+  }, [latest]);
 
   const overallShare = useMemo(() => {
     if (!latest || !latest.players || !Array.isArray(latest.players)) return [] as any[];
     const items = latest.players.map((p:any) => ({
-      brand: p.competitor?.name || ownBrandName,
+      brand: p.brand_name || p.competitor?.name || ownBrandName,
       share: Number(p.share_percentage),
       mentions: Number(p.mention_count) || 0,
       change: 0,
