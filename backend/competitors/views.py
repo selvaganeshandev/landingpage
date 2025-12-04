@@ -987,7 +987,8 @@ def answer_gap_analysis(request):
         your_mentioned_prompts = PromptAnalytics.objects.filter(your_prompts_filter).values_list('prompt_id', flat=True).distinct()
 
         # Get competitor mentioned prompts
-        comp_filter = Q(competitor__domain_id=domain_id, is_mentioned=True, position__lte=10)
+        # Include both: records with position <= 10 OR position is NULL (not yet set)
+        comp_filter = Q(competitor__domain_id=domain_id, is_mentioned=True) & (Q(position__lte=10) | Q(position__isnull=True))
         if competitor_id:
             comp_filter &= Q(competitor_id=competitor_id)
         # NEW: Filter by platform if specified
