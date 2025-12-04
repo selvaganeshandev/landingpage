@@ -23,7 +23,8 @@ import {
   Settings,
   Loader2,
   Table,
-  Presentation
+  Presentation,
+  Trash2
 } from "lucide-react";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
@@ -640,33 +641,11 @@ const Reports = () => {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <Button
                       size="sm"
-                      variant="outline"
-                      onClick={() => handlePreview(report)}
-                    >
-                      <Eye className="h-3 w-3 mr-1" />
-                      View
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleRunNow(report)}
-                      disabled={report.status === 'paused'}
-                    >
-                      Run Now
-                    </Button>
-                    <Button
-                      size="sm"
                       variant="ghost"
-                      onClick={() => handleEdit(report)}
+                      onClick={() => handleDelete(report)}
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
                     >
-                      Edit
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleToggleStatus(report)}
-                    >
-                      {report.status === 'active' ? 'Pause' : 'Resume'}
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
