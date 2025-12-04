@@ -1055,11 +1055,15 @@ const Competitors = () => {
           ...(platformParam && { platform: platformParam })
         }, { signal: controller.signal });
 
+        console.log(`[DEBUG Prompts] Platform filter: ${promptsLLMFilter}, API param: ${platformParam || 'none'}`);
+        console.log(`[DEBUG Prompts] API response:`, compPromptAnalytics);
+
         if (didAbort || controller.signal.aborted) return;
 
         // Handle new grouped response structure
         // Each result is a prompt with nested analytics array
         const promptGroups = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
+        console.log(`[DEBUG Prompts] Prompt groups count: ${promptGroups.length}`);
         const paginationInfo = !Array.isArray(compPromptAnalytics) ? compPromptAnalytics : null;
 
         // Store pagination info
@@ -1075,9 +1079,13 @@ const Competitors = () => {
         // Transform to flat array of rows for existing UI logic
         const normalizedPromptRows: any[] = [];
 
+        console.log(`[DEBUG Prompts] First prompt group sample:`, promptGroups[0]);
+
         promptGroups.forEach((promptGroup: any) => {
           const promptId = promptGroup.prompt_id;
           const promptText = promptGroup.prompt_text;
+
+          console.log(`[DEBUG Prompts] Processing prompt "${promptText}" with ${promptGroup.analytics?.length || 0} analytics entries`);
 
           // Each analytics entry in the group becomes a separate row
           promptGroup.analytics.forEach((analytics: any) => {
@@ -1110,6 +1118,9 @@ const Competitors = () => {
             });
           });
         });
+
+        console.log(`[DEBUG Prompts] Total normalized rows: ${normalizedPromptRows.length}`);
+        console.log(`[DEBUG Prompts] Sample normalized row:`, normalizedPromptRows[0]);
 
         setPromptRows(normalizedPromptRows);
       } catch (e: any) {

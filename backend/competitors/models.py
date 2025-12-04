@@ -144,7 +144,7 @@ class CompetitorPromptAnalytics(models.Model):
     
     class Meta:
         db_table = 'competitor_prompt_analytics'
-        unique_together = [['competitor', 'prompt']]
+        unique_together = [['competitor', 'prompt', 'platform']]  # Allow multiple records per platform
         indexes = [
             models.Index(fields=['competitor', 'track_status']),
             models.Index(fields=['prompt', 'track_status']),
