@@ -2068,16 +2068,16 @@ const Competitors = () => {
                   </div>
                 </div>
 
-                <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {answerGapData && answerGapData.length > 0 ? (
                     answerGapData.map((gap: any) => (
-                      <Card key={gap.id} className="p-5 transition-all duration-300 border border-border hover:border-primary">
+                      <Card key={gap.id} className="p-5 transition-all duration-300 border border-border hover:border-primary hover:shadow-lg">
                         <div className="space-y-4">
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-2">
                                 <Search className="h-4 w-4 text-muted-foreground" />
-                                <h4 className="font-medium">{gap.query}</h4>
+                                <h4 className="font-medium text-sm leading-snug">{gap.query}</h4>
                               </div>
                               <div className="flex items-center gap-3 text-sm text-muted-foreground">
                                 <span>{gap.competitor} has {gap.mentions} mentions</span>
@@ -2085,11 +2085,11 @@ const Competitors = () => {
                                 <span>You have {gap.yourMentions} mentions</span>
                               </div>
                             </div>
-                            <Badge 
+                            <Badge
                               variant={gap.opportunity === 'high' ? 'destructive' : 'secondary'}
-                              className="ml-4"
+                              className="ml-4 shrink-0"
                             >
-                              {gap.opportunity} opportunity
+                              {gap.opportunity}
                             </Badge>
                           </div>
 
@@ -2103,9 +2103,9 @@ const Competitors = () => {
                           </div>
 
                           <div className="pt-3 border-t">
-                            <Button 
-                              variant="default" 
-                              size="sm" 
+                            <Button
+                              variant="default"
+                              size="sm"
                               className="w-full gradient-primary"
                               onClick={() => handleGenerateForGap(gap)}
                             >
@@ -2117,7 +2117,7 @@ const Competitors = () => {
                       </Card>
                     ))
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-16 space-y-4">
+                    <div className="col-span-2 flex flex-col items-center justify-center py-16 space-y-4">
                       <p className="text-sm text-muted-foreground">No answer gaps identified yet.</p>
                       <p className="text-xs text-muted-foreground">Start analyzing competitors to identify gaps.</p>
                     </div>
