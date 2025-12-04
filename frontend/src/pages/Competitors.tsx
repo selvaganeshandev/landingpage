@@ -2092,24 +2092,23 @@ const Competitors = () => {
                             </Badge>
                           </div>
 
-                          <div className="flex flex-wrap gap-2">
-                            <span className="text-xs text-muted-foreground">Platforms:</span>
-                            {gap.platforms && gap.platforms.map((platform: string) => (
-                              <Badge key={platform} variant="outline" className="text-xs">
-                                {platform}
-                              </Badge>
-                            ))}
-                          </div>
-
-                          <div className="pt-3 border-t">
+                          <div className="flex items-end justify-between pt-3 border-t">
+                            <div className="flex flex-wrap gap-2 items-center">
+                              <span className="text-xs text-muted-foreground">Platforms:</span>
+                              {gap.platforms && gap.platforms.map((platform: string) => (
+                                <Badge key={platform} variant="outline" className="text-xs">
+                                  {platform}
+                                </Badge>
+                              ))}
+                            </div>
                             <Button
                               variant="default"
                               size="sm"
-                              className="w-full gradient-primary"
+                              className="gradient-primary text-xs px-3 py-1 h-7"
                               onClick={() => handleGenerateForGap(gap)}
                             >
                               <Sparkles className="h-3 w-3 mr-1" />
-                              Generate Content
+                              Generate
                             </Button>
                           </div>
                         </div>
