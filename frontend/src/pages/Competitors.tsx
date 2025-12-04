@@ -139,7 +139,7 @@ const Competitors = () => {
   const navigate = useNavigate();
   const [timePeriod, setTimePeriod] = useState("7");
   const [selectedTab, setSelectedTab] = useState("overview");
-  const [selectedLLM, setSelectedLLM] = useState("all");
+  const [promptsLLMFilter, setPromptsLLMFilter] = useState("all");
   const { toast } = useToast();
   const { navigateToContentGeneration } = useContentGeneration();
   const [addCompetitorDialogOpen, setAddCompetitorDialogOpen] = useState(false);
@@ -311,7 +311,7 @@ const Competitors = () => {
   const promptCards = useMemo(() => {
     if (!promptRows.length) return [];
 
-    // Use all rows without filtering by competitor, platform, or time
+    // No need for client-side filtering - backend already filters by platform
     const filteredRows = promptRows;
 
     if (!filteredRows.length) {
@@ -622,13 +622,12 @@ const Competitors = () => {
       try {
         // Load main competitor data first (in parallel)
         const batchStartTime = performance.now();
-        const platformParam = selectedLLM !== 'all' ? selectedLLM : undefined;
         const [list, latest, byDomain, snapshotHistory, heatmapResponse] = await Promise.all([
-          apiClient.getEngineCompetitors({ domain_id: domainId, platform: platformParam }, { signal: controller.signal }),
+          apiClient.getEngineCompetitors({ domain_id: domainId }, { signal: controller.signal }),
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }, { signal: controller.signal }),
           apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days: Number(timePeriod) }, { signal: controller.signal }),
-          apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
-          apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod), platform: platformParam }, { signal: controller.signal }),
+          apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: Number(timePeriod) }, { signal: controller.signal }),
+          apiClient.getCompetitorHeatmap({ domain_id: domainId, days: Number(timePeriod) }, { signal: controller.signal }),
         ] as any);
 
         // Prompts are now loaded separately by the pagination useEffect
@@ -639,16 +638,14 @@ const Competitors = () => {
 
         const [strengthAnalysis, insights, gaps] = await Promise.all([
           apiClient.getCompetitiveStrengthAnalysis({
-            domain_id: domainId,
-            platform: selectedLLM !== 'all' ? selectedLLM : undefined
+            domain_id: domainId
           }, { signal: controller.signal }).catch((e: any) => {
             console.error('❌ Failed to load competitive strength analysis:', e?.message);
             return undefined;
           }),
 
           apiClient.getCompetitiveInsights({
-            domain_id: domainId,
-            platform: selectedLLM !== 'all' ? selectedLLM : undefined
+            domain_id: domainId
           }, { signal: controller.signal }).catch((e: any) => {
             console.error('❌ Failed to load competitive insights:', e?.message);
             return undefined;
@@ -656,8 +653,7 @@ const Competitors = () => {
 
           apiClient.getAnswerGapAnalysis({
             domain_id: domainId,
-            competitor_id: promptCompetitorFilter !== 'all' ? promptCompetitorFilter : undefined,
-            platform: selectedLLM !== 'all' ? selectedLLM : undefined
+            competitor_id: promptCompetitorFilter !== 'all' ? promptCompetitorFilter : undefined
           }, { signal: controller.signal }).catch((e: any) => {
             console.error('❌ Failed to load answer gap analysis:', e?.message);
             return undefined;
@@ -1029,7 +1025,7 @@ const Competitors = () => {
       didAbort = true;
       controller.abort();
     };
-  }, [domainId, timePeriod, selectedLLM, promptCompetitorFilter, domainProcessingStatus, toast, isAnalysisInProgress]);
+  }, [domainId, timePeriod, promptCompetitorFilter, domainProcessingStatus, toast, isAnalysisInProgress]);
 
   // Separate useEffect for prompt pagination - only reload prompts when page changes
   useEffect(() => {
@@ -1040,19 +1036,34 @@ const Competitors = () => {
       if (!domainId || !hasLoadedData) return; // Only run if initial data is loaded
 
       try {
-        const platformParam = selectedLLM !== 'all' ? selectedLLM : undefined;
+        // Map filter values to actual platform names for API
+        const platformMapping: Record<string, string> = {
+          'chatgpt': 'ChatGPT',
+          'gemini': 'Google Gemini',
+          'perplexity': 'Perplexity',
+          'claude': 'Claude'
+        };
+
+        const platformParam = promptsLLMFilter !== 'all'
+          ? platformMapping[promptsLLMFilter.toLowerCase()] || promptsLLMFilter
+          : undefined;
+
         const compPromptAnalytics = await apiClient.getCompetitorPromptAnalyticsEngine({
           domain_id: domainId,
           page_size: '20',
           page: promptsCurrentPage,
-          platform: platformParam
+          ...(platformParam && { platform: platformParam })
         }, { signal: controller.signal });
+
+        console.log(`[DEBUG Prompts] Platform filter: ${promptsLLMFilter}, API param: ${platformParam || 'none'}`);
+        console.log(`[DEBUG Prompts] API response:`, compPromptAnalytics);
 
         if (didAbort || controller.signal.aborted) return;
 
         // Handle new grouped response structure
         // Each result is a prompt with nested analytics array
         const promptGroups = Array.isArray(compPromptAnalytics) ? compPromptAnalytics : compPromptAnalytics?.results || [];
+        console.log(`[DEBUG Prompts] Prompt groups count: ${promptGroups.length}`);
         const paginationInfo = !Array.isArray(compPromptAnalytics) ? compPromptAnalytics : null;
 
         // Store pagination info
@@ -1068,9 +1079,13 @@ const Competitors = () => {
         // Transform to flat array of rows for existing UI logic
         const normalizedPromptRows: any[] = [];
 
+        console.log(`[DEBUG Prompts] First prompt group sample:`, promptGroups[0]);
+
         promptGroups.forEach((promptGroup: any) => {
           const promptId = promptGroup.prompt_id;
           const promptText = promptGroup.prompt_text;
+
+          console.log(`[DEBUG Prompts] Processing prompt "${promptText}" with ${promptGroup.analytics?.length || 0} analytics entries`);
 
           // Each analytics entry in the group becomes a separate row
           promptGroup.analytics.forEach((analytics: any) => {
@@ -1104,6 +1119,9 @@ const Competitors = () => {
           });
         });
 
+        console.log(`[DEBUG Prompts] Total normalized rows: ${normalizedPromptRows.length}`);
+        console.log(`[DEBUG Prompts] Sample normalized row:`, normalizedPromptRows[0]);
+
         setPromptRows(normalizedPromptRows);
       } catch (e: any) {
         if (controller.signal.aborted || didAbort || e?.name === 'AbortError') {
@@ -1119,7 +1137,7 @@ const Competitors = () => {
       didAbort = true;
       controller.abort();
     };
-  }, [promptsCurrentPage, domainId, hasLoadedData, selectedLLM, competitors, selectedDomain]);
+  }, [promptsCurrentPage, domainId, hasLoadedData, competitors, selectedDomain, promptsLLMFilter]);
 
   const handleAddCompetitor = () => {
     setAddCompetitorDialogOpen(true);
@@ -1369,7 +1387,7 @@ const Competitors = () => {
 
   // Show processing state when competitors exist but have no data yet OR when analysis is in progress
   // Don't show processing state when filtering by specific platform (let tabs show their empty states)
-  if ((allCompetitorsHaveZeroData && selectedLLM === 'all') || isAnalysisInProgress) {
+  if (allCompetitorsHaveZeroData || isAnalysisInProgress) {
     console.log('📊 [COMPETITOR ANALYSIS] Progress card is now visible - showing processing status');
 
     // Use analysisProgress state for dynamic count
@@ -1492,17 +1510,6 @@ const Competitors = () => {
 
               <div className="flex items-center gap-3">
                 {/* <TimeFilter selected={timePeriod} onSelect={setTimePeriod} /> */}
-                <Select value={selectedLLM} onValueChange={setSelectedLLM}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="All LLMs" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All LLMs</SelectItem>
-                    <SelectItem value="chatgpt">ChatGPT</SelectItem>
-                    <SelectItem value="gemini">Gemini</SelectItem>
-                    <SelectItem value="perplexity">Perplexity</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </div>
           )}
@@ -1512,7 +1519,7 @@ const Competitors = () => {
 
             {/* Competitor Cards - Show top 5 competitors, 3 per row, exclude "You" */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {realCompetitors.length > 0 && (selectedLLM === 'all' || !realCompetitors.every(c => c.mentions === 0 && c.citations === 0)) ? (
+              {realCompetitors.length > 0 ? (
                 realCompetitors.slice(0, 5).map((competitor, idx) => (
                 <Card
                   key={competitor.id}
@@ -1595,27 +1602,6 @@ const Competitors = () => {
                 ))
               ) : (
                 <div className="col-span-full flex flex-col items-center justify-center py-32 space-y-4">
-                  {selectedLLM !== 'all' && realCompetitors.length > 0 ? (
-                    <>
-                      <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
-                        <Search className="h-10 w-10 text-muted-foreground" />
-                      </div>
-                      <h3 className="text-xl font-semibold text-foreground">
-                        No Data for {selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1)}
-                      </h3>
-                      <p className="text-sm text-muted-foreground max-w-md text-center">
-                        There is no competitor data available for the selected LLM platform. This could mean competitors haven't been analyzed on this platform yet, or no mentions were found.
-                      </p>
-                      <Button
-                        onClick={() => setSelectedLLM('all')}
-                        className="mt-4 gradient-primary"
-                        size="lg"
-                      >
-                        Clear Filter & View All LLMs
-                      </Button>
-                    </>
-                  ) : (
-                    <>
                   <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
                     <Target className="h-10 w-10 text-muted-foreground" />
                   </div>
@@ -1631,14 +1617,12 @@ const Competitors = () => {
                     <Plus className="h-4 w-4 mr-2" />
                     Add Your Competitor
                   </Button>
-                    </>
-                  )}
                 </div>
               )}
             </div>
 
-            {/* Show rest of content only if there are real competitors and data for the selected platform */}
-            {realCompetitors.length > 0 && (selectedLLM === 'all' || !realCompetitors.every(c => c.mentions === 0 && c.citations === 0)) && (
+            {/* Show rest of content only if there are real competitors */}
+            {realCompetitors.length > 0 && (
               <>
             {/* Brand Visibility Over Time */}
             <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
@@ -1893,12 +1877,26 @@ const Competitors = () => {
                 <div className="flex items-center justify-between pb-4 border-b border-border">
                       <div>
                         <h3 className="text-lg font-semibold font-inter">Prompt Performance Analysis</h3>
-                        <p className="text-sm text-muted-foreground mt-1">See which prompts competitors dominate</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <p className="text-sm text-muted-foreground">See which prompts competitors dominate</p>
+                          <Badge variant="secondary" className="text-xs">
+                            <MessageSquare className="h-3 w-3 mr-1" />
+                            {promptCards.length} Prompts Tracked
+                          </Badge>
+                        </div>
                       </div>
-                      <Badge variant="secondary">
-                        <MessageSquare className="h-3 w-3 mr-1" />
-                        {promptCards.length} Prompts Tracked
-                      </Badge>
+                      <Select value={promptsLLMFilter} onValueChange={setPromptsLLMFilter}>
+                        <SelectTrigger className="w-[180px]">
+                          <SelectValue placeholder="All LLMs" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All LLMs</SelectItem>
+                          <SelectItem value="chatgpt">ChatGPT</SelectItem>
+                          <SelectItem value="gemini">Gemini</SelectItem>
+                          <SelectItem value="perplexity">Perplexity</SelectItem>
+                          <SelectItem value="claude">Claude</SelectItem>
+                        </SelectContent>
+                      </Select>
                 </div>
 
                 <div className="space-y-4">
@@ -2040,33 +2038,10 @@ const Competitors = () => {
                     </>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-16 space-y-4">
-                      {selectedLLM !== 'all' ? (
-                        <>
-                          <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
-                            <Search className="h-10 w-10 text-muted-foreground" />
-                          </div>
-                          <h3 className="text-xl font-semibold text-foreground">
-                            No Data for {selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1)}
-                          </h3>
-                          <p className="text-sm text-muted-foreground max-w-md text-center">
-                            There is no prompt data available for the selected LLM platform. This could mean prompts haven't been analyzed on this platform yet, or no mentions were found.
-                          </p>
-                          <Button
-                            onClick={() => setSelectedLLM('all')}
-                            className="mt-4 gradient-primary"
-                            size="lg"
-                          >
-                            Clear Filter & View All LLMs
-                          </Button>
-                        </>
-                      ) : (
-                        <>
                       <p className="text-sm text-muted-foreground text-center">
-                            No prompt performance data available.
+                        No prompt performance data available.
                       </p>
-                          <p className="text-xs text-muted-foreground">Start analyzing prompts to see data here.</p>
-                        </>
-                      )}
+                      <p className="text-xs text-muted-foreground">Start analyzing prompts to see data here.</p>
                     </div>
                   )}
                 </div>
@@ -2081,26 +2056,27 @@ const Competitors = () => {
                 <div className="flex items-center justify-between pb-4 border-b border-border">
                   <div>
                     <h3 className="text-lg font-semibold font-inter">Answer Gap Analysis</h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Queries where competitors appear but you don't
-                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className="text-sm text-muted-foreground">
+                        Queries where competitors appear but you don't
+                      </p>
+                      <Badge variant="destructive" className="text-xs">
+                        <AlertCircle className="h-3 w-3 mr-1" />
+                        {answerGapData && answerGapData.length > 0 ? answerGapData.length : 0} Gaps Identified
+                      </Badge>
+                    </div>
                   </div>
-                  <Badge variant="destructive">
-                    <AlertCircle className="h-3 w-3 mr-1" />
-                    {answerGapData && answerGapData.length > 0 ? answerGapData.length : 0} Gaps Identified
-                  </Badge>
                 </div>
 
-                <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {answerGapData && answerGapData.length > 0 ? (
                     answerGapData.map((gap: any) => (
-                      <Card key={gap.id} className="p-5 transition-all duration-300 border border-border hover:border-primary">
+                      <Card key={gap.id} className="p-5 transition-all duration-300 border border-border hover:border-primary hover:shadow-lg">
                         <div className="space-y-4">
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Search className="h-4 w-4 text-muted-foreground" />
-                                <h4 className="font-medium">{gap.query}</h4>
+                              <div className="mb-2">
+                                <h4 className="font-bold text-sm leading-snug">{gap.query}</h4>
                               </div>
                               <div className="flex items-center gap-3 text-sm text-muted-foreground">
                                 <span>{gap.competitor} has {gap.mentions} mentions</span>
@@ -2108,28 +2084,26 @@ const Competitors = () => {
                                 <span>You have {gap.yourMentions} mentions</span>
                               </div>
                             </div>
-                            <Badge 
+                            <Badge
                               variant={gap.opportunity === 'high' ? 'destructive' : 'secondary'}
-                              className="ml-4"
+                              className="ml-4 shrink-0"
                             >
-                              {gap.opportunity} opportunity
+                              {gap.opportunity}
                             </Badge>
                           </div>
 
-                          <div className="flex flex-wrap gap-2">
-                            <span className="text-xs text-muted-foreground">Platforms:</span>
-                            {gap.platforms && gap.platforms.map((platform: string) => (
-                              <Badge key={platform} variant="outline" className="text-xs">
-                                {platform}
-                              </Badge>
-                            ))}
-                          </div>
-
-                          <div className="pt-3 border-t">
-                            <Button 
-                              variant="default" 
-                              size="sm" 
-                              className="w-full gradient-primary"
+                          <div className="flex items-end justify-between pt-3 border-t">
+                            <div className="flex flex-wrap gap-2 items-center">
+                              <span className="text-xs text-muted-foreground">Platforms:</span>
+                              {gap.platforms && gap.platforms.map((platform: string) => (
+                                <Badge key={platform} variant="outline" className="text-xs">
+                                  {platform}
+                                </Badge>
+                              ))}
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="default"
                               onClick={() => handleGenerateForGap(gap)}
                             >
                               <Sparkles className="h-3 w-3 mr-1" />
@@ -2140,32 +2114,9 @@ const Competitors = () => {
                       </Card>
                     ))
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-16 space-y-4">
-                      {selectedLLM !== 'all' ? (
-                        <>
-                          <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-2">
-                            <Search className="h-10 w-10 text-muted-foreground" />
-                          </div>
-                          <h3 className="text-xl font-semibold text-foreground">
-                            No Data for {selectedLLM.charAt(0).toUpperCase() + selectedLLM.slice(1)}
-                          </h3>
-                          <p className="text-sm text-muted-foreground max-w-md text-center">
-                            There are no answer gaps identified for the selected LLM platform. This could mean no gaps exist on this platform, or the analysis hasn't been completed yet.
-                          </p>
-                          <Button
-                            onClick={() => setSelectedLLM('all')}
-                            className="mt-4 gradient-primary"
-                            size="lg"
-                          >
-                            Clear Filter & View All LLMs
-                          </Button>
-                        </>
-                      ) : (
-                        <>
+                    <div className="col-span-2 flex flex-col items-center justify-center py-16 space-y-4">
                       <p className="text-sm text-muted-foreground">No answer gaps identified yet.</p>
-                          <p className="text-xs text-muted-foreground">Start analyzing competitors to identify gaps.</p>
-                        </>
-                      )}
+                      <p className="text-xs text-muted-foreground">Start analyzing competitors to identify gaps.</p>
                     </div>
                   )}
                 </div>

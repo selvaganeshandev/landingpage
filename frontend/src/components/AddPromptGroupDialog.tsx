@@ -83,11 +83,11 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
           const capitalized = words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
           setGroupId(capitalized);
         }
-        
+
         // Add generated variants (avoid duplicates)
         const newVariants = response.variants.filter(v => !variants.includes(v));
         setVariants([...variants, ...newVariants]);
-        
+
         toast({
           title: "Suggestions Generated",
           description: `Generated ${response.variants.length} prompt variants.`,

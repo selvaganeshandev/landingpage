@@ -557,23 +557,81 @@ class CompetitorPromptViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'])
     def answer_gaps(self, request):
-        """Get prompts where competitors dominate (answer gap analysis)."""
+        """
+        Get prompts where competitors are mentioned but your brand is not (answer gap analysis).
+        Uses CompetitorPromptAnalytics to identify gaps at the prompt level.
+        """
         domain_id = request.query_params.get('domain_id')
         if not domain_id:
             return Response(
                 {'error': 'domain_id is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Get prompts where competitor mentions are high and your mentions are low
-        queryset = self.get_queryset().filter(
-            competitor__domain_id=domain_id,
-            mentions__gte=10,  # At least 10 competitor mentions
-            your_mentions__lt=5  # Less than 5 of your mentions
-        ).order_by('-mentions')
-        
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+
+        from prompts.models import Prompt, PromptAnalytics
+        from django.db.models import Count, Q
+
+        # Get all unique prompts for this domain that have competitor mentions
+        prompts_with_competitor_mentions = set(
+            CompetitorPromptAnalytics.objects.filter(
+                competitor__domain_id=domain_id,
+                is_mentioned=True
+            ).values_list('prompt_id', flat=True)
+        )
+
+        # For each unique prompt, check if YOUR brand is mentioned
+        gap_data = []
+        for prompt_id in prompts_with_competitor_mentions:
+            # Check if your brand is mentioned in this prompt
+            your_mention = PromptAnalytics.objects.filter(
+                prompt_id=prompt_id,
+                is_mention=True
+            ).exists()
+
+            if not your_mention:
+                # This is a gap! Competitors mentioned but you're not
+                try:
+                    prompt = Prompt.objects.select_related('group__domain').get(id=prompt_id)
+                except Prompt.DoesNotExist:
+                    continue
+
+                # Get all competitors mentioned in this prompt (aggregate by competitor, not by platform)
+                competitor_analytics = CompetitorPromptAnalytics.objects.filter(
+                    prompt_id=prompt_id,
+                    is_mentioned=True
+                ).select_related('competitor')
+
+                # Get unique competitors and their data
+                competitor_map = {}
+                platforms_set = set()
+
+                for ca in competitor_analytics:
+                    comp_name = ca.competitor.name
+                    platforms_set.add(ca.platform)
+
+                    if comp_name not in competitor_map:
+                        competitor_map[comp_name] = {
+                            'name': comp_name,
+                            'mentions': ca.mention_count,
+                            'position': ca.position
+                        }
+
+                competitors = list(competitor_map.values())
+                platforms = list(platforms_set)
+
+                gap_data.append({
+                    'prompt_id': prompt.id,
+                    'prompt_text': prompt.prompt,
+                    'competitors': competitors,
+                    'platforms': platforms,
+                    'total_competitor_mentions': len(competitors),  # Unique competitors
+                    'your_mentions': 0  # Gap means 0 mentions
+                })
+
+        # Sort by total competitor mentions (highest first)
+        gap_data.sort(key=lambda x: x['total_competitor_mentions'], reverse=True)
+
+        return Response(gap_data)
 
 
 class CompetitorMetricSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
@@ -929,7 +987,8 @@ def answer_gap_analysis(request):
         your_mentioned_prompts = PromptAnalytics.objects.filter(your_prompts_filter).values_list('prompt_id', flat=True).distinct()
 
         # Get competitor mentioned prompts
-        comp_filter = Q(competitor__domain_id=domain_id, is_mentioned=True, position__lte=10)
+        # Include both: records with position <= 10 OR position is NULL (not yet set)
+        comp_filter = Q(competitor__domain_id=domain_id, is_mentioned=True) & (Q(position__lte=10) | Q(position__isnull=True))
         if competitor_id:
             comp_filter &= Q(competitor_id=competitor_id)
         # NEW: Filter by platform if specified

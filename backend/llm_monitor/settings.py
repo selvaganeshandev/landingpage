@@ -49,7 +49,7 @@ INSTALLED_APPS = [
     'keywords',
     'prompts',
     'alerts',
-    'competitors',
+    'competitors.apps.CompetitorsConfig',
     'topics',
     'analytics',
     'integrations.apps.IntegrationsConfig',
@@ -117,8 +117,13 @@ DATABASES = {
         'OPTIONS': {
             'gssencmode': 'disable',  # Disable GSSAPI to prevent macOS fork crashes
             'connect_timeout': 10,
+            'keepalives': 1,  # Enable TCP keepalives
+            'keepalives_idle': 30,  # Seconds before sending keepalive probes
+            'keepalives_interval': 10,  # Seconds between keepalive probes
+            'keepalives_count': 5,  # Number of keepalives before giving up
         },
-        'CONN_MAX_AGE': 600,  # Connection pooling to reduce reconnections
+        'CONN_MAX_AGE': 300,  # Reduced to 5 minutes to prevent stale connections
+        'CONN_HEALTH_CHECKS': True,  # Django 4.1+ health checks before using connection
     }
 }
 

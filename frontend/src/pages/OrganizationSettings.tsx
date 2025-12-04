@@ -108,6 +108,7 @@ export default function OrganizationSettings() {
   const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
   const [keywordSearchQuery, setKeywordSearchQuery] = useState("");
   const [useManualKeywords, setUseManualKeywords] = useState(false);
+  const [ignoreBrandKeywords, setIgnoreBrandKeywords] = useState(false);
 
   // Team members state
   const [teamMembers, setTeamMembers] = useState<Array<{
@@ -1122,6 +1123,7 @@ export default function OrganizationSettings() {
       setSelectedKeywordIndices(new Set());
       setKeywordSearchQuery("");
       setUseManualKeywords(false);
+      setIgnoreBrandKeywords(false);
       setWizardStep(1);
       setAddDomainDialogOpen(false);
 
@@ -1796,6 +1798,7 @@ export default function OrganizationSettings() {
           setKeywordSearchQuery("");
           setNewDomainKeywords([]);
           setKeywordInput("");
+          setIgnoreBrandKeywords(false);
         }
       }}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -1806,7 +1809,7 @@ export default function OrganizationSettings() {
             </DialogTitle>
             <DialogDescription>
               {wizardStep === 1 && "Enter domain details and select industry niches"}
-              {wizardStep === 2 && "Additional configuration (Coming soon)"}
+              {wizardStep === 2 && "Select keywords to track for your brand"}
             </DialogDescription>
           </DialogHeader>
 
@@ -1972,7 +1975,20 @@ export default function OrganizationSettings() {
                           </Badge>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center space-x-2 bg-muted/30 px-3 py-2 rounded-lg border border-border">
+                          <Checkbox
+                            id="ignoreBrandKeywords"
+                            checked={ignoreBrandKeywords}
+                            onCheckedChange={(checked) => setIgnoreBrandKeywords(checked as boolean)}
+                          />
+                          <label
+                            htmlFor="ignoreBrandKeywords"
+                            className="text-sm font-medium leading-none cursor-pointer"
+                          >
+                            Ignore Brand Keywords
+                          </label>
+                        </div>
                         <Button
                           variant="outline"
                           size="sm"
@@ -2029,12 +2045,20 @@ export default function OrganizationSettings() {
                         <TableBody>
                           {generatedKeywords
                             .map((keyword, index) => ({ keyword, index }))
-                            .filter(({ keyword }) =>
-                              keywordSearchQuery === "" ||
-                              keyword.keyword.toLowerCase().includes(keywordSearchQuery.toLowerCase()) ||
-                              (keyword.topic && keyword.topic.toLowerCase().includes(keywordSearchQuery.toLowerCase())) ||
-                              (keyword.entity && keyword.entity.toLowerCase().includes(keywordSearchQuery.toLowerCase()))
-                            )
+                            .filter(({ keyword }) => {
+                              // Search filter
+                              const matchesSearch = keywordSearchQuery === "" ||
+                                keyword.keyword.toLowerCase().includes(keywordSearchQuery.toLowerCase()) ||
+                                (keyword.topic && keyword.topic.toLowerCase().includes(keywordSearchQuery.toLowerCase())) ||
+                                (keyword.entity && keyword.entity.toLowerCase().includes(keywordSearchQuery.toLowerCase()));
+
+                              // Brand keyword filter
+                              const brandName = newBrandName || newDomain.replace(/^(https?:\/\/)?(www\.)?/, '').split('.')[0];
+                              const containsBrandName = ignoreBrandKeywords && brandName &&
+                                keyword.keyword.toLowerCase().includes(brandName.toLowerCase());
+
+                              return matchesSearch && !containsBrandName;
+                            })
                             .map(({ keyword, index }) => (
                             <TableRow
                               key={index}

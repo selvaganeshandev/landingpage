@@ -445,7 +445,7 @@ class PromptAnalyticsProcessor:
 
             # Create analytics record
             analytics = self._create_analytics_record(prompt, results)
-            
+
             # Update prompt status to completed
             prompt.track_status = 'COMP'
             prompt.tracked_at = timezone.now()
@@ -459,12 +459,12 @@ class PromptAnalyticsProcessor:
                 prompt_analytics = PromptAnalytics.objects.filter(
                     prompt=prompt
                 )
-                
+
                 # Create prompt metric snapshots for this prompt
                 if prompt_analytics.exists():
                     logger.info(f"Creating prompt metric snapshots for prompt {prompt_id}")
                     self._create_prompt_metric_snapshots(prompt_analytics, today, period_type='daily')
-                    
+
                     # Update sentiment analytics for the theme if applicable
                     if group.theme:
                         logger.info(f"Updating sentiment analytics for theme '{group.theme}' after processing prompt {prompt_id}")
@@ -472,6 +472,17 @@ class PromptAnalyticsProcessor:
                             self._update_sentiment_analytics_for_theme(group, prompt_analytics)
                         except Exception as sentiment_error:
                             logger.error(f"Error updating sentiment analytics for theme '{group.theme}': {str(sentiment_error)}", exc_info=True)
+
+                    # Sync competitor prompt analytics for competitors mentioned in this prompt
+                    logger.info(f"Syncing competitor prompt analytics for prompt {prompt_id}")
+                    try:
+                        from .competitor_sync import sync_competitor_prompt_analytics
+                        domain_id = prompt.group.domain_id
+                        sync_stats = sync_competitor_prompt_analytics(domain_id=domain_id, prompt_id=prompt_id)
+                        logger.info(f"Competitor sync completed for prompt {prompt_id}: {sync_stats}")
+                    except Exception as sync_error:
+                        logger.error(f"Error syncing competitor analytics for prompt {prompt_id}: {str(sync_error)}", exc_info=True)
+                        # Don't fail the entire process if sync fails
             except Exception as snapshot_error:
                 logger.error(f"Error creating snapshots for prompt {prompt_id}: {str(snapshot_error)}", exc_info=True)
                 # Don't fail the entire process if snapshots fail

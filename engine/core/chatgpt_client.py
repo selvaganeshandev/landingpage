@@ -380,11 +380,12 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
 
         system_prompt = (
             "You are a keyword extraction expert. Extract the main topic/subject from the user's question. "
-            "Return 2-4 words that capture the essence of the question. "
+            "Return a concise, descriptive title that captures the full essence of the question. "
             "Remove question words (what, how, why, etc.) and filler words (the, a, some, best, etc.). "
-            "Keep only the core subject matter. "
-            "Format: Title Case (e.g., 'Vaginal Dryness Relief', 'Employee Rewards Program'). "
-            "Return ONLY the extracted keywords, nothing else."
+            "Keep the complete core subject matter - don't truncate important context like company names or specific products. "
+            "Keep it brief but complete (maximum 6 words). "
+            "Format: Title Case (e.g., 'Vaginal Dryness Relief', 'Employee Rewards Program India', 'Indiabulls Securities Trading'). "
+            "Return ONLY the extracted title, nothing else."
         )
 
         try:

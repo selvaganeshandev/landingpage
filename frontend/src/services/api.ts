@@ -569,7 +569,7 @@ export const apiClient = {
     method: 'DELETE',
   }),
 
-  generatePromptVariants: (data: { main_prompt?: string; prompt?: string; group_id?: number }) => 
+  generatePromptVariants: (data: { main_prompt?: string; prompt?: string; group_id?: number }) =>
     apiRequest('/prompts/groups/generate-variants/', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -852,7 +852,7 @@ export const apiClient = {
 
   getShareOfVoiceLatestEngine: (params: { domain_id: string }, options?: RequestOptions) => {
     const queryParams = `?${new URLSearchParams({ domain_id: params.domain_id }).toString()}`;
-    return apiRequest(`/analytics/share-of-voice/${queryParams}`, options);
+    return apiRequest(`/analytics/share-of-voice/by_domain/${queryParams}`, options);
   },
 
   // ===== Engine (port 8001) helpers for competitor sentiment (optional for Sentiment page)
