@@ -225,14 +225,19 @@ class PDFReportGenerator:
             ))
 
             # Create a table with favicon and domain name
+            # Use proper column widths to prevent overlap
+            favicon_width = 40
+            spacing = 10
+            domain_width = self.usable_width - favicon_width - spacing
+
             header_data = [[favicon_img, domain_para]]
-            header_table = Table(header_data, colWidths=[44, self.usable_width - 54], rowHeights=[36])
+            header_table = Table(header_data, colWidths=[favicon_width, domain_width], rowHeights=[36])
             header_table.setStyle(TableStyle([
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('ALIGN', (0, 0), (0, 0), 'LEFT'),
                 ('ALIGN', (1, 0), (1, 0), 'LEFT'),
                 ('LEFTPADDING', (0, 0), (0, 0), 0),
-                ('LEFTPADDING', (1, 0), (1, 0), 8),
+                ('LEFTPADDING', (1, 0), (1, 0), spacing),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 0),
                 ('TOPPADDING', (0, 0), (-1, -1), 0),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
