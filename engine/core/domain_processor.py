@@ -899,11 +899,20 @@ class DomainProcessor:
         - Maximum max_words (default 4)
         - Join multiple words with spaces
         """
-        if not text or not text.strip():
+        if not text:
             return "General"
-        
+
+        # If text is already a well-formatted GPT title (2-6 words, Title Case), return EXACTLY as-is
+        words = text.split()
+        if 2 <= len(words) <= 6 and text and text[0].isupper():
+            # Check if it looks like a proper title (most words capitalized)
+            capitalized_count = sum(1 for word in words if word and word[0].isupper())
+            if capitalized_count >= len(words) * 0.6:  # At least 60% of words capitalized
+                return text  # Return completely untouched
+
+        # Only apply normalization if it's NOT a GPT title
         text_clean = text.strip()
-        
+
         # Remove question marks
         if text_clean.endswith('?'):
             text_clean = text_clean[:-1].strip()

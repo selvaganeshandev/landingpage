@@ -1806,7 +1806,7 @@ export default function OrganizationSettings() {
             </DialogTitle>
             <DialogDescription>
               {wizardStep === 1 && "Enter domain details and select industry niches"}
-              {wizardStep === 2 && "Additional configuration (Coming soon)"}
+              {wizardStep === 2 && "Select keywords to track for your brand"}
             </DialogDescription>
           </DialogHeader>
 
