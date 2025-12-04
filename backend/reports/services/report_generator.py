@@ -305,10 +305,10 @@ class ReportDataService:
         prev_mentions = prev_analytics.filter(is_mention=True).count()
         mentions_growth = ((total_mentions - prev_mentions) / prev_mentions * 100) if prev_mentions > 0 else 0
 
-        # Get topics with analytics
+        # Get ALL topics with analytics
         topics = Topic.objects.filter(domain=self.domain).order_by('-total_mentions')
         topic_performance = []
-        for topic in topics[:10]:
+        for topic in topics:  # Get ALL topics, not just top 10
             coverage_score = min(topic.total_mentions / 10, 100) if topic.total_mentions > 0 else 0
 
             topic_performance.append({
@@ -343,8 +343,8 @@ class ReportDataService:
                     'priority': 'Critical' if keyword.priority >= 8 else ('High' if keyword.priority >= 5 else 'Medium'),
                 })
 
-        # Sort gaps by opportunity score
-        content_gaps = sorted(content_gaps, key=lambda x: x['opportunity_score'], reverse=True)[:20]
+        # Sort gaps by opportunity score - Include ALL gaps
+        content_gaps = sorted(content_gaps, key=lambda x: x['opportunity_score'], reverse=True)
 
         # Get untapped keywords (keywords with zero mentions)
         untapped_keywords = []
@@ -387,6 +387,69 @@ class ReportDataService:
                 'url': comp.url,
             })
 
+        # Get Answer Gap data (prompts where competitors are mentioned but you're not)
+        from competitors.models import CompetitorPromptAnalytics
+        from django.db.models import Q
+
+        # Get all unique prompts for this domain that have competitor mentions
+        prompts_with_competitor_mentions = set(
+            CompetitorPromptAnalytics.objects.filter(
+                competitor__domain_id=self.domain.id,
+                is_mentioned=True,
+                prompt__created_at__gte=self.start_date,
+                prompt__created_at__lte=self.end_date
+            ).values_list('prompt_id', flat=True)
+        )
+
+        # For each unique prompt, check if YOUR brand is mentioned
+        answer_gaps = []
+        for prompt_id in prompts_with_competitor_mentions:
+            # Check if your brand is mentioned in this prompt
+            your_mention = analytics.filter(
+                prompt_id=prompt_id,
+                is_mention=True
+            ).exists()
+
+            if not your_mention:
+                # This is a gap! Competitors mentioned but you're not
+                try:
+                    prompt = Prompt.objects.select_related('group__domain').get(id=prompt_id)
+                except Prompt.DoesNotExist:
+                    continue
+
+                # Get unique competitors and their data
+                competitor_map = {}
+                platforms_set = set()
+
+                for ca in CompetitorPromptAnalytics.objects.filter(
+                    prompt_id=prompt_id,
+                    is_mentioned=True
+                ).select_related('competitor'):
+                    comp_name = ca.competitor.name
+                    platforms_set.add(ca.platform)
+
+                    if comp_name not in competitor_map:
+                        competitor_map[comp_name] = {
+                            'name': comp_name,
+                            'mentions': ca.mention_count,
+                            'position': ca.position
+                        }
+
+                competitors_list = list(competitor_map.values())
+                platforms = list(platforms_set)
+
+                answer_gaps.append({
+                    'prompt_id': prompt.id,
+                    'prompt_text': prompt.prompt,
+                    'competitors': competitors_list,
+                    'platforms': platforms,
+                    'total_competitor_mentions': len(competitors_list),
+                    'your_mentions': 0
+                })
+
+        # Sort by total competitor mentions (highest opportunity first)
+        answer_gaps.sort(key=lambda x: x['total_competitor_mentions'], reverse=True)
+
         return {
             'period': {
                 'start': self.start_date,
@@ -399,10 +462,12 @@ class ReportDataService:
                 'topics_covered': topics.count(),
                 'topics_growth': round(mentions_growth / 4, 0),  # Approximate topic growth
                 'content_gaps_found': len(content_gaps),
+                'answer_gaps_found': len(answer_gaps),
                 'engagement_rate': round(avg_engagement, 0),
                 'engagement_growth': round(mentions_growth / 2, 0),  # Approximate
             },
-            'content_gaps': content_gaps[:5],  # Top 5 critical gaps
+            'content_gaps': content_gaps,  # All critical gaps
+            'answer_gaps': answer_gaps,  # All answer gaps
             'topic_performance': topic_performance,
             'untapped_keywords': untapped_keywords[:10],
             'trending_keywords': trending_keywords[:5],
