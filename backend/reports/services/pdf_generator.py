@@ -997,7 +997,8 @@ class PDFReportGenerator:
                     trend_str
                 ])
 
-            topic_table = Table(topic_data, colWidths=[2*inch, 0.8*inch, 0.9*inch, 0.9*inch, 0.9*inch])
+            topic_col_widths = [self.usable_width * 0.35, self.usable_width * 0.15, self.usable_width * 0.18, self.usable_width * 0.16, self.usable_width * 0.16]
+            topic_table = Table(topic_data, colWidths=topic_col_widths)
             topic_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['primary']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
@@ -1008,8 +1009,11 @@ class PDFReportGenerator:
                 ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['primary_light']]),
                 ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
-                ('TOPPADDING', (0, 1), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ]))
             self.story.append(topic_table)
         else:
@@ -1030,7 +1034,8 @@ class PDFReportGenerator:
                     f"+{gap.get('estimated_traffic', 0)}/mo"
                 ])
 
-            gap_table = Table(gap_data, colWidths=[2*inch, 1*inch, 1.2*inch, 1.2*inch])
+            gap_col_widths = [self.usable_width * 0.35, self.usable_width * 0.20, self.usable_width * 0.23, self.usable_width * 0.22]
+            gap_table = Table(gap_data, colWidths=gap_col_widths)
             gap_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['danger']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
@@ -1041,8 +1046,11 @@ class PDFReportGenerator:
                 ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['danger_light'], self.COLORS['white']]),
                 ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
-                ('TOPPADDING', (0, 1), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ]))
             self.story.append(gap_table)
         else:
