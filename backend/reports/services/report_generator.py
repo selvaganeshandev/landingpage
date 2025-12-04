@@ -192,10 +192,11 @@ class ReportDataService:
 
         for competitor in competitors:
             # Get competitor analytics for the period
+            # Filter by prompt creation date, not tracked_at (which is sync time)
             comp_analytics = CompetitorPromptAnalytics.objects.filter(
                 competitor=competitor,
-                tracked_at__gte=self.start_date,
-                tracked_at__lte=self.end_date
+                prompt__created_at__gte=self.start_date,
+                prompt__created_at__lte=self.end_date
             )
 
             # Use stored competitor metrics (updated from processing)
