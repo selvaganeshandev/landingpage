@@ -31,4 +31,5 @@ urlpatterns = [
     path('reports/', include('reports.urls')),
     path('misinformation/', include('misinformation.urls')),
     path('content/', include('content.urls')),
+    path('', include('chat.urls')),
 ]

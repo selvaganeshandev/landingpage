@@ -32,6 +32,7 @@ import {
   Check,
   Eye,
   EyeOff,
+  Trash2,
 } from "lucide-react";
 import { DomainSelector } from "./DomainSelector";
 import { Separator } from "@/components/ui/separator";
@@ -97,20 +98,57 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
             const isActive = location.pathname === item.path;
 
             return (
-              <button
+              <div
                 key={idx}
-                type="button"
-                onClick={() => {
-                  navigate(item.path);
-                  onItemClick();
-                }}
                 className={cn(
-                  "recent-chat-item w-full flex items-center px-3 py-1.5 text-sm rounded-lg text-left",
+                  "recent-chat-item group w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg hover:bg-accent",
                   isActive && "text-primary"
                 )}
               >
-                <span className="truncate">{item.name}</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigate(item.path);
+                    onItemClick();
+                  }}
+                  className="flex-1 text-left truncate"
+                >
+                  <span className="truncate">{item.name}</span>
+                </button>
+                {item.conversationId && (
+                  <button
+                    type="button"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        const { api } = await import('@/services/api');
+                        await api.deleteChatConversation(item.conversationId);
+                        // Refresh recent conversations
+                        const { useNavigationStore } = await import('@/stores/navigationStore');
+                        const { updateRecentChats } = useNavigationStore.getState();
+                        const response = await api.getChatConversations();
+                        if (response.conversations) {
+                          const sorted = [...response.conversations].sort((a: any, b: any) =>
+                            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+                          );
+                          updateRecentChats(sorted.slice(0, 20));
+                        }
+                        // Navigate to new chat if deleting current conversation
+                        const urlParams = new URLSearchParams(window.location.search);
+                        if (urlParams.get('conversation') === String(item.conversationId)) {
+                          navigate('/chat');
+                        }
+                      } catch (error) {
+                        console.error('Failed to delete conversation:', error);
+                      }
+                    }}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-destructive/10 rounded"
+                    title="Delete conversation"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </button>
+                )}
+              </div>
             );
           })}
         </div>
