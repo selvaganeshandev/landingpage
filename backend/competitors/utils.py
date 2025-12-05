@@ -5,7 +5,7 @@ import logging
 import re
 from django.db import transaction
 from django.utils import timezone
-from django.db.models import Q, Sum
+from django.db.models import Q, Sum, Avg
 from competitors.models import Competitor, CompetitorPromptAnalytics
 from prompts.models import PromptAnalytics
 
@@ -265,13 +265,52 @@ def sync_competitor_prompt_analytics(domain_id=None, prompt_id=None, batch_size=
                 total=Sum('mention_count')
             )['total'] or 0
 
+            # Calculate average position across all platforms (where position is not null)
+            avg_position = comp_analytics.filter(position__isnull=False).aggregate(
+                avg=Avg('position')
+            )['avg'] or 0
+
+            # Calculate average sentiment across all platforms (where sentiment is not null)
+            avg_sentiment = comp_analytics.filter(sentiment_score__isnull=False).aggregate(
+                avg=Avg('sentiment_score')
+            )['avg'] or 0
+
+            # Calculate visibility score based on average position (100 - position * 20, capped at 0-100)
+            visibility = 100.0 - (float(avg_position) * 20.0) if avg_position > 0 else 0.0
+            visibility = max(0.0, min(100.0, visibility))
+
             # Update the competitor's aggregated fields
-            if competitor.total_citations != total_citations or competitor.total_mentions != total_mentions:
+            fields_to_update = []
+
+            if competitor.total_citations != total_citations:
                 competitor.total_citations = total_citations
+                fields_to_update.append('total_citations')
+
+            if competitor.total_mentions != total_mentions:
                 competitor.total_mentions = total_mentions
-                competitor.save(update_fields=['total_citations', 'total_mentions'])
+                fields_to_update.append('total_mentions')
+
+            if float(competitor.average_position) != round(float(avg_position), 2):
+                competitor.average_position = round(float(avg_position), 2)
+                fields_to_update.append('average_position')
+
+            if float(competitor.sentiment_score) != round(float(avg_sentiment), 2):
+                competitor.sentiment_score = round(float(avg_sentiment), 2)
+                fields_to_update.append('sentiment_score')
+
+            if float(competitor.visibility_score) != round(visibility, 2):
+                competitor.visibility_score = round(visibility, 2)
+                fields_to_update.append('visibility_score')
+
+            if fields_to_update:
+                competitor.save(update_fields=fields_to_update)
                 updated_competitors += 1
-                logger.debug(f"Updated {competitor.name}: {total_mentions} mentions, {total_citations} citations")
+                logger.debug(
+                    f"Updated {competitor.name}: "
+                    f"{total_mentions} mentions, {total_citations} citations, "
+                    f"avg position: {avg_position:.2f}, visibility: {visibility:.2f}, "
+                    f"sentiment: {avg_sentiment:.2f}"
+                )
 
         logger.info(f"Updated {updated_competitors} competitor aggregated fields")
 
