@@ -11,8 +11,7 @@ import {
   Award,
   ArrowUpRight,
   ArrowDownRight,
-  Crown,
-  Loader2
+  Crown
 } from "lucide-react";
 import { 
   BarChart,
@@ -39,6 +38,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
+import { PageLoader } from "@/components/PageLoader";
 
 type SovRow = { domain: number; competitor: number | null; platform?: string | null; share_percentage: number; mention_count: number; market_position?: number | null; timestamp: string };
 type LatestSov = { domain_id: number; timestamp: string; platform: string; players: Array<{ competitor: any | null; share_percentage: number; mention_count: number; market_position: number | null }>; };
@@ -203,50 +203,7 @@ const ShareOfVoice = () => {
 
   // Show loading state while data is being fetched
   if (isLoadingCompetitors || isLoadingData) {
-    return (
-      <div className="p-8 space-y-6 bg-background animate-fade-in">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight">Share of Voice</h1>
-            <p className="text-muted-foreground mt-2">
-              Competitive benchmarking and market position analysis
-            </p>
-          </div>
-          <Button
-            onClick={() => window.location.reload()}
-            variant="outline"
-            size="sm"
-          >
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            Refresh
-          </Button>
-        </div>
-
-        <Card className="p-6 border-dashed border-primary/40 bg-card/70">
-          <div className="flex flex-col md:flex-row gap-4 items-start">
-            <div className="p-3 rounded-full bg-primary/10 text-primary">
-              <Loader2 className="h-6 w-6 animate-spin" />
-            </div>
-            <div className="flex-1 space-y-2">
-              <h3 className="text-lg font-semibold">
-                Loading share of voice data...
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                Competitors are automatically discovered and analyzed. Share of voice data will appear here once available.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                This typically takes a few minutes. The page will update automatically, or you can click Refresh to check for updates.
-              </p>
-              <div className="flex flex-wrap gap-3 pt-2">
-                <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
-                  Refresh Status
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Card>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   // Show empty state when no data is available yet
