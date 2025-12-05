@@ -22,7 +22,10 @@ import {
   ArrowLeft,
   TrendingUp,
   Copy,
-  Loader2
+  Loader2,
+  MessageSquare,
+  GitBranch,
+  Target
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
@@ -392,35 +395,54 @@ const PromptDetail = () => {
 
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Mentions</p>
-            <p className="text-4xl font-bold font-inter">{promptGroup?.total_mentions || 0}</p>
-            {visibilityGrowth !== null ? (
-              <div className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-success" />
-                <span className="text-sm font-semibold text-success">+{visibilityGrowth}%</span>
-                <span className="text-sm text-muted-foreground">vs last month</span>
-              </div>
-            ) : (
-              <span className="text-sm text-muted-foreground">No historical data available</span>
-            )}
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <p className="text-sm text-muted-foreground font-medium">Total Mentions</p>
+              <h3 className="text-3xl font-bold mt-3">{promptGroup?.total_mentions || 0}</h3>
+            </div>
+            <div className="p-3 rounded-xl bg-primary/10">
+              <MessageSquare className="h-6 w-6 text-primary" />
+            </div>
+          </div>
+          {visibilityGrowth !== null ? (
+            <div className="flex items-center gap-2 text-sm">
+              <TrendingUp className="h-4 w-4 text-success" />
+              <span className="text-success font-medium">+{visibilityGrowth}%</span>
+              <span className="text-muted-foreground">vs last period</span>
+            </div>
+          ) : (
+            <span className="text-sm text-muted-foreground">No historical data</span>
+          )}
+        </Card>
+
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <p className="text-sm text-muted-foreground font-medium">Active Variants</p>
+              <h3 className="text-3xl font-bold mt-3">{promptGroup?.active_variants || prompts?.length || 0}</h3>
+            </div>
+            <div className="p-3 rounded-xl bg-primary/10">
+              <GitBranch className="h-6 w-6 text-primary" />
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Prompt variations tracked</span>
           </div>
         </Card>
 
-        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground uppercase tracking-wider">Active Variants</p>
-            <p className="text-4xl font-bold font-inter">{promptGroup?.active_variants || prompts?.length || 0}</p>
-            <p className="text-sm text-muted-foreground">Prompt variations being tracked</p>
+        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <p className="text-sm text-muted-foreground font-medium">Avg Position</p>
+              <h3 className="text-3xl font-bold mt-3">{Math.round(promptGroup?.average_position || 0)}</h3>
+            </div>
+            <div className="p-3 rounded-xl bg-primary/10">
+              <Target className="h-6 w-6 text-primary" />
+            </div>
           </div>
-        </Card>
-
-        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground uppercase tracking-wider">Avg Position</p>
-            <p className="text-4xl font-bold font-inter">{Math.round(promptGroup?.average_position || 0)}</p>
-            <p className="text-sm text-muted-foreground">Across all platforms</p>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Across all platforms</span>
           </div>
         </Card>
       </div>
