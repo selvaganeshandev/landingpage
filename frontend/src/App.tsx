@@ -21,6 +21,7 @@ import Alerts from "./pages/Alerts";
 import Competitors from "./pages/Competitors";
 import CompetitorDetail from "./pages/CompetitorDetail";
 import Reports from "./pages/Reports";
+import ReportBuilder from "./pages/ReportBuilder";
 import Multilingual from "./pages/Multilingual";
 // import PromptInsights from "./pages/PromptInsights";
 // import AgentAnalytics from "./pages/AgentAnalytics";
@@ -178,6 +179,11 @@ const App = () => (
               <Route path="/reports" element={
                 <ProtectedRoute requiredPermission={MODULES.REPORTS}>
                   <Reports />
+                </ProtectedRoute>
+              } />
+              <Route path="/reports/create-template" element={
+                <ProtectedRoute requiredPermission={MODULES.REPORTS}>
+                  <ReportBuilder />
                 </ProtectedRoute>
               } />
               

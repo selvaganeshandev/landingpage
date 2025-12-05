@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import {
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 const Reports = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { selectedDomain } = useDomainStore();
@@ -562,12 +564,7 @@ const Reports = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button onClick={() => {
-            toast({
-              title: "Coming Soon",
-              description: "Custom template creation will be available soon.",
-            });
-          }}>
+          <Button onClick={() => navigate('/reports/create-template')}>
             <Plus className="h-4 w-4 mr-2" />
             Create Template
           </Button>
