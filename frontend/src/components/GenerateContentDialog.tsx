@@ -67,9 +67,22 @@ export const GenerateContentDialog = ({
     scheduledDate: existingContent?.scheduledDate || new Date(),
   });
 
-  // Update form data when existingContent changes
+  // Reset state when dialog closes, initialize when it opens
   useEffect(() => {
-    if (existingContent && open) {
+    if (!open) {
+      // Dialog closed - reset everything for next time
+      setStep(1);
+      setProgress(0);
+      setIsGenerating(false);
+      setError(null);
+      setShowSuccess(false);
+      setGeneratedContent(null);
+    }
+  }, [open]);
+
+  // Update form data when existingContent changes (on dialog open)
+  useEffect(() => {
+    if (existingContent && open && !showSuccess) {
       setFormData({
         articleType: existingContent?.type || "blog",
         title: existingContent?.title || "",
@@ -84,14 +97,8 @@ export const GenerateContentDialog = ({
         wordCount: existingContent?.wordCount || 1500,
         scheduledDate: existingContent?.scheduledDate || new Date(),
       });
-      // Reset step and states when new content is loaded
-      setStep(1);
-      setProgress(0);
-      setIsGenerating(false);
-      setError(null);
-      setShowSuccess(false);
     }
-  }, [existingContent, open]);
+  }, [existingContent, open, showSuccess]);
 
   const articleTypes = [
     {
@@ -468,13 +475,7 @@ export const GenerateContentDialog = ({
 
                 <div className="flex justify-center pt-4">
                   <Button
-                    onClick={() => {
-                      setShowSuccess(false);
-                      setGeneratedContent(null);
-                      setStep(1);
-                      setProgress(0);
-                      onOpenChange(false);
-                    }}
+                    onClick={() => onOpenChange(false)}
                     className="gradient-primary"
                   >
                     Close
@@ -556,14 +557,39 @@ export const GenerateContentDialog = ({
           <DialogTitle className="text-2xl">Content Generation Wizard</DialogTitle>
         </DialogHeader>
 
-        {/* Progress Indicator */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium">Step {step} of 4</span>
-            <span className="text-sm text-muted-foreground">{(step / 4 * 100).toFixed(0)}% Complete</span>
+        {/* Wizard Step Indicator - Only show when not in success state */}
+        {!showSuccess && (
+          <div className="mb-6">
+            <div className="flex items-center justify-center gap-3">
+              {[1, 2, 3, 4].map((stepNumber) => (
+                <div key={stepNumber} className="flex items-center">
+                  <div className={`flex items-center justify-center w-10 h-10 rounded-full transition-all ${
+                    stepNumber === step
+                      ? 'bg-primary text-white shadow-md shadow-primary/30'
+                      : stepNumber < step
+                        ? 'bg-primary/20 text-primary'
+                        : 'bg-muted text-muted-foreground'
+                  }`}>
+                    <span className="text-sm font-semibold">{stepNumber}</span>
+                  </div>
+                  {stepNumber < 4 && (
+                    <div className={`w-16 h-0.5 mx-1 transition-all ${
+                      stepNumber < step ? 'bg-primary' : 'bg-muted'
+                    }`} />
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="text-center mt-3">
+              <p className="text-sm font-medium">
+                {step === 1 && "Choose Article Type"}
+                {step === 2 && "Article Details"}
+                {step === 3 && "Content Settings"}
+                {step === 4 && "Review & Generate"}
+              </p>
+            </div>
           </div>
-          <Progress value={(step / 4) * 100} className="h-2" />
-        </div>
+        )}
 
         {renderStepContent()}
 
