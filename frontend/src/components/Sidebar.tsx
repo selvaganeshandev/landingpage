@@ -49,6 +49,16 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Command,
   CommandEmpty,
   CommandGroup,
@@ -69,6 +79,7 @@ import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDomainProcessing }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void; navigate: any; isDomainProcessing?: boolean }) => {
   const [submenuOpen, setSubmenuOpen] = useState(false);
   const [recentsVisible, setRecentsVisible] = useState(true);
+  const [deleteConversationId, setDeleteConversationId] = useState<number | null>(null);
 
   // Check if any item in group is active
   const hasActiveItem = group.items.some((item: any) => location.pathname === item.path);
@@ -115,43 +126,72 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
                   <span className="truncate">{item.name}</span>
                 </button>
                 {item.conversationId && (
-                  <button
-                    type="button"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      try {
-                        const { api } = await import('@/services/api');
-                        await api.deleteChatConversation(item.conversationId);
-                        // Refresh recent conversations
-                        const { useNavigationStore } = await import('@/stores/navigationStore');
-                        const { updateRecentChats } = useNavigationStore.getState();
-                        const response = await api.getChatConversations();
-                        if (response.conversations) {
-                          const sorted = [...response.conversations].sort((a: any, b: any) =>
-                            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-                          );
-                          updateRecentChats(sorted.slice(0, 20));
-                        }
-                        // Navigate to new chat if deleting current conversation
-                        const urlParams = new URLSearchParams(window.location.search);
-                        if (urlParams.get('conversation') === String(item.conversationId)) {
-                          navigate('/chat');
-                        }
-                      } catch (error) {
-                        console.error('Failed to delete conversation:', error);
-                      }
-                    }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-destructive/10 rounded"
-                    title="Delete conversation"
-                  >
-                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteConversationId(item.conversationId);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-destructive/10 rounded"
+                      title="Delete conversation"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </button>
+                  </>
                 )}
               </div>
             );
           })}
         </div>
         </div>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteConversationId !== null} onOpenChange={(open) => !open && setDeleteConversationId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Conversation?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete this chat conversation. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={async () => {
+                  if (deleteConversationId) {
+                    try {
+                      const { api } = await import('@/services/api');
+                      await api.deleteChatConversation(deleteConversationId);
+                      // Refresh recent conversations
+                      const { useNavigationStore } = await import('@/stores/navigationStore');
+                      const { updateRecentChats } = useNavigationStore.getState();
+                      const response = await api.getChatConversations();
+                      if (response.conversations) {
+                        const sorted = [...response.conversations].sort((a: any, b: any) =>
+                          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+                        );
+                        updateRecentChats(sorted.slice(0, 20));
+                      }
+                      // Navigate to new chat if deleting current conversation
+                      const urlParams = new URLSearchParams(window.location.search);
+                      if (urlParams.get('conversation') === String(deleteConversationId)) {
+                        navigate('/chat');
+                      }
+                    } catch (error) {
+                      console.error('Failed to delete conversation:', error);
+                    } finally {
+                      setDeleteConversationId(null);
+                    }
+                  }
+                }}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }

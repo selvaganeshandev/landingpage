@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Send, Sparkles, TrendingUp, Lightbulb, Users, Search, BarChart3, MessageSquare, Bell, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,6 +13,71 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
+// Loading messages - 3 sets
+const LOADING_MESSAGES = {
+  set1: [
+    "Let me process that for a moment…",
+    "Looking into this carefully…",
+    "Gathering the most relevant details…",
+    "Thinking this through… almost done…",
+    "Organizing the information for clarity…",
+    "Just polishing the response…",
+    "Preparing something helpful for you…",
+    "Hold on… finalizing the best answer…"
+  ],
+  set2: [
+    "Analyzing your request from all angles…",
+    "Forming a clear explanation…",
+    "Connecting the important points…",
+    "Reasoning through the details…",
+    "Evaluating the best way to respond…",
+    "Fine-tuning the final output…",
+    "Let me make this as accurate as possible…",
+    "Almost ready — refining the insight…"
+  ],
+  set3: [
+    "Give me a moment to think this over…",
+    "Working out the best way to answer…",
+    "Let me organize my thoughts…",
+    "Thinking it through… nearly there…",
+    "Making sure everything lines up…",
+    "Just a second — improving the clarity…",
+    "Preparing a meaningful response…",
+    "Alright… wrapping up the final answer…"
+  ]
+};
+
+// Helper function to get random loading message
+const getRandomLoadingMessage = () => {
+  const sets = ['set1', 'set2', 'set3'] as const;
+  const randomSet = sets[Math.floor(Math.random() * sets.length)];
+  const messages = LOADING_MESSAGES[randomSet];
+  return messages[Math.floor(Math.random() * messages.length)];
+};
+
+// Helper function to format markdown-like text to HTML
+const formatMessage = (text: string): string => {
+  return text
+    // Bold: **text** or __text__
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(.*?)__/g, '<strong>$1</strong>')
+    // Italic: *text* or _text_
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/_(.*?)_/g, '<em>$1</em>')
+    // Headers: ### text
+    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+    .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+    // Links: [text](url) - open in new tab
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">$1</a>')
+    // Bullet lists: - item or * item
+    .replace(/^[\-\*] (.+)$/gim, '<li>$1</li>')
+    // Paragraph breaks - double newline creates proper spacing
+    .replace(/\n\n/g, '</p><p>')
+    // Single newlines within paragraphs
+    .replace(/\n/g, '<br />');
+};
+
 export const Chat = () => {
   const { user } = useAuth();
   const { selectedDomain } = useDomainStore();
@@ -21,8 +86,58 @@ export const Chat = () => {
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState("");
   const [openPopover, setOpenPopover] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<number | null>(null);
+  const previousDomainRef = useRef<number | null>(null);
+  const [streamingText, setStreamingText] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const loadingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cycle through loading messages
+  useEffect(() => {
+    if (isLoading) {
+      // Pick a random set of messages
+      const sets = ['set1', 'set2', 'set3'] as const;
+      const randomSet = sets[Math.floor(Math.random() * sets.length)];
+      const messages = LOADING_MESSAGES[randomSet];
+      let currentIndex = 0;
+
+      // Set initial message
+      setLoadingMessage(messages[0]);
+
+      // Rotate through messages every 2 seconds
+      loadingIntervalRef.current = setInterval(() => {
+        currentIndex = (currentIndex + 1) % messages.length;
+        setLoadingMessage(messages[currentIndex]);
+      }, 2000);
+    } else {
+      // Clear interval when not loading
+      if (loadingIntervalRef.current) {
+        clearInterval(loadingIntervalRef.current);
+        loadingIntervalRef.current = null;
+      }
+      setLoadingMessage("");
+    }
+
+    return () => {
+      if (loadingIntervalRef.current) {
+        clearInterval(loadingIntervalRef.current);
+      }
+    };
+  }, [isLoading]);
+
+  // Clear chat when domain changes
+  useEffect(() => {
+    if (previousDomainRef.current !== null &&
+        selectedDomain?.id !== previousDomainRef.current) {
+      // Domain changed - clear messages and conversation
+      setMessages([]);
+      setConversationId(null);
+    }
+    previousDomainRef.current = selectedDomain?.id || null;
+  }, [selectedDomain]);
 
   // Load recent conversations on mount
   useEffect(() => {
@@ -36,6 +151,11 @@ export const Chat = () => {
       loadConversation(parseInt(convId));
     }
   }, [searchParams, selectedDomain]);
+
+  // Auto-scroll to bottom when messages or streaming text changes
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, streamingText, isLoading]);
 
   const loadRecentConversations = async () => {
     if (!selectedDomain) return;
@@ -73,6 +193,27 @@ export const Chat = () => {
     }
   };
 
+  // Typewriter effect for streaming text
+  const typeWriterEffect = (text: string, speed: number = 15) => {
+    return new Promise<void>((resolve) => {
+      setIsStreaming(true);
+      setStreamingText("");
+      let currentIndex = 0;
+
+      const intervalId = setInterval(() => {
+        if (currentIndex <= text.length) {
+          setStreamingText(text.slice(0, currentIndex));
+          currentIndex++;
+        } else {
+          clearInterval(intervalId);
+          setIsStreaming(false);
+          setStreamingText("");
+          resolve();
+        }
+      }, speed);
+    });
+  };
+
   const handleSend = async () => {
     if (!input.trim() || !selectedDomain) return;
 
@@ -89,7 +230,13 @@ export const Chat = () => {
         conversation_id: conversationId || undefined
       });
 
-      // Add assistant response
+      // Hide loading indicator
+      setIsLoading(false);
+
+      // Start typewriter effect
+      await typeWriterEffect(response.message);
+
+      // Add complete message to history
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: response.message
@@ -103,12 +250,15 @@ export const Chat = () => {
       }
     } catch (error: any) {
       console.error('ChatBot error:', error);
+      setIsLoading(false);
+
+      const errorMessage = error.response?.data?.error || "Sorry, I encountered an error. Please try again.";
+      await typeWriterEffect(errorMessage);
+
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: error.response?.data?.error || "Sorry, I encountered an error. Please try again."
+        content: errorMessage
       }]);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -176,7 +326,7 @@ export const Chat = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask me anything..."
+                placeholder="What would you like to explore in your domain?"
                 className="min-h-[120px] pr-12 resize-none text-base shadow-glow"
                 disabled={isLoading}
               />
@@ -378,46 +528,51 @@ export const Chat = () => {
               {messages.map((message, index) => (
                 <div
                   key={index}
-                  className="flex gap-4 items-start px-6 py-4 transition-colors rounded-2xl"
+                  className={`flex items-start transition-colors animate-fade-in ${
+                    message.role === 'user' ? 'gap-2 py-2 px-3' : 'py-1.5'
+                  }`}
                   style={{
-                    backgroundColor: message.role === 'user' ? 'hsl(240, 10%, 96%)' : 'transparent'
+                    backgroundColor: message.role === 'user' ? 'hsl(240, 10%, 96%)' : 'transparent',
+                    animationDelay: `${index * 0.05}s`,
                   }}
                 >
-                  <div className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center">
-                    {message.role === 'assistant' ? (
-                      <div className="w-9 h-9 rounded-full bg-gradient-to-r from-primary to-secondary flex items-center justify-center">
-                        <Sparkles className="h-4 w-4 text-white" />
+                  {message.role === 'user' ? (
+                    <>
+                      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center mt-0.5">
+                        <span className="text-xs font-semibold text-primary">{getUserInitials()}</span>
                       </div>
-                    ) : (
-                      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
-                        <span className="text-sm font-semibold text-primary">{getUserInitials()}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[15px] leading-normal">
+                          <p className="whitespace-pre-wrap m-0">{message.content}</p>
+                        </div>
                       </div>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0 py-1">
-                    <div className="text-[15px] leading-normal">
-                      <p className="whitespace-pre-wrap">{message.content}</p>
+                    </>
+                  ) : (
+                    <div className="w-full">
+                      <div className="text-[15px] leading-[1.5] prose prose-sm max-w-none [&>p]:my-2 [&>p]:leading-[1.5] [&>h1]:text-lg [&>h1]:font-semibold [&>h1]:my-2 [&>h1]:leading-tight [&>h2]:text-base [&>h2]:font-semibold [&>h2]:my-2 [&>h2]:leading-tight [&>h3]:text-base [&>h3]:font-medium [&>h3]:my-2 [&>h3]:leading-tight [&>ul]:my-2 [&>ul]:pl-4 [&>ul]:space-y-1 [&>li]:leading-[1.5] [&>strong]:font-semibold">
+                        <div dangerouslySetInnerHTML={{ __html: formatMessage(message.content) }} />
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               ))}
               {isLoading && (
-                <div
-                  className="flex gap-4 items-start px-6 py-4 rounded-2xl"
-                  style={{ backgroundColor: 'transparent' }}
-                >
-                  <div className="flex-shrink-0 w-9 h-9 rounded-full bg-gradient-to-r from-primary to-secondary flex items-center justify-center">
-                    <Sparkles className="h-4 w-4 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0 py-1">
-                    <div className="flex gap-1">
-                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                    </div>
+                <div className="flex items-center gap-2 py-1.5 animate-fade-in">
+                  <Sparkles className="h-4 w-4 text-primary animate-bounce" />
+                  {loadingMessage && (
+                    <p className="text-[15px] text-muted-foreground">{loadingMessage}</p>
+                  )}
+                </div>
+              )}
+              {isStreaming && streamingText && (
+                <div className="py-1.5">
+                  <div className="text-[15px] leading-[1.5] prose prose-sm max-w-none [&>p]:my-2 [&>p]:leading-[1.5] [&>h1]:text-lg [&>h1]:font-semibold [&>h1]:my-2 [&>h1]:leading-tight [&>h2]:text-base [&>h2]:font-semibold [&>h2]:my-2 [&>h2]:leading-tight [&>h3]:text-base [&>h3]:font-medium [&>h3]:my-2 [&>h3]:leading-tight [&>ul]:my-2 [&>ul]:pl-4 [&>ul]:space-y-1 [&>li]:leading-[1.5] [&>strong]:font-semibold">
+                    <div dangerouslySetInnerHTML={{ __html: formatMessage(streamingText) }} />
+                    <span className="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-middle"></span>
                   </div>
                 </div>
               )}
+              <div ref={messagesEndRef} />
               </div>
             </div>
           </div>
@@ -430,13 +585,13 @@ export const Chat = () => {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Ask me anything..."
+                  placeholder="What would you like to explore in your domain?"
                   className="min-h-[84px] pr-12 resize-none shadow-glow"
-                  disabled={isLoading}
+                  disabled={isLoading || isStreaming}
                 />
                 <Button
                   onClick={handleSend}
-                  disabled={!input.trim() || isLoading}
+                  disabled={!input.trim() || isLoading || isStreaming}
                   size="icon"
                   className="absolute right-2 bottom-2 rounded-full"
                 >

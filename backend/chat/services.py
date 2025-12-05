@@ -3,8 +3,9 @@ Service layer for Agentic ChatBot
 Provides reusable business logic for function calling tools
 """
 from django.utils import timezone
-from datetime import timedelta
+from datetime import timedelta, date
 from django.db.models import Count, Avg, Q, F
+from decimal import Decimal
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,24 @@ class ChatbotService:
         days_map = {'7d': 7, '30d': 30, '90d': 90}
         days = days_map.get(date_range, 30)
         return timezone.now() - timedelta(days=days)
+
+    @staticmethod
+    def _serialize_value(value):
+        """Convert non-JSON serializable types to JSON serializable types"""
+        if isinstance(value, Decimal):
+            return float(value)
+        elif isinstance(value, (date,)):
+            return value.isoformat()
+        return value
+
+    @staticmethod
+    def _serialize_dict(data):
+        """Recursively serialize dictionary values"""
+        if isinstance(data, dict):
+            return {k: ChatbotService._serialize_value(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [ChatbotService._serialize_dict(item) for item in data]
+        return ChatbotService._serialize_value(data)
 
     @staticmethod
     def get_domain_analytics(domain, date_range='30d', include_trends=False):
@@ -47,6 +66,10 @@ class ChatbotService:
             .annotate(count=Count('id'), avg_pos=Avg('position'))
             .order_by('-count')
         )
+        # Convert Decimal to float
+        for item in platform_breakdown:
+            if 'avg_pos' in item and item['avg_pos']:
+                item['avg_pos'] = float(item['avg_pos'])
 
         # Sentiment breakdown using sentiment_category
         sentiment_breakdown = list(
@@ -56,7 +79,7 @@ class ChatbotService:
 
         result = {
             'total_mentions': total_mentions,
-            'average_position': round(avg_position, 2),
+            'average_position': float(avg_position),
             'visibility_score': float(domain.visibility_score),
             'sentiment_score': float(domain.sentiment_score),
             'platform_breakdown': platform_breakdown,
@@ -74,6 +97,12 @@ class ChatbotService:
                 .annotate(count=Count('id'), avg_pos=Avg('position'))
                 .order_by('date')
             )
+            # Convert Decimal to float in trends
+            for item in trends:
+                if 'avg_pos' in item and item['avg_pos']:
+                    item['avg_pos'] = float(item['avg_pos'])
+                if 'date' in item:
+                    item['date'] = item['date'].isoformat()
             result['trends'] = trends
 
         return result
@@ -123,13 +152,12 @@ class ChatbotService:
             is_mention=True
         )
 
+        domain_avg_result = domain_mentions.aggregate(avg=Avg('position'))['avg']
+
         return {
             'domain_name': domain.name,
             'domain_mentions': domain_mentions.count(),
-            'domain_avg_position': round(
-                domain_mentions.aggregate(avg=Avg('position'))['avg'] or 0,
-                2
-            ),
+            'domain_avg_position': float(domain_avg_result) if domain_avg_result else 0.0,
             'competitors': competitor_data,
             'total_competitors_tracked': len(competitors)
         }
@@ -156,10 +184,11 @@ class ChatbotService:
             if platform != 'all':
                 analytics_query = analytics_query.filter(platform=platform)
                 mention_count = analytics_query.count()
-                avg_pos = analytics_query.aggregate(avg=Avg('position'))['avg'] or 0
+                avg_pos_result = analytics_query.aggregate(avg=Avg('position'))['avg']
+                avg_pos = float(avg_pos_result) if avg_pos_result else 0.0
             else:
                 mention_count = group.mention_count
-                avg_pos = group.avg_position or 0
+                avg_pos = float(group.avg_position) if group.avg_position else 0.0
 
             if mention_count == 0:
                 continue
@@ -363,13 +392,11 @@ class ChatbotService:
         for platform in platforms:
             platform_mentions = mentions_query.filter(platform=platform)
 
+            avg_pos_result = platform_mentions.aggregate(avg=Avg('position'))['avg']
             data = {
                 'platform': platform,
                 'mention_count': platform_mentions.count(),
-                'avg_position': round(
-                    platform_mentions.aggregate(avg=Avg('position'))['avg'] or 0,
-                    2
-                )
+                'avg_position': float(avg_pos_result) if avg_pos_result else 0.0
             }
 
             if metric in ['sentiment', 'all']:
@@ -435,10 +462,14 @@ class ChatbotService:
             .annotate(count=Count('id'))
             .order_by('date')
         )
+        # Convert dates to ISO format for JSON serialization
+        for item in trend_data:
+            if 'date' in item:
+                item['date'] = item['date'].isoformat()
 
         return {
             'total_mentions': total_mentions,
-            'average_position': round(avg_position, 2),
+            'average_position': float(avg_position),
             'visibility_score': float(domain.visibility_score),
             'sentiment_score': float(domain.sentiment_score),
             'active_alerts': active_alerts,
@@ -634,8 +665,8 @@ class ChatbotService:
             {
                 'topic': t['prompt__group__theme'] or t['prompt__group__group_id'] or 'Uncategorized',
                 'mention_count': t['mention_count'],
-                'average_position': round(t['avg_position'] or 0, 2),
-                'average_sentiment': round(t['avg_sentiment'] or 0, 2) if t['avg_sentiment'] else None
+                'average_position': float(t['avg_position']) if t['avg_position'] else 0.0,
+                'average_sentiment': float(t['avg_sentiment']) if t['avg_sentiment'] else 0.0
             }
             for t in topics
         ]
@@ -735,12 +766,15 @@ class ChatbotService:
             if metric in ['mentions', 'all']:
                 trend_data['mentions'] = t['mentions']
             if metric in ['position', 'all']:
-                trend_data['average_position'] = round(t['avg_position'] or 0, 2)
+                avg_pos = float(t['avg_position']) if t['avg_position'] else 0.0
+                trend_data['average_position'] = round(avg_pos, 2)
             if metric in ['sentiment', 'all']:
-                trend_data['average_sentiment'] = round(t['avg_sentiment'] or 0, 2) if t['avg_sentiment'] else None
+                avg_sent = float(t['avg_sentiment']) if t['avg_sentiment'] else 0.0
+                trend_data['average_sentiment'] = round(avg_sent, 2)
             if metric in ['visibility', 'all']:
                 # Calculate simple visibility score
-                visibility = (1 / (t['avg_position'] or 10)) * 100 if t['avg_position'] else 0
+                avg_pos_val = float(t['avg_position']) if t['avg_position'] else 10.0
+                visibility = (1 / avg_pos_val) * 100 if avg_pos_val else 0
                 trend_data['visibility_score'] = round(visibility, 2)
 
             formatted_trends.append(trend_data)
@@ -779,7 +813,7 @@ class ChatbotService:
                     'id': pg.id,
                     'name': pg.theme or pg.group_id,
                     'mention_count': pg.mention_count,
-                    'average_position': round(pg.avg_position or 0, 2),
+                    'average_position': float(pg.avg_position) if pg.avg_position else 0.0,
                     'variants_count': pg.prompts.count()
                 }
                 for pg in prompt_groups
@@ -848,7 +882,8 @@ class ChatbotService:
 
         # Core metrics
         total_mentions = mentions_30d.count()
-        avg_position = mentions_30d.aggregate(avg=Avg('position'))['avg'] or 0
+        avg_position_result = mentions_30d.aggregate(avg=Avg('position'))['avg']
+        avg_position = float(avg_position_result) if avg_position_result else 0.0
 
         # Platform breakdown
         platforms = list(
