@@ -184,8 +184,13 @@ export const GenerateContentDialog = ({
         source_id: existingContent?.sourceId,
         source_reference: sourceReference,
         priority: existingContent?.priority || 'medium',
-        scheduled_date: formData.scheduledDate
+        scheduled_date: formData.scheduledDate instanceof Date
+          ? formData.scheduledDate.toISOString().split('T')[0]  // Convert to YYYY-MM-DD format
+          : formData.scheduledDate
       };
+
+      // Log the data being sent for debugging
+      console.log('Content generation request:', generationData);
 
       // Call the API to generate content
       const response = await apiClient.generateContent(generationData);
@@ -211,6 +216,7 @@ export const GenerateContentDialog = ({
       setIsGenerating(false);
       setProgress(0);
 
+      console.error('Content generation error:', err);
       const errorMessage = err.message || 'Failed to generate content. Please try again.';
       setError(errorMessage);
 

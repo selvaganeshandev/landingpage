@@ -45,7 +45,7 @@ class ContentGenerationRequestSerializer(serializers.Serializer):
     depth = serializers.CharField(default='comprehensive')
     word_count = serializers.IntegerField(default=1500)
     source_type = serializers.ChoiceField(
-        choices=['topic', 'content_gap', 'manual'],
+        choices=['topic', 'content_gap', 'answer_gap', 'manual'],
         default='manual'
     )
     source_id = serializers.IntegerField(required=False, allow_null=True)

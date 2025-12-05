@@ -15,6 +15,7 @@ class GeneratedContent(models.Model):
     SOURCE_TYPE_CHOICES = [
         ('topic', 'Topic Module'),
         ('content_gap', 'Content Gap Module'),
+        ('answer_gap', 'Answer Gap Module'),
         ('manual', 'Manual Creation'),
     ]
 
