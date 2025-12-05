@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CreateReportDialog } from "@/components/CreateReportDialog";
 import { ReportPreviewDialog } from "@/components/ReportPreviewDialog";
 import { EditReportDialog } from "@/components/EditReportDialog";
@@ -23,11 +25,13 @@ import {
   Settings,
   Loader2,
   Table,
-  Presentation
+  Presentation,
+  Trash2
 } from "lucide-react";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 const Reports = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { selectedDomain } = useDomainStore();
@@ -37,8 +41,10 @@ const Reports = () => {
   const [generateNowDialogOpen, setGenerateNowDialogOpen] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<any>(null);
   const [viewingReportId, setViewingReportId] = useState<number | null>(null);
+  const [reportToDelete, setReportToDelete] = useState<number | null>(null);
 
   // Get domain ID for filtering
   const domainId = selectedDomain?.id;
@@ -279,9 +285,16 @@ const Reports = () => {
     }
   };
 
-  const handleDeleteReport = async (reportId: number) => {
-    if (confirm('Are you sure you want to delete this scheduled report?')) {
-      deleteReportMutation.mutate(reportId);
+  const handleDeleteReport = (reportId: number) => {
+    setReportToDelete(reportId);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (reportToDelete) {
+      deleteReportMutation.mutate(reportToDelete);
+      setDeleteDialogOpen(false);
+      setReportToDelete(null);
     }
   };
 
@@ -551,20 +564,15 @@ const Reports = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button onClick={() => {
-            toast({
-              title: "Coming Soon",
-              description: "Custom template creation will be available soon.",
-            });
-          }}>
+          <Button onClick={() => navigate('/reports/create-template')}>
             <Plus className="h-4 w-4 mr-2" />
             Create Template
           </Button>
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* Quick Actions - Hidden for now */}
+      {/* <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Button variant="outline" className="h-24 flex flex-col gap-2" onClick={handleGenerateNow}>
           <FileText className="h-6 w-6" />
           <span className="font-medium">Generate Now</span>
@@ -581,7 +589,7 @@ const Reports = () => {
           <Share2 className="h-6 w-6" />
           <span className="font-medium">Share Report</span>
         </Button>
-      </div>
+      </div> */}
 
       {/* Scheduled Reports */}
       <Card className="p-6">
@@ -640,33 +648,11 @@ const Reports = () => {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <Button
                       size="sm"
-                      variant="outline"
-                      onClick={() => handlePreview(report)}
-                    >
-                      <Eye className="h-3 w-3 mr-1" />
-                      View
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleRunNow(report)}
-                      disabled={report.status === 'paused'}
-                    >
-                      Run Now
-                    </Button>
-                    <Button
-                      size="sm"
                       variant="ghost"
-                      onClick={() => handleEdit(report)}
+                      onClick={() => handleDeleteReport(report.id)}
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
                     >
-                      Edit
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleToggleStatus(report)}
-                    >
-                      {report.status === 'active' ? 'Pause' : 'Resume'}
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
@@ -736,8 +722,8 @@ const Reports = () => {
         )}
       </Card> */}
 
-      {/* Templates */}
-      <Card className="p-6">
+      {/* Templates - Hidden for now */}
+      {/* <Card className="p-6">
         <h3 className="text-lg font-semibold mb-6">Report Templates</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {templates.map((template: any) => (
@@ -777,7 +763,7 @@ const Reports = () => {
             </div>
           ))}
         </div>
-      </Card>
+      </Card> */}
 
       {/* API Access - Commented out for now */}
       {/* <Card className="p-6">
@@ -832,6 +818,17 @@ const Reports = () => {
         onOpenChange={setPdfViewerOpen}
         reportId={viewingReportId}
         reportName={selectedReport?.name || "Report"}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title="Delete Scheduled Report"
+        description="Are you sure you want to delete this scheduled report? This action cannot be undone."
+        confirmText="Delete"
+        onConfirm={confirmDelete}
+        variant="destructive"
       />
     </div>
   );

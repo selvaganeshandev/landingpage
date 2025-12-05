@@ -78,6 +78,11 @@ def sync_competitor_prompt_analytics(domain_id=None, prompt_id=None):
                         continue
 
                     # Create or update CompetitorPromptAnalytics
+                    # IMPORTANT: Don't copy citation_list from PromptAnalytics as it contains ALL citations
+                    # for the entire response, not specific citations for each competitor
+                    empty_citation_list = []
+                    logger.debug(f"Creating CompetitorPromptAnalytics with empty citation_list for {competitor_name}")
+
                     with transaction.atomic():
                         obj, created = CompetitorPromptAnalytics.objects.update_or_create(
                             competitor_id=competitor_id,
@@ -89,7 +94,7 @@ def sync_competitor_prompt_analytics(domain_id=None, prompt_id=None):
                                 'position': int(pa.position) if pa.position else None,
                                 'sentiment_category': pa.sentiment_category,
                                 'sentiment_score': pa.sentiment_score,
-                                'citation_list': pa.citation_list or [],
+                                'citation_list': empty_citation_list,
                                 'track_status': 'COMP',
                                 'tracked_at': timezone.now(),
                             }

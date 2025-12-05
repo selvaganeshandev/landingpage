@@ -225,14 +225,19 @@ class PDFReportGenerator:
             ))
 
             # Create a table with favicon and domain name
+            # Use proper column widths to prevent overlap
+            favicon_width = 40
+            spacing = 10
+            domain_width = self.usable_width - favicon_width - spacing
+
             header_data = [[favicon_img, domain_para]]
-            header_table = Table(header_data, colWidths=[44, self.usable_width - 54], rowHeights=[36])
+            header_table = Table(header_data, colWidths=[favicon_width, domain_width], rowHeights=[36])
             header_table.setStyle(TableStyle([
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('ALIGN', (0, 0), (0, 0), 'LEFT'),
                 ('ALIGN', (1, 0), (1, 0), 'LEFT'),
                 ('LEFTPADDING', (0, 0), (0, 0), 0),
-                ('LEFTPADDING', (1, 0), (1, 0), 8),
+                ('LEFTPADDING', (1, 0), (1, 0), spacing),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 0),
                 ('TOPPADDING', (0, 0), (-1, -1), 0),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
@@ -671,7 +676,9 @@ class PDFReportGenerator:
                     f"{stats.get('avg_sentiment', 0):.2f}"
                 ])
 
-            llm_table = Table(llm_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+            # Full width table with dynamic columns
+            llm_col_widths = [self.usable_width * 0.30, self.usable_width * 0.25, self.usable_width * 0.25, self.usable_width * 0.20]
+            llm_table = Table(llm_data, colWidths=llm_col_widths)
             llm_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['dark']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
@@ -682,8 +689,10 @@ class PDFReportGenerator:
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['light_gray']]),
                 ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
-                ('TOPPADDING', (0, 1), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ]))
 
             self.story.append(llm_table)
@@ -702,16 +711,23 @@ class PDFReportGenerator:
                     str(stat.get('mentions', 0))
                 ])
 
-            daily_table = Table(daily_data, colWidths=[2*inch, 2*inch, 2*inch])
+            # Full width table with dynamic columns
+            daily_col_widths = [self.usable_width * 0.40, self.usable_width * 0.30, self.usable_width * 0.30]
+            daily_table = Table(daily_data, colWidths=daily_col_widths)
             daily_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['primary']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('TOPPADDING', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
                 ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['white'], self.COLORS['primary_light']]),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ]))
 
             self.story.append(daily_table)
@@ -975,6 +991,7 @@ class PDFReportGenerator:
         <b>Content Quality Score:</b> {overview.get('content_quality_score', 0)}%<br/>
         <b>Topics Covered:</b> {overview.get('topics_covered', 0)}<br/>
         <b>Content Gaps Found:</b> {overview.get('content_gaps_found', 0)}<br/>
+        <b>Answer Gaps Found:</b> {overview.get('answer_gaps_found', 0)}<br/>
         <b>Engagement Rate:</b> {overview.get('engagement_rate', 0)}%
         """
         self.story.append(Paragraph(overview_text, self.styles['CustomBody']))
@@ -986,7 +1003,7 @@ class PDFReportGenerator:
         topics = self.data.get('topic_performance', [])
         if topics:
             topic_data = [['Topic', 'Mentions', 'Coverage', 'Sentiment', 'Trend']]
-            for topic in topics[:10]:
+            for topic in topics:  # Show ALL topics
                 trend = topic.get('growth', 0)
                 trend_str = f"+{trend}%" if trend > 0 else f"{trend}%"
                 topic_data.append([
@@ -1026,7 +1043,7 @@ class PDFReportGenerator:
         gaps = self.data.get('content_gaps', [])
         if gaps:
             gap_data = [['Keyword', 'Priority', 'Opportunity', 'Est. Traffic']]
-            for gap in gaps[:10]:
+            for gap in gaps:  # Show ALL content gaps
                 gap_data.append([
                     gap.get('keyword', '')[:30],
                     gap.get('priority', 'Medium'),
@@ -1056,7 +1073,60 @@ class PDFReportGenerator:
         else:
             self.story.append(Paragraph('No content gaps identified. Great coverage!', self.styles['CustomBody']))
 
-        # 4. Recommendations
+        # 4. Answer Gaps
+        self.story.append(Spacer(1, 0.4*inch))
+        self.story.append(Paragraph('Answer Gaps (Competitor Mentioned, You\'re Not)', self.styles['SectionHeading']))
+
+        answer_gaps = self.data.get('answer_gaps', [])
+        if answer_gaps:
+            answer_gap_data = [['Prompt', 'Competitors', 'Platforms', 'Opportunity']]
+            for gap in answer_gaps:
+                # Truncate prompt text to fit
+                prompt_text = gap.get('prompt_text', '')[:40] + ('...' if len(gap.get('prompt_text', '')) > 40 else '')
+
+                # Get competitor names
+                competitors_list = gap.get('competitors', [])
+                competitor_names = ', '.join([c.get('name', '') for c in competitors_list[:2]])
+                if len(competitors_list) > 2:
+                    competitor_names += f' +{len(competitors_list) - 2}'
+
+                # Get platforms
+                platforms = ', '.join(gap.get('platforms', [])[:3])
+
+                # Calculate opportunity level
+                total_mentions = gap.get('total_competitor_mentions', 0)
+                opportunity = 'High' if total_mentions >= 3 else ('Medium' if total_mentions >= 2 else 'Low')
+
+                answer_gap_data.append([
+                    prompt_text,
+                    competitor_names,
+                    platforms,
+                    opportunity
+                ])
+
+            answer_gap_col_widths = [self.usable_width * 0.35, self.usable_width * 0.25, self.usable_width * 0.25, self.usable_width * 0.15]
+            answer_gap_table = Table(answer_gap_data, colWidths=answer_gap_col_widths)
+            answer_gap_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['danger']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['white']),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('TOPPADDING', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.COLORS['danger_light'], self.COLORS['white']]),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('TOPPADDING', (0, 1), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ]))
+            self.story.append(answer_gap_table)
+        else:
+            self.story.append(Paragraph('No answer gaps identified. You\'re competing well!', self.styles['CustomBody']))
+
+        # 5. Recommendations
         self.story.append(Spacer(1, 0.4*inch))
         self.story.append(Paragraph('Strategic Recommendations', self.styles['SectionHeading']))
 
