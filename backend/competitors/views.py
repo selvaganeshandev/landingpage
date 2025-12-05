@@ -1693,80 +1693,82 @@ def content_gap_detail(request, gap_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def competitor_heatmap(request):
+    """
+    Calculate heatmap data dynamically from CompetitorPromptAnalytics.
+    This ensures all platforms are included with accurate, up-to-date mention counts.
+    """
     try:
         domain_id = request.GET.get('domain_id')
-        platform = request.GET.get('platform')  # NEW: Platform filter
+        platform_filter = request.GET.get('platform')  # Optional: filter by specific platform
         if not domain_id:
             return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-        days = int(request.GET.get('days', 90))
-        since = timezone.now() - timedelta(days=days)
-
-        snapshots = CompetitorMetricSnapshot.objects.filter(
-            domain_id=domain_id,
-            timestamp__gte=since
-        ).select_related('competitor', 'domain').order_by('-timestamp')
 
         domain = Domain.objects.filter(id=domain_id).only('id', 'name', 'url').first()
+        if not domain:
+            return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        latest_snapshots = []
-        seen = set()
-        for snap in snapshots:
-            key = snap.competitor_id or f"domain-{snap.domain_id}"
-            if key in seen:
-                continue
-            latest_snapshots.append(snap)
-            seen.add(key)
+        # Get all competitors for this domain
+        competitors = Competitor.objects.filter(domain_id=domain_id).values('id', 'name', 'url')
 
+        # Calculate per-platform mention counts from CompetitorPromptAnalytics
         rows = []
         platform_totals = defaultdict(float)
 
-        for snap in latest_snapshots:
-            metrics = snap.platform_metrics or []
+        # Process each competitor
+        for comp in competitors:
+            comp_analytics = CompetitorPromptAnalytics.objects.filter(
+                competitor_id=comp['id'],
+                is_mentioned=True
+            )
+
+            # Apply platform filter if specified
+            if platform_filter and platform_filter.lower() != 'all':
+                comp_analytics = comp_analytics.filter(platform__iexact=platform_filter)
+
+            # Aggregate mentions by platform
             platform_mentions = {}
-            for metric in metrics:
-                platform_name = metric.get('platform') or 'Overall'
-                # NEW: Filter by platform if specified
-                if platform and platform.lower() != 'all':
-                    if platform_name.lower() != platform.lower():
-                        continue
-                mentions = float(metric.get('mentions') or 0)
-                if mentions <= 0:
+            for ca in comp_analytics:
+                plat_name = ca.platform or 'Overall'
+                mention_count = ca.mention_count or 0
+                if mention_count <= 0:
                     continue
-                platform_mentions[platform_name] = mentions
-                platform_totals[platform_name] += mentions
+                platform_mentions[plat_name] = platform_mentions.get(plat_name, 0) + mention_count
+                platform_totals[plat_name] += mention_count
 
-            if not platform_mentions:
-                continue
-
-            rows.append({
-                'name': snap.competitor.name if snap.competitor else snap.domain.name,
-                'isYou': snap.competitor is None,
-                'platform_mentions': platform_mentions,
-                'url': (snap.competitor.url if snap.competitor else snap.domain.url) if snap.competitor or snap.domain else None,
-            })
-
-        if not any(row['isYou'] for row in rows):
-            your_platforms = defaultdict(float)
-            sov_filter = Q(domain_id=domain_id, competitor__isnull=True, timestamp__gte=since)
-            # NEW: Filter by platform if specified
-            if platform and platform.lower() != 'all':
-                sov_filter &= Q(platform__iexact=platform)
-            sov_records = ShareOfVoiceAnalytics.objects.filter(sov_filter)
-            for record in sov_records:
-                plat_name = record.platform or 'Overall'
-                mentions = float(record.mention_count or 0)
-                if mentions <= 0:
-                    continue
-                your_platforms[plat_name] += mentions
-                platform_totals[plat_name] += mentions
-            if your_platforms:
+            if platform_mentions:
                 rows.append({
-                    'name': 'Your Brand',
-                    'isYou': True,
-                    'platform_mentions': dict(your_platforms),
-                    'url': domain.url if domain else None,
+                    'name': comp['name'],
+                    'isYou': False,
+                    'platform_mentions': platform_mentions,
+                    'url': comp['url'],
                 })
 
+        # Add "Your Brand" data from PromptAnalytics
+        your_platforms = defaultdict(float)
+        prompt_analytics = PromptAnalytics.objects.filter(
+            prompt__group__domain_id=domain_id,
+            is_mention=True
+        )
+
+        # Apply platform filter if specified
+        if platform_filter and platform_filter.lower() != 'all':
+            prompt_analytics = prompt_analytics.filter(platform__iexact=platform_filter)
+
+        for pa in prompt_analytics:
+            plat_name = pa.platform or 'Overall'
+            # For "Your Brand", we count domain mentions
+            your_platforms[plat_name] += 1
+            platform_totals[plat_name] += 1
+
+        if your_platforms:
+            rows.append({
+                'name': 'Your Brand',
+                'isYou': True,
+                'platform_mentions': dict(your_platforms),
+                'url': domain.url,
+            })
+
+        # Calculate percentages
         platforms = sorted(platform_totals.keys())
         formatted_rows = []
         for row in rows:
@@ -1779,11 +1781,13 @@ def competitor_heatmap(request):
                 'name': row['name'],
                 'isYou': row['isYou'],
                 'platforms': percentages,
-                'url': row.get('url') or (domain.url if row['isYou'] and domain else None),
+                'url': row.get('url'),
             })
 
         return Response({'platforms': platforms, 'rows': formatted_rows})
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
