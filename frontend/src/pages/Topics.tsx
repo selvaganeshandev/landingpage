@@ -641,7 +641,10 @@ const Topics = () => {
           title: selectedTopic.name,
           targetKeywords: selectedTopic.keywords,
           type: "guide",
-          wordCount: 1500
+          wordCount: 1500,
+          sourceType: "topic",
+          sourceId: selectedTopic.id,
+          sourceReference: `Topic Analysis\n\nTopic: ${selectedTopic.name}\nKeywords: ${selectedTopic.keywords.join(', ')}\nTotal Mentions: ${selectedTopic.mentions}\nVisibility Score: ${selectedTopic.visibility}%\nSentiment: ${selectedTopic.sentiment}%\nTrend: ${selectedTopic.trend > 0 ? '+' : ''}${selectedTopic.trend}%\nActive Platforms: ${selectedTopic.platforms.join(', ')}\n\nObjective: Generate content optimized for this topic to increase visibility and engagement.`
         } : undefined}
       />
     </div>

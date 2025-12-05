@@ -2142,6 +2142,9 @@ const Competitors = () => {
           type: "guide",
           wordCount: 1500,
           priority: selectedGap.opportunity,
+          sourceType: "answer_gap",
+          sourceId: selectedGap.id,
+          sourceReference: `Answer Gap Analysis\n\nQuery: ${selectedGap.query}\nCompetitor Mentioned: ${selectedGap.competitor}\nOpportunity Level: ${selectedGap.opportunity}\nPlatforms: ${selectedGap.platforms ? selectedGap.platforms.join(', ') : 'Multiple'}\nYour Mentions: ${selectedGap.yourMentions || 0}\nCompetitor Mentions: ${selectedGap.competitorMentions || 0}\n\nObjective: Generate content to address this answer gap where ${selectedGap.competitor} is mentioned but you are not.`,
           source: `Answer Gap - Competitor: ${selectedGap.competitor}`,
           description: `Generate content to address this answer gap where ${selectedGap.competitor} is mentioned but you are not. Platforms: ${selectedGap.platforms ? selectedGap.platforms.join(', ') : 'Multiple'}`
         } : undefined}

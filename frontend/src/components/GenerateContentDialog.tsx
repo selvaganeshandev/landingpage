@@ -21,15 +21,17 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  FileText, 
-  Book, 
-  GitCompare, 
-  List, 
+import {
+  FileText,
+  Book,
+  GitCompare,
+  List,
   Wrench,
   Sparkles,
   Calendar,
-  Target
+  Target,
+  CheckCircle2,
+  ArrowRight
 } from "lucide-react";
 
 interface GenerateContentDialogProps {
@@ -50,6 +52,7 @@ export const GenerateContentDialog = ({
   const [progress, setProgress] = useState(0);
   const [generatedContent, setGeneratedContent] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
   
   const [formData, setFormData] = useState({
     articleType: existingContent?.type || "blog",
@@ -86,6 +89,7 @@ export const GenerateContentDialog = ({
       setProgress(0);
       setIsGenerating(false);
       setError(null);
+      setShowSuccess(false);
     }
   }, [existingContent, open]);
 
@@ -184,20 +188,13 @@ export const GenerateContentDialog = ({
 
       if (response.status === 'success') {
         setGeneratedContent(response.data);
+        setIsGenerating(false);
+        setShowSuccess(true);
 
         toast({
           title: "Content Generated Successfully!",
           description: `Generated ${response.data.actual_word_count} words in ${response.data.generation_time_seconds}s`,
         });
-
-        // Wait a moment to show success before closing
-        setTimeout(() => {
-          setIsGenerating(false);
-          onOpenChange(false);
-          setStep(1);
-          setProgress(0);
-          setGeneratedContent(null);
-        }, 2000);
       } else {
         throw new Error(response.message || 'Generation failed');
       }
@@ -408,13 +405,83 @@ export const GenerateContentDialog = ({
         return (
           <div className="space-y-6">
             <div className="pb-4 border-b border-border">
-              <h3 className="text-lg font-semibold mb-1">Review & Generate</h3>
+              <h3 className="text-lg font-semibold mb-1">
+                {showSuccess ? "Content Generated!" : "Review & Generate"}
+              </h3>
               <p className="text-sm text-muted-foreground">
-                Review your settings and generate content
+                {showSuccess
+                  ? "Your content has been successfully generated"
+                  : "Review your settings and generate content"}
               </p>
             </div>
 
-            {isGenerating ? (
+            {showSuccess ? (
+              <div className="py-8 space-y-6">
+                <div className="flex items-center justify-center">
+                  <div className="w-20 h-20 rounded-full bg-green-500/10 flex items-center justify-center">
+                    <CheckCircle2 className="h-10 w-10 text-green-500" />
+                  </div>
+                </div>
+
+                <div className="text-center space-y-2">
+                  <h4 className="text-xl font-semibold">Content Successfully Generated!</h4>
+                  <p className="text-muted-foreground">
+                    Your content has been created and saved to your content library
+                  </p>
+                </div>
+
+                {generatedContent && (
+                  <Card className="p-5 border border-border bg-muted/30">
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-5 w-5 text-primary" />
+                        <h4 className="font-semibold">{generatedContent.title || formData.title}</h4>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="secondary">{formData.articleType}</Badge>
+                        <Badge variant="outline">
+                          {generatedContent.actual_word_count || formData.wordCount} words
+                        </Badge>
+                        {generatedContent.generation_time_seconds && (
+                          <Badge variant="outline">
+                            Generated in {generatedContent.generation_time_seconds}s
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                )}
+
+                <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <Calendar className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                    <div className="text-sm">
+                      <p className="font-medium mb-1">View Your Content</p>
+                      <p className="text-muted-foreground">
+                        Your generated content is now available in the <strong>Content Planner</strong> section.
+                        Navigate to the Content Planner from the menu to view, edit, and schedule your content.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-center pt-4">
+                  <Button
+                    onClick={() => {
+                      setShowSuccess(false);
+                      setGeneratedContent(null);
+                      setStep(1);
+                      setProgress(0);
+                      onOpenChange(false);
+                    }}
+                    className="gradient-primary"
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+            ) : isGenerating ? (
               <div className="py-12 space-y-6">
                 <div className="flex items-center justify-center">
                   <div className="w-20 h-20 rounded-full gradient-primary flex items-center justify-center animate-pulse">
@@ -500,31 +567,33 @@ export const GenerateContentDialog = ({
 
         {renderStepContent()}
 
-        {/* Navigation */}
-        <div className="flex items-center justify-between pt-6 border-t border-border">
-          <Button
-            variant="outline"
-            onClick={() => step > 1 ? setStep(step - 1) : onOpenChange(false)}
-            disabled={isGenerating}
-          >
-            {step === 1 ? "Cancel" : "Previous"}
-          </Button>
-          
-          {step < 4 ? (
-            <Button onClick={() => setStep(step + 1)} disabled={!formData.title && step === 2}>
-              Next Step
-            </Button>
-          ) : (
-            <Button 
-              onClick={handleGenerate} 
+        {/* Navigation - Hide when showing success */}
+        {!showSuccess && (
+          <div className="flex items-center justify-between pt-6 border-t border-border">
+            <Button
+              variant="outline"
+              onClick={() => step > 1 ? setStep(step - 1) : onOpenChange(false)}
               disabled={isGenerating}
-              className="gradient-primary"
             >
-              <Sparkles className="h-4 w-4 mr-2" />
-              {isGenerating ? "Generating..." : "Generate Content"}
+              {step === 1 ? "Cancel" : "Previous"}
             </Button>
-          )}
-        </div>
+
+            {step < 4 ? (
+              <Button onClick={() => setStep(step + 1)} disabled={!formData.title && step === 2}>
+                Next Step
+              </Button>
+            ) : (
+              <Button
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                className="gradient-primary"
+              >
+                <Sparkles className="h-4 w-4 mr-2" />
+                {isGenerating ? "Generating..." : "Generate Content"}
+              </Button>
+            )}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
