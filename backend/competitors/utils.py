@@ -5,7 +5,7 @@ import logging
 import re
 from django.db import transaction
 from django.utils import timezone
-from django.db.models import Q
+from django.db.models import Q, Sum
 from competitors.models import Competitor, CompetitorPromptAnalytics
 from prompts.models import PromptAnalytics
 
@@ -236,6 +236,44 @@ def sync_competitor_prompt_analytics(domain_id=None, prompt_id=None, batch_size=
 
             offset += batch_size
             logger.info(f"Processed batch: {offset}/{total_records} ({(offset/total_records*100):.1f}%)")
+
+        # After syncing all CompetitorPromptAnalytics, update Competitor.total_citations
+        # This ensures the aggregated field matches the sum across all platforms
+        logger.info("Updating Competitor total_citations aggregated field...")
+
+        # Get all competitors that were potentially updated
+        if domain_id:
+            competitors_to_update = Competitor.objects.filter(domain_id=domain_id)
+        else:
+            competitors_to_update = Competitor.objects.all()
+
+        updated_competitors = 0
+        for competitor in competitors_to_update:
+            # Calculate total citations across all platforms
+            total_citations = 0
+            comp_analytics = CompetitorPromptAnalytics.objects.filter(
+                competitor=competitor,
+                is_mentioned=True
+            )
+
+            for ca in comp_analytics:
+                if ca.citation_list and isinstance(ca.citation_list, list):
+                    total_citations += len(ca.citation_list)
+
+            # Calculate total mentions across all platforms
+            total_mentions = comp_analytics.aggregate(
+                total=Sum('mention_count')
+            )['total'] or 0
+
+            # Update the competitor's aggregated fields
+            if competitor.total_citations != total_citations or competitor.total_mentions != total_mentions:
+                competitor.total_citations = total_citations
+                competitor.total_mentions = total_mentions
+                competitor.save(update_fields=['total_citations', 'total_mentions'])
+                updated_competitors += 1
+                logger.debug(f"Updated {competitor.name}: {total_mentions} mentions, {total_citations} citations")
+
+        logger.info(f"Updated {updated_competitors} competitor aggregated fields")
 
         logger.info(f"Sync completed successfully: {stats}")
         return stats
