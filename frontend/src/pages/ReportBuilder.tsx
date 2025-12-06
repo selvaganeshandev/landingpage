@@ -28,6 +28,9 @@ import {
   X,
   Link2,
   Eye,
+  Smile,
+  Meh,
+  Frown,
 } from "lucide-react";
 import {
   Dialog,
@@ -123,6 +126,27 @@ const widgetModules: WidgetModule[] = [
         title: "Avg Position",
         icon: TrendingUp,
         description: "Average position in responses",
+      },
+      {
+        id: "positive-sentiment-metric",
+        type: "metric",
+        title: "Positive Sentiment",
+        icon: Smile,
+        description: "Percentage of positive mentions",
+      },
+      {
+        id: "neutral-sentiment-metric",
+        type: "metric",
+        title: "Neutral Sentiment",
+        icon: Meh,
+        description: "Percentage of neutral mentions",
+      },
+      {
+        id: "negative-sentiment-metric",
+        type: "metric",
+        title: "Negative Sentiment",
+        icon: Frown,
+        description: "Percentage of negative mentions",
       },
     ],
   },
@@ -669,6 +693,42 @@ const ReportBuilder = () => {
             <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
               <TrendingUp className="h-4 w-4" />
               -0.3 (improved)
+            </p>
+          </Card>
+        );
+
+      case "positive-sentiment-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-green-500/10 to-green-500/5 border-green-200">
+            <p className="text-sm text-muted-foreground mb-2">Positive Sentiment</p>
+            <p className="text-4xl font-bold text-green-600">68%</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <Smile className="h-4 w-4" />
+              Majority positive
+            </p>
+          </Card>
+        );
+
+      case "neutral-sentiment-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-slate-500/10 to-slate-500/5 border-slate-200">
+            <p className="text-sm text-muted-foreground mb-2">Neutral Sentiment</p>
+            <p className="text-4xl font-bold text-slate-600">24%</p>
+            <p className="text-sm text-muted-foreground mt-2 flex items-center gap-1">
+              <Meh className="h-4 w-4" />
+              Balanced feedback
+            </p>
+          </Card>
+        );
+
+      case "negative-sentiment-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-red-500/10 to-red-500/5 border-red-200">
+            <p className="text-sm text-muted-foreground mb-2">Negative Sentiment</p>
+            <p className="text-4xl font-bold text-red-600">8%</p>
+            <p className="text-sm text-red-600 mt-2 flex items-center gap-1">
+              <Frown className="h-4 w-4" />
+              Minimal negative
             </p>
           </Card>
         );
