@@ -253,7 +253,7 @@ const ReportBuilder = () => {
   const [templateDescription, setTemplateDescription] = useState("");
 
   // Fetch domain statistics
-  const { data: domainStats } = useQuery({
+  const { data: domainStats, isLoading: isLoadingStats } = useQuery({
     queryKey: ['domainStats', selectedDomain?.id],
     queryFn: async () => {
       if (!selectedDomain?.id) return null;
@@ -280,10 +280,13 @@ const ReportBuilder = () => {
       return {
         totalPrompts: promptsData.length,
         totalPromptGroups: Array.isArray(promptGroups) ? promptGroups.length : promptGroups?.results?.length || 0,
-        trackedLLMs: Array.from(llms)
+        trackedLLMs: Array.from(llms),
+        lastUpdated: new Date().toISOString()
       };
     },
-    enabled: !!selectedDomain?.id
+    enabled: !!selectedDomain?.id,
+    refetchOnMount: true,
+    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
   // Add new grid row
@@ -711,16 +714,22 @@ const ReportBuilder = () => {
                   <div className="flex items-center gap-6 text-sm text-muted-foreground">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">Prompts:</span>
-                      <span className="text-gray-900 font-semibold">{domainStats?.totalPrompts || 0}</span>
+                      <span className="text-gray-900 font-semibold">
+                        {isLoadingStats ? "..." : (domainStats?.totalPrompts ?? 0)}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="font-medium">Groups:</span>
-                      <span className="text-gray-900 font-semibold">{domainStats?.totalPromptGroups || 0}</span>
+                      <span className="text-gray-900 font-semibold">
+                        {isLoadingStats ? "..." : (domainStats?.totalPromptGroups ?? 0)}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="font-medium">LLMs:</span>
                       <div className="flex flex-wrap gap-1">
-                        {domainStats?.trackedLLMs && domainStats.trackedLLMs.length > 0 ? (
+                        {isLoadingStats ? (
+                          <span className="text-muted-foreground">...</span>
+                        ) : domainStats?.trackedLLMs && domainStats.trackedLLMs.length > 0 ? (
                           domainStats.trackedLLMs.map((llm: string) => (
                             <Badge key={llm} variant="outline" className="text-xs py-0 h-5">
                               {llm}
@@ -737,14 +746,20 @@ const ReportBuilder = () => {
                   <div className="flex items-center gap-6 text-xs text-muted-foreground mt-2">
                     <div className="flex items-center gap-2">
                       <span>Report Created:</span>
-                      <span className="text-gray-900">{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                      <span className="text-gray-900">
+                        {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span>Last Updated:</span>
+                      <span>Data Updated:</span>
                       <span className="text-gray-900">
-                        {selectedDomain.updated_at
-                          ? new Date(selectedDomain.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                          : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {isLoadingStats ? "..." : (
+                          domainStats?.lastUpdated
+                            ? new Date(domainStats.lastUpdated).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                            : selectedDomain.updated_at
+                            ? new Date(selectedDomain.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                            : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                        )}
                       </span>
                     </div>
                   </div>
