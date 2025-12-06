@@ -253,12 +253,10 @@ const ReportBuilder = () => {
   const [templateDescription, setTemplateDescription] = useState("");
 
   // Fetch domain statistics
-  const { data: domainStats, isLoading: isLoadingStats, error: statsError } = useQuery({
+  const { data: domainStats, isLoading: isLoadingStats } = useQuery({
     queryKey: ['domainStats', selectedDomain?.id],
     queryFn: async () => {
       if (!selectedDomain?.id) return null;
-
-      console.log('[ReportBuilder] Fetching stats for domain:', selectedDomain.id);
 
       // Fetch prompts, prompt groups, and dashboard summary (for platforms)
       const [prompts, promptGroups, dashboardSummary] = await Promise.all([
@@ -267,14 +265,8 @@ const ReportBuilder = () => {
         apiClient.getDashboardSummary({ domain_id: String(selectedDomain.id), days: 30 })
       ]);
 
-      console.log('[ReportBuilder] Raw prompts response:', prompts);
-      console.log('[ReportBuilder] Raw promptGroups response:', promptGroups);
-      console.log('[ReportBuilder] Raw dashboardSummary response:', dashboardSummary);
-
       // Handle prompts response - could be array or paginated object
       const promptsData = Array.isArray(prompts) ? prompts : prompts?.results || prompts?.prompts || [];
-      console.log('[ReportBuilder] Processed promptsData:', promptsData);
-      console.log('[ReportBuilder] Prompts count:', promptsData.length);
 
       // Extract LLMs from dashboard summary platforms
       const llms = new Set<string>();
@@ -286,13 +278,10 @@ const ReportBuilder = () => {
         });
       }
 
-      console.log('[ReportBuilder] Tracked LLMs:', Array.from(llms));
-
       // Handle prompt groups response - the API returns { total_count, groups }
       const groupsCount = Array.isArray(promptGroups)
         ? promptGroups.length
         : (promptGroups?.groups?.length || promptGroups?.results?.length || 0);
-      console.log('[ReportBuilder] Groups count:', groupsCount);
 
       return {
         totalPrompts: promptsData.length,
@@ -305,11 +294,6 @@ const ReportBuilder = () => {
     refetchOnMount: true,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
-
-  // Log any errors
-  if (statsError) {
-    console.error('[ReportBuilder] Error fetching stats:', statsError);
-  }
 
   // Add new grid row
   const addGridRow = (type: GridType) => {
