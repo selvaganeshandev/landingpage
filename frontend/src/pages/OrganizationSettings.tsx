@@ -2078,7 +2078,7 @@ export default function OrganizationSettings() {
                                   keyword.volume_level === 'very-high' ? 'default' :
                                   keyword.volume_level === 'high' ? 'secondary' :
                                   'outline'
-                                } className="text-xs">
+                                } className="text-xs whitespace-nowrap">
                                   {keyword.volume_level || 'N/A'}
                                 </Badge>
                               </TableCell>
