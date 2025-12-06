@@ -269,8 +269,8 @@ const ReportBuilder = () => {
       console.log('[ReportBuilder] Raw prompts response:', prompts);
       console.log('[ReportBuilder] Raw promptGroups response:', promptGroups);
 
-      // Get unique LLMs from prompts
-      const promptsData = Array.isArray(prompts) ? prompts : prompts?.results || [];
+      // Handle prompts response - could be array or paginated object
+      const promptsData = Array.isArray(prompts) ? prompts : prompts?.results || prompts?.prompts || [];
       console.log('[ReportBuilder] Processed promptsData:', promptsData);
       console.log('[ReportBuilder] Prompts count:', promptsData.length);
 
@@ -287,7 +287,10 @@ const ReportBuilder = () => {
 
       console.log('[ReportBuilder] Tracked LLMs:', Array.from(llms));
 
-      const groupsCount = Array.isArray(promptGroups) ? promptGroups.length : promptGroups?.results?.length || 0;
+      // Handle prompt groups response - the API returns { total_count, groups }
+      const groupsCount = Array.isArray(promptGroups)
+        ? promptGroups.length
+        : (promptGroups?.groups?.length || promptGroups?.results?.length || 0);
       console.log('[ReportBuilder] Groups count:', groupsCount);
 
       return {
