@@ -616,6 +616,63 @@ const ReportBuilder = () => {
           </Card>
         );
 
+      case "total-prompts-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-indigo-500/10 to-indigo-500/5 border-indigo-200">
+            <p className="text-sm text-muted-foreground mb-2">Total Prompts</p>
+            <p className="text-4xl font-bold text-indigo-600">{domainStats?.totalPrompts || 0}</p>
+            <p className="text-sm text-muted-foreground mt-2">Tracked prompts</p>
+          </Card>
+        );
+
+      case "total-citations-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-blue-500/10 to-blue-500/5 border-blue-200">
+            <p className="text-sm text-muted-foreground mb-2">Total Citations</p>
+            <p className="text-4xl font-bold text-blue-600">342</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              +18.2% from last month
+            </p>
+          </Card>
+        );
+
+      case "total-mentions-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-cyan-500/10 to-cyan-500/5 border-cyan-200">
+            <p className="text-sm text-muted-foreground mb-2">Total Mentions</p>
+            <p className="text-4xl font-bold text-cyan-600">1,547</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              +24.5% from last month
+            </p>
+          </Card>
+        );
+
+      case "visibility-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border-emerald-200">
+            <p className="text-sm text-muted-foreground mb-2">Visibility Score</p>
+            <p className="text-4xl font-bold text-emerald-600">87.5</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              +6.3% improvement
+            </p>
+          </Card>
+        );
+
+      case "avg-position-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-amber-500/10 to-amber-500/5 border-amber-200">
+            <p className="text-sm text-muted-foreground mb-2">Avg Position</p>
+            <p className="text-4xl font-bold text-amber-600">2.4</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              -0.3 (improved)
+            </p>
+          </Card>
+        );
+
       default:
         return (
           <Card className="p-6 bg-muted">
