@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useDomainStore } from "@/stores/domainStore";
 import apiClient from "@/services/api";
 import {
@@ -46,6 +47,7 @@ export const GenerateContentDialog = ({
   existingContent
 }: GenerateContentDialogProps) => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { selectedDomain } = useDomainStore();
   const [step, setStep] = useState(1);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -436,53 +438,43 @@ export const GenerateContentDialog = ({
                   </div>
                 </div>
 
-                <div className="text-center space-y-2">
+                <div className="text-center space-y-3">
                   <h4 className="text-xl font-semibold">Content Successfully Generated!</h4>
-                  <p className="text-muted-foreground">
-                    Your content has been created and saved to your content library
+                  <p className="text-muted-foreground max-w-md mx-auto">
+                    Your content has been created and saved to your content library which can be found in{' '}
+                    <strong>
+                      {existingContent?.sourceType === 'content_gap' ? 'Content Gaps' :
+                       existingContent?.sourceType === 'answer_gap' ? 'Competitor Analysis' :
+                       existingContent?.sourceType === 'topic' ? 'Topics' :
+                       'Content Calendar'}
+                    </strong>
                   </p>
                 </div>
 
-                {generatedContent && (
-                  <Card className="p-5 border border-border bg-muted/30">
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-5 w-5 text-primary" />
-                        <h4 className="font-semibold">{generatedContent.title || formData.title}</h4>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant="secondary">{formData.articleType}</Badge>
-                        <Badge variant="outline">
-                          {generatedContent.actual_word_count || formData.wordCount} words
-                        </Badge>
-                        {generatedContent.generation_time_seconds && (
-                          <Badge variant="outline">
-                            Generated in {generatedContent.generation_time_seconds}s
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  </Card>
-                )}
-
-                <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
-                  <div className="flex items-start gap-3">
-                    <Calendar className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-                    <div className="text-sm">
-                      <p className="font-medium mb-1">View Your Content</p>
-                      <p className="text-muted-foreground">
-                        Your generated content is now available in the <strong>Content Planner</strong> section.
-                        Navigate to the Content Planner from the menu to view, edit, and schedule your content.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-center pt-4">
+                <div className="flex justify-center gap-3 pt-4">
+                  <Button
+                    onClick={() => {
+                      onOpenChange(false);
+                      // Navigate to the appropriate section based on source type
+                      const sourceType = existingContent?.sourceType;
+                      if (sourceType === 'content_gap') {
+                        navigate('/content-gaps');
+                      } else if (sourceType === 'answer_gap') {
+                        navigate('/competitors');
+                      } else if (sourceType === 'topic') {
+                        navigate('/topics');
+                      } else {
+                        navigate('/content-calendar');
+                      }
+                    }}
+                    className="gradient-primary"
+                  >
+                    <ArrowRight className="h-4 w-4 mr-2" />
+                    View Content
+                  </Button>
                   <Button
                     onClick={() => onOpenChange(false)}
-                    className="gradient-primary"
+                    variant="outline"
                   >
                     Close
                   </Button>
@@ -630,5 +622,3 @@ export const GenerateContentDialog = ({
     </Dialog>
   );
 };
-
-import { Card } from "./ui/card";
