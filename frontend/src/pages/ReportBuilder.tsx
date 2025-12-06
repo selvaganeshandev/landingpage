@@ -609,7 +609,7 @@ const ReportBuilder = () => {
         {/* Sidebar - Available Widgets */}
         <div className="w-80 border-r border-border/50 bg-card/50 backdrop-blur-sm p-6 overflow-y-auto">
           <h2 className="text-lg font-semibold font-inter mb-4">Available Widgets</h2>
-          <Accordion type="multiple" defaultValue={widgetModules.map((m) => m.name)} className="space-y-2">
+          <Accordion type="single" defaultValue={widgetModules[0]?.name} collapsible className="space-y-2">
             {widgetModules.map((module) => (
               <AccordionItem key={module.name} value={module.name} className="border rounded-lg px-4 bg-card/80">
                 <AccordionTrigger className="text-sm font-semibold hover:no-underline">
