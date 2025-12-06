@@ -651,44 +651,60 @@ const ReportBuilder = () => {
             <div className="bg-white rounded-lg border border-border min-h-[1100px] p-12 space-y-6">
               {/* Default Report Header */}
               {selectedDomain && (
-                <div className="border-b border-border pb-6 mb-8">
-                  {/* Brand Info */}
-                  <div className="flex items-start gap-4 mb-6">
+                <div className="border-b border-border pb-4 mb-6">
+                  {/* Brand Info - Compact */}
+                  <div className="flex items-center gap-3 mb-3">
                     <img
-                      src={getFaviconUrl(selectedDomain.url, 48)}
+                      src={getFaviconUrl(selectedDomain.url, 32)}
                       alt={`${selectedDomain.name} favicon`}
-                      className="h-12 w-12 rounded"
-                      onError={(e) => handleFaviconError(e, selectedDomain.url, selectedDomain.name, 48)}
+                      className="h-8 w-8 rounded"
+                      onError={(e) => handleFaviconError(e, selectedDomain.url, selectedDomain.name, 32)}
                     />
                     <div className="flex-1">
-                      <h2 className="text-2xl font-bold text-gray-900">{selectedDomain.name}</h2>
-                      <p className="text-sm text-muted-foreground mt-1">{selectedDomain.url}</p>
+                      <h2 className="text-xl font-bold text-gray-900">{selectedDomain.name}</h2>
+                      <p className="text-xs text-muted-foreground">{selectedDomain.url}</p>
                     </div>
                   </div>
 
-                  {/* Statistics Grid */}
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="bg-muted/30 rounded-lg p-4">
-                      <p className="text-xs font-medium text-muted-foreground mb-1">Total Prompts</p>
-                      <p className="text-2xl font-bold text-gray-900">{domainStats?.totalPrompts || 0}</p>
+                  {/* Statistics - Compact Single Line */}
+                  <div className="flex items-center gap-6 text-sm text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">Prompts:</span>
+                      <span className="text-gray-900 font-semibold">{domainStats?.totalPrompts || 0}</span>
                     </div>
-                    <div className="bg-muted/30 rounded-lg p-4">
-                      <p className="text-xs font-medium text-muted-foreground mb-1">Prompt Groups</p>
-                      <p className="text-2xl font-bold text-gray-900">{domainStats?.totalPromptGroups || 0}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">Groups:</span>
+                      <span className="text-gray-900 font-semibold">{domainStats?.totalPromptGroups || 0}</span>
                     </div>
-                    <div className="bg-muted/30 rounded-lg p-4">
-                      <p className="text-xs font-medium text-muted-foreground mb-1">Tracked LLMs</p>
-                      <div className="flex flex-wrap gap-1 mt-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">LLMs:</span>
+                      <div className="flex flex-wrap gap-1">
                         {domainStats?.trackedLLMs && domainStats.trackedLLMs.length > 0 ? (
                           domainStats.trackedLLMs.map((llm: string) => (
-                            <Badge key={llm} variant="secondary" className="text-xs">
+                            <Badge key={llm} variant="outline" className="text-xs py-0 h-5">
                               {llm}
                             </Badge>
                           ))
                         ) : (
-                          <p className="text-sm text-muted-foreground">None</p>
+                          <span className="text-muted-foreground">None</span>
                         )}
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Dates - Compact Single Line */}
+                  <div className="flex items-center gap-6 text-xs text-muted-foreground mt-2">
+                    <div className="flex items-center gap-2">
+                      <span>Report Created:</span>
+                      <span className="text-gray-900">{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span>Last Updated:</span>
+                      <span className="text-gray-900">
+                        {selectedDomain.updated_at
+                          ? new Date(selectedDomain.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                          : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
                     </div>
                   </div>
                 </div>
