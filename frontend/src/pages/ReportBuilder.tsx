@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useDomainStore } from "@/stores/domainStore";
+import { apiClient } from "@/services/api";
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 import {
   ArrowLeft,
   Save,
@@ -197,12 +202,47 @@ const dummyPieData = [
 const ReportBuilder = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { selectedDomain } = useDomainStore();
   const [gridRows, setGridRows] = useState<GridRow[]>([]);
   const [draggedWidget, setDraggedWidget] = useState<Widget | null>(null);
   const [gridDialogOpen, setGridDialogOpen] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
+
+  // Fetch domain statistics
+  const { data: domainStats } = useQuery({
+    queryKey: ['domainStats', selectedDomain?.id],
+    queryFn: async () => {
+      if (!selectedDomain?.id) return null;
+
+      // Fetch prompts and prompt groups
+      const [prompts, promptGroups] = await Promise.all([
+        apiClient.getPrompts({ domain_id: selectedDomain.id }),
+        apiClient.getPromptGroups({ domain_id: selectedDomain.id })
+      ]);
+
+      // Get unique LLMs from prompts
+      const promptsData = Array.isArray(prompts) ? prompts : prompts?.results || [];
+      const llms = new Set<string>();
+      promptsData.forEach((prompt: any) => {
+        if (prompt.analytics) {
+          prompt.analytics.forEach((analytics: any) => {
+            if (analytics.platform) {
+              llms.add(analytics.platform);
+            }
+          });
+        }
+      });
+
+      return {
+        totalPrompts: promptsData.length,
+        totalPromptGroups: Array.isArray(promptGroups) ? promptGroups.length : promptGroups?.results?.length || 0,
+        trackedLLMs: Array.from(llms)
+      };
+    },
+    enabled: !!selectedDomain?.id
+  });
 
   // Add new grid row
   const addGridRow = (type: GridType) => {
@@ -609,6 +649,51 @@ const ReportBuilder = () => {
           <div className="max-w-[850px] mx-auto">
             {/* PDF-like white canvas */}
             <div className="bg-white rounded-lg border border-border min-h-[1100px] p-12 space-y-6">
+              {/* Default Report Header */}
+              {selectedDomain && (
+                <div className="border-b border-border pb-6 mb-8">
+                  {/* Brand Info */}
+                  <div className="flex items-start gap-4 mb-6">
+                    <img
+                      src={getFaviconUrl(selectedDomain.url, 48)}
+                      alt={`${selectedDomain.name} favicon`}
+                      className="h-12 w-12 rounded"
+                      onError={(e) => handleFaviconError(e, selectedDomain.url, selectedDomain.name, 48)}
+                    />
+                    <div className="flex-1">
+                      <h2 className="text-2xl font-bold text-gray-900">{selectedDomain.name}</h2>
+                      <p className="text-sm text-muted-foreground mt-1">{selectedDomain.url}</p>
+                    </div>
+                  </div>
+
+                  {/* Statistics Grid */}
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="bg-muted/30 rounded-lg p-4">
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Total Prompts</p>
+                      <p className="text-2xl font-bold text-gray-900">{domainStats?.totalPrompts || 0}</p>
+                    </div>
+                    <div className="bg-muted/30 rounded-lg p-4">
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Prompt Groups</p>
+                      <p className="text-2xl font-bold text-gray-900">{domainStats?.totalPromptGroups || 0}</p>
+                    </div>
+                    <div className="bg-muted/30 rounded-lg p-4">
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Tracked LLMs</p>
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {domainStats?.trackedLLMs && domainStats.trackedLLMs.length > 0 ? (
+                          domainStats.trackedLLMs.map((llm: string) => (
+                            <Badge key={llm} variant="secondary" className="text-xs">
+                              {llm}
+                            </Badge>
+                          ))
+                        ) : (
+                          <p className="text-sm text-muted-foreground">None</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {gridRows.length === 0 ? (
                 <div className="h-full flex items-center justify-center py-32">
                   <div className="text-center max-w-md">
