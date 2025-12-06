@@ -260,30 +260,31 @@ const ReportBuilder = () => {
 
       console.log('[ReportBuilder] Fetching stats for domain:', selectedDomain.id);
 
-      // Fetch prompts and prompt groups
-      const [prompts, promptGroups] = await Promise.all([
+      // Fetch prompts, prompt groups, and dashboard summary (for platforms)
+      const [prompts, promptGroups, dashboardSummary] = await Promise.all([
         apiClient.getPrompts({ domain_id: selectedDomain.id }),
-        apiClient.getPromptGroups({ domain_id: selectedDomain.id })
+        apiClient.getPromptGroups({ domain_id: selectedDomain.id }),
+        apiClient.getDashboardSummary({ domain_id: String(selectedDomain.id), days: 30 })
       ]);
 
       console.log('[ReportBuilder] Raw prompts response:', prompts);
       console.log('[ReportBuilder] Raw promptGroups response:', promptGroups);
+      console.log('[ReportBuilder] Raw dashboardSummary response:', dashboardSummary);
 
       // Handle prompts response - could be array or paginated object
       const promptsData = Array.isArray(prompts) ? prompts : prompts?.results || prompts?.prompts || [];
       console.log('[ReportBuilder] Processed promptsData:', promptsData);
       console.log('[ReportBuilder] Prompts count:', promptsData.length);
 
+      // Extract LLMs from dashboard summary platforms
       const llms = new Set<string>();
-      promptsData.forEach((prompt: any) => {
-        if (prompt.analytics) {
-          prompt.analytics.forEach((analytics: any) => {
-            if (analytics.platform) {
-              llms.add(analytics.platform);
-            }
-          });
-        }
-      });
+      if (Array.isArray(dashboardSummary?.platforms)) {
+        dashboardSummary.platforms.forEach((platform: any) => {
+          if (platform.platform) {
+            llms.add(platform.platform);
+          }
+        });
+      }
 
       console.log('[ReportBuilder] Tracked LLMs:', Array.from(llms));
 
