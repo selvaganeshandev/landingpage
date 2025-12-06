@@ -87,6 +87,46 @@ interface WidgetModule {
 // Available widgets grouped by modules
 const widgetModules: WidgetModule[] = [
   {
+    name: "Insights",
+    widgets: [
+      {
+        id: "total-prompts-metric",
+        type: "metric",
+        title: "Total Prompts",
+        icon: FileText,
+        description: "Total number of prompts tracked",
+      },
+      {
+        id: "total-citations-metric",
+        type: "metric",
+        title: "Total Citations",
+        icon: Link2,
+        description: "Total citations across all platforms",
+      },
+      {
+        id: "total-mentions-metric",
+        type: "metric",
+        title: "Total Mentions",
+        icon: Eye,
+        description: "Total brand mentions",
+      },
+      {
+        id: "visibility-metric",
+        type: "metric",
+        title: "Visibility Score",
+        icon: Target,
+        description: "Overall visibility score",
+      },
+      {
+        id: "avg-position-metric",
+        type: "metric",
+        title: "Avg Position",
+        icon: TrendingUp,
+        description: "Average position in responses",
+      },
+    ],
+  },
+  {
     name: "Mentions",
     widgets: [
       {
@@ -173,46 +213,6 @@ const widgetModules: WidgetModule[] = [
         title: "Sentiment Distribution",
         icon: PieChart,
         description: "Pie chart of sentiment breakdown",
-      },
-    ],
-  },
-  {
-    name: "Insights",
-    widgets: [
-      {
-        id: "total-prompts-metric",
-        type: "metric",
-        title: "Total Prompts",
-        icon: FileText,
-        description: "Total number of prompts tracked",
-      },
-      {
-        id: "total-citations-metric",
-        type: "metric",
-        title: "Total Citations",
-        icon: Link2,
-        description: "Total citations across all platforms",
-      },
-      {
-        id: "total-mentions-metric",
-        type: "metric",
-        title: "Total Mentions",
-        icon: Eye,
-        description: "Total brand mentions",
-      },
-      {
-        id: "visibility-metric",
-        type: "metric",
-        title: "Visibility Score",
-        icon: Target,
-        description: "Overall visibility score",
-      },
-      {
-        id: "avg-position-metric",
-        type: "metric",
-        title: "Avg Position",
-        icon: TrendingUp,
-        description: "Average position in responses",
       },
     ],
   },
