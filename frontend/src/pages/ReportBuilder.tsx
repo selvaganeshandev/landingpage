@@ -667,13 +667,12 @@ const ReportBuilder = () => {
                         onDragStart={() => handleDragStart(widget)}
                         className="p-3 cursor-move hover:border-primary transition-all duration-200 hover:shadow-md border-border/50"
                       >
-                        <div className="flex items-start gap-3">
+                        <div className="flex items-center gap-3">
                           <div className="p-2 rounded-lg bg-primary/10">
                             <widget.icon className="h-4 w-4 text-primary" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="font-medium text-sm mb-1">{widget.title}</h3>
-                            <p className="text-xs text-muted-foreground">{widget.description}</p>
+                            <h3 className="font-medium text-sm">{widget.title}</h3>
                           </div>
                           <Grip className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                         </div>
