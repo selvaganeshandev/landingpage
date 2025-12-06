@@ -53,41 +53,69 @@ class CompetitorViewSet(viewsets.ModelViewSet):
 
         # If platform filter is specified and not 'all', calculate metrics from analytics
         if platform and platform.lower() != 'all':
+            # OPTIMIZATION: Fetch all analytics data in one query to avoid N+1 problem
+            competitor_ids = list(competitors.values_list('id', flat=True))
+
+            # Get all analytics for this platform in one query
+            all_analytics = CompetitorPromptAnalytics.objects.filter(
+                competitor_id__in=competitor_ids,
+                platform__iexact=platform,
+                is_mentioned=True
+            ).select_related('competitor')
+
+            # Pre-aggregate data by competitor to avoid multiple queries
+            analytics_by_competitor = {}
+            for ca in all_analytics:
+                comp_id = ca.competitor_id
+                if comp_id not in analytics_by_competitor:
+                    analytics_by_competitor[comp_id] = {
+                        'mentions': 0,
+                        'citations': 0,
+                        'positions': [],
+                        'sentiments': []
+                    }
+
+                analytics_by_competitor[comp_id]['mentions'] += ca.mention_count or 0
+
+                if ca.citation_list and isinstance(ca.citation_list, list):
+                    analytics_by_competitor[comp_id]['citations'] += len(ca.citation_list)
+
+                if ca.position is not None:
+                    analytics_by_competitor[comp_id]['positions'].append(ca.position)
+
+                if ca.sentiment_score is not None:
+                    analytics_by_competitor[comp_id]['sentiments'].append(ca.sentiment_score)
+
+            # Get all share of voice data in one query
+            from analytics.models import ShareOfVoiceAnalytics
+            sov_data = ShareOfVoiceAnalytics.objects.filter(
+                competitor_id__in=competitor_ids,
+                platform__iexact=platform
+            ).order_by('competitor_id', '-timestamp').distinct('competitor_id')
+            sov_by_competitor = {sov.competitor_id: float(sov.share_percentage) for sov in sov_data}
+
             result = []
             for comp in competitors:
-                # Filter analytics by platform
-                analytics_filter = Q(competitor=comp, platform__iexact=platform)
-                comp_analytics = CompetitorPromptAnalytics.objects.filter(analytics_filter)
+                # Get pre-aggregated data
+                comp_data = analytics_by_competitor.get(comp.id, {
+                    'mentions': 0,
+                    'citations': 0,
+                    'positions': [],
+                    'sentiments': []
+                })
 
-                # Calculate platform-specific metrics
-                total_mentions = comp_analytics.filter(is_mentioned=True).aggregate(
-                    total=Sum('mention_count')
-                )['total'] or 0
+                total_mentions = comp_data['mentions']
+                total_citations = comp_data['citations']
 
-                total_citations = 0
-                for ca in comp_analytics.filter(is_mentioned=True):
-                    if ca.citation_list and isinstance(ca.citation_list, list):
-                        total_citations += len(ca.citation_list)
-
-                avg_position = comp_analytics.filter(is_mentioned=True, position__isnull=False).aggregate(
-                    avg=Avg('position')
-                )['avg'] or 0
-
-                avg_sentiment = comp_analytics.filter(is_mentioned=True, sentiment_score__isnull=False).aggregate(
-                    avg=Avg('sentiment_score')
-                )['avg'] or 0
+                # Calculate averages
+                avg_position = sum(comp_data['positions']) / len(comp_data['positions']) if comp_data['positions'] else 0
+                avg_sentiment = sum(comp_data['sentiments']) / len(comp_data['sentiments']) if comp_data['sentiments'] else 0
 
                 # Calculate visibility score (100 - position * 20, capped at 0-100)
                 visibility = 100.0 - (float(avg_position) * 20.0) if avg_position > 0 else 0.0
                 visibility = max(0.0, min(100.0, visibility))
 
-                # Get share of voice for this platform
-                from analytics.models import ShareOfVoiceAnalytics
-                sov = ShareOfVoiceAnalytics.objects.filter(
-                    competitor=comp,
-                    platform__iexact=platform
-                ).order_by('-timestamp').first()
-                share_of_voice = float(sov.share_percentage) if sov else 0.0
+                share_of_voice = sov_by_competitor.get(comp.id, 0.0)
 
                 # Build response matching serializer format
                 result.append({
