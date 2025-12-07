@@ -23,15 +23,77 @@ import os
 logger = logging.getLogger(__name__)
 
 
-class ReportTemplateViewSet(viewsets.ReadOnlyModelViewSet):
+class ReportTemplateViewSet(viewsets.ModelViewSet):
     """
-    List available report templates
-    Read-only - templates are predefined
+    CRUD operations for report templates
+    - Predefined templates are read-only (visible to all)
+    - Custom templates can be created/updated/deleted by users (organisation-specific)
     """
-    queryset = ReportTemplate.objects.filter(is_active=True)
     serializer_class = ReportTemplateSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = None  # Disable pagination
+
+    def get_queryset(self):
+        """
+        Return:
+        - All active predefined templates
+        - Custom templates belonging to user's organisation
+        """
+        queryset = ReportTemplate.objects.filter(is_active=True)
+
+        # Filter: predefined OR custom templates from user's org
+        from django.db.models import Q
+        queryset = queryset.filter(
+            Q(template_type='predefined') |
+            Q(template_type='custom', organisation=self.request.user.organisation)
+        )
+
+        # Optional filter by template_type
+        template_type = self.request.query_params.get('template_type')
+        if template_type:
+            queryset = queryset.filter(template_type=template_type)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        """Set organisation and created_by for custom templates"""
+        # The serializer's create method already handles this,
+        # but we can also do it here for clarity
+        if serializer.validated_data.get('template_type') == 'custom':
+            serializer.save(
+                organisation=self.request.user.organisation,
+                created_by=self.request.user
+            )
+        else:
+            serializer.save()
+
+    def perform_destroy(self, instance):
+        """Only allow deletion of custom templates owned by user's organisation"""
+        if instance.template_type == 'predefined':
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Cannot delete predefined templates")
+
+        if instance.organisation != self.request.user.organisation:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Cannot delete templates from other organisations")
+
+        # Soft delete
+        instance.is_active = False
+        instance.save()
+
+    def perform_update(self, serializer):
+        """Only allow updating custom templates owned by user's organisation"""
+        instance = self.get_object()
+
+        if instance.template_type == 'predefined':
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Cannot modify predefined templates")
+
+        if instance.organisation != self.request.user.organisation:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Cannot modify templates from other organisations")
+
+        serializer.save()
 
 
 class ScheduledReportViewSet(viewsets.ModelViewSet):

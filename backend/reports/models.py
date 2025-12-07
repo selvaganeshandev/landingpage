@@ -3,10 +3,55 @@ from django.utils import timezone
 
 
 class ReportTemplate(models.Model):
-    """Predefined report templates"""
+    """Predefined and custom report templates"""
+    TEMPLATE_TYPE_CHOICES = [
+        ('predefined', 'Predefined Template'),
+        ('custom', 'Custom Template')
+    ]
+
     name = models.CharField(max_length=100)
     description = models.TextField()
-    sections = models.JSONField(default=list)  # List of section names
+    template_type = models.CharField(
+        max_length=20,
+        choices=TEMPLATE_TYPE_CHOICES,
+        default='predefined',
+        help_text='Type of report template'
+    )
+
+    # For predefined templates (legacy)
+    sections = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='List of section names (used by predefined templates)'
+    )
+
+    # For custom templates (report builder)
+    grid_rows = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Grid layout configuration with widgets for custom reports'
+    )
+
+    # Organisation link (null for predefined, required for custom)
+    organisation = models.ForeignKey(
+        'authentication.Organisation',
+        on_delete=models.CASCADE,
+        related_name='custom_report_templates',
+        null=True,
+        blank=True,
+        help_text='Organisation that owns this custom template (null for predefined templates)'
+    )
+
+    # Creator tracking
+    created_by = models.ForeignKey(
+        'authentication.Account',
+        on_delete=models.SET_NULL,
+        related_name='created_templates',
+        null=True,
+        blank=True,
+        help_text='User who created this custom template'
+    )
+
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
@@ -14,6 +59,9 @@ class ReportTemplate(models.Model):
     class Meta:
         db_table = 'report_templates'
         ordering = ['name']
+        indexes = [
+            models.Index(fields=['organisation', 'template_type'], name='report_tmpl_org_type_idx'),
+        ]
 
     def __str__(self):
         return self.name

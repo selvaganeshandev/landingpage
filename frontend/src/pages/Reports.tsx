@@ -722,48 +722,90 @@ const Reports = () => {
         )}
       </Card> */}
 
-      {/* Templates - Hidden for now */}
-      {/* <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-6">Report Templates</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {templates.map((template: any) => (
-            <div key={template.id} className="p-4 rounded-lg border border-border hover:border-primary transition-all duration-300">
-              {getTemplateThumbnail(template.name)}
-              <h4 className="font-semibold mb-2 mt-4">{template.name}</h4>
-              <p className="text-sm text-muted-foreground mb-3">{template.description}</p>
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs text-muted-foreground">
-                  {template.sections?.length || 0} sections
-                </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handlePreview({
-                    id: template.id,
-                    name: template.name,
-                    description: template.description,
-                    format: ["PDF"],
-                    schedule: "",
-                    lastGenerated: "",
-                    recipients: [],
-                    status: "active"
-                  })}
-                >
-                  <Eye className="h-3 w-3 mr-1" />
-                  Preview
-                </Button>
-              </div>
-              <Button
-                className="w-full"
-                size="sm"
-                onClick={() => handleUseTemplate(template)}
-              >
-                Use Template
-              </Button>
-            </div>
-          ))}
+      {/* Report Templates */}
+      <Card className="p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-semibold">Report Templates</h3>
+          <Button variant="outline" size="sm" onClick={() => navigate('/reports/create-template')}>
+            <Plus className="h-4 w-4 mr-2" />
+            Create Custom Template
+          </Button>
         </div>
-      </Card> */}
+        {templatesLoading ? (
+          <div className="text-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mx-auto mb-4" />
+            <p className="text-muted-foreground">Loading templates...</p>
+          </div>
+        ) : templates.length === 0 ? (
+          <div className="text-center py-12">
+            <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <p className="text-muted-foreground mb-4">No templates created yet</p>
+            <Button onClick={() => navigate('/reports/create-template')}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create Your First Template
+            </Button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {templates.map((template: any) => (
+              <div key={template.id} className="p-4 rounded-lg border border-border hover:border-primary transition-all duration-300">
+                {getTemplateThumbnail(template.name)}
+                <div className="mt-4 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <h4 className="font-semibold text-sm">{template.name}</h4>
+                    {template.template_type === 'custom' && (
+                      <Badge variant="secondary" className="text-xs">Custom</Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground line-clamp-2">{template.description}</p>
+                  {template.template_type === 'custom' && template.grid_rows && (
+                    <span className="text-xs text-muted-foreground">
+                      {template.grid_rows.length} {template.grid_rows.length === 1 ? 'row' : 'rows'}
+                    </span>
+                  )}
+                  {template.template_type === 'predefined' && template.sections && (
+                    <span className="text-xs text-muted-foreground">
+                      {template.sections.length} {template.sections.length === 1 ? 'section' : 'sections'}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <Button
+                    className="flex-1"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handlePreview({
+                      id: template.id,
+                      name: template.name,
+                      description: template.description,
+                      format: ["PDF"],
+                      schedule: "",
+                      lastGenerated: "",
+                      recipients: [],
+                      status: "active",
+                      template_type: template.template_type,
+                      grid_rows: template.grid_rows
+                    })}
+                  >
+                    <Eye className="h-3 w-3 mr-1" />
+                    Preview
+                  </Button>
+                  {template.template_type === 'custom' && (
+                    <Button
+                      className="flex-1"
+                      size="sm"
+                      onClick={() => navigate(`/reports/create-template?template_id=${template.id}`)}
+                    >
+                      <Settings className="h-3 w-3 mr-1" />
+                      Edit
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
 
       {/* API Access - Commented out for now */}
       {/* <Card className="p-6">

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ import {
   Smile,
   Meh,
   Frown,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog,
@@ -269,12 +270,39 @@ const ReportBuilder = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { selectedDomain } = useDomainStore();
+  const [searchParams] = useSearchParams();
+  const templateId = searchParams.get('template_id');
+
   const [gridRows, setGridRows] = useState<GridRow[]>([]);
   const [draggedWidget, setDraggedWidget] = useState<Widget | null>(null);
   const [gridDialogOpen, setGridDialogOpen] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
+  const [isEditMode, setIsEditMode] = useState(false);
+
+  // Fetch template data if editing
+  const { data: templateData, isLoading: isLoadingTemplate } = useQuery({
+    queryKey: ['reportTemplate', templateId],
+    queryFn: async () => {
+      if (!templateId) return null;
+      const response = await apiClient.get(`/reports/templates/${templateId}/`);
+      return response;
+    },
+    enabled: !!templateId,
+  });
+
+  // Load template data into state when editing
+  useEffect(() => {
+    if (templateData && templateId) {
+      setIsEditMode(true);
+      setTemplateName(templateData.name || "");
+      setTemplateDescription(templateData.description || "");
+      if (templateData.grid_rows && Array.isArray(templateData.grid_rows)) {
+        setGridRows(templateData.grid_rows);
+      }
+    }
+  }, [templateData, templateId]);
 
   // Fetch domain statistics
   const { data: domainStats, isLoading: isLoadingStats } = useQuery({
@@ -405,7 +433,7 @@ const ReportBuilder = () => {
   };
 
   // Confirm save
-  const confirmSave = () => {
+  const confirmSave = async () => {
     if (!templateName.trim()) {
       toast({
         title: "Name Required",
@@ -424,21 +452,42 @@ const ReportBuilder = () => {
       return;
     }
 
-    const templateData = {
+    const templatePayload = {
       name: templateName,
       description: templateDescription,
-      gridRows,
+      template_type: "custom",
+      grid_rows: gridRows,
     };
 
-    console.log("Saving template:", templateData);
+    try {
+      if (isEditMode && templateId) {
+        // Update existing template
+        await apiClient.put(`/reports/templates/${templateId}/`, templatePayload);
 
-    toast({
-      title: "Template Saved",
-      description: `"${templateName}" has been saved successfully.`,
-    });
+        toast({
+          title: "Template Updated",
+          description: `"${templateName}" has been updated successfully.`,
+        });
+      } else {
+        // Create new template
+        await apiClient.post("/reports/templates/", templatePayload);
 
-    setSaveDialogOpen(false);
-    navigate("/reports");
+        toast({
+          title: "Template Saved",
+          description: `"${templateName}" has been saved successfully.`,
+        });
+      }
+
+      setSaveDialogOpen(false);
+      navigate("/reports");
+    } catch (error: any) {
+      console.error("Error saving template:", error);
+      toast({
+        title: isEditMode ? "Update Failed" : "Save Failed",
+        description: error.message || "Failed to save template. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   // Render widget preview with dummy data
@@ -751,28 +800,41 @@ const ReportBuilder = () => {
             <Button
               variant="outline"
               size="icon"
-              onClick={() => navigate("/reports")}
+              onClick={() => navigate(-1)}
               className="border-border/50"
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>
               <h1 className="text-3xl font-bold tracking-tight font-inter">
-                Report Template Builder
+                {isEditMode ? "Edit Template" : "Report Template Builder"}
               </h1>
               <p className="text-muted-foreground mt-1">
-                Drag and drop widgets to create your custom report template
+                {isEditMode
+                  ? "Update your custom report template"
+                  : "Drag and drop widgets to create your custom report template"}
               </p>
             </div>
           </div>
           <Button onClick={handleSaveTemplate}>
             <Save className="h-4 w-4 mr-2" />
-            Save Template
+            {isEditMode ? "Update Template" : "Save Template"}
           </Button>
         </div>
       </div>
 
+      {/* Loading state */}
+      {isLoadingTemplate && templateId && (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+            <p className="text-muted-foreground">Loading template...</p>
+          </div>
+        </div>
+      )}
+
       {/* Main content */}
+      {(!isLoadingTemplate || !templateId) && (
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar - Available Widgets */}
         <div className="w-80 border-r border-border/50 bg-card/50 backdrop-blur-sm p-6 overflow-y-auto">
@@ -982,6 +1044,7 @@ const ReportBuilder = () => {
           </div>
         </div>
       </div>
+      )}
 
       {/* Grid Selection Dialog */}
       <Dialog open={gridDialogOpen} onOpenChange={setGridDialogOpen}>
@@ -1056,9 +1119,13 @@ const ReportBuilder = () => {
       <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Save Report Template</DialogTitle>
+            <DialogTitle>
+              {isEditMode ? "Update Report Template" : "Save Report Template"}
+            </DialogTitle>
             <DialogDescription>
-              Enter a name and description for your custom report template.
+              {isEditMode
+                ? "Update the name and description for your custom report template."
+                : "Enter a name and description for your custom report template."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -1103,7 +1170,9 @@ const ReportBuilder = () => {
             <Button variant="outline" onClick={() => setSaveDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={confirmSave}>Save Template</Button>
+            <Button onClick={confirmSave}>
+              {isEditMode ? "Update Template" : "Save Template"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

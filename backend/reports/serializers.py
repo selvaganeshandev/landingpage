@@ -3,10 +3,26 @@ from .models import ReportTemplate, ScheduledReport, GeneratedReport
 
 
 class ReportTemplateSerializer(serializers.ModelSerializer):
+    created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
+    organisation_name = serializers.CharField(source='organisation.name', read_only=True)
+
     class Meta:
         model = ReportTemplate
-        fields = ['id', 'name', 'description', 'sections', 'is_active', 'created_at']
-        read_only_fields = ['id', 'created_at']
+        fields = [
+            'id', 'name', 'description', 'template_type', 'sections', 'grid_rows',
+            'organisation', 'organisation_name', 'created_by', 'created_by_email',
+            'is_active', 'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at']
+
+    def create(self, validated_data):
+        # Set organisation and created_by from request user for custom templates
+        request = self.context.get('request')
+        if request and hasattr(request, 'user'):
+            if validated_data.get('template_type') == 'custom':
+                validated_data['organisation'] = request.user.organisation
+                validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
 
 class ScheduledReportSerializer(serializers.ModelSerializer):
