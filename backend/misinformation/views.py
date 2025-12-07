@@ -678,14 +678,24 @@ def citations_list(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    # Get all completed prompt analytics
+    # Get pagination params early
+    page = int(request.query_params.get('page', 1))
+    page_size = min(int(request.query_params.get('page_size', 20)), 100)
+
+    # Get filters
+    platform = request.query_params.get('platform')
+    source_type_filter = request.query_params.get('source_type')
+    search = request.query_params.get('search')
+    status_filter = request.query_params.get('status')
+
+    # Build optimized query with select_related for performance
+    # Note: We use select_related to avoid N+1 queries when accessing prompt and group
     analytics_qs = PromptAnalytics.objects.filter(
         prompt__group__domain=domain,
         track_status='COMP'
-    ).exclude(citation_list=[])
+    ).exclude(citation_list=[]).order_by('-created_at')
 
-    # Platform filter
-    platform = request.query_params.get('platform')
+    # Platform filter at DB level
     if platform:
         analytics_qs = analytics_qs.filter(platform=platform)
 
@@ -693,74 +703,88 @@ def citations_list(request):
     all_citations = []
     domain_url_clean = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
 
-    for pa in analytics_qs:
-        if pa.citation_list and isinstance(pa.citation_list, list):
-            for idx, url in enumerate(pa.citation_list):
-                source_domain = extract_domain_from_url(url)
-                is_your_domain = domain_url_clean in url
+    # Pre-fetch all citation URLs for this domain to avoid N+1 queries
+    citation_urls_map = {}
+    for citation_url in CitationURL.objects.filter(domain=domain).only('url', 'crawl_status', 'http_status_code'):
+        citation_urls_map[citation_url.url] = citation_url
 
-                # Source type filter
-                source_type_filter = request.query_params.get('source_type')
-                if source_type_filter:
-                    if source_type_filter == 'your_domain' and not is_your_domain:
+    # Process analytics in batches and use early exit strategy
+    # We'll stop fetching once we have enough results for the current page
+    batch_size = 100
+    offset = 0
+    target_citations = page * page_size + 50  # Fetch a bit extra to account for filtering
+
+    while offset < 1000:  # Max limit to prevent excessive processing
+        batch = analytics_qs[offset:offset + batch_size]
+        if not batch:
+            break
+
+        for pa in batch:
+            if pa.citation_list and isinstance(pa.citation_list, list):
+                for idx, url in enumerate(pa.citation_list):
+                    # Early search filter check (fastest filter)
+                    if search and search.lower() not in url.lower():
                         continue
-                    elif source_type_filter == 'third_party' and is_your_domain:
+
+                    source_domain = extract_domain_from_url(url)
+                    is_your_domain = domain_url_clean in url
+
+                    # Source type filter
+                    if source_type_filter:
+                        if source_type_filter == 'your_domain' and not is_your_domain:
+                            continue
+                        elif source_type_filter == 'third_party' and is_your_domain:
+                            continue
+
+                    # Check if this URL has been crawled (from pre-fetched map)
+                    crawled_citation = citation_urls_map.get(url)
+
+                    display_status = 'pending'
+                    http_status_code = None
+                    crawl_status = 'pending'
+
+                    if crawled_citation:
+                        crawl_status = crawled_citation.crawl_status
+                        http_status_code = crawled_citation.http_status_code
+
+                        if crawl_status == 'success' and http_status_code and http_status_code < 400:
+                            display_status = 'valid'
+                        elif http_status_code and http_status_code >= 400:
+                            display_status = 'broken'
+                        elif crawl_status == 'blocked':
+                            display_status = 'blocked'
+                        elif crawl_status == 'failed':
+                            display_status = 'failed'
+
+                    # Status filter
+                    if status_filter and display_status != status_filter:
                         continue
 
-                # Search filter
-                search = request.query_params.get('search')
-                if search and search.lower() not in url.lower():
-                    continue
+                    all_citations.append({
+                        'url': url,
+                        'source_domain': source_domain,
+                        'is_your_domain': is_your_domain,
+                        'source_type': 'your_domain' if is_your_domain else 'third_party',
+                        'platform': pa.platform,
+                        'created_at': pa.created_at,
+                        'prompt_analytics_id': pa.id,
+                        'display_status': display_status,
+                        'crawl_status': crawl_status,
+                        'http_status_code': http_status_code,
+                        'position_in_response': idx + 1,
+                        'context_snippet': None,
+                    })
 
-                # Check if this URL has been crawled by misinformation scan
-                crawled_citation = CitationURL.objects.filter(
-                    domain=domain,
-                    url=url
-                ).first()
+        # Early exit if we have enough citations for current page
+        if len(all_citations) >= target_citations:
+            break
 
-                display_status = 'pending'
-                http_status_code = None
-                crawl_status = 'pending'
+        offset += batch_size
 
-                if crawled_citation:
-                    crawl_status = crawled_citation.crawl_status
-                    http_status_code = crawled_citation.http_status_code
-
-                    if crawl_status == 'success' and http_status_code and http_status_code < 400:
-                        display_status = 'valid'
-                    elif http_status_code and http_status_code >= 400:
-                        display_status = 'broken'
-                    elif crawl_status == 'blocked':
-                        display_status = 'blocked'
-                    elif crawl_status == 'failed':
-                        display_status = 'failed'
-
-                all_citations.append({
-                    'url': url,
-                    'source_domain': source_domain,
-                    'is_your_domain': is_your_domain,
-                    'source_type': 'your_domain' if is_your_domain else 'third_party',
-                    'platform': pa.platform,
-                    'created_at': pa.created_at,
-                    'prompt_analytics_id': pa.id,
-                    'display_status': display_status,
-                    'crawl_status': crawl_status,
-                    'http_status_code': http_status_code,
-                    'position_in_response': idx + 1,
-                    'context_snippet': None,  # Could extract from context_summary if needed
-                })
-
-    # Status filter (after extraction)
-    status_filter = request.query_params.get('status')
-    if status_filter:
-        all_citations = [c for c in all_citations if c['display_status'] == status_filter]
-
-    # Sort by created_at descending
+    # Sort by created_at descending (citations are already roughly sorted by analytics order)
     all_citations.sort(key=lambda x: x['created_at'], reverse=True)
 
     # Pagination
-    page = int(request.query_params.get('page', 1))
-    page_size = min(int(request.query_params.get('page_size', 20)), 100)
     start = (page - 1) * page_size
     end = start + page_size
 

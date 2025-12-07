@@ -216,6 +216,7 @@ class PromptAnalytics(models.Model):
             models.Index(fields=['prompt', 'is_mention', '-position']),  # Mention analysis
             models.Index(fields=['platform', 'is_mention', 'created_at']),  # Platform trends
             models.Index(fields=['prompt', '-sentiment_score']),  # Sentiment analysis
+            models.Index(fields=['track_status', '-created_at']),  # Citations list filtering
         ]
     
     def __str__(self):

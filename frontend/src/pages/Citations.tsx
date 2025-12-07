@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -54,7 +54,12 @@ const Citations = () => {
   const [platformFilter, setPlatformFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState("all");
-  const pageSize = 20;
+  const [paginationDirection, setPaginationDirection] = useState<'next' | 'prev' | null>(null);
+  const [isPaginationLoading, setIsPaginationLoading] = useState(false);
+  const pageSize = 10; // Reduced from 20 for faster loading
+
+  // Ref to track table container position
+  const tableContainerRef = useRef<HTMLDivElement>(null);
 
   const domainId = selectedDomain?.id?.toString() || "";
 
@@ -63,10 +68,12 @@ const Citations = () => {
     queryKey: ["citationsDashboard", domainId],
     queryFn: () => apiClient.getCitationsDashboard({ domain_id: domainId }),
     enabled: !!domainId,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    refetchOnWindowFocus: false, // Prevent refetch on window focus
   });
 
   // Fetch citations list
-  const { data: citationsData, isLoading: citationsLoading, refetch: refetchCitations } = useQuery({
+  const { data: citationsData, isLoading: citationsLoading, isFetching: citationsFetching, refetch: refetchCitations } = useQuery({
     queryKey: ["citations", domainId, statusFilter, sourceTypeFilter, platformFilter, searchQuery, currentPage],
     queryFn: () =>
       apiClient.getCitations({
@@ -79,6 +86,9 @@ const Citations = () => {
         page_size: pageSize,
       }),
     enabled: !!domainId,
+    staleTime: 2 * 60 * 1000, // Cache for 2 minutes
+    refetchOnWindowFocus: false, // Prevent refetch on window focus
+    keepPreviousData: true, // Keep previous data while fetching new page
   });
 
   // Fetch citations by source
@@ -86,7 +96,21 @@ const Citations = () => {
     queryKey: ["citationsBySource", domainId],
     queryFn: () => apiClient.getCitationsBySource({ domain_id: domainId, limit: 10 }),
     enabled: !!domainId,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    refetchOnWindowFocus: false, // Prevent refetch on window focus
   });
+
+  // Reset loading state when data finishes loading
+  useEffect(() => {
+    if (!citationsFetching && isPaginationLoading) {
+      // Small delay to ensure smooth transition
+      const timer = setTimeout(() => {
+        setIsPaginationLoading(false);
+        setPaginationDirection(null);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [citationsFetching, isPaginationLoading]);
 
   const handleExport = () => {
     toast({
@@ -450,7 +474,7 @@ const Citations = () => {
             </div>
           </div>
 
-          <TabsContent value={activeTab}>
+          <TabsContent value={activeTab} ref={tableContainerRef}>
             <CitationsTable
               citations={filteredCitations}
               isLoading={citationsLoading}
@@ -470,20 +494,41 @@ const Citations = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
+                    onClick={() => {
+                      setPaginationDirection('prev');
+                      setIsPaginationLoading(true);
+                      setCurrentPage((p) => Math.max(1, p - 1));
+                    }}
+                    disabled={currentPage === 1 || isPaginationLoading}
                   >
+                    {isPaginationLoading && paginationDirection === 'prev' ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : null}
                     Previous
                   </Button>
                   <span className="text-sm text-muted-foreground">
-                    Page {currentPage} of {totalPages}
+                    {isPaginationLoading ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Loading...
+                      </span>
+                    ) : (
+                      `Page ${currentPage} of ${totalPages}`
+                    )}
                   </span>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={currentPage === totalPages}
+                    onClick={() => {
+                      setPaginationDirection('next');
+                      setIsPaginationLoading(true);
+                      setCurrentPage((p) => Math.min(totalPages, p + 1));
+                    }}
+                    disabled={currentPage === totalPages || isPaginationLoading}
                   >
+                    {isPaginationLoading && paginationDirection === 'next' ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : null}
                     Next
                   </Button>
                 </div>
@@ -546,8 +591,8 @@ const CitationsTable = ({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {citations.map((citation: any) => (
-            <TableRow key={citation.id} className="hover:bg-muted/20 transition-colors">
+          {citations.map((citation: any, index: number) => (
+            <TableRow key={`${citation.url}-${citation.prompt_analytics_id}-${index}`} className="hover:bg-muted/20 transition-colors">
               <TableCell className="py-2 px-2">{getStatusIcon(citation.display_status)}</TableCell>
               <TableCell className="py-2 px-2">
                 <div className="flex flex-col gap-0.5">
