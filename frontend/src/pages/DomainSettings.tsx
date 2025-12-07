@@ -35,6 +35,10 @@ import {
   Palette,
   Link2,
   Info,
+  Activity,
+  CheckCircle2,
+  AlertCircle,
+  XCircle,
 } from "lucide-react";
 import { PageLoader } from "@/components/PageLoader";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
@@ -117,6 +121,13 @@ export default function DomainSettings() {
   const [isAddingKeywords, setIsAddingKeywords] = useState(false);
   const [showAddKeywords, setShowAddKeywords] = useState(false);
 
+  // Health check state
+  const [healthData, setHealthData] = useState<any>(null);
+  const [isLoadingHealth, setIsLoadingHealth] = useState(false);
+  const [healthError, setHealthError] = useState<string | null>(null);
+  const [healthHistory, setHealthHistory] = useState<any>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
   const MAX_KEYWORD_LENGTH = 255;
 
   const initialTab = searchParams.get("tab") || "basic-info";
@@ -134,6 +145,58 @@ export default function DomainSettings() {
     const newParams = new URLSearchParams(searchParams);
     newParams.set("tab", value);
     setSearchParams(newParams, { replace: true });
+
+    // Fetch health check data when Health tab is activated
+    if (value === 'health' && domainId) {
+      if (!healthData) {
+        fetchHealthCheck();
+      } else if (!healthHistory) {
+        // If we have health data but no history, just fetch history
+        fetchHealthHistory();
+      }
+    }
+  };
+
+  // Fetch health check data
+  const fetchHealthCheck = async () => {
+    if (!domainId) return;
+
+    setIsLoadingHealth(true);
+    setHealthError(null);
+
+    try {
+      const response = await apiClient.getDomainHealthCheck(parseInt(domainId));
+      setHealthData(response);
+
+      // Also fetch updated history
+      fetchHealthHistory();
+    } catch (error: any) {
+      console.error('Error fetching health check:', error);
+      setHealthError(error.message || 'Failed to fetch health check data');
+      toast({
+        title: "Error",
+        description: error.message || "Failed to fetch health check data. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingHealth(false);
+    }
+  };
+
+  // Fetch health check history
+  const fetchHealthHistory = async () => {
+    if (!domainId) return;
+
+    setIsLoadingHistory(true);
+
+    try {
+      const response = await apiClient.getDomainHealthCheckHistory(parseInt(domainId), 5);
+      setHealthHistory(response);
+    } catch (error: any) {
+      console.error('Error fetching health history:', error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
   };
 
   // Load domain data
@@ -888,9 +951,15 @@ export default function DomainSettings() {
             />
             <div>
               <h1 className="text-3xl font-bold capitalize">{domain.name}</h1>
-              <p className="text-muted-foreground">
-                Configure settings for {domain.url}
-              </p>
+              <a
+                href={domain.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-muted-foreground hover:text-primary hover:underline transition-colors inline-flex items-center gap-1"
+              >
+                {domain.url}
+                <Link2 className="h-3 w-3" />
+              </a>
             </div>
           </div>
         </div>
@@ -1029,6 +1098,10 @@ export default function DomainSettings() {
           <TabsTrigger value="integrations" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
             <Link2 className="h-4 w-4" />
             Integrations
+          </TabsTrigger>
+          <TabsTrigger value="health" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+            <Activity className="h-4 w-4" />
+            Health
           </TabsTrigger>
         </TabsList>
 
@@ -1430,6 +1503,250 @@ export default function DomainSettings() {
               <div className="text-sm text-muted-foreground text-center py-4">
                 More integrations coming soon (Slack, Webhooks, etc.)
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Health Tab */}
+        <TabsContent value="health" className="space-y-4 mt-6">
+          <Card className="border border-border">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Website Health Check</CardTitle>
+                <CardDescription>
+                  Technical assessment of your website's AI-friendliness and SEO optimization
+                </CardDescription>
+              </div>
+              <Button
+                onClick={fetchHealthCheck}
+                disabled={isLoadingHealth}
+                size="sm"
+                variant="outline"
+              >
+                {isLoadingHealth ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Checking...
+                  </>
+                ) : (
+                  <>
+                    <Activity className="h-4 w-4 mr-2" />
+                    Run Health Check
+                  </>
+                )}
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {isLoadingHealth ? (
+                <div className="flex items-center justify-center p-12">
+                  <div className="text-center space-y-3">
+                    <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+                    <p className="text-sm text-muted-foreground">Analyzing your website...</p>
+                  </div>
+                </div>
+              ) : healthError ? (
+                <div className="p-6 bg-destructive/10 rounded-lg border border-destructive/20 text-center">
+                  <XCircle className="h-8 w-8 text-destructive mx-auto mb-2" />
+                  <p className="text-sm text-destructive font-medium">{healthError}</p>
+                  <Button
+                    onClick={fetchHealthCheck}
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                  >
+                    Try Again
+                  </Button>
+                </div>
+              ) : healthData ? (
+                <>
+                  {/* Overall Score */}
+                  <div className="flex items-center justify-center p-8 bg-gradient-to-br from-primary/5 to-primary/10 rounded-lg border border-primary/20">
+                    <div className="text-center">
+                      <div className="text-6xl font-bold text-primary mb-2">
+                        {healthData.percentage}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        out of 100 ({healthData.health_score}/{healthData.max_score} points)
+                      </div>
+                      <div className="mt-3">
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${
+                            healthData.grade_color === 'green' ? 'border-green-500 text-green-600' :
+                            healthData.grade_color === 'blue' ? 'border-blue-500 text-blue-600' :
+                            healthData.grade_color === 'yellow' ? 'border-yellow-500 text-yellow-600' :
+                            'border-red-500 text-red-600'
+                          }`}
+                        >
+                          {healthData.grade}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary Stats */}
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="p-4 rounded-lg border border-green-200 bg-green-50 dark:bg-green-900/10">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                        <span className="text-sm font-medium text-green-900 dark:text-green-100">Passed</span>
+                      </div>
+                      <div className="text-2xl font-bold text-green-600 mt-1">{healthData.summary.passed}</div>
+                    </div>
+                    <div className="p-4 rounded-lg border border-yellow-200 bg-yellow-50 dark:bg-yellow-900/10">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 text-yellow-600" />
+                        <span className="text-sm font-medium text-yellow-900 dark:text-yellow-100">Warnings</span>
+                      </div>
+                      <div className="text-2xl font-bold text-yellow-600 mt-1">{healthData.summary.warnings}</div>
+                    </div>
+                    <div className="p-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-900/10">
+                      <div className="flex items-center gap-2">
+                        <XCircle className="h-4 w-4 text-red-600" />
+                        <span className="text-sm font-medium text-red-900 dark:text-red-100">Failed</span>
+                      </div>
+                      <div className="text-2xl font-bold text-red-600 mt-1">{healthData.summary.failed}</div>
+                    </div>
+                  </div>
+
+                  {/* Health Checks */}
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-sm">Detailed Health Checks</h3>
+                    {healthData.checks && healthData.checks.map((check: any, index: number) => (
+                      <div
+                        key={index}
+                        className={`flex items-start gap-3 p-4 rounded-lg border ${
+                          check.status === 'pass' ? 'border-green-200 bg-green-50/50 dark:bg-green-900/5' :
+                          check.status === 'warning' ? 'border-yellow-200 bg-yellow-50/50 dark:bg-yellow-900/5' :
+                          'border-red-200 bg-red-50/50 dark:bg-red-900/5'
+                        }`}
+                      >
+                        {check.status === 'pass' ? (
+                          <CheckCircle2 className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
+                        ) : check.status === 'warning' ? (
+                          <AlertCircle className="h-5 w-5 text-yellow-500 mt-0.5 flex-shrink-0" />
+                        ) : (
+                          <XCircle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium text-sm">{check.name}</div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className="text-xs text-muted-foreground">
+                                {check.score}/{check.max_score} pts
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className={`text-xs ${
+                                  check.importance === 'high' || check.importance === 'critical' ? 'border-red-400 text-red-600' :
+                                  check.importance === 'medium' ? 'border-yellow-400 text-yellow-600' :
+                                  'border-gray-400 text-gray-600'
+                                }`}
+                              >
+                                {check.importance}
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {check.message}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Health Check History */}
+                  {healthHistory && healthHistory.history && healthHistory.history.length > 0 && (
+                    <div className="mt-8 pt-6 border-t border-border">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-semibold text-sm">Recent Health Checks</h3>
+                        {healthHistory.trend && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">Trend:</span>
+                            <Badge
+                              variant="outline"
+                              className={`text-xs ${
+                                healthHistory.trend.direction === 'up' ? 'border-green-500 text-green-600' :
+                                healthHistory.trend.direction === 'down' ? 'border-red-500 text-red-600' :
+                                'border-gray-500 text-gray-600'
+                              }`}
+                            >
+                              {healthHistory.trend.direction === 'up' ? '↑' : healthHistory.trend.direction === 'down' ? '↓' : '→'}
+                              {' '}
+                              {healthHistory.trend.change > 0 ? '+' : ''}{healthHistory.trend.change}%
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        {healthHistory.history.map((check: any, index: number) => (
+                          <div
+                            key={check.id}
+                            className={`flex items-center justify-between p-3 rounded-lg border ${
+                              index === 0 ? 'border-primary/30 bg-primary/5' : 'border-border bg-card'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="text-center">
+                                <div className={`text-2xl font-bold ${
+                                  check.grade_color === 'green' ? 'text-green-600' :
+                                  check.grade_color === 'blue' ? 'text-blue-600' :
+                                  check.grade_color === 'yellow' ? 'text-yellow-600' :
+                                  'text-red-600'
+                                }`}>
+                                  {check.percentage}
+                                </div>
+                                <div className="text-xs text-muted-foreground">score</div>
+                              </div>
+                              <div>
+                                <div className="text-sm font-medium">
+                                  {new Date(check.created_at).toLocaleDateString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                  {index === 0 && <span className="ml-2 text-primary text-xs">(Latest)</span>}
+                                </div>
+                                <div className="text-xs text-muted-foreground mt-0.5">
+                                  {check.summary.passed} passed, {check.summary.warnings} warnings, {check.summary.failed} failed
+                                </div>
+                              </div>
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className={`text-xs ${
+                                check.grade_color === 'green' ? 'border-green-500 text-green-600' :
+                                check.grade_color === 'blue' ? 'border-blue-500 text-blue-600' :
+                                check.grade_color === 'yellow' ? 'border-yellow-500 text-yellow-600' :
+                                'border-red-500 text-red-600'
+                              }`}
+                            >
+                              {check.grade}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                      {healthHistory.total_checks > 5 && (
+                        <div className="text-center mt-3">
+                          <p className="text-xs text-muted-foreground">
+                            Showing 5 of {healthHistory.total_checks} total health checks
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-center p-12">
+                  <Activity className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">Run Your First Health Check</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Click the "Run Health Check" button above to analyze your website's AI-friendliness
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

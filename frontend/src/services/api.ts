@@ -426,6 +426,14 @@ export const apiClient = {
       body: JSON.stringify(data),
     }),
 
+  getDomainHealthCheck: (domainId: number) =>
+    apiRequest(`/domains/${domainId}/health-check/`),
+
+  getDomainHealthCheckHistory: (domainId: number, limit?: number) => {
+    const queryParams = limit ? `?limit=${limit}` : '';
+    return apiRequest(`/domains/${domainId}/health-check/history/${queryParams}`);
+  },
+
   bulkCreateKeywords: (domainId: number, keywords: any[]) =>
     apiRequest('/keywords/bulk-create/', {
       method: 'POST',

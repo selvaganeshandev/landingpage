@@ -5,7 +5,10 @@ from .models import Domain, DomainAccess
 class DomainSerializer(serializers.ModelSerializer):
     """Serializer for Domain model"""
     organisation_name = serializers.CharField(source='organisation.name', read_only=True)
-    
+    latest_health_score = serializers.SerializerMethodField()
+    latest_health_grade = serializers.SerializerMethodField()
+    latest_health_grade_color = serializers.SerializerMethodField()
+
     class Meta:
         model = Domain
         fields = [
@@ -16,9 +19,25 @@ class DomainSerializer(serializers.ModelSerializer):
             'total_mentions', 'total_citations', 'visibility_score',
             'average_position', 'active_alerts', 'sentiment_category',
             'sentiment_score', 'processing_status', 'track_message', 'tracked_at',
-            'created_at', 'modified_at'
+            'created_at', 'modified_at',
+            'latest_health_score', 'latest_health_grade', 'latest_health_grade_color'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
+
+    def get_latest_health_score(self, obj):
+        """Get the latest health check score percentage"""
+        latest_check = obj.health_checks.first()  # Already ordered by -created_at in model
+        return latest_check.percentage if latest_check else None
+
+    def get_latest_health_grade(self, obj):
+        """Get the latest health check grade"""
+        latest_check = obj.health_checks.first()
+        return latest_check.grade if latest_check else None
+
+    def get_latest_health_grade_color(self, obj):
+        """Get the latest health check grade color"""
+        latest_check = obj.health_checks.first()
+        return latest_check.grade_color if latest_check else None
 
 
 class DomainDetailSerializer(DomainSerializer):

@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/services/api";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search, Activity } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -1446,23 +1446,53 @@ export default function OrganizationSettings() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      {/* Status Badge */}
+                    <div className="flex items-center gap-3">
+                      {/* Health Score Display - First */}
+                      {domain.latest_health_score !== undefined && domain.latest_health_score !== null ? (
+                        <button
+                          onClick={() => navigate(`/organization-settings/domains/${domain.id}?tab=health`)}
+                          className="flex flex-col items-center justify-center px-2 py-1 hover:opacity-80 transition-opacity cursor-pointer"
+                          title="View health check details"
+                        >
+                          <div className={`text-xl font-bold leading-none ${
+                            domain.latest_health_grade_color === 'green' ? 'text-green-600' :
+                            domain.latest_health_grade_color === 'blue' ? 'text-blue-600' :
+                            domain.latest_health_grade_color === 'yellow' ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {domain.latest_health_score}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                            Health
+                          </div>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => navigate(`/organization-settings/domains/${domain.id}?tab=health`)}
+                          className="flex items-center gap-1 px-2 py-1 hover:opacity-80 transition-opacity cursor-pointer"
+                          title="Run health check"
+                        >
+                          <Activity className="h-3.5 w-3.5 text-primary" />
+                          <span className="text-primary font-medium text-xs">Run</span>
+                        </button>
+                      )}
+
+                      {/* Status Badge - Second */}
                       {isProcessing && (
-                        <Badge variant="outline" className="gap-1 border-orange-500 text-orange-600 bg-orange-50">
-                          <Loader2 className="h-3 w-3 animate-spin" />
+                        <Badge variant="outline" className="gap-1.5 border-orange-500 text-orange-600 bg-orange-50 px-3 py-1">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           {getStatusLabel()}
                         </Badge>
                       )}
                       {isFailed && (
-                        <Badge variant="outline" className="gap-1 border-red-500 text-red-600 bg-red-50">
-                          <AlertCircle className="h-3 w-3" />
+                        <Badge variant="outline" className="gap-1.5 border-red-500 text-red-600 bg-red-50 px-3 py-1">
+                          <AlertCircle className="h-3.5 w-3.5" />
                           Failed
                         </Badge>
                       )}
                       {isCompleted && (
-                        <Badge variant="outline" className="gap-1 border-green-500 text-green-600 bg-green-50">
-                          <CheckCircle2 className="h-3 w-3" />
+                        <Badge variant="outline" className="gap-1.5 border-green-500 text-green-600 bg-green-50 px-3 py-1">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
                           Ready
                         </Badge>
                       )}

@@ -8,6 +8,8 @@ urlpatterns = [
     path('generate-semantic-keywords/', views.generate_semantic_keywords, name='generate_semantic_keywords'),
     path('<int:pk>/', views.domain_detail, name='domain_detail'),
     path('<int:pk>/keywords/', views.domain_keywords, name='domain_keywords'),
+    path('<int:domain_id>/health-check/', views.domain_health_check, name='domain_health_check'),
+    path('<int:domain_id>/health-check/history/', views.domain_health_check_history, name='domain_health_check_history'),
 
     # Domain Access Management
     path('<int:domain_id>/access/', views.domain_access_list, name='domain_access_list'),

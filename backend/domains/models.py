@@ -176,3 +176,88 @@ class DomainAccess(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.domain.name}"
+
+
+class DomainHealthCheck(models.Model):
+    """
+    Stores historical health check results for domains
+    Tracks AI-friendliness and SEO optimization over time
+    """
+    GRADE_CHOICES = [
+        ('Excellent', 'Excellent'),
+        ('Good', 'Good'),
+        ('Fair', 'Fair'),
+        ('Poor', 'Poor'),
+    ]
+
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='health_checks',
+        help_text="Domain this health check belongs to"
+    )
+    health_score = models.PositiveIntegerField(
+        help_text="Total health score achieved (0-100)"
+    )
+    max_score = models.PositiveIntegerField(
+        default=100,
+        help_text="Maximum possible score"
+    )
+    percentage = models.PositiveIntegerField(
+        help_text="Health score as percentage"
+    )
+    grade = models.CharField(
+        max_length=10,
+        choices=GRADE_CHOICES,
+        help_text="Grade based on percentage (Excellent/Good/Fair/Poor)"
+    )
+    grade_color = models.CharField(
+        max_length=10,
+        help_text="Color for grade display (green/blue/yellow/red)"
+    )
+
+    # Store detailed check results as JSON
+    checks = models.JSONField(
+        help_text="Array of individual check results with status, score, message"
+    )
+
+    # Summary statistics
+    total_checks = models.PositiveIntegerField(
+        help_text="Total number of checks performed"
+    )
+    passed_checks = models.PositiveIntegerField(
+        help_text="Number of checks that passed"
+    )
+    warning_checks = models.PositiveIntegerField(
+        help_text="Number of checks with warnings"
+    )
+    failed_checks = models.PositiveIntegerField(
+        help_text="Number of checks that failed"
+    )
+
+    # Metadata
+    checked_by = models.ForeignKey(
+        'authentication.Account',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='health_checks_performed',
+        help_text="User who initiated the health check"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Timestamp when health check was performed"
+    )
+
+    class Meta:
+        db_table = 'domain_health_checks'
+        verbose_name = 'Domain Health Check'
+        verbose_name_plural = 'Domain Health Checks'
+        ordering = ['-created_at']  # Most recent first
+        indexes = [
+            models.Index(fields=['domain', '-created_at']),
+            models.Index(fields=['domain', '-health_score']),
+            models.Index(fields=['grade', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.domain.name} - {self.percentage}% ({self.grade}) - {self.created_at.strftime('%Y-%m-%d %H:%M')}"

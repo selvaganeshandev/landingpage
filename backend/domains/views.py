@@ -726,3 +726,419 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def domain_health_check(request, domain_id):
+    """
+    Perform comprehensive health checks on a domain to assess AI-friendliness
+    Uses ScrapingDog API for reliable web scraping
+    Checks: HTTPS, robots.txt, sitemap, meta tags, schema markup, content structure
+    """
+    import requests
+    from urllib.parse import urljoin, urlparse
+    import time
+    import re
+
+    try:
+        domain = get_object_or_404(Domain, id=domain_id)
+        url = domain.url
+
+        # Ensure URL has protocol
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+
+        health_score = 0
+        max_score = 100
+        checks = []
+
+        # 1. HTTPS Check (10 points)
+        https_check = {
+            'name': 'HTTPS/SSL Certificate',
+            'status': 'pass' if url.startswith('https://') else 'fail',
+            'score': 10 if url.startswith('https://') else 0,
+            'max_score': 10,
+            'message': 'Website uses HTTPS' if url.startswith('https://') else 'Website should use HTTPS for security',
+            'importance': 'high'
+        }
+        checks.append(https_check)
+        health_score += https_check['score']
+
+        # Get ScrapingDog API key from settings (optional, will fallback to direct request)
+        scrapingdog_api_key = getattr(settings, "SCRAPINGDOG_API_KEY", None)
+
+        # Fetch the homepage using ScrapingDog (with fallback to direct request)
+        try:
+            start_time = time.time()
+            html_content = None
+
+            # Try ScrapingDog first if API key is available
+            if scrapingdog_api_key:
+                try:
+                    scrapingdog_url = "https://api.scrapingdog.com/scrape"
+                    params = {
+                        'api_key': scrapingdog_api_key,
+                        'url': url,
+                        'dynamic': 'false'
+                    }
+
+                    scrapingdog_response = requests.get(scrapingdog_url, params=params, timeout=30)
+
+                    if scrapingdog_response.status_code == 200:
+                        html_content = scrapingdog_response.text
+                        logger.info(f"Successfully fetched {url} using ScrapingDog")
+                    elif scrapingdog_response.status_code == 403:
+                        logger.warning(f"ScrapingDog API returned 403 - API key might be invalid or quota exceeded. Falling back to direct request.")
+                    else:
+                        logger.warning(f"ScrapingDog returned status {scrapingdog_response.status_code}. Falling back to direct request.")
+                except Exception as sd_error:
+                    logger.warning(f"ScrapingDog error: {str(sd_error)}. Falling back to direct request.")
+
+            # Fallback to direct request if ScrapingDog failed or not configured
+            if not html_content:
+                response = requests.get(url, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }, timeout=30)
+                html_content = response.text
+                logger.info(f"Successfully fetched {url} using direct request")
+
+            load_time = time.time() - start_time
+
+            # 2. Page Load Speed (10 points)
+            speed_score = 10 if load_time < 3 else (5 if load_time < 6 else 0)
+            speed_check = {
+                'name': 'Page Load Speed',
+                'status': 'pass' if load_time < 3 else ('warning' if load_time < 6 else 'fail'),
+                'score': speed_score,
+                'max_score': 10,
+                'message': f'Page loads in {load_time:.2f}s' + (' (Excellent)' if load_time < 3 else ' (Needs improvement)'),
+                'importance': 'medium'
+            }
+            checks.append(speed_check)
+            health_score += speed_score
+
+            # Parse HTML using regex for basic checks (no BeautifulSoup needed)
+
+            # 3. Meta Title (10 points)
+            title_match = re.search(r'<title[^>]*>(.*?)</title>', html_content, re.IGNORECASE | re.DOTALL)
+            title_text = title_match.group(1).strip() if title_match else None
+            title_check = {
+                'name': 'Meta Title Tag',
+                'status': 'pass' if title_text and len(title_text) > 0 else 'fail',
+                'score': 10 if (title_text and len(title_text) > 0) else 0,
+                'max_score': 10,
+                'message': f'Title: "{title_text[:60]}..."' if title_text else 'Missing title tag',
+                'importance': 'high'
+            }
+            checks.append(title_check)
+            health_score += title_check['score']
+
+            # 4. Meta Description (10 points)
+            meta_desc_match = re.search(r'<meta\s+name=["\']description["\']\s+content=["\'](.*?)["\']', html_content, re.IGNORECASE)
+            if not meta_desc_match:
+                meta_desc_match = re.search(r'<meta\s+content=["\'](.*?)["\']\s+name=["\']description["\']', html_content, re.IGNORECASE)
+            meta_desc = meta_desc_match.group(1) if meta_desc_match else None
+            desc_check = {
+                'name': 'Meta Description',
+                'status': 'pass' if meta_desc else 'fail',
+                'score': 10 if meta_desc else 0,
+                'max_score': 10,
+                'message': 'Meta description present' if meta_desc else 'Missing meta description',
+                'importance': 'high'
+            }
+            checks.append(desc_check)
+            health_score += desc_check['score']
+
+            # 5. Schema.org Structured Data (15 points)
+            schema_scripts = re.findall(r'<script\s+type=["\']application/ld\+json["\'][^>]*>.*?</script>', html_content, re.IGNORECASE | re.DOTALL)
+            schema_check = {
+                'name': 'Structured Data (Schema.org)',
+                'status': 'pass' if len(schema_scripts) > 0 else 'fail',
+                'score': 15 if len(schema_scripts) > 0 else 0,
+                'max_score': 15,
+                'message': f'Found {len(schema_scripts)} structured data blocks' if schema_scripts else 'No structured data found',
+                'importance': 'high'
+            }
+            checks.append(schema_check)
+            health_score += schema_check['score']
+
+            # 6. Heading Structure (10 points)
+            h1_tags = re.findall(r'<h1[^>]*>.*?</h1>', html_content, re.IGNORECASE | re.DOTALL)
+            headings_check = {
+                'name': 'Proper Heading Structure',
+                'status': 'pass' if len(h1_tags) == 1 else ('warning' if len(h1_tags) > 1 else 'fail'),
+                'score': 10 if len(h1_tags) == 1 else (5 if len(h1_tags) > 1 else 0),
+                'max_score': 10,
+                'message': f'Found {len(h1_tags)} H1 tag(s)' + (' (Perfect)' if len(h1_tags) == 1 else ' (Should have exactly one)'),
+                'importance': 'medium'
+            }
+            checks.append(headings_check)
+            health_score += headings_check['score']
+
+            # 7. Images with Alt Text (10 points)
+            images = re.findall(r'<img[^>]*>', html_content, re.IGNORECASE)
+            images_with_alt = [img for img in images if re.search(r'alt=["\'][^"\']*["\']', img)]
+            alt_ratio = len(images_with_alt) / len(images) if images else 0
+            alt_score = int(10 * alt_ratio)
+            alt_check = {
+                'name': 'Images with Alt Text',
+                'status': 'pass' if alt_ratio >= 0.8 else ('warning' if alt_ratio >= 0.5 else 'fail'),
+                'score': alt_score,
+                'max_score': 10,
+                'message': f'{len(images_with_alt)}/{len(images)} images have alt text ({int(alt_ratio*100)}%)' if images else 'No images found',
+                'importance': 'medium'
+            }
+            checks.append(alt_check)
+            health_score += alt_score
+
+            # 8. Mobile-Friendly Viewport (5 points)
+            viewport = re.search(r'<meta\s+name=["\']viewport["\']', html_content, re.IGNORECASE)
+            mobile_check = {
+                'name': 'Mobile-Friendly (Viewport)',
+                'status': 'pass' if viewport else 'fail',
+                'score': 5 if viewport else 0,
+                'max_score': 5,
+                'message': 'Viewport meta tag present' if viewport else 'Missing viewport meta tag',
+                'importance': 'high'
+            }
+            checks.append(mobile_check)
+            health_score += mobile_check['score']
+
+        except requests.RequestException as e:
+            logger.error(f"Error fetching domain {url}: {str(e)}")
+            checks.append({
+                'name': 'Website Accessibility',
+                'status': 'fail',
+                'score': 0,
+                'max_score': 75,
+                'message': f'Unable to access website: {str(e)}',
+                'importance': 'critical'
+            })
+
+        # 9. robots.txt Check (2 points)
+        try:
+            robots_url = urljoin(url, '/robots.txt')
+            robots_response = requests.get(robots_url, timeout=5)
+            robots_exists = robots_response.status_code == 200
+            robots_check = {
+                'name': 'robots.txt',
+                'status': 'pass' if robots_exists else 'warning',
+                'score': 2 if robots_exists else 0,
+                'max_score': 2,
+                'message': 'robots.txt found' if robots_exists else 'robots.txt not found (optional but recommended)',
+                'importance': 'low'
+            }
+            checks.append(robots_check)
+            health_score += robots_check['score']
+        except:
+            checks.append({
+                'name': 'robots.txt',
+                'status': 'warning',
+                'score': 0,
+                'max_score': 2,
+                'message': 'Unable to check robots.txt',
+                'importance': 'low'
+            })
+
+        # 10. llms.txt Check (5 points) - AI/LLM crawler instructions
+        try:
+            llms_url = urljoin(url, '/llms.txt')
+            llms_response = requests.get(llms_url, timeout=5)
+            llms_exists = llms_response.status_code == 200
+            llms_check = {
+                'name': 'llms.txt',
+                'status': 'pass' if llms_exists else 'warning',
+                'score': 5 if llms_exists else 0,
+                'max_score': 5,
+                'message': 'llms.txt found - provides AI crawler guidance' if llms_exists else 'llms.txt not found (recommended for AI optimization)',
+                'importance': 'medium'
+            }
+            checks.append(llms_check)
+            health_score += llms_check['score']
+        except:
+            checks.append({
+                'name': 'llms.txt',
+                'status': 'warning',
+                'score': 0,
+                'max_score': 5,
+                'message': 'Unable to check llms.txt',
+                'importance': 'medium'
+            })
+
+        # 11. sitemap.xml Check (8 points)
+        try:
+            sitemap_url = urljoin(url, '/sitemap.xml')
+            sitemap_response = requests.get(sitemap_url, timeout=5)
+            sitemap_exists = sitemap_response.status_code == 200
+            sitemap_check = {
+                'name': 'XML Sitemap',
+                'status': 'pass' if sitemap_exists else 'fail',
+                'score': 8 if sitemap_exists else 0,
+                'max_score': 8,
+                'message': 'sitemap.xml found' if sitemap_exists else 'sitemap.xml not found',
+                'importance': 'high'
+            }
+            checks.append(sitemap_check)
+            health_score += sitemap_check['score']
+        except:
+            checks.append({
+                'name': 'XML Sitemap',
+                'status': 'fail',
+                'score': 0,
+                'max_score': 8,
+                'message': 'Unable to check sitemap.xml',
+                'importance': 'high'
+            })
+
+        # Calculate percentage
+        health_percentage = int((health_score / max_score) * 100)
+
+        # Determine health grade
+        if health_percentage >= 80:
+            grade = 'Excellent'
+            grade_color = 'green'
+        elif health_percentage >= 60:
+            grade = 'Good'
+            grade_color = 'blue'
+        elif health_percentage >= 40:
+            grade = 'Fair'
+            grade_color = 'yellow'
+        else:
+            grade = 'Poor'
+            grade_color = 'red'
+
+        # Calculate summary
+        summary = {
+            'total_checks': len(checks),
+            'passed': len([c for c in checks if c['status'] == 'pass']),
+            'warnings': len([c for c in checks if c['status'] == 'warning']),
+            'failed': len([c for c in checks if c['status'] == 'fail'])
+        }
+
+        # Save health check results to database
+        from .models import DomainHealthCheck
+        health_check = DomainHealthCheck.objects.create(
+            domain=domain,
+            health_score=health_score,
+            max_score=max_score,
+            percentage=health_percentage,
+            grade=grade,
+            grade_color=grade_color,
+            checks=checks,
+            total_checks=summary['total_checks'],
+            passed_checks=summary['passed'],
+            warning_checks=summary['warnings'],
+            failed_checks=summary['failed'],
+            checked_by=request.user
+        )
+
+        return Response({
+            'success': True,
+            'id': health_check.id,
+            'domain': {
+                'id': domain.id,
+                'name': domain.name,
+                'url': domain.url
+            },
+            'health_score': health_score,
+            'max_score': max_score,
+            'percentage': health_percentage,
+            'grade': grade,
+            'grade_color': grade_color,
+            'checks': checks,
+            'summary': summary,
+            'created_at': health_check.created_at.isoformat()
+        })
+
+    except Exception as e:
+        logger.error(f"Error in domain health check: {str(e)}")
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def domain_health_check_history(request, domain_id):
+    """
+    Get health check history for a domain
+    Returns list of past health checks with optional limit
+    """
+    from .models import DomainHealthCheck
+
+    try:
+        domain = get_object_or_404(Domain, id=domain_id)
+
+        # Get limit from query params (default 10, max 100)
+        limit = request.GET.get('limit', '10')
+        try:
+            limit = int(limit)
+            if limit > 100:
+                limit = 100
+        except ValueError:
+            limit = 10
+
+        # Get health check history
+        health_checks = DomainHealthCheck.objects.filter(
+            domain=domain
+        ).order_by('-created_at')[:limit]
+
+        # Serialize the data
+        history = []
+        for check in health_checks:
+            history.append({
+                'id': check.id,
+                'health_score': check.health_score,
+                'max_score': check.max_score,
+                'percentage': check.percentage,
+                'grade': check.grade,
+                'grade_color': check.grade_color,
+                'checks': check.checks,
+                'summary': {
+                    'total_checks': check.total_checks,
+                    'passed': check.passed_checks,
+                    'warnings': check.warning_checks,
+                    'failed': check.failed_checks
+                },
+                'checked_by': {
+                    'id': check.checked_by.id if check.checked_by else None,
+                    'email': check.checked_by.email if check.checked_by else None,
+                    'first_name': check.checked_by.first_name if check.checked_by else None,
+                    'last_name': check.checked_by.last_name if check.checked_by else None,
+                } if check.checked_by else None,
+                'created_at': check.created_at.isoformat()
+            })
+
+        # Get latest check for comparison
+        latest_check = health_checks.first() if health_checks.exists() else None
+
+        # Calculate trend if we have at least 2 checks
+        trend = None
+        if len(history) >= 2:
+            current_score = history[0]['percentage']
+            previous_score = history[1]['percentage']
+            trend = {
+                'direction': 'up' if current_score > previous_score else 'down' if current_score < previous_score else 'stable',
+                'change': current_score - previous_score
+            }
+
+        return Response({
+            'success': True,
+            'domain': {
+                'id': domain.id,
+                'name': domain.name,
+                'url': domain.url
+            },
+            'history': history,
+            'trend': trend,
+            'total_checks': DomainHealthCheck.objects.filter(domain=domain).count()
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching health check history: {str(e)}")
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
