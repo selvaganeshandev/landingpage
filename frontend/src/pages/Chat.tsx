@@ -7,6 +7,7 @@ import { useDomainStore } from "@/stores/domainStore";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { api } from "@/services/api";
 import { useSearchParams } from "react-router-dom";
+import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 import {
   Popover,
   PopoverContent,
@@ -57,25 +58,204 @@ const getRandomLoadingMessage = () => {
 
 // Helper function to format markdown-like text to HTML
 const formatMessage = (text: string): string => {
-  return text
-    // Bold: **text** or __text__
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/__(.*?)__/g, '<strong>$1</strong>')
-    // Italic: *text* or _text_
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/_(.*?)_/g, '<em>$1</em>')
-    // Headers: ### text
-    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-    .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-    // Links: [text](url) - open in new tab
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">$1</a>')
-    // Bullet lists: - item or * item
-    .replace(/^[\-\*] (.+)$/gim, '<li>$1</li>')
-    // Paragraph breaks - double newline creates proper spacing
-    .replace(/\n\n/g, '</p><p>')
-    // Single newlines within paragraphs
-    .replace(/\n/g, '<br />');
+  // Apply inline formatting (bold, links)
+  const applyInlineFormatting = (str: string): string => {
+    return str
+      // Bold: **text** or __text__
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/__(.*?)__/g, '<strong>$1</strong>')
+      // Links: [text](url)
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">$1</a>');
+  };
+
+  const lines = text.split('\n');
+  const result: string[] = [];
+  let inNumberedList = false;
+  let inBulletList = false;
+  let paragraphBuffer: string[] = [];
+  let lastWasNumbered = false;
+
+  const flushParagraph = () => {
+    if (paragraphBuffer.length > 0) {
+      result.push(`<p>${applyInlineFormatting(paragraphBuffer.join('<br />'))}</p>`);
+      paragraphBuffer = [];
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Empty line - only close lists if truly done
+    if (trimmed === '') {
+      flushParagraph();
+
+      // Check if next non-empty line is also a list item
+      let nextIsNumbered = false;
+      let nextIsBullet = false;
+      for (let j = i + 1; j < lines.length; j++) {
+        const nextTrimmed = lines[j].trim();
+        if (nextTrimmed !== '') {
+          nextIsNumbered = /^\d+\.\s+/.test(nextTrimmed);
+          nextIsBullet = /^[\•\-\*]\s+/.test(nextTrimmed);
+          break;
+        }
+      }
+
+      // Close nested bullet list if we had one
+      if (lastWasNumbered && inBulletList) {
+        result.push('</ul>');
+        result.push('</li>'); // Close the numbered item containing the bullets
+        inBulletList = false;
+        lastWasNumbered = false;
+      }
+
+      // Only close standalone bullet list if next is not a bullet
+      if (inBulletList && !lastWasNumbered && !nextIsBullet) {
+        result.push('</ul>');
+        inBulletList = false;
+      }
+
+      // Only close numbered list if next is not numbered
+      if (inNumberedList && !nextIsNumbered) {
+        result.push('</ol>');
+        inNumberedList = false;
+      }
+
+      continue;
+    }
+
+    // Headers
+    const h3Match = trimmed.match(/^###\s+(.+)$/);
+    const h2Match = trimmed.match(/^##\s+(.+)$/);
+    const h1Match = trimmed.match(/^#\s+(.+)$/);
+
+    if (h3Match || h2Match || h1Match) {
+      flushParagraph();
+      if (inBulletList) { result.push('</ul>'); inBulletList = false; }
+      if (inNumberedList) { result.push('</ol>'); inNumberedList = false; }
+      const level = h3Match ? 3 : h2Match ? 2 : 1;
+      const content = h3Match?.[1] || h2Match?.[1] || h1Match?.[1] || '';
+      result.push(`<h${level}>${applyInlineFormatting(content)}</h${level}>`);
+      lastWasNumbered = false;
+      continue;
+    }
+
+    // Numbered list
+    const numberedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
+    if (numberedMatch) {
+      flushParagraph();
+
+      // Close any nested bullet list from previous numbered item
+      if (inBulletList && lastWasNumbered) {
+        result.push('</ul>');
+        result.push('</li>'); // Close previous numbered item
+        inBulletList = false;
+        lastWasNumbered = false;
+      }
+
+      // Close standalone bullet list if transitioning to numbered
+      if (inBulletList && !inNumberedList) {
+        result.push('</ul>');
+        inBulletList = false;
+      }
+
+      // Start numbered list if not already in one
+      if (!inNumberedList) {
+        result.push('<ol>');
+        inNumberedList = true;
+      }
+
+      // Check if next line is a bullet (nested list)
+      const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : '';
+      const nextIsBullet = /^[\•\-\*]\s+/.test(nextLine);
+
+      if (nextIsBullet) {
+        // Start list item but don't close it yet (nested bullets coming)
+        result.push(`<li>${applyInlineFormatting(numberedMatch[1])}`);
+        lastWasNumbered = true;
+      } else {
+        result.push(`<li>${applyInlineFormatting(numberedMatch[1])}</li>`);
+        lastWasNumbered = false;
+      }
+      continue;
+    }
+
+    // Bullet list
+    const bulletMatch = trimmed.match(/^[\•\-\*]\s+(.+)$/);
+    if (bulletMatch) {
+      flushParagraph();
+
+      // If this is nested under a numbered item
+      if (lastWasNumbered) {
+        if (!inBulletList) {
+          result.push('<ul>');
+          inBulletList = true;
+        }
+        result.push(`<li>${applyInlineFormatting(bulletMatch[1])}</li>`);
+
+        // Check if next line is also a bullet or numbered item
+        const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : '';
+        const nextIsBullet = /^[\•\-\*]\s+/.test(nextLine);
+        const nextIsNumbered = /^\d+\.\s+/.test(nextLine);
+
+        // If next is numbered, close nested list and the numbered item
+        if (nextIsNumbered) {
+          result.push('</ul>');
+          result.push('</li>'); // Close the numbered list item
+          inBulletList = false;
+          lastWasNumbered = false;
+        }
+        // If next is not a bullet and not numbered, close nested list
+        else if (!nextIsBullet) {
+          result.push('</ul>');
+          result.push('</li>'); // Close the numbered list item
+          inBulletList = false;
+          lastWasNumbered = false;
+        }
+      } else {
+        // Standalone bullet list
+        if (inNumberedList) {
+          result.push('</ol>');
+          inNumberedList = false;
+        }
+        if (!inBulletList) {
+          result.push('<ul>');
+          inBulletList = true;
+        }
+        result.push(`<li>${applyInlineFormatting(bulletMatch[1])}</li>`);
+      }
+      continue;
+    }
+
+    // Regular text
+    if (inBulletList && !lastWasNumbered) {
+      result.push('</ul>');
+      inBulletList = false;
+    }
+    if (inNumberedList && !lastWasNumbered) {
+      result.push('</ol>');
+      inNumberedList = false;
+    }
+    if (lastWasNumbered) {
+      result.push('</li>');
+      lastWasNumbered = false;
+    }
+    paragraphBuffer.push(trimmed);
+  }
+
+  flushParagraph();
+
+  // Close any open lists
+  if (inBulletList) {
+    result.push('</ul>');
+    if (lastWasNumbered) result.push('</li>');
+  }
+  if (inNumberedList) {
+    result.push('</ol>');
+  }
+
+  return result.join('');
 };
 
 export const Chat = () => {
@@ -278,20 +458,7 @@ export const Chat = () => {
 
   const userName = user?.first_name || user?.email?.split('@')[0] || "there";
 
-  // Get domain favicon URL
-  const getDomainFavicon = () => {
-    if (selectedDomain?.url) {
-      try {
-        const url = new URL(selectedDomain.url.startsWith('http') ? selectedDomain.url : `https://${selectedDomain.url}`);
-        return `${url.protocol}//${url.hostname}/favicon.ico`;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  };
-
-  // Fallback to user initials (not domain)
+  // Fallback to user initials when no domain is selected
   const getUserInitials = () => {
     if (user?.first_name && user?.last_name) {
       return `${user.first_name.charAt(0)}${user.last_name.charAt(0)}`.toUpperCase();
@@ -312,8 +479,18 @@ export const Chat = () => {
           <div className="w-[60%] text-center">
             {/* Greeting - above input */}
             <div className="mb-8 flex items-center justify-center gap-3">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-r from-primary to-secondary flex-shrink-0">
-                <Sparkles className="h-6 w-6 text-white" />
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-r from-primary to-secondary flex-shrink-0 overflow-hidden">
+                {selectedDomain ? (
+                  <img
+                    key={selectedDomain.id}
+                    src={getFaviconUrl(selectedDomain.url, 48)}
+                    alt="Project favicon"
+                    className="w-full h-full object-cover"
+                    onError={(e) => handleFaviconError(e, selectedDomain.url, selectedDomain.name, 48)}
+                  />
+                ) : (
+                  <span className="text-xs font-semibold text-white">{getUserInitials()}</span>
+                )}
               </div>
               <h2 className="text-4xl font-bold">
                 {getGreeting()}, {userName}
@@ -529,27 +706,36 @@ export const Chat = () => {
                 <div
                   key={index}
                   className={`flex items-start transition-colors animate-fade-in ${
-                    message.role === 'user' ? 'gap-2 py-2 px-3' : 'py-1.5'
+                    message.role === 'user' ? 'py-3' : 'py-1.5'
                   }`}
                   style={{
-                    backgroundColor: message.role === 'user' ? 'hsl(240, 10%, 96%)' : 'transparent',
                     animationDelay: `${index * 0.05}s`,
                   }}
                 >
                   {message.role === 'user' ? (
-                    <>
-                      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center mt-0.5">
-                        <span className="text-xs font-semibold text-primary">{getUserInitials()}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[15px] leading-normal">
-                          <p className="whitespace-pre-wrap m-0">{message.content}</p>
+                    <div className="flex-1 min-w-0">
+                      <div className="bg-primary/5 rounded-2xl px-4 py-3 inline-flex items-start gap-3 max-w-full">
+                        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden">
+                          {selectedDomain ? (
+                            <img
+                              key={selectedDomain.id}
+                              src={getFaviconUrl(selectedDomain.url, 28)}
+                              alt="Project favicon"
+                              className="w-full h-full object-cover"
+                              onError={(e) => handleFaviconError(e, selectedDomain.url, selectedDomain.name, 28)}
+                            />
+                          ) : (
+                            <span className="text-xs font-semibold text-primary">{getUserInitials()}</span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[15px] leading-normal whitespace-pre-wrap m-0">{message.content}</p>
                         </div>
                       </div>
-                    </>
+                    </div>
                   ) : (
                     <div className="w-full">
-                      <div className="text-[15px] leading-[1.5] prose prose-sm max-w-none [&>p]:my-2 [&>p]:leading-[1.5] [&>h1]:text-lg [&>h1]:font-semibold [&>h1]:my-2 [&>h1]:leading-tight [&>h2]:text-base [&>h2]:font-semibold [&>h2]:my-2 [&>h2]:leading-tight [&>h3]:text-base [&>h3]:font-medium [&>h3]:my-2 [&>h3]:leading-tight [&>ul]:my-2 [&>ul]:pl-4 [&>ul]:space-y-1 [&>li]:leading-[1.5] [&>strong]:font-semibold">
+                      <div className="text-[15px] leading-relaxed [&_p]:mb-3 [&_p]:leading-relaxed [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mb-2 [&_h1]:mt-4 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mb-2 [&_h2]:mt-3 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mb-2 [&_h3]:mt-3 [&_ul]:my-2 [&_ul]:pl-6 [&_ul]:list-disc [&_ul_ul]:mt-1 [&_ul_ul]:mb-1 [&_ol]:my-2 [&_ol]:pl-6 [&_ol]:list-decimal [&_li]:leading-relaxed [&_li]:mb-2 [&_li_ul]:mt-2 [&_strong]:font-semibold [&_a]:text-primary [&_a]:underline [&_a]:hover:text-primary/80">
                         <div dangerouslySetInnerHTML={{ __html: formatMessage(message.content) }} />
                       </div>
                     </div>
@@ -565,8 +751,8 @@ export const Chat = () => {
                 </div>
               )}
               {isStreaming && streamingText && (
-                <div className="py-1.5">
-                  <div className="text-[15px] leading-[1.5] prose prose-sm max-w-none [&>p]:my-2 [&>p]:leading-[1.5] [&>h1]:text-lg [&>h1]:font-semibold [&>h1]:my-2 [&>h1]:leading-tight [&>h2]:text-base [&>h2]:font-semibold [&>h2]:my-2 [&>h2]:leading-tight [&>h3]:text-base [&>h3]:font-medium [&>h3]:my-2 [&>h3]:leading-tight [&>ul]:my-2 [&>ul]:pl-4 [&>ul]:space-y-1 [&>li]:leading-[1.5] [&>strong]:font-semibold">
+                <div className="py-1.5 w-full">
+                  <div className="text-[15px] leading-relaxed [&_p]:mb-3 [&_p]:leading-relaxed [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mb-2 [&_h1]:mt-4 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mb-2 [&_h2]:mt-3 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mb-2 [&_h3]:mt-3 [&_ul]:my-2 [&_ul]:pl-6 [&_ul]:list-disc [&_ul_ul]:mt-1 [&_ul_ul]:mb-1 [&_ol]:my-2 [&_ol]:pl-6 [&_ol]:list-decimal [&_li]:leading-relaxed [&_li]:mb-2 [&_li_ul]:mt-2 [&_strong]:font-semibold [&_a]:text-primary [&_a]:underline [&_a]:hover:text-primary/80">
                     <div dangerouslySetInnerHTML={{ __html: formatMessage(streamingText) }} />
                     <span className="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-middle"></span>
                   </div>
