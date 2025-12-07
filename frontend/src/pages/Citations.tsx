@@ -60,8 +60,21 @@ const Citations = () => {
 
   // Ref to track table container position
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const savedScrollPosition = useRef<number>(0);
 
   const domainId = selectedDomain?.id?.toString() || "";
+
+  // Prevent scroll on page change
+  useEffect(() => {
+    if (isPaginationLoading) {
+      // Save current scroll position
+      savedScrollPosition.current = window.scrollY;
+    } else if (savedScrollPosition.current > 0) {
+      // Restore scroll position after loading
+      window.scrollTo(0, savedScrollPosition.current);
+      savedScrollPosition.current = 0;
+    }
+  }, [isPaginationLoading]);
 
   // Fetch dashboard data
   const { data: dashboardData, isLoading: dashboardLoading, refetch: refetchDashboard } = useQuery({
@@ -555,9 +568,22 @@ const CitationsTable = ({
   formatDate: (date: string) => string;
   truncateUrl: (url: string, maxLength?: number) => string;
 }) => {
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [tableHeight, setTableHeight] = useState<number>(0);
+
+  // Measure actual table height after render
+  useEffect(() => {
+    if (tableRef.current && !isLoading) {
+      setTableHeight(tableRef.current.offsetHeight);
+    }
+  }, [citations, isLoading]);
+
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center py-12">
+      <div
+        className="rounded-lg border border-border overflow-hidden flex flex-col items-center justify-center"
+        style={{ height: tableHeight > 0 ? `${tableHeight}px` : '650px' }}
+      >
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-4" />
         <p className="text-muted-foreground">Loading citations...</p>
       </div>
@@ -566,7 +592,7 @@ const CitationsTable = ({
 
   if (citations.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12">
+      <div className="rounded-lg border border-border overflow-hidden flex flex-col items-center justify-center" style={{ height: '650px' }}>
         <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
           <Link2 className="h-8 w-8 text-muted-foreground" />
         </div>
@@ -577,7 +603,7 @@ const CitationsTable = ({
   }
 
   return (
-    <div className="rounded-lg border border-border overflow-hidden">
+    <div ref={tableRef} className="rounded-lg border border-border overflow-hidden">
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/30">
