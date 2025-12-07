@@ -28,6 +28,7 @@ import { useDomainStore } from "@/stores/domainStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainIdNumber } from "@/utils/activeDomain";
 import DOMPurify from 'dompurify';
+import { formatMessage, FORMATTED_MESSAGE_CLASSES } from "@/utils/textFormatter";
 
 interface Mention {
   id: number;
@@ -83,118 +84,6 @@ const Mentions = () => {
   const [availableSentiments, setAvailableSentiments] = useState<string[]>(["Positive", "Negative", "Neutral"]);
   const [showAll, setShowAll] = useState(false);
   const { toast } = useToast();
-
-  // Function to process content and convert markdown-like syntax to HTML
-  const processContent = (content: string) => {
-    if (!content) return '';
-
-    let processedContent = content;
-
-    // Replace headers (#### h4, ### h3, ## h2, # h1) - order matters!
-    processedContent = processedContent.replace(/^####\s*(.+)$/gm, '<h4>$1</h4>');
-    processedContent = processedContent.replace(/^###\s*(.+)$/gm, '<h3>$1</h3>');
-    processedContent = processedContent.replace(/^##\s*(.+)$/gm, '<h2>$1</h2>');
-    processedContent = processedContent.replace(/^#\s*(.+)$/gm, '<h1>$1</h1>');
-
-    // Replace **text** with <strong>text</strong> for bold
-    processedContent = processedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-
-    // Replace *text* or _text_ with <em>text</em> for italic (but not when it's part of a list marker)
-    processedContent = processedContent.replace(/(?<!\*)\*(?!\*)([^\*\n]+?)\*(?!\*)/g, '<em>$1</em>');
-    processedContent = processedContent.replace(/_([^_\n]+?)_/g, '<em>$1</em>');
-
-    // Convert markdown links [text](url) to HTML links first
-    processedContent = processedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-
-    // Process lists - split by lines and process
-    const lines = processedContent.split('\n');
-    let inUnorderedList = false;
-    let inOrderedList = false;
-    let processedLines: string[] = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const trimmedLine = line.trim();
-
-      // Unordered list items (-, *, +)
-      if (/^[-\*\+]\s+/.test(trimmedLine)) {
-        const content = trimmedLine.replace(/^[-\*\+]\s+/, '');
-        if (!inUnorderedList) {
-          processedLines.push('<ul>');
-          inUnorderedList = true;
-        }
-        processedLines.push(`<li>${content}</li>`);
-      }
-      // Ordered list items (1., 2., etc.)
-      else if (/^\d+\.\s+/.test(trimmedLine)) {
-        const content = trimmedLine.replace(/^\d+\.\s+/, '');
-        if (!inOrderedList) {
-          processedLines.push('<ol>');
-          inOrderedList = true;
-        }
-        processedLines.push(`<li>${content}</li>`);
-      }
-      // Not a list item
-      else {
-        // Close any open lists
-        if (inUnorderedList) {
-          processedLines.push('</ul>');
-          inUnorderedList = false;
-        }
-        if (inOrderedList) {
-          processedLines.push('</ol>');
-          inOrderedList = false;
-        }
-        processedLines.push(line);
-      }
-    }
-
-    // Close any remaining open lists
-    if (inUnorderedList) {
-      processedLines.push('</ul>');
-    }
-    if (inOrderedList) {
-      processedLines.push('</ol>');
-    }
-
-    processedContent = processedLines.join('\n');
-
-    // Convert standalone URLs to clickable links
-    const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/g;
-    processedContent = processedContent.replace(urlRegex, (match, url) => {
-      // Check if this URL is already inside an HTML tag
-      if (processedContent.includes(`href="${url}"`) || processedContent.includes(`href='${url}'`)) {
-        return match; // Don't process if already in an href attribute
-      }
-      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
-    });
-
-    // Also handle www. links
-    const wwwRegex = /(www\.[^\s<>"{}|\\^`\[\]]+)/g;
-    processedContent = processedContent.replace(wwwRegex, (match, url) => {
-      // Check if this www. URL is already inside an HTML tag
-      if (processedContent.includes(`href="https://${url}"`) || processedContent.includes(`href='https://${url}'`)) {
-        return match; // Don't process if already in an href attribute
-      }
-      return `<a href="https://${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
-    });
-
-    // Smarter line break handling:
-    // 1. Convert double line breaks to paragraph breaks (for spacing between paragraphs)
-    processedContent = processedContent.replace(/\n\n+/g, '<br><br>');
-
-    // 2. Remove single line breaks around block-level elements (headers, lists)
-    processedContent = processedContent.replace(/<br>\s*<(h[1-6]|ul|ol|li)>/g, '<$1>');
-    processedContent = processedContent.replace(/<\/(h[1-6]|ul|ol|li)>\s*<br>/g, '</$1>');
-
-    // 3. Convert remaining single line breaks to <br> (for line breaks within paragraphs)
-    processedContent = processedContent.replace(/\n/g, '<br>');
-
-    // 4. Clean up excessive breaks
-    processedContent = processedContent.replace(/(<br>\s*){3,}/g, '<br><br>');
-
-    return processedContent;
-  };
 
   const { selectedDomain } = useDomainStore();
   const { user } = useAuth();
@@ -475,9 +364,9 @@ const Mentions = () => {
 
               <div className="bg-gradient-to-br from-muted/30 to-muted/50 rounded-xl p-5 border border-border backdrop-blur-sm">
                 <div
-                  className="text-sm leading-relaxed prose prose-sm max-w-none [&_h1]:font-semibold [&_h1]:text-lg [&_h1]:mt-4 [&_h1]:mb-2 [&_h1]:text-foreground [&_h2]:font-semibold [&_h2]:text-base [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-foreground [&_h3]:font-semibold [&_h3]:text-sm [&_h3]:mt-4 [&_h3]:mb-2 [&_h3]:text-foreground [&_h4]:font-semibold [&_h4]:text-sm [&_h4]:mt-3 [&_h4]:mb-2 [&_h4]:text-foreground [&_a]:text-primary [&_a]:underline [&_a]:hover:no-underline [&_strong]:font-semibold [&_strong]:text-foreground [&_b]:font-semibold [&_b]:text-foreground [&_em]:italic [&_i]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-3 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-3 [&_li]:my-1"
+                  className={FORMATTED_MESSAGE_CLASSES}
                   dangerouslySetInnerHTML={{
-                    __html: DOMPurify.sanitize(processContent(mention.description || mention.context_summary || 'No description available'), {
+                    __html: DOMPurify.sanitize(formatMessage(mention.description || mention.context_summary || 'No description available'), {
                       ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'blockquote', 'code', 'pre', 'br', 'div', 'span'],
                       ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'id']
                     })

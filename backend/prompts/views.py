@@ -1495,7 +1495,11 @@ def prompt_group_detail(request, group_id):
             platform_filter = request.GET.get('platform')
             
             # Get detailed information about the group
-            prompts = group.prompts.all().order_by('created_at')
+            # Use prefetch_related to avoid N+1 queries when accessing prompt analytics
+            prompts = group.prompts.prefetch_related(
+                'analytics'  # Prefetch all analytics for each prompt
+            ).all().order_by('created_at')
+
             # Get all analytics for the group (for summary stats)
             analytics = PromptAnalytics.objects.filter(prompt__group=group)
             # Analytics filtering is done per-prompt below to show all variants with platform-specific metrics
@@ -1507,49 +1511,64 @@ def prompt_group_detail(request, group_id):
                 group.prompts.filter(type='secondary').order_by('created_at').values_list('prompt', flat=True)
             )
             
-            # Get full_ai_response from latest analytics for primary prompt
-            # Try multiple fallbacks to find the best available response
+            # Get full_ai_response from latest analytics
+            # If platform_filter is provided, get response for that specific platform
+            # Otherwise, get response from primary prompt
             primary_full_ai_response = ''
-            if primary_prompt_obj:
+
+            # Build the base query - if platform_filter exists, search across all prompts in group for that platform
+            # Otherwise, only search within primary_prompt_obj
+            if platform_filter:
+                # When filtering by platform, get the response from ANY prompt in the group that matches the platform
+                base_query = PromptAnalytics.objects.filter(
+                    prompt__group=group,
+                    platform=platform_filter
+                )
+            elif primary_prompt_obj:
+                # No platform filter, get from primary prompt
+                base_query = PromptAnalytics.objects.filter(
+                    prompt=primary_prompt_obj
+                )
+            else:
+                base_query = PromptAnalytics.objects.none()
+
+            # Try multiple fallbacks to find the best available response
+            if base_query.exists():
                 # First try: Get latest published mention analytics
-                latest_primary_analytic = PromptAnalytics.objects.filter(
-                    prompt=primary_prompt_obj,
+                latest_primary_analytic = base_query.filter(
                     is_mention=True,
                     is_published=True
                 ).order_by('-created_at').first()
-                
+
                 # Fallback 1: If no mention found, try any published analytics
                 if not latest_primary_analytic:
-                    latest_primary_analytic = PromptAnalytics.objects.filter(
-                        prompt=primary_prompt_obj,
+                    latest_primary_analytic = base_query.filter(
                         is_published=True
                     ).order_by('-created_at').first()
-                
+
                 # Fallback 2: If still nothing, try any analytics record (even if not published)
                 if not latest_primary_analytic:
-                    latest_primary_analytic = PromptAnalytics.objects.filter(
-                        prompt=primary_prompt_obj
-                    ).order_by('-created_at').first()
-                
+                    latest_primary_analytic = base_query.order_by('-created_at').first()
+
                 if latest_primary_analytic and latest_primary_analytic.context_summary:
                     primary_full_ai_response = latest_primary_analytic.context_summary
-            
+
             prompts_data = []
             for prompt in prompts:
-                # Get all analytics for this prompt (for platforms list)
-                all_prompt_analytics = PromptAnalytics.objects.filter(prompt=prompt)
-                
+                # Use prefetched analytics instead of making new queries
+                all_prompt_analytics = prompt.analytics.all()
+
                 # Get platform-filtered analytics for metrics calculation
                 if platform_filter:
-                    # Filter by both prompt and platform
-                    prompt_analytics = all_prompt_analytics.filter(platform=platform_filter)
+                    # Filter in Python (analytics already prefetched)
+                    prompt_analytics = [a for a in all_prompt_analytics if a.platform == platform_filter]
                 else:
                     # Use all analytics for this prompt
-                    prompt_analytics = all_prompt_analytics
+                    prompt_analytics = list(all_prompt_analytics)
                 
                 # Sum total_mentions from analytics records, not just count records
                 # This matches how group.total_mentions is calculated (Sum of total_mentions field)
-                mention_analytics = prompt_analytics.filter(is_mention=True, is_published=True)
+                mention_analytics = [a for a in prompt_analytics if a.is_mention and a.is_published]
                 prompt_mentions = sum(analytic.total_mentions or 1 for analytic in mention_analytics)
                 
                 # Calculate citations count
@@ -1565,8 +1584,7 @@ def prompt_group_detail(request, group_id):
                 total_negative_mentions = 0
                 
                 # Only count mentions (is_mention=True, is_published=True) for sentiment calculation
-                mention_analytics = prompt_analytics.filter(is_mention=True, is_published=True)
-                for analytic in mention_analytics:
+                for analytic in mention_analytics:  # Already filtered above
                     # Use sentiment_category directly (like Mentions page does)
                     sentiment_category = getattr(analytic, 'sentiment_category', None)
                     # Count each mention (not just analytics record)
@@ -1600,22 +1618,22 @@ def prompt_group_detail(request, group_id):
                 }
                 
                 # Get latest analytics for position (most recent tracked date)
-                latest_analytic = prompt_analytics.order_by('-created_at').first()
+                latest_analytic = max(prompt_analytics, key=lambda a: a.created_at) if prompt_analytics else None
                 latest_position = float(latest_analytic.position) if latest_analytic else 0
-                
+
                 # Get latest mention analytics ID for navigation
-                latest_mention_analytic = prompt_analytics.filter(
-                    is_mention=True, 
-                    is_published=True
-                ).order_by('-created_at').first()
-                latest_mention_id = latest_mention_analytic.id if latest_mention_analytic else None
-                
+                mention_analytics_sorted = sorted(
+                    mention_analytics,
+                    key=lambda a: a.created_at,
+                    reverse=True
+                )
+                latest_mention_id = mention_analytics_sorted[0].id if mention_analytics_sorted else None
+
                 # Get all platforms that have analytics for this prompt (for filtering)
                 # Use all_prompt_analytics to get complete platform list, not filtered
-                all_platforms = list(all_prompt_analytics.values_list('platform', flat=True).distinct())
-                all_platforms = [p for p in all_platforms if p]  # Remove None/empty values
+                all_platforms = list(set(a.platform for a in all_prompt_analytics if a.platform))
                 # Ensure we have at least the latest platform if available
-                latest_all_analytic = all_prompt_analytics.order_by('-created_at').first()
+                latest_all_analytic = max(all_prompt_analytics, key=lambda a: a.created_at) if all_prompt_analytics else None
                 if latest_all_analytic and latest_all_analytic.platform and latest_all_analytic.platform not in all_platforms:
                     all_platforms.append(latest_all_analytic.platform)
                 
@@ -1627,9 +1645,9 @@ def prompt_group_detail(request, group_id):
                     'last_tracked_at': prompt.tracked_at.isoformat() if prompt.tracked_at else None,
                     'track_message': prompt.track_message,
                     'created_at': prompt.created_at.isoformat(),
-                    'analytics_count': prompt_analytics.count(),
+                    'analytics_count': len(prompt_analytics),
                     'mentions_count': prompt_mentions,
-                    'avg_position': float(prompt_analytics.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0),
+                    'avg_position': sum(a.position for a in prompt_analytics if a.position) / len([a for a in prompt_analytics if a.position]) if any(a.position for a in prompt_analytics) else 0.0,
                     'latest_position': latest_position,
                     'citations_count': total_citations,
                     'sentiment': sentiment_percentages,
@@ -1676,7 +1694,30 @@ def prompt_group_detail(request, group_id):
                     'count': int(agg['mention_count']),
                     'avg_position': float(avg_pos)
                 })
-            
+
+            # Fallback: if no snapshot data, calculate from analytics directly
+            if not platform_dist:
+                # Get all analytics for the group
+                all_analytics = PromptAnalytics.objects.filter(
+                    prompt__group=group,
+                    is_mention=True,
+                    is_published=True
+                ).exclude(platform__isnull=True).exclude(platform='')
+
+                # Aggregate by platform
+                from django.db.models import Count, Avg
+                platform_stats = all_analytics.values('platform').annotate(
+                    count=Count('id'),
+                    avg_position=Avg('position')
+                ).order_by('-count')
+
+                for stat in platform_stats:
+                    platform_dist.append({
+                        'platform': stat['platform'],
+                        'count': stat['count'],
+                        'avg_position': float(stat['avg_position'] or 0)
+                    })
+
             # Sort by count descending
             platform_dist.sort(key=lambda x: x['count'], reverse=True)
 
@@ -1812,7 +1853,7 @@ def prompt_group_detail(request, group_id):
             except Exception as e:
                 logger.warning(f"Error calculating average position for group {group.id}: {e}")
                 calculated_avg_position = float(group.average_position)
-            
+
             return Response({
                 'group': {
                     'id': group.id,

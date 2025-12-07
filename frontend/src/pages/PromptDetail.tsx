@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -31,6 +32,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
 import DOMPurify from 'dompurify';
 import { PageLoader } from "@/components/PageLoader";
+import { formatMessage, FORMATTED_MESSAGE_CLASSES } from "@/utils/textFormatter";
 import {
   LineChart,
   Line,
@@ -53,6 +55,8 @@ const PromptDetail = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingPrompts, setIsLoadingPrompts] = useState(false);
   const [selectedPlatform, setSelectedPlatform] = useState<string>("ChatGPT");
+  const [selectedResponsePlatform, setSelectedResponsePlatform] = useState<string>("");
+  const [platformResponses, setPlatformResponses] = useState<Record<string, string>>({});
 
   // Initial load - load everything once
   useEffect(() => {
@@ -77,11 +81,94 @@ const PromptDetail = () => {
       setPromptGroup(response.group);
       const promptsData = response.group?.prompts || [];
       setPrompts(promptsData);
+
+      // Load full AI responses for each unique platform
+      const platforms = new Set<string>();
+      promptsData.forEach((p: any) => {
+        if (p.platforms && Array.isArray(p.platforms)) {
+          p.platforms.forEach((platform: string) => {
+            if (platform) platforms.add(platform);
+          });
+        }
+        if (p.platform) platforms.add(p.platform);
+      });
+
+      // Fetch full responses for each platform
+      const responsesMap: Record<string, string> = {};
+
+      // First, check if we have a primary response and which platform it belongs to
+      const primaryPlatform = promptsData.find((p: any) => p.full_ai_response)?.platform ||
+                             promptsData.find((p: any) => p.platforms?.[0])?.platforms?.[0];
+
+      if (response.group?.primary_full_ai_response && primaryPlatform) {
+        responsesMap[primaryPlatform] = response.group.primary_full_ai_response;
+        console.log(`Using primary response for ${primaryPlatform}:`, {
+          hasResponse: true,
+          length: response.group.primary_full_ai_response.length
+        });
+      }
+
+      // Fetch all platform responses in parallel for better performance
+      const platformsToFetch = Array.from(platforms).filter(p => !responsesMap[p]);
+
+      if (platformsToFetch.length > 0) {
+        console.log(`Fetching responses for ${platformsToFetch.length} platforms in parallel:`, platformsToFetch);
+
+        const platformPromises = platformsToFetch.map(async (platform) => {
+          try {
+            console.log(`Fetching response for ${platform}...`);
+            const platformResponse = await apiClient.getPromptGroupDetail(parseInt(id!), { platform });
+
+            // Try multiple sources for the response
+            let platformFullResponse = null;
+
+            if (platformResponse.group?.prompts?.[0]?.full_ai_response) {
+              // First priority: prompt's own full_ai_response
+              platformFullResponse = platformResponse.group.prompts[0].full_ai_response;
+              console.log(`✓ Found response in prompt.full_ai_response for ${platform}`);
+            } else if (platformResponse.group?.primary_full_ai_response) {
+              // Second priority: group's primary_full_ai_response (when filtered by platform, this should be platform-specific)
+              platformFullResponse = platformResponse.group.primary_full_ai_response;
+              console.log(`✓ Found response in group.primary_full_ai_response for ${platform}`);
+            }
+
+            if (platformFullResponse) {
+              console.log(`✓ Stored response for ${platform}, length: ${platformFullResponse.length}`);
+              return { platform, response: platformFullResponse };
+            } else {
+              console.warn(`✗ No response found for ${platform}`);
+              return { platform, response: null };
+            }
+          } catch (error) {
+            console.error(`Failed to load response for ${platform}:`, error);
+            return { platform, response: null };
+          }
+        });
+
+        // Wait for all platforms to complete in parallel
+        const results = await Promise.all(platformPromises);
+
+        // Store all results in the map
+        results.forEach(({ platform, response }) => {
+          if (response) {
+            responsesMap[platform] = response;
+          }
+        });
+      }
+
+      setPlatformResponses(responsesMap);
+
       // Debug: Log the full AI response availability
       console.log('Prompt Group Response:', {
         hasPrimaryFullAiResponse: !!response.group?.primary_full_ai_response,
         primaryFullAiResponseLength: response.group?.primary_full_ai_response?.length || 0,
-        primaryFullAiResponsePreview: response.group?.primary_full_ai_response?.substring(0, 100) || 'N/A'
+        primaryFullAiResponsePreview: response.group?.primary_full_ai_response?.substring(0, 100) || 'N/A',
+        totalPrompts: promptsData.length,
+        platformResponses: Object.keys(responsesMap).map(platform => ({
+          platform,
+          hasResponse: !!responsesMap[platform],
+          length: responsesMap[platform]?.length || 0
+        }))
       });
     } catch (error: any) {
       const errorMessage = error.message || "Failed to load prompt group details";
@@ -168,6 +255,23 @@ const PromptDetail = () => {
     return Array.from(platforms).sort();
   }, [prompts]);
 
+  // Get the full AI response for the selected platform
+  const selectedFullAiResponse = useMemo(() => {
+    if (!selectedResponsePlatform) {
+      return promptGroup?.primary_full_ai_response || '';
+    }
+
+    // Find the prompt for the selected platform
+    const platformPrompt = prompts.find((p: any) => {
+      if (p.platforms && Array.isArray(p.platforms)) {
+        return p.platforms.includes(selectedResponsePlatform);
+      }
+      return p.platform === selectedResponsePlatform;
+    });
+
+    return platformPrompt?.full_ai_response || promptGroup?.primary_full_ai_response || '';
+  }, [selectedResponsePlatform, prompts, promptGroup]);
+
   // Set default platform to ChatGPT if available, otherwise use first available platform
   useEffect(() => {
     if (availablePlatforms.length > 0) {
@@ -181,6 +285,17 @@ const PromptDetail = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availablePlatforms]);
 
+  // Set default response platform when data loads
+  useEffect(() => {
+    if (availablePlatforms.length > 0 && !selectedResponsePlatform) {
+      const defaultPlatform = availablePlatforms.includes('ChatGPT')
+        ? 'ChatGPT'
+        : availablePlatforms[0];
+      setSelectedResponsePlatform(defaultPlatform);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availablePlatforms]);
+
   const formatDate = (dateString: string | null) => {
     if (!dateString) return "N/A";
     try {
@@ -189,118 +304,6 @@ const PromptDetail = () => {
     } catch {
       return dateString;
     }
-  };
-
-  // Function to process content and convert markdown-like syntax to HTML
-  const processContent = (content: string) => {
-    if (!content) return '';
-
-    let processedContent = content;
-
-    // Replace headers (#### h4, ### h3, ## h2, # h1) - order matters!
-    processedContent = processedContent.replace(/^####\s*(.+)$/gm, '<h4>$1</h4>');
-    processedContent = processedContent.replace(/^###\s*(.+)$/gm, '<h3>$1</h3>');
-    processedContent = processedContent.replace(/^##\s*(.+)$/gm, '<h2>$1</h2>');
-    processedContent = processedContent.replace(/^#\s*(.+)$/gm, '<h1>$1</h1>');
-
-    // Replace **text** with <strong>text</strong> for bold
-    processedContent = processedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-
-    // Replace *text* or _text_ with <em>text</em> for italic (but not when it's part of a list marker)
-    processedContent = processedContent.replace(/(?<!\*)\*(?!\*)([^\*\n]+?)\*(?!\*)/g, '<em>$1</em>');
-    processedContent = processedContent.replace(/_([^_\n]+?)_/g, '<em>$1</em>');
-
-    // Convert markdown links [text](url) to HTML links first
-    processedContent = processedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-
-    // Process lists - split by lines and process
-    const lines = processedContent.split('\n');
-    let inUnorderedList = false;
-    let inOrderedList = false;
-    let processedLines: string[] = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const trimmedLine = line.trim();
-
-      // Unordered list items (-, *, +)
-      if (/^[-\*\+]\s+/.test(trimmedLine)) {
-        const content = trimmedLine.replace(/^[-\*\+]\s+/, '');
-        if (!inUnorderedList) {
-          processedLines.push('<ul>');
-          inUnorderedList = true;
-        }
-        processedLines.push(`<li>${content}</li>`);
-      }
-      // Ordered list items (1., 2., etc.)
-      else if (/^\d+\.\s+/.test(trimmedLine)) {
-        const content = trimmedLine.replace(/^\d+\.\s+/, '');
-        if (!inOrderedList) {
-          processedLines.push('<ol>');
-          inOrderedList = true;
-        }
-        processedLines.push(`<li>${content}</li>`);
-      }
-      // Not a list item
-      else {
-        // Close any open lists
-        if (inUnorderedList) {
-          processedLines.push('</ul>');
-          inUnorderedList = false;
-        }
-        if (inOrderedList) {
-          processedLines.push('</ol>');
-          inOrderedList = false;
-        }
-        processedLines.push(line);
-      }
-    }
-
-    // Close any remaining open lists
-    if (inUnorderedList) {
-      processedLines.push('</ul>');
-    }
-    if (inOrderedList) {
-      processedLines.push('</ol>');
-    }
-
-    processedContent = processedLines.join('\n');
-
-    // Convert standalone URLs to clickable links
-    const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/g;
-    processedContent = processedContent.replace(urlRegex, (match, url) => {
-      // Check if this URL is already inside an HTML tag
-      if (processedContent.includes(`href="${url}"`) || processedContent.includes(`href='${url}'`)) {
-        return match; // Don't process if already in an href attribute
-      }
-      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
-    });
-
-    // Also handle www. links
-    const wwwRegex = /(www\.[^\s<>"{}|\\^`\[\]]+)/g;
-    processedContent = processedContent.replace(wwwRegex, (match, url) => {
-      // Check if this www. URL is already inside an HTML tag
-      if (processedContent.includes(`href="https://${url}"`) || processedContent.includes(`href='https://${url}'`)) {
-        return match; // Don't process if already in an href attribute
-      }
-      return `<a href="https://${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
-    });
-
-    // Smarter line break handling:
-    // 1. Convert double line breaks to paragraph breaks (for spacing between paragraphs)
-    processedContent = processedContent.replace(/\n\n+/g, '<br><br>');
-
-    // 2. Remove single line breaks around block-level elements (headers, lists)
-    processedContent = processedContent.replace(/<br>\s*<(h[1-6]|ul|ol|li)>/g, '<$1>');
-    processedContent = processedContent.replace(/<\/(h[1-6]|ul|ol|li)>\s*<br>/g, '</$1>');
-
-    // 3. Convert remaining single line breaks to <br> (for line breaks within paragraphs)
-    processedContent = processedContent.replace(/\n/g, '<br>');
-
-    // 4. Clean up excessive breaks
-    processedContent = processedContent.replace(/(<br>\s*){3,}/g, '<br><br>');
-
-    return processedContent;
   };
 
   const getSentimentColor = (sentiment: string) => {
@@ -367,7 +370,7 @@ const PromptDetail = () => {
   }));
 
   // Calculate max mentions for bar width calculation
-  const maxMentions = platformBreakdown.length > 0 
+  const maxMentions = platformBreakdown.length > 0
     ? Math.max(...platformBreakdown.map((p: any) => p.mentions || 0))
     : 1;
 
@@ -464,27 +467,64 @@ const PromptDetail = () => {
       </Card>
 
       {/* Full AI Response Section */}
-      {promptGroup?.primary_full_ai_response && promptGroup.primary_full_ai_response.trim() && (
+      {availablePlatforms.length > 0 && (
         <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold font-inter">Full AI Response</h3>
-              <Button variant="ghost" size="sm" onClick={() => handleCopy(promptGroup?.primary_full_ai_response || '')}>
+              <Button variant="ghost" size="sm" onClick={() => handleCopy(selectedFullAiResponse || '')}>
                 <Copy className="h-4 w-4 mr-1" />
                 Copy
               </Button>
             </div>
-            <div className="bg-gradient-to-br from-muted/30 to-muted/50 p-6 rounded-xl border border-border/50 backdrop-blur-sm">
-              <div
-                className="text-sm leading-relaxed prose prose-sm max-w-none [&_h1]:font-semibold [&_h1]:text-lg [&_h1]:mt-4 [&_h1]:mb-2 [&_h1]:text-foreground [&_h2]:font-semibold [&_h2]:text-base [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-foreground [&_h3]:font-semibold [&_h3]:text-sm [&_h3]:mt-4 [&_h3]:mb-2 [&_h3]:text-foreground [&_h4]:font-semibold [&_h4]:text-sm [&_h4]:mt-3 [&_h4]:mb-2 [&_h4]:text-foreground [&_a]:text-primary [&_a]:underline [&_a]:hover:no-underline [&_strong]:font-semibold [&_strong]:text-foreground [&_b]:font-semibold [&_b]:text-foreground [&_em]:italic [&_i]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-3 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-3 [&_li]:my-1"
-                dangerouslySetInnerHTML={{
-                  __html: DOMPurify.sanitize(processContent(promptGroup?.primary_full_ai_response || ''), {
-                    ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'blockquote', 'code', 'pre', 'br', 'div', 'span'],
-                    ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'id']
-                  })
-                }}
-              />
-            </div>
+
+            <Tabs value={selectedResponsePlatform} onValueChange={setSelectedResponsePlatform}>
+              <TabsList className="bg-muted/50 p-1 border border-border mb-4">
+                {availablePlatforms.map((platform) => (
+                  <TabsTrigger
+                    key={platform}
+                    value={platform}
+                    className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white"
+                  >
+                    {platform}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+
+              {availablePlatforms.map((platform) => {
+                // Get the platform-specific response from our pre-loaded map
+                const platformResponse = platformResponses[platform] || '';
+
+                // Debug logging
+                console.log(`Platform Tab: ${platform}`, {
+                  hasResponse: !!platformResponse,
+                  responseLength: platformResponse?.length || 0,
+                  responsePreview: platformResponse?.substring(0, 100) || 'N/A'
+                });
+
+                return (
+                  <TabsContent key={platform} value={platform} className="mt-0">
+                    {platformResponse && platformResponse.trim() ? (
+                      <div className="bg-gradient-to-br from-muted/30 to-muted/50 p-6 rounded-xl border border-border/50 backdrop-blur-sm">
+                        <div
+                          className={FORMATTED_MESSAGE_CLASSES}
+                          dangerouslySetInnerHTML={{
+                            __html: DOMPurify.sanitize(formatMessage(platformResponse), {
+                              ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'blockquote', 'code', 'pre', 'br', 'div', 'span'],
+                              ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'id']
+                            })
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="bg-gradient-to-br from-muted/30 to-muted/50 p-6 rounded-xl border border-border/50 backdrop-blur-sm text-center">
+                        <p className="text-sm text-muted-foreground">No AI response available for {platform}</p>
+                      </div>
+                    )}
+                  </TabsContent>
+                );
+              })}
+            </Tabs>
           </div>
         </Card>
       )}
@@ -635,17 +675,28 @@ const PromptDetail = () => {
                     No platform data available
                   </div>
                 ) : (
-                  platformBreakdown.map((platform: any, idx: number) => (
-                    <div key={idx} className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">{platform.platform}</span>
-                        <span className="text-sm font-bold font-inter">{platform.mentions}</span>
+                  platformBreakdown.map((platform: any, idx: number) => {
+                    const widthPercent = platform.mentions > 0 ? (platform.mentions / maxMentions) * 100 : 0;
+                    return (
+                      <div key={idx} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">{platform.platform}</span>
+                          <span className="text-sm font-bold font-inter">{platform.mentions}</span>
+                        </div>
+                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 ${
+                              idx === 0 ? 'bg-primary' :
+                              idx === 1 ? 'bg-blue-500' :
+                              idx === 2 ? 'bg-green-500' :
+                              'bg-purple-500'
+                            }`}
+                            style={{ width: `${widthPercent}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 bg-muted rounded-full overflow-hidden">
-                        <div className={`h-full bg-chart-${(idx % 4) + 1} transition-all duration-500`} style={{ width: `${platform.mentions > 0 ? (platform.mentions / maxMentions) * 100 : 0}%` }} />
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
