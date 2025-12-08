@@ -491,7 +491,7 @@ export const Chat = () => {
 
             {/* Disclaimer */}
             <p className="text-xs text-muted-foreground">
-              AI can make mistakes. Check important info.
+              AI can make mistakes. Double-check important details.
             </p>
           </div>
         </div>
@@ -584,7 +584,7 @@ export const Chat = () => {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground mt-2 text-center">
-                AI can make mistakes. Check important info.
+                AI can make mistakes. Double-check important details.
               </p>
             </div>
           </div>
