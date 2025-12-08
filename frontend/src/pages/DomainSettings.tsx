@@ -1592,72 +1592,76 @@ export default function DomainSettings() {
                 </div>
               ) : healthData ? (
                 <>
-                  {/* Overall Score & Summary Stats - Professional Layout */}
-                  <div className="flex items-start gap-6">
-                    {/* Left side - Overall Score */}
-                    <div className="flex-shrink-0">
-                      <Card className="p-6 bg-gradient-to-br from-primary/5 via-primary/3 to-background border-primary/20 shadow-lg shadow-primary/5">
-                        <div className="text-center">
-                          <div className="text-7xl font-bold bg-gradient-to-br from-primary to-primary/60 bg-clip-text text-transparent mb-2">
-                            {healthData.percentage}
-                          </div>
-                          <div className="text-sm text-muted-foreground mb-3">
-                            out of 100
-                          </div>
-                          <div className="text-xs text-muted-foreground/80 mb-4">
-                            ({healthData.health_score}/{healthData.max_score} points)
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className={`text-sm px-3 py-1 ${
-                              healthData.grade_color === 'green' ? 'border-green-500 text-green-600 bg-green-50 dark:bg-green-900/20' :
-                              healthData.grade_color === 'blue' ? 'border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/20' :
-                              healthData.grade_color === 'yellow' ? 'border-yellow-500 text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20' :
-                              'border-red-500 text-red-600 bg-red-50 dark:bg-red-900/20'
-                            }`}
-                          >
-                            {healthData.grade}
-                          </Badge>
+                  {/* Overall Score & Summary Stats - 50/50 Layout */}
+                  <div className="grid grid-cols-2 gap-6">
+                    {/* Left side - Overall Score (50% width) */}
+                    <Card className="p-8 bg-gradient-to-br from-primary/5 via-primary/3 to-background border-primary/20 shadow-lg shadow-primary/5 flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="text-8xl font-bold bg-gradient-to-br from-primary to-primary/60 bg-clip-text text-transparent mb-3">
+                          {healthData.percentage}
                         </div>
-                      </Card>
-                    </div>
+                        <div className="text-base text-muted-foreground mb-2">
+                          out of 100
+                        </div>
+                        <div className="text-sm text-muted-foreground/80 mb-5">
+                          ({healthData.health_score}/{healthData.max_score} points)
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={`text-base px-4 py-1.5 ${
+                            healthData.grade_color === 'green' ? 'border-green-500 text-green-600 bg-green-50 dark:bg-green-900/20' :
+                            healthData.grade_color === 'blue' ? 'border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/20' :
+                            healthData.grade_color === 'yellow' ? 'border-yellow-500 text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20' :
+                            'border-red-500 text-red-600 bg-red-50 dark:bg-red-900/20'
+                          }`}
+                        >
+                          {healthData.grade}
+                        </Badge>
+                      </div>
+                    </Card>
 
-                    {/* Right side - Summary Stats */}
-                    <div className="flex-1 grid grid-cols-3 gap-4">
+                    {/* Right side - Summary Stats in 2x2 Grid (50% width) */}
+                    <div className="grid grid-cols-2 gap-4">
                       <Card className="p-6 border-green-200 bg-gradient-to-br from-green-50 to-background dark:from-green-900/10 dark:to-background hover:shadow-md transition-shadow">
-                        <div className="flex flex-col">
+                        <div className="flex flex-col h-full">
                           <div className="flex items-center gap-2 mb-3">
                             <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
                               <CheckCircle2 className="h-5 w-5 text-green-600" />
                             </div>
                             <span className="text-sm font-medium text-green-900 dark:text-green-100">Passed</span>
                           </div>
-                          <div className="text-4xl font-bold text-green-600">{healthData.summary.passed}</div>
-                          <div className="text-xs text-muted-foreground mt-1">checks successful</div>
+                          <div className="flex-1 flex flex-col justify-center">
+                            <div className="text-5xl font-bold text-green-600">{healthData.summary.passed}</div>
+                            <div className="text-xs text-muted-foreground mt-2">checks successful</div>
+                          </div>
                         </div>
                       </Card>
                       <Card className="p-6 border-yellow-200 bg-gradient-to-br from-yellow-50 to-background dark:from-yellow-900/10 dark:to-background hover:shadow-md transition-shadow">
-                        <div className="flex flex-col">
+                        <div className="flex flex-col h-full">
                           <div className="flex items-center gap-2 mb-3">
                             <div className="p-2 rounded-lg bg-yellow-100 dark:bg-yellow-900/30">
                               <AlertCircle className="h-5 w-5 text-yellow-600" />
                             </div>
                             <span className="text-sm font-medium text-yellow-900 dark:text-yellow-100">Warnings</span>
                           </div>
-                          <div className="text-4xl font-bold text-yellow-600">{healthData.summary.warnings}</div>
-                          <div className="text-xs text-muted-foreground mt-1">needs attention</div>
+                          <div className="flex-1 flex flex-col justify-center">
+                            <div className="text-5xl font-bold text-yellow-600">{healthData.summary.warnings}</div>
+                            <div className="text-xs text-muted-foreground mt-2">needs attention</div>
+                          </div>
                         </div>
                       </Card>
-                      <Card className="p-6 border-red-200 bg-gradient-to-br from-red-50 to-background dark:from-red-900/10 dark:to-background hover:shadow-md transition-shadow">
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-2 mb-3">
-                            <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/30">
-                              <XCircle className="h-5 w-5 text-red-600" />
-                            </div>
-                            <span className="text-sm font-medium text-red-900 dark:text-red-100">Failed</span>
+                      <Card className="p-6 border-red-200 bg-gradient-to-br from-red-50 to-background dark:from-red-900/10 dark:to-background hover:shadow-md transition-shadow col-span-2">
+                        <div className="flex items-center gap-4">
+                          <div className="p-3 rounded-lg bg-red-100 dark:bg-red-900/30">
+                            <XCircle className="h-6 w-6 text-red-600" />
                           </div>
-                          <div className="text-4xl font-bold text-red-600">{healthData.summary.failed}</div>
-                          <div className="text-xs text-muted-foreground mt-1">requires fixing</div>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium text-red-900 dark:text-red-100">Failed</span>
+                              <div className="text-5xl font-bold text-red-600">{healthData.summary.failed}</div>
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">requires fixing</div>
+                          </div>
                         </div>
                       </Card>
                     </div>
