@@ -460,6 +460,7 @@ const ReportBuilder = () => {
   const [templateDescription, setTemplateDescription] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedModule, setSelectedModule] = useState<string>("Information Metrics");
+  const [widgetSearchQuery, setWidgetSearchQuery] = useState("");
 
   // Fetch template data if editing
   const { data: templateData, isLoading: isLoadingTemplate } = useQuery({
@@ -1339,31 +1340,68 @@ const ReportBuilder = () => {
             </SelectContent>
           </Select>
 
+          {/* Widget Search Input */}
+          <div className="relative mb-4">
+            <Input
+              type="text"
+              placeholder="Search widgets..."
+              value={widgetSearchQuery}
+              onChange={(e) => setWidgetSearchQuery(e.target.value)}
+              className="pr-8"
+            />
+            {widgetSearchQuery && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setWidgetSearchQuery("")}
+                className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+
           {/* Show widgets when module is selected */}
-          {selectedModule && (
-            <div className="space-y-3">
-              {widgetModules
-                .find((m) => m.name === selectedModule)
-                ?.widgets.map((widget) => (
-                  <Card
-                    key={widget.id}
-                    draggable
-                    onDragStart={() => handleDragStart(widget)}
-                    className="p-3 cursor-move hover:border-primary transition-all duration-200 hover:shadow-md border-border/50"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-lg bg-primary/10">
-                        <widget.icon className="h-4 w-4 text-primary" />
+          {selectedModule && (() => {
+            const filteredWidgets = widgetModules
+              .find((m) => m.name === selectedModule)
+              ?.widgets.filter((widget) =>
+                widget.title.toLowerCase().includes(widgetSearchQuery.toLowerCase()) ||
+                widget.description.toLowerCase().includes(widgetSearchQuery.toLowerCase())
+              ) || [];
+
+            return (
+              <div className="space-y-3">
+                {filteredWidgets.length > 0 ? (
+                  filteredWidgets.map((widget) => (
+                    <Card
+                      key={widget.id}
+                      draggable
+                      onDragStart={() => handleDragStart(widget)}
+                      className="p-3 cursor-move hover:border-primary transition-all duration-200 hover:shadow-md border-border/50"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-primary/10">
+                          <widget.icon className="h-4 w-4 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-medium text-sm">{widget.title}</h3>
+                        </div>
+                        <Grip className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-sm">{widget.title}</h3>
-                      </div>
-                      <Grip className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    </div>
-                  </Card>
-                ))}
-            </div>
-          )}
+                    </Card>
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p className="text-sm">No widgets found</p>
+                    {widgetSearchQuery && (
+                      <p className="text-xs mt-1">Try a different search term</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Canvas - PDF-like Preview Area */}
