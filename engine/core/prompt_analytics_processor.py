@@ -473,16 +473,17 @@ class PromptAnalyticsProcessor:
                         except Exception as sentiment_error:
                             logger.error(f"Error updating sentiment analytics for theme '{group.theme}': {str(sentiment_error)}", exc_info=True)
 
-                    # Sync competitor prompt analytics for competitors mentioned in this prompt
-                    logger.info(f"Syncing competitor prompt analytics for prompt {prompt_id}")
-                    try:
-                        from .competitor_sync import sync_competitor_prompt_analytics
-                        domain_id = prompt.group.domain_id
-                        sync_stats = sync_competitor_prompt_analytics(domain_id=domain_id, prompt_id=prompt_id)
-                        logger.info(f"Competitor sync completed for prompt {prompt_id}: {sync_stats}")
-                    except Exception as sync_error:
-                        logger.error(f"Error syncing competitor analytics for prompt {prompt_id}: {str(sync_error)}", exc_info=True)
-                        # Don't fail the entire process if sync fails
+                    # DISABLED: Per-prompt sync can cause premature processing
+                    # Competitor sync is done at domain level after all prompts complete
+                    # logger.info(f"Syncing competitor prompt analytics for prompt {prompt_id}")
+                    # try:
+                    #     from .competitor_sync import sync_competitor_prompt_analytics
+                    #     domain_id = prompt.group.domain_id
+                    #     sync_stats = sync_competitor_prompt_analytics(domain_id=domain_id, prompt_id=prompt_id)
+                    #     logger.info(f"Competitor sync completed for prompt {prompt_id}: {sync_stats}")
+                    # except Exception as sync_error:
+                    #     logger.error(f"Error syncing competitor analytics for prompt {prompt_id}: {str(sync_error)}", exc_info=True)
+                    #     # Don't fail the entire process if sync fails
             except Exception as snapshot_error:
                 logger.error(f"Error creating snapshots for prompt {prompt_id}: {str(snapshot_error)}", exc_info=True)
                 # Don't fail the entire process if snapshots fail
