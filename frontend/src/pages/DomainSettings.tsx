@@ -1592,173 +1592,245 @@ export default function DomainSettings() {
                 </div>
               ) : healthData ? (
                 <>
-                  {/* Overall Score */}
-                  <div className="flex items-center justify-center p-8 bg-gradient-to-br from-primary/5 to-primary/10 rounded-lg border border-primary/20">
-                    <div className="text-center">
-                      <div className="text-6xl font-bold text-primary mb-2">
-                        {healthData.percentage}
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        out of 100 ({healthData.health_score}/{healthData.max_score} points)
-                      </div>
-                      <div className="mt-3">
-                        <Badge
-                          variant="outline"
-                          className={`text-xs ${
-                            healthData.grade_color === 'green' ? 'border-green-500 text-green-600' :
-                            healthData.grade_color === 'blue' ? 'border-blue-500 text-blue-600' :
-                            healthData.grade_color === 'yellow' ? 'border-yellow-500 text-yellow-600' :
-                            'border-red-500 text-red-600'
-                          }`}
-                        >
-                          {healthData.grade}
-                        </Badge>
-                      </div>
+                  {/* Overall Score & Summary Stats - Professional Layout */}
+                  <div className="flex items-start gap-6">
+                    {/* Left side - Overall Score */}
+                    <div className="flex-shrink-0">
+                      <Card className="p-6 bg-gradient-to-br from-primary/5 via-primary/3 to-background border-primary/20 shadow-lg shadow-primary/5">
+                        <div className="text-center">
+                          <div className="text-7xl font-bold bg-gradient-to-br from-primary to-primary/60 bg-clip-text text-transparent mb-2">
+                            {healthData.percentage}
+                          </div>
+                          <div className="text-sm text-muted-foreground mb-3">
+                            out of 100
+                          </div>
+                          <div className="text-xs text-muted-foreground/80 mb-4">
+                            ({healthData.health_score}/{healthData.max_score} points)
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={`text-sm px-3 py-1 ${
+                              healthData.grade_color === 'green' ? 'border-green-500 text-green-600 bg-green-50 dark:bg-green-900/20' :
+                              healthData.grade_color === 'blue' ? 'border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/20' :
+                              healthData.grade_color === 'yellow' ? 'border-yellow-500 text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20' :
+                              'border-red-500 text-red-600 bg-red-50 dark:bg-red-900/20'
+                            }`}
+                          >
+                            {healthData.grade}
+                          </Badge>
+                        </div>
+                      </Card>
                     </div>
-                  </div>
 
-                  {/* Summary Stats */}
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="p-4 rounded-lg border border-green-200 bg-green-50 dark:bg-green-900/10">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4 text-green-600" />
-                        <span className="text-sm font-medium text-green-900 dark:text-green-100">Passed</span>
-                      </div>
-                      <div className="text-2xl font-bold text-green-600 mt-1">{healthData.summary.passed}</div>
-                    </div>
-                    <div className="p-4 rounded-lg border border-yellow-200 bg-yellow-50 dark:bg-yellow-900/10">
-                      <div className="flex items-center gap-2">
-                        <AlertCircle className="h-4 w-4 text-yellow-600" />
-                        <span className="text-sm font-medium text-yellow-900 dark:text-yellow-100">Warnings</span>
-                      </div>
-                      <div className="text-2xl font-bold text-yellow-600 mt-1">{healthData.summary.warnings}</div>
-                    </div>
-                    <div className="p-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-900/10">
-                      <div className="flex items-center gap-2">
-                        <XCircle className="h-4 w-4 text-red-600" />
-                        <span className="text-sm font-medium text-red-900 dark:text-red-100">Failed</span>
-                      </div>
-                      <div className="text-2xl font-bold text-red-600 mt-1">{healthData.summary.failed}</div>
+                    {/* Right side - Summary Stats */}
+                    <div className="flex-1 grid grid-cols-3 gap-4">
+                      <Card className="p-6 border-green-200 bg-gradient-to-br from-green-50 to-background dark:from-green-900/10 dark:to-background hover:shadow-md transition-shadow">
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
+                              <CheckCircle2 className="h-5 w-5 text-green-600" />
+                            </div>
+                            <span className="text-sm font-medium text-green-900 dark:text-green-100">Passed</span>
+                          </div>
+                          <div className="text-4xl font-bold text-green-600">{healthData.summary.passed}</div>
+                          <div className="text-xs text-muted-foreground mt-1">checks successful</div>
+                        </div>
+                      </Card>
+                      <Card className="p-6 border-yellow-200 bg-gradient-to-br from-yellow-50 to-background dark:from-yellow-900/10 dark:to-background hover:shadow-md transition-shadow">
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="p-2 rounded-lg bg-yellow-100 dark:bg-yellow-900/30">
+                              <AlertCircle className="h-5 w-5 text-yellow-600" />
+                            </div>
+                            <span className="text-sm font-medium text-yellow-900 dark:text-yellow-100">Warnings</span>
+                          </div>
+                          <div className="text-4xl font-bold text-yellow-600">{healthData.summary.warnings}</div>
+                          <div className="text-xs text-muted-foreground mt-1">needs attention</div>
+                        </div>
+                      </Card>
+                      <Card className="p-6 border-red-200 bg-gradient-to-br from-red-50 to-background dark:from-red-900/10 dark:to-background hover:shadow-md transition-shadow">
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/30">
+                              <XCircle className="h-5 w-5 text-red-600" />
+                            </div>
+                            <span className="text-sm font-medium text-red-900 dark:text-red-100">Failed</span>
+                          </div>
+                          <div className="text-4xl font-bold text-red-600">{healthData.summary.failed}</div>
+                          <div className="text-xs text-muted-foreground mt-1">requires fixing</div>
+                        </div>
+                      </Card>
                     </div>
                   </div>
 
                   {/* Health Checks */}
-                  <div className="space-y-3">
-                    <h3 className="font-semibold text-sm">Detailed Health Checks</h3>
-                    {healthData.checks && healthData.checks.map((check: any, index: number) => (
-                      <div
-                        key={index}
-                        className={`flex items-start gap-3 p-4 rounded-lg border ${
-                          check.status === 'pass' ? 'border-green-200 bg-green-50/50 dark:bg-green-900/5' :
-                          check.status === 'warning' ? 'border-yellow-200 bg-yellow-50/50 dark:bg-yellow-900/5' :
-                          'border-red-200 bg-red-50/50 dark:bg-red-900/5'
-                        }`}
-                      >
-                        {check.status === 'pass' ? (
-                          <CheckCircle2 className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
-                        ) : check.status === 'warning' ? (
-                          <AlertCircle className="h-5 w-5 text-yellow-500 mt-0.5 flex-shrink-0" />
-                        ) : (
-                          <XCircle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-medium text-sm">{check.name}</div>
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                              <span className="text-xs text-muted-foreground">
-                                {check.score}/{check.max_score} pts
-                              </span>
-                              <Badge
-                                variant="outline"
-                                className={`text-xs ${
-                                  check.importance === 'high' || check.importance === 'critical' ? 'border-red-400 text-red-600' :
-                                  check.importance === 'medium' ? 'border-yellow-400 text-yellow-600' :
-                                  'border-gray-400 text-gray-600'
-                                }`}
-                              >
-                                {check.importance}
-                              </Badge>
+                  <div className="space-y-4 mt-8">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-semibold">Detailed Health Checks</h3>
+                      <span className="text-sm text-muted-foreground">{healthData.checks?.length} total checks</span>
+                    </div>
+                    <div className="space-y-2">
+                      {healthData.checks && healthData.checks.map((check: any, index: number) => (
+                        <Card
+                          key={index}
+                          className={`p-4 transition-all hover:shadow-md ${
+                            check.status === 'pass' ? 'border-green-200/60 bg-gradient-to-r from-green-50/50 to-background dark:from-green-900/5 dark:to-background' :
+                            check.status === 'warning' ? 'border-yellow-200/60 bg-gradient-to-r from-yellow-50/50 to-background dark:from-yellow-900/5 dark:to-background' :
+                            'border-red-200/60 bg-gradient-to-r from-red-50/50 to-background dark:from-red-900/5 dark:to-background'
+                          }`}
+                        >
+                          <div className="flex items-start gap-4">
+                            <div className={`flex-shrink-0 p-2 rounded-lg ${
+                              check.status === 'pass' ? 'bg-green-100 dark:bg-green-900/30' :
+                              check.status === 'warning' ? 'bg-yellow-100 dark:bg-yellow-900/30' :
+                              'bg-red-100 dark:bg-red-900/30'
+                            }`}>
+                              {check.status === 'pass' ? (
+                                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                              ) : check.status === 'warning' ? (
+                                <AlertCircle className="h-5 w-5 text-yellow-600" />
+                              ) : (
+                                <XCircle className="h-5 w-5 text-red-600" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-3 mb-2">
+                                <h4 className="font-semibold text-sm leading-tight">{check.name}</h4>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-xs font-medium ${
+                                      check.importance === 'critical' ? 'border-red-500 text-red-700 bg-red-50 dark:bg-red-900/20' :
+                                      check.importance === 'high' ? 'border-orange-500 text-orange-700 bg-orange-50 dark:bg-orange-900/20' :
+                                      check.importance === 'medium' ? 'border-yellow-500 text-yellow-700 bg-yellow-50 dark:bg-yellow-900/20' :
+                                      'border-gray-400 text-gray-600 bg-gray-50 dark:bg-gray-900/20'
+                                    }`}
+                                  >
+                                    {check.importance}
+                                  </Badge>
+                                  <span className={`text-xs font-mono font-semibold px-2 py-1 rounded ${
+                                    check.status === 'pass' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                                    check.status === 'warning' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                    'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                  }`}>
+                                    {check.score}/{check.max_score}
+                                  </span>
+                                </div>
+                              </div>
+                              <p className="text-sm text-muted-foreground leading-relaxed">
+                                {check.message}
+                              </p>
                             </div>
                           </div>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            {check.message}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                        </Card>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Health Check History */}
                   {healthHistory && healthHistory.history && healthHistory.history.length > 0 && (
-                    <div className="mt-8 pt-6 border-t border-border">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-semibold text-sm">Recent Health Checks</h3>
+                    <div className="mt-10 pt-8 border-t border-border/50">
+                      <div className="flex items-center justify-between mb-6">
+                        <div>
+                          <h3 className="text-lg font-semibold">Health Check History</h3>
+                          <p className="text-sm text-muted-foreground mt-1">Track improvements over time</p>
+                        </div>
                         {healthHistory.trend && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">Trend:</span>
-                            <Badge
-                              variant="outline"
-                              className={`text-xs ${
-                                healthHistory.trend.direction === 'up' ? 'border-green-500 text-green-600' :
-                                healthHistory.trend.direction === 'down' ? 'border-red-500 text-red-600' :
-                                'border-gray-500 text-gray-600'
-                              }`}
-                            >
-                              {healthHistory.trend.direction === 'up' ? '↑' : healthHistory.trend.direction === 'down' ? '↓' : '→'}
-                              {' '}
-                              {healthHistory.trend.change > 0 ? '+' : ''}{healthHistory.trend.change}%
-                            </Badge>
-                          </div>
+                          <Card className={`px-4 py-2 ${
+                            healthHistory.trend.direction === 'up' ? 'border-green-200 bg-green-50/50 dark:bg-green-900/10' :
+                            healthHistory.trend.direction === 'down' ? 'border-red-200 bg-red-50/50 dark:bg-red-900/10' :
+                            'border-gray-200 bg-gray-50/50 dark:bg-gray-900/10'
+                          }`}>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-medium text-muted-foreground">Trend:</span>
+                              <Badge
+                                variant="outline"
+                                className={`text-sm font-semibold ${
+                                  healthHistory.trend.direction === 'up' ? 'border-green-500 text-green-700 bg-green-100 dark:bg-green-900/30' :
+                                  healthHistory.trend.direction === 'down' ? 'border-red-500 text-red-700 bg-red-100 dark:bg-red-900/30' :
+                                  'border-gray-500 text-gray-700 bg-gray-100 dark:bg-gray-900/30'
+                                }`}
+                              >
+                                {healthHistory.trend.direction === 'up' ? '↑' : healthHistory.trend.direction === 'down' ? '↓' : '→'}
+                                {' '}
+                                {healthHistory.trend.change > 0 ? '+' : ''}{healthHistory.trend.change}%
+                              </Badge>
+                            </div>
+                          </Card>
                         )}
                       </div>
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                         {healthHistory.history.map((check: any, index: number) => (
-                          <div
+                          <Card
                             key={check.id}
-                            className={`flex items-center justify-between p-3 rounded-lg border ${
-                              index === 0 ? 'border-primary/30 bg-primary/5' : 'border-border bg-card'
+                            className={`p-5 transition-all hover:shadow-md ${
+                              index === 0 ? 'border-primary/40 bg-gradient-to-r from-primary/5 to-background shadow-sm' : 'border-border/60 bg-card'
                             }`}
                           >
-                            <div className="flex items-center gap-3">
-                              <div className="text-center">
-                                <div className={`text-2xl font-bold ${
-                                  check.grade_color === 'green' ? 'text-green-600' :
-                                  check.grade_color === 'blue' ? 'text-blue-600' :
-                                  check.grade_color === 'yellow' ? 'text-yellow-600' :
-                                  'text-red-600'
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                <div className={`text-center px-4 py-2 rounded-lg ${
+                                  check.grade_color === 'green' ? 'bg-green-100 dark:bg-green-900/30' :
+                                  check.grade_color === 'blue' ? 'bg-blue-100 dark:bg-blue-900/30' :
+                                  check.grade_color === 'yellow' ? 'bg-yellow-100 dark:bg-yellow-900/30' :
+                                  'bg-red-100 dark:bg-red-900/30'
                                 }`}>
-                                  {check.percentage}
+                                  <div className={`text-3xl font-bold ${
+                                    check.grade_color === 'green' ? 'text-green-600' :
+                                    check.grade_color === 'blue' ? 'text-blue-600' :
+                                    check.grade_color === 'yellow' ? 'text-yellow-600' :
+                                    'text-red-600'
+                                  }`}>
+                                    {check.percentage}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground font-medium">score</div>
                                 </div>
-                                <div className="text-xs text-muted-foreground">score</div>
+                                <div>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <div className="text-sm font-semibold">
+                                      {new Date(check.created_at).toLocaleDateString('en-US', {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                      })}
+                                    </div>
+                                    {index === 0 && (
+                                      <Badge className="text-xs bg-primary/10 text-primary border-primary/30">
+                                        Latest
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                                    <span className="flex items-center gap-1">
+                                      <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                                      {check.summary.passed} passed
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                                      {check.summary.warnings} warnings
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                                      {check.summary.failed} failed
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
-                              <div>
-                                <div className="text-sm font-medium">
-                                  {new Date(check.created_at).toLocaleDateString('en-US', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    year: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  })}
-                                  {index === 0 && <span className="ml-2 text-primary text-xs">(Latest)</span>}
-                                </div>
-                                <div className="text-xs text-muted-foreground mt-0.5">
-                                  {check.summary.passed} passed, {check.summary.warnings} warnings, {check.summary.failed} failed
-                                </div>
-                              </div>
+                              <Badge
+                                variant="outline"
+                                className={`text-sm px-3 py-1 font-semibold ${
+                                  check.grade_color === 'green' ? 'border-green-500 text-green-700 bg-green-50 dark:bg-green-900/20' :
+                                  check.grade_color === 'blue' ? 'border-blue-500 text-blue-700 bg-blue-50 dark:bg-blue-900/20' :
+                                  check.grade_color === 'yellow' ? 'border-yellow-500 text-yellow-700 bg-yellow-50 dark:bg-yellow-900/20' :
+                                  'border-red-500 text-red-700 bg-red-50 dark:bg-red-900/20'
+                                }`}
+                              >
+                                {check.grade}
+                              </Badge>
                             </div>
-                            <Badge
-                              variant="outline"
-                              className={`text-xs ${
-                                check.grade_color === 'green' ? 'border-green-500 text-green-600' :
-                                check.grade_color === 'blue' ? 'border-blue-500 text-blue-600' :
-                                check.grade_color === 'yellow' ? 'border-yellow-500 text-yellow-600' :
-                                'border-red-500 text-red-600'
-                              }`}
-                            >
-                              {check.grade}
-                            </Badge>
-                          </div>
+                          </Card>
                         ))}
                       </div>
                       {healthHistory.total_checks > 5 && (
