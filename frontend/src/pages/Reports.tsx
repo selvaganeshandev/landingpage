@@ -724,12 +724,8 @@ const Reports = () => {
 
       {/* Report Templates */}
       <Card className="p-6">
-        <div className="flex items-center justify-between mb-6">
+        <div className="mb-6">
           <h3 className="text-lg font-semibold">Report Templates</h3>
-          <Button variant="outline" size="sm" onClick={() => navigate('/reports/create-template')}>
-            <Plus className="h-4 w-4 mr-2" />
-            Create Custom Template
-          </Button>
         </div>
         {templatesLoading ? (
           <div className="text-center py-12">
