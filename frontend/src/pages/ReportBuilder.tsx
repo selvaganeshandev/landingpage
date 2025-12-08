@@ -6,6 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
@@ -32,6 +39,7 @@ import {
   Meh,
   Frown,
   Loader2,
+  AlertCircle,
 } from "lucide-react";
 import {
   Dialog,
@@ -91,15 +99,67 @@ interface WidgetModule {
 // Available widgets grouped by modules
 const widgetModules: WidgetModule[] = [
   {
-    name: "Insights",
+    name: "Information Metrics",
     widgets: [
+      // Performance Metrics
       {
-        id: "total-prompts-metric",
+        id: "visibility-metric",
         type: "metric",
-        title: "Total Prompts",
-        icon: FileText,
-        description: "Total number of prompts tracked",
+        title: "Overall Visibility Score",
+        icon: Target,
+        description: "Overall visibility score",
       },
+      {
+        id: "avg-position-metric",
+        type: "metric",
+        title: "Average Position",
+        icon: TrendingUp,
+        description: "Average position in responses",
+      },
+      {
+        id: "engagement-metric",
+        type: "metric",
+        title: "Engagement Score",
+        icon: Activity,
+        description: "Overall engagement score",
+      },
+      {
+        id: "share-metric",
+        type: "metric",
+        title: "Share of Voice",
+        icon: Target,
+        description: "Your share of voice percentage",
+      },
+      // Mention Metrics
+      {
+        id: "total-mentions-metric",
+        type: "metric",
+        title: "Total AI Mentions",
+        icon: Eye,
+        description: "Total brand mentions",
+      },
+      {
+        id: "mention-rate-metric",
+        type: "metric",
+        title: "Mention Rate",
+        icon: TrendingUp,
+        description: "Percentage of prompts with mentions",
+      },
+      {
+        id: "mention-growth-metric",
+        type: "metric",
+        title: "Mention Growth",
+        icon: TrendingUp,
+        description: "Growth vs previous period",
+      },
+      {
+        id: "platform-coverage-metric",
+        type: "metric",
+        title: "Platform Coverage",
+        icon: BarChart3,
+        description: "Number of platforms with mentions",
+      },
+      // Citation Metrics
       {
         id: "total-citations-metric",
         type: "metric",
@@ -108,46 +168,163 @@ const widgetModules: WidgetModule[] = [
         description: "Total citations across all platforms",
       },
       {
-        id: "total-mentions-metric",
+        id: "citation-rate-metric",
         type: "metric",
-        title: "Total Mentions",
-        icon: Eye,
-        description: "Total brand mentions",
+        title: "Citation Rate",
+        icon: Link2,
+        description: "Citations per mention",
       },
       {
-        id: "visibility-metric",
+        id: "citation-density-metric",
         type: "metric",
-        title: "Visibility Score",
-        icon: Target,
-        description: "Overall visibility score",
+        title: "Citation Density",
+        icon: Link2,
+        description: "Average citations per response",
       },
       {
-        id: "avg-position-metric",
+        id: "primary-sources-metric",
         type: "metric",
-        title: "Avg Position",
-        icon: TrendingUp,
-        description: "Average position in responses",
+        title: "Primary Sources",
+        icon: Link2,
+        description: "Count of primary source citations",
       },
+      // Sentiment Metrics
       {
         id: "positive-sentiment-metric",
         type: "metric",
-        title: "Positive Sentiment",
+        title: "Positive Sentiment %",
         icon: Smile,
         description: "Percentage of positive mentions",
       },
       {
-        id: "neutral-sentiment-metric",
+        id: "avg-sentiment-metric",
         type: "metric",
-        title: "Neutral Sentiment",
-        icon: Meh,
-        description: "Percentage of neutral mentions",
+        title: "Average Sentiment Score",
+        icon: Activity,
+        description: "Average sentiment score",
+      },
+      {
+        id: "sentiment-trend-metric",
+        type: "metric",
+        title: "Sentiment Trend",
+        icon: TrendingUp,
+        description: "Sentiment change vs previous period",
       },
       {
         id: "negative-sentiment-metric",
         type: "metric",
-        title: "Negative Sentiment",
+        title: "Negative Sentiment %",
         icon: Frown,
         description: "Percentage of negative mentions",
+      },
+      // Competitive Metrics
+      {
+        id: "market-position-metric",
+        type: "metric",
+        title: "Market Position",
+        icon: Target,
+        description: "Your rank vs competitors",
+      },
+      {
+        id: "competitor-gap-metric",
+        type: "metric",
+        title: "Competitor Gap",
+        icon: Users,
+        description: "Difference from top competitor",
+      },
+      {
+        id: "market-share-trend-metric",
+        type: "metric",
+        title: "Market Share Trend",
+        icon: TrendingUp,
+        description: "Share of voice trend",
+      },
+      // Quality Metrics
+      {
+        id: "health-score-metric",
+        type: "metric",
+        title: "Health Score",
+        icon: Activity,
+        description: "Domain AI-friendliness score",
+      },
+      {
+        id: "content-quality-metric",
+        type: "metric",
+        title: "Content Quality Score",
+        icon: FileText,
+        description: "Based on sentiment and engagement",
+      },
+      {
+        id: "topics-covered-metric",
+        type: "metric",
+        title: "Topics Covered",
+        icon: FileText,
+        description: "Number of topics with mentions",
+      },
+      {
+        id: "answer-coverage-metric",
+        type: "metric",
+        title: "Answer Coverage",
+        icon: Target,
+        description: "Percentage of prompts answered",
+      },
+      // Alert Metrics
+      {
+        id: "active-alerts-metric",
+        type: "metric",
+        title: "Active Alerts",
+        icon: AlertCircle,
+        description: "Open misinformation alerts",
+      },
+      {
+        id: "critical-issues-metric",
+        type: "metric",
+        title: "Critical Issues",
+        icon: AlertCircle,
+        description: "High severity alerts",
+      },
+      {
+        id: "broken-links-metric",
+        type: "metric",
+        title: "Broken Links",
+        icon: Link2,
+        description: "Failed citation URLs",
+      },
+      {
+        id: "misinformation-cases-metric",
+        type: "metric",
+        title: "Misinformation Cases",
+        icon: AlertCircle,
+        description: "Detected misinformation alerts",
+      },
+      // Growth Metrics
+      {
+        id: "mention-growth-percent-metric",
+        type: "metric",
+        title: "Mention Growth %",
+        icon: TrendingUp,
+        description: "Growth vs previous period",
+      },
+      {
+        id: "visibility-trend-metric",
+        type: "metric",
+        title: "Visibility Trend",
+        icon: TrendingUp,
+        description: "Visibility score change",
+      },
+      {
+        id: "citation-growth-metric",
+        type: "metric",
+        title: "Citation Growth",
+        icon: TrendingUp,
+        description: "Citation growth percentage",
+      },
+      {
+        id: "engagement-growth-metric",
+        type: "metric",
+        title: "Engagement Growth",
+        icon: TrendingUp,
+        description: "Engagement score change",
       },
     ],
   },
@@ -280,6 +457,7 @@ const ReportBuilder = () => {
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
+  const [selectedModule, setSelectedModule] = useState<string>("Information Metrics");
 
   // Fetch template data if editing
   const { data: templateData, isLoading: isLoadingTemplate } = useQuery({
@@ -839,38 +1017,46 @@ const ReportBuilder = () => {
         {/* Sidebar - Available Widgets */}
         <div className="w-80 border-r border-border/50 bg-card/50 backdrop-blur-sm p-6 overflow-y-auto">
           <h2 className="text-lg font-semibold font-inter mb-4">Available Widgets</h2>
-          <Accordion type="single" defaultValue={widgetModules[0]?.name} collapsible className="space-y-2">
-            {widgetModules.map((module) => (
-              <AccordionItem key={module.name} value={module.name} className="border rounded-lg px-4 bg-card/80">
-                <AccordionTrigger className="text-sm font-semibold hover:no-underline">
-                  {module.name}
-                  <span className="ml-2 text-xs text-muted-foreground">({module.widgets.length})</span>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="space-y-3 pt-2">
-                    {module.widgets.map((widget) => (
-                      <Card
-                        key={widget.id}
-                        draggable
-                        onDragStart={() => handleDragStart(widget)}
-                        className="p-3 cursor-move hover:border-primary transition-all duration-200 hover:shadow-md border-border/50"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 rounded-lg bg-primary/10">
-                            <widget.icon className="h-4 w-4 text-primary" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-medium text-sm">{widget.title}</h3>
-                          </div>
-                          <Grip className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            ))}
-          </Accordion>
+
+          {/* Module Selector Dropdown */}
+          <Select value={selectedModule} onValueChange={setSelectedModule}>
+            <SelectTrigger className="mb-4">
+              <SelectValue placeholder="Select widget category" />
+            </SelectTrigger>
+            <SelectContent>
+              {widgetModules.map((module) => (
+                <SelectItem key={module.name} value={module.name}>
+                  {module.name} ({module.widgets.length})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Show widgets when module is selected */}
+          {selectedModule && (
+            <div className="space-y-3">
+              {widgetModules
+                .find((m) => m.name === selectedModule)
+                ?.widgets.map((widget) => (
+                  <Card
+                    key={widget.id}
+                    draggable
+                    onDragStart={() => handleDragStart(widget)}
+                    className="p-3 cursor-move hover:border-primary transition-all duration-200 hover:shadow-md border-border/50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-primary/10">
+                        <widget.icon className="h-4 w-4 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-medium text-sm">{widget.title}</h3>
+                      </div>
+                      <Grip className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    </div>
+                  </Card>
+                ))}
+            </div>
+          )}
         </div>
 
         {/* Canvas - PDF-like Preview Area */}
