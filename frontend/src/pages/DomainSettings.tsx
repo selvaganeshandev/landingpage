@@ -140,6 +140,14 @@ export default function DomainSettings() {
     }
   }, [searchParams, activeTab]);
 
+  // Fetch health data when health tab is active (including on initial load with ?tab=health)
+  useEffect(() => {
+    if (activeTab === 'health' && domainId && !healthHistory) {
+      console.log('Health tab is active, fetching health history');
+      fetchHealthHistory();
+    }
+  }, [activeTab, domainId]);
+
   const handleTabChange = (value: string) => {
     setActiveTab(value);
     const newParams = new URLSearchParams(searchParams);
@@ -148,11 +156,14 @@ export default function DomainSettings() {
 
     // Fetch health check data when Health tab is activated
     if (value === 'health' && domainId) {
+      console.log('Health tab activated. healthData exists:', !!healthData, 'healthHistory exists:', !!healthHistory);
       if (!healthData && !healthHistory) {
         // First time viewing health tab - fetch latest health check from history first
+        console.log('Fetching health history (first time)');
         fetchHealthHistory();
       } else if (!healthHistory) {
         // If we have health data but no history, just fetch history
+        console.log('Fetching health history (have data, need history)');
         fetchHealthHistory();
       }
     }
@@ -192,11 +203,13 @@ export default function DomainSettings() {
 
     try {
       const response = await apiClient.getDomainHealthCheckHistory(parseInt(domainId), 5);
+      console.log('Health history response:', response);
       setHealthHistory(response);
 
       // If we don't have healthData but history has results, use the latest one
       if (!healthData && response.history && response.history.length > 0) {
         const latest = response.history[0];
+        console.log('Setting health data from latest history:', latest);
         setHealthData({
           id: latest.id,
           domain: response.domain,
@@ -209,6 +222,8 @@ export default function DomainSettings() {
           summary: latest.summary,
           created_at: latest.created_at
         });
+      } else {
+        console.log('No health data to set. healthData exists:', !!healthData, 'history length:', response.history?.length);
       }
     } catch (error: any) {
       console.error('Error fetching health history:', error);
