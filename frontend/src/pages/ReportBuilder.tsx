@@ -418,6 +418,215 @@ const widgetModules: WidgetModule[] = [
       },
     ],
   },
+  {
+    name: "Platform Metrics",
+    widgets: [
+      // Overview Metrics
+      {
+        id: "total-platforms-metric",
+        type: "metric",
+        title: "Total Platforms Tracked",
+        icon: LayoutGrid,
+        description: "Count of active LLM platforms being monitored",
+      },
+      {
+        id: "total-platform-mentions-metric",
+        type: "metric",
+        title: "Total Platform Mentions",
+        icon: Eye,
+        description: "Sum of all mentions across all platforms",
+      },
+      {
+        id: "total-platform-citations-metric",
+        type: "metric",
+        title: "Total Platform Citations",
+        icon: Link2,
+        description: "Sum of all citations across all platforms",
+      },
+      {
+        id: "platform-coverage-metric",
+        type: "metric",
+        title: "Platform Coverage %",
+        icon: Target,
+        description: "Percentage of platforms where brand appears",
+      },
+      // Performance Metrics (Per Platform)
+      {
+        id: "chatgpt-visibility-metric",
+        type: "metric",
+        title: "ChatGPT Visibility Score",
+        icon: Activity,
+        description: "Visibility score specifically for ChatGPT",
+      },
+      {
+        id: "gemini-visibility-metric",
+        type: "metric",
+        title: "Google Gemini Visibility Score",
+        icon: Activity,
+        description: "Visibility score for Google Gemini",
+      },
+      {
+        id: "perplexity-visibility-metric",
+        type: "metric",
+        title: "Perplexity Visibility Score",
+        icon: Activity,
+        description: "Visibility score for Perplexity",
+      },
+      {
+        id: "claude-visibility-metric",
+        type: "metric",
+        title: "Claude Visibility Score",
+        icon: Activity,
+        description: "Visibility score for Claude",
+      },
+      {
+        id: "grok-visibility-metric",
+        type: "metric",
+        title: "Grok Visibility Score",
+        icon: Activity,
+        description: "Visibility score for Grok",
+      },
+      // Mention & Citation Metrics
+      {
+        id: "top-performing-platform-metric",
+        type: "metric",
+        title: "Top Performing Platform",
+        icon: TrendingUp,
+        description: "Platform with highest visibility/mentions",
+      },
+      {
+        id: "platform-mention-distribution-chart",
+        type: "chart",
+        title: "Platform Mention Distribution",
+        icon: PieChart,
+        description: "Pie chart showing mentions per platform",
+      },
+      {
+        id: "platform-citation-distribution-chart",
+        type: "chart",
+        title: "Platform Citation Distribution",
+        icon: BarChart3,
+        description: "Citations breakdown by platform",
+      },
+      {
+        id: "platform-mention-trends-chart",
+        type: "chart",
+        title: "Platform Mention Trends",
+        icon: LineChart,
+        description: "Line chart showing mentions over time per platform",
+      },
+      // Position Metrics
+      {
+        id: "avg-position-by-platform-chart",
+        type: "chart",
+        title: "Average Position by Platform",
+        icon: BarChart3,
+        description: "Bar chart showing avg position per platform",
+      },
+      {
+        id: "best-platform-position-metric",
+        type: "metric",
+        title: "Best Platform Position",
+        icon: Target,
+        description: "Which platform ranks brand highest",
+      },
+      {
+        id: "platform-position-comparison-chart",
+        type: "chart",
+        title: "Platform Position Comparison",
+        icon: BarChart3,
+        description: "Side-by-side comparison chart",
+      },
+      // Sentiment Metrics
+      {
+        id: "platform-sentiment-breakdown-chart",
+        type: "chart",
+        title: "Platform Sentiment Breakdown",
+        icon: BarChart3,
+        description: "Sentiment scores per platform",
+      },
+      {
+        id: "most-positive-platform-metric",
+        type: "metric",
+        title: "Most Positive Platform",
+        icon: Smile,
+        description: "Platform with highest sentiment",
+      },
+      {
+        id: "platform-sentiment-trends-chart",
+        type: "chart",
+        title: "Platform Sentiment Trends",
+        icon: LineChart,
+        description: "Sentiment changes over time per platform",
+      },
+      // Engagement Metrics
+      {
+        id: "platform-response-rate-metric",
+        type: "metric",
+        title: "Platform Response Rate",
+        icon: Activity,
+        description: "How often brand appears when queried on each platform",
+      },
+      {
+        id: "platform-mention-rate-chart",
+        type: "chart",
+        title: "Platform Mention Rate",
+        icon: BarChart3,
+        description: "Mentions per 100 queries by platform",
+      },
+      {
+        id: "platform-growth-rate-chart",
+        type: "chart",
+        title: "Platform Growth Rate",
+        icon: LineChart,
+        description: "Week-over-week growth per platform",
+      },
+      // Comparative Metrics
+      {
+        id: "platform-share-of-voice-chart",
+        type: "chart",
+        title: "Platform Share of Voice",
+        icon: PieChart,
+        description: "% of total mentions per platform",
+      },
+      {
+        id: "platform-performance-matrix-chart",
+        type: "chart",
+        title: "Platform Performance Matrix",
+        icon: BarChart3,
+        description: "Scatter plot: visibility vs sentiment",
+      },
+      {
+        id: "platform-citation-density-chart",
+        type: "chart",
+        title: "Platform Citation Density",
+        icon: BarChart3,
+        description: "Citations per mention ratio by platform",
+      },
+      // Health Metrics
+      {
+        id: "platform-health-score-chart",
+        type: "chart",
+        title: "Platform Health Score",
+        icon: Activity,
+        description: "Overall health score per platform",
+      },
+      {
+        id: "platform-coverage-quality-metric",
+        type: "metric",
+        title: "Platform Coverage Quality",
+        icon: Target,
+        description: "Quality of mentions per platform",
+      },
+      {
+        id: "platform-consistency-score-metric",
+        type: "metric",
+        title: "Platform Consistency Score",
+        icon: Activity,
+        description: "How consistently brand appears",
+      },
+    ],
+  },
 ];
 
 // Dummy data for previews
@@ -1265,6 +1474,517 @@ const ReportBuilder = () => {
               <TrendingUp className="h-4 w-4" />
               Better engagement
             </p>
+          </Card>
+        );
+
+      // Platform Metrics - Overview
+      case "total-platforms-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-purple-500/10 to-purple-500/5 border-purple-200">
+            <p className="text-sm text-muted-foreground mb-2">Total Platforms Tracked</p>
+            <p className="text-4xl font-bold text-purple-600">5</p>
+            <p className="text-sm text-muted-foreground mt-2">Active platforms</p>
+          </Card>
+        );
+
+      case "total-platform-mentions-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-blue-500/10 to-blue-500/5 border-blue-200">
+            <p className="text-sm text-muted-foreground mb-2">Total Platform Mentions</p>
+            <p className="text-4xl font-bold text-blue-600">2,847</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              +15.3% across all platforms
+            </p>
+          </Card>
+        );
+
+      case "total-platform-citations-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-cyan-500/10 to-cyan-500/5 border-cyan-200">
+            <p className="text-sm text-muted-foreground mb-2">Total Platform Citations</p>
+            <p className="text-4xl font-bold text-cyan-600">1,264</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              +22.1% from last month
+            </p>
+          </Card>
+        );
+
+      case "platform-coverage-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border-emerald-200">
+            <p className="text-sm text-muted-foreground mb-2">Platform Coverage</p>
+            <p className="text-4xl font-bold text-emerald-600">94%</p>
+            <p className="text-sm text-muted-foreground mt-2">5 of 5 platforms active</p>
+          </Card>
+        );
+
+      // Platform Metrics - Performance Per Platform
+      case "chatgpt-visibility-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-green-500/10 to-green-500/5 border-green-200">
+            <p className="text-sm text-muted-foreground mb-2">ChatGPT Visibility</p>
+            <p className="text-4xl font-bold text-green-600">89.2</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              Leading platform
+            </p>
+          </Card>
+        );
+
+      case "gemini-visibility-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-blue-500/10 to-blue-500/5 border-blue-200">
+            <p className="text-sm text-muted-foreground mb-2">Gemini Visibility</p>
+            <p className="text-4xl font-bold text-blue-600">82.7</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              Strong presence
+            </p>
+          </Card>
+        );
+
+      case "perplexity-visibility-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-purple-500/10 to-purple-500/5 border-purple-200">
+            <p className="text-sm text-muted-foreground mb-2">Perplexity Visibility</p>
+            <p className="text-4xl font-bold text-purple-600">78.5</p>
+            <p className="text-sm text-muted-foreground mt-2">Good performance</p>
+          </Card>
+        );
+
+      case "claude-visibility-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-orange-500/10 to-orange-500/5 border-orange-200">
+            <p className="text-sm text-muted-foreground mb-2">Claude Visibility</p>
+            <p className="text-4xl font-bold text-orange-600">85.3</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              +4.2% improvement
+            </p>
+          </Card>
+        );
+
+      case "grok-visibility-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-indigo-500/10 to-indigo-500/5 border-indigo-200">
+            <p className="text-sm text-muted-foreground mb-2">Grok Visibility</p>
+            <p className="text-4xl font-bold text-indigo-600">71.8</p>
+            <p className="text-sm text-amber-600 mt-2 flex items-center gap-1">
+              Growing platform
+            </p>
+          </Card>
+        );
+
+      // Platform Metrics - Mention & Citation
+      case "top-platform-mentions-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-green-500/10 to-green-500/5 border-green-200">
+            <p className="text-sm text-muted-foreground mb-2">Top Platform by Mentions</p>
+            <p className="text-4xl font-bold text-green-600">ChatGPT</p>
+            <p className="text-sm text-muted-foreground mt-2">847 mentions</p>
+          </Card>
+        );
+
+      case "platform-mention-distribution-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsPieChart>
+                <Pie
+                  data={[
+                    { name: 'ChatGPT', value: 35, color: '#10b981' },
+                    { name: 'Claude', value: 25, color: '#f97316' },
+                    { name: 'Gemini', value: 20, color: '#3b82f6' },
+                    { name: 'Perplexity', value: 12, color: '#8b5cf6' },
+                    { name: 'Grok', value: 8, color: '#6366f1' },
+                  ]}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={(entry) => `${entry.name}: ${entry.value}%`}
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                >
+                  {[
+                    { name: 'ChatGPT', value: 35, color: '#10b981' },
+                    { name: 'Claude', value: 25, color: '#f97316' },
+                    { name: 'Gemini', value: 20, color: '#3b82f6' },
+                    { name: 'Perplexity', value: 12, color: '#8b5cf6' },
+                    { name: 'Grok', value: 8, color: '#6366f1' },
+                  ].map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </RechartsPieChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "platform-citation-distribution-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsBarChart data={[
+                { platform: 'ChatGPT', citations: 425 },
+                { platform: 'Claude', citations: 318 },
+                { platform: 'Gemini', citations: 267 },
+                { platform: 'Perplexity', citations: 189 },
+                { platform: 'Grok', citations: 65 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="platform" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="citations" fill="#3b82f6" />
+              </RechartsBarChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "platform-mentions-trend-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsLineChart data={[
+                { month: 'Jan', ChatGPT: 120, Claude: 85, Gemini: 75, Perplexity: 45, Grok: 25 },
+                { month: 'Feb', ChatGPT: 140, Claude: 95, Gemini: 82, Perplexity: 52, Grok: 28 },
+                { month: 'Mar', ChatGPT: 165, Claude: 110, Gemini: 95, Perplexity: 58, Grok: 32 },
+                { month: 'Apr', ChatGPT: 182, Claude: 125, Gemini: 108, Perplexity: 65, Grok: 38 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="ChatGPT" stroke="#10b981" strokeWidth={2} />
+                <Line type="monotone" dataKey="Claude" stroke="#f97316" strokeWidth={2} />
+                <Line type="monotone" dataKey="Gemini" stroke="#3b82f6" strokeWidth={2} />
+                <Line type="monotone" dataKey="Perplexity" stroke="#8b5cf6" strokeWidth={2} />
+                <Line type="monotone" dataKey="Grok" stroke="#6366f1" strokeWidth={2} />
+              </RechartsLineChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      // Platform Metrics - Position
+      case "avg-position-by-platform-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsBarChart data={[
+                { platform: 'ChatGPT', position: 1.8 },
+                { platform: 'Claude', position: 2.1 },
+                { platform: 'Gemini', position: 2.4 },
+                { platform: 'Perplexity', position: 2.8 },
+                { platform: 'Grok', position: 3.2 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="platform" />
+                <YAxis reversed />
+                <Tooltip />
+                <Bar dataKey="position" fill="#f59e0b" />
+              </RechartsBarChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "best-platform-position-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-amber-500/10 to-amber-500/5 border-amber-200">
+            <p className="text-sm text-muted-foreground mb-2">Best Platform Position</p>
+            <p className="text-4xl font-bold text-amber-600">ChatGPT</p>
+            <p className="text-sm text-muted-foreground mt-2">Avg position: 1.8</p>
+          </Card>
+        );
+
+      case "platform-position-comparison-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsLineChart data={[
+                { month: 'Jan', ChatGPT: 2.2, Claude: 2.5, Gemini: 2.8, Perplexity: 3.2, Grok: 3.8 },
+                { month: 'Feb', ChatGPT: 2.0, Claude: 2.3, Gemini: 2.6, Perplexity: 3.0, Grok: 3.5 },
+                { month: 'Mar', ChatGPT: 1.9, Claude: 2.2, Gemini: 2.5, Perplexity: 2.9, Grok: 3.3 },
+                { month: 'Apr', ChatGPT: 1.8, Claude: 2.1, Gemini: 2.4, Perplexity: 2.8, Grok: 3.2 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis reversed />
+                <Tooltip />
+                <Line type="monotone" dataKey="ChatGPT" stroke="#10b981" strokeWidth={2} />
+                <Line type="monotone" dataKey="Claude" stroke="#f97316" strokeWidth={2} />
+                <Line type="monotone" dataKey="Gemini" stroke="#3b82f6" strokeWidth={2} />
+                <Line type="monotone" dataKey="Perplexity" stroke="#8b5cf6" strokeWidth={2} />
+                <Line type="monotone" dataKey="Grok" stroke="#6366f1" strokeWidth={2} />
+              </RechartsLineChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      // Platform Metrics - Sentiment
+      case "platform-sentiment-breakdown-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsBarChart data={[
+                { platform: 'ChatGPT', Positive: 72, Neutral: 20, Negative: 8 },
+                { platform: 'Claude', Positive: 68, Neutral: 24, Negative: 8 },
+                { platform: 'Gemini', Positive: 65, Neutral: 27, Negative: 8 },
+                { platform: 'Perplexity', Positive: 70, Neutral: 22, Negative: 8 },
+                { platform: 'Grok', Positive: 62, Neutral: 28, Negative: 10 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="platform" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="Positive" stackId="a" fill="#10b981" />
+                <Bar dataKey="Neutral" stackId="a" fill="#94a3b8" />
+                <Bar dataKey="Negative" stackId="a" fill="#ef4444" />
+              </RechartsBarChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "most-positive-platform-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-green-500/10 to-green-500/5 border-green-200">
+            <p className="text-sm text-muted-foreground mb-2">Most Positive Platform</p>
+            <p className="text-4xl font-bold text-green-600">ChatGPT</p>
+            <p className="text-sm text-muted-foreground mt-2">72% positive sentiment</p>
+          </Card>
+        );
+
+      case "platform-sentiment-trend-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsLineChart data={[
+                { month: 'Jan', ChatGPT: 68, Claude: 64, Gemini: 60, Perplexity: 66, Grok: 58 },
+                { month: 'Feb', ChatGPT: 69, Claude: 65, Gemini: 62, Perplexity: 67, Grok: 59 },
+                { month: 'Mar', ChatGPT: 70, Claude: 66, Gemini: 63, Perplexity: 68, Grok: 60 },
+                { month: 'Apr', ChatGPT: 72, Claude: 68, Gemini: 65, Perplexity: 70, Grok: 62 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="ChatGPT" stroke="#10b981" strokeWidth={2} />
+                <Line type="monotone" dataKey="Claude" stroke="#f97316" strokeWidth={2} />
+                <Line type="monotone" dataKey="Gemini" stroke="#3b82f6" strokeWidth={2} />
+                <Line type="monotone" dataKey="Perplexity" stroke="#8b5cf6" strokeWidth={2} />
+                <Line type="monotone" dataKey="Grok" stroke="#6366f1" strokeWidth={2} />
+              </RechartsLineChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      // Platform Metrics - Engagement
+      case "platform-response-rate-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-violet-500/10 to-violet-500/5 border-violet-200">
+            <p className="text-sm text-muted-foreground mb-2">Platform Response Rate</p>
+            <p className="text-4xl font-bold text-violet-600">96.4%</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              High engagement
+            </p>
+          </Card>
+        );
+
+      case "platform-mention-rate-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsBarChart data={[
+                { platform: 'ChatGPT', rate: 84 },
+                { platform: 'Claude', rate: 76 },
+                { platform: 'Gemini', rate: 72 },
+                { platform: 'Perplexity', rate: 68 },
+                { platform: 'Grok', rate: 58 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="platform" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="rate" fill="#8b5cf6" />
+              </RechartsBarChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "platform-growth-rate-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsLineChart data={[
+                { month: 'Jan', ChatGPT: 0, Claude: 0, Gemini: 0, Perplexity: 0, Grok: 0 },
+                { month: 'Feb', ChatGPT: 16.7, Claude: 11.8, Gemini: 9.3, Perplexity: 15.6, Grok: 12.0 },
+                { month: 'Mar', ChatGPT: 17.9, Claude: 15.8, Gemini: 15.9, Perplexity: 11.5, Grok: 14.3 },
+                { month: 'Apr', ChatGPT: 10.3, Claude: 13.6, Gemini: 13.7, Perplexity: 12.1, Grok: 18.8 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="ChatGPT" stroke="#10b981" strokeWidth={2} />
+                <Line type="monotone" dataKey="Claude" stroke="#f97316" strokeWidth={2} />
+                <Line type="monotone" dataKey="Gemini" stroke="#3b82f6" strokeWidth={2} />
+                <Line type="monotone" dataKey="Perplexity" stroke="#8b5cf6" strokeWidth={2} />
+                <Line type="monotone" dataKey="Grok" stroke="#6366f1" strokeWidth={2} />
+              </RechartsLineChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      // Platform Metrics - Comparative
+      case "platform-share-of-voice-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsBarChart data={[
+                { platform: 'ChatGPT', share: 35 },
+                { platform: 'Claude', share: 25 },
+                { platform: 'Gemini', share: 20 },
+                { platform: 'Perplexity', share: 12 },
+                { platform: 'Grok', share: 8 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="platform" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="share" fill="#f97316" />
+              </RechartsBarChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "platform-performance-matrix-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <div className="overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b">
+                  <tr>
+                    <th className="text-left py-2">Platform</th>
+                    <th className="text-right py-2">Visibility</th>
+                    <th className="text-right py-2">Position</th>
+                    <th className="text-right py-2">Sentiment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b">
+                    <td className="py-2">ChatGPT</td>
+                    <td className="text-right">89.2</td>
+                    <td className="text-right">1.8</td>
+                    <td className="text-right text-green-600">72%</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-2">Claude</td>
+                    <td className="text-right">85.3</td>
+                    <td className="text-right">2.1</td>
+                    <td className="text-right text-green-600">68%</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-2">Gemini</td>
+                    <td className="text-right">82.7</td>
+                    <td className="text-right">2.4</td>
+                    <td className="text-right text-green-600">65%</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-2">Perplexity</td>
+                    <td className="text-right">78.5</td>
+                    <td className="text-right">2.8</td>
+                    <td className="text-right text-green-600">70%</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2">Grok</td>
+                    <td className="text-right">71.8</td>
+                    <td className="text-right">3.2</td>
+                    <td className="text-right text-green-600">62%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        );
+
+      case "platform-citation-density-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsBarChart data={[
+                { platform: 'ChatGPT', density: 0.50 },
+                { platform: 'Claude', density: 0.38 },
+                { platform: 'Gemini', density: 0.32 },
+                { platform: 'Perplexity', density: 0.22 },
+                { platform: 'Grok', density: 0.08 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="platform" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="density" fill="#3b82f6" />
+              </RechartsBarChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      // Platform Metrics - Health
+      case "platform-health-score-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-teal-500/10 to-teal-500/5 border-teal-200">
+            <p className="text-sm text-muted-foreground mb-2">Platform Health Score</p>
+            <p className="text-4xl font-bold text-teal-600">88.5</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              Healthy across all platforms
+            </p>
+          </Card>
+        );
+
+      case "platform-coverage-quality-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsBarChart data={[
+                { platform: 'ChatGPT', quality: 92 },
+                { platform: 'Claude', quality: 88 },
+                { platform: 'Gemini', quality: 85 },
+                { platform: 'Perplexity', quality: 82 },
+                { platform: 'Grok', quality: 75 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="platform" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="quality" fill="#14b8a6" />
+              </RechartsBarChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "platform-consistency-score-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-sky-500/10 to-sky-500/5 border-sky-200">
+            <p className="text-sm text-muted-foreground mb-2">Platform Consistency Score</p>
+            <p className="text-4xl font-bold text-sky-600">91.2</p>
+            <p className="text-sm text-muted-foreground mt-2">Consistent performance</p>
           </Card>
         );
 
