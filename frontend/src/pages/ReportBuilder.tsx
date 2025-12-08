@@ -452,6 +452,8 @@ const ReportBuilder = () => {
 
   const [gridRows, setGridRows] = useState<GridRow[]>([]);
   const [draggedWidget, setDraggedWidget] = useState<Widget | null>(null);
+  const [draggedRowIndex, setDraggedRowIndex] = useState<number | null>(null);
+  const [dragOverRowIndex, setDragOverRowIndex] = useState<number | null>(null);
   const [gridDialogOpen, setGridDialogOpen] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
@@ -595,6 +597,52 @@ const ReportBuilder = () => {
   // Remove entire grid row
   const handleRemoveRow = (rowId: string) => {
     setGridRows(gridRows.filter((row) => row.id !== rowId));
+  };
+
+  // Handle row drag start
+  const handleRowDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedRowIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  // Handle row drag over
+  const handleRowDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+
+    if (draggedRowIndex === null || draggedRowIndex === index) return;
+
+    setDragOverRowIndex(index);
+  };
+
+  // Handle row drag leave
+  const handleRowDragLeave = () => {
+    setDragOverRowIndex(null);
+  };
+
+  // Handle row drop
+  const handleRowDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+
+    if (draggedRowIndex === null || draggedRowIndex === dropIndex) {
+      setDraggedRowIndex(null);
+      setDragOverRowIndex(null);
+      return;
+    }
+
+    const newRows = [...gridRows];
+    const [draggedRow] = newRows.splice(draggedRowIndex, 1);
+    newRows.splice(dropIndex, 0, draggedRow);
+
+    setGridRows(newRows);
+    setDraggedRowIndex(null);
+    setDragOverRowIndex(null);
+  };
+
+  // Handle row drag end
+  const handleRowDragEnd = () => {
+    setDraggedRowIndex(null);
+    setDragOverRowIndex(null);
   };
 
   // Handle save template
@@ -1416,20 +1464,41 @@ const ReportBuilder = () => {
               ) : (
                 <>
                   {gridRows.map((row, rowIndex) => (
-                    <div key={row.id} className="relative group">
-                      {/* Remove row button */}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleRemoveRow(row.id)}
-                        className="absolute -top-3 -right-3 opacity-0 group-hover:opacity-100 transition-opacity z-10 h-7 w-7 p-0 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+                    <div
+                      key={row.id}
+                      draggable
+                      onDragStart={(e) => handleRowDragStart(e, rowIndex)}
+                      onDragOver={(e) => handleRowDragOver(e, rowIndex)}
+                      onDragLeave={handleRowDragLeave}
+                      onDrop={(e) => handleRowDrop(e, rowIndex)}
+                      onDragEnd={handleRowDragEnd}
+                      className={`relative group transition-all duration-200 ${
+                        draggedRowIndex === rowIndex ? 'opacity-50 scale-95' : ''
+                      } ${
+                        dragOverRowIndex === rowIndex && draggedRowIndex !== rowIndex
+                          ? 'border-2 border-primary border-dashed rounded-lg p-2 bg-primary/5'
+                          : 'mb-6'
+                      }`}
+                    >
+                      {/* Drag handle and remove button container */}
+                      <div className="absolute -top-3 -left-3 right-3 flex items-center justify-between z-10">
+                        <div className="flex items-center gap-2 bg-background border border-border rounded-md px-2 py-1 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity cursor-move">
+                          <Grip className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-xs text-muted-foreground">Drag to reorder</span>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleRemoveRow(row.id)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 p-0 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
 
                       {/* Grid slots */}
                       <div
-                        className={`grid gap-4 ${
+                        className={`grid gap-4 mt-4 ${
                           row.type === "single"
                             ? "grid-cols-1"
                             : row.type === "double"
