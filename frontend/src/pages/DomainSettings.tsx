@@ -148,8 +148,9 @@ export default function DomainSettings() {
 
     // Fetch health check data when Health tab is activated
     if (value === 'health' && domainId) {
-      if (!healthData) {
-        fetchHealthCheck();
+      if (!healthData && !healthHistory) {
+        // First time viewing health tab - fetch latest health check from history first
+        fetchHealthHistory();
       } else if (!healthHistory) {
         // If we have health data but no history, just fetch history
         fetchHealthHistory();
@@ -192,6 +193,23 @@ export default function DomainSettings() {
     try {
       const response = await apiClient.getDomainHealthCheckHistory(parseInt(domainId), 5);
       setHealthHistory(response);
+
+      // If we don't have healthData but history has results, use the latest one
+      if (!healthData && response.history && response.history.length > 0) {
+        const latest = response.history[0];
+        setHealthData({
+          id: latest.id,
+          domain: response.domain,
+          health_score: latest.health_score,
+          max_score: latest.max_score,
+          percentage: latest.percentage,
+          grade: latest.grade,
+          grade_color: latest.grade_color,
+          checks: latest.checks,
+          summary: latest.summary,
+          created_at: latest.created_at
+        });
+      }
     } catch (error: any) {
       console.error('Error fetching health history:', error);
     } finally {
