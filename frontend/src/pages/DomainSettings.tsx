@@ -1550,27 +1550,38 @@ export default function DomainSettings() {
                   Technical assessment of your website's AI-friendliness and SEO optimization
                 </CardDescription>
               </div>
-              <Button
-                onClick={fetchHealthCheck}
-                disabled={isLoadingHealth}
-                size="sm"
-                variant="outline"
-              >
-                {isLoadingHealth ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Checking...
-                  </>
-                ) : (
-                  <>
-                    <Activity className="h-4 w-4 mr-2" />
-                    Run Health Check
-                  </>
-                )}
-              </Button>
+              {/* Hide button when domain is processing */}
+              {domain?.processing_status !== 'PROC' && domain?.processing_status !== 'SCHD' && (
+                <Button
+                  onClick={fetchHealthCheck}
+                  disabled={isLoadingHealth}
+                  size="sm"
+                  variant="outline"
+                >
+                  {isLoadingHealth ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Checking...
+                    </>
+                  ) : (
+                    <>
+                      <Activity className="h-4 w-4 mr-2" />
+                      Run Health Check
+                    </>
+                  )}
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-6">
-              {isLoadingHealth ? (
+              {domain?.processing_status === 'PROC' || domain?.processing_status === 'SCHD' ? (
+                <div className="flex items-center justify-center p-12">
+                  <div className="text-center space-y-3">
+                    <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+                    <p className="text-sm text-muted-foreground">Domain is currently being processed...</p>
+                    <p className="text-xs text-muted-foreground">Health check will be available once processing is complete</p>
+                  </div>
+                </div>
+              ) : isLoadingHealth ? (
                 <div className="flex items-center justify-center p-12">
                   <div className="text-center space-y-3">
                     <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
