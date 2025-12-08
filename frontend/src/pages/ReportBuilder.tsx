@@ -960,6 +960,265 @@ const ReportBuilder = () => {
           </Card>
         );
 
+      // New Information Metrics
+      case "engagement-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-violet-500/10 to-violet-500/5 border-violet-200">
+            <p className="text-sm text-muted-foreground mb-2">Engagement Score</p>
+            <p className="text-4xl font-bold text-violet-600">92.3</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              +8.1% improvement
+            </p>
+          </Card>
+        );
+
+      case "mention-rate-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-sky-500/10 to-sky-500/5 border-sky-200">
+            <p className="text-sm text-muted-foreground mb-2">Mention Rate</p>
+            <p className="text-4xl font-bold text-sky-600">67%</p>
+            <p className="text-sm text-muted-foreground mt-2">Of total prompts</p>
+          </Card>
+        );
+
+      case "mention-growth-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-teal-500/10 to-teal-500/5 border-teal-200">
+            <p className="text-sm text-muted-foreground mb-2">Mention Growth</p>
+            <p className="text-4xl font-bold text-teal-600">+24.5%</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              vs last month
+            </p>
+          </Card>
+        );
+
+      case "platform-coverage-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-pink-500/10 to-pink-500/5 border-pink-200">
+            <p className="text-sm text-muted-foreground mb-2">Platform Coverage</p>
+            <p className="text-4xl font-bold text-pink-600">5/5</p>
+            <p className="text-sm text-muted-foreground mt-2">All platforms active</p>
+          </Card>
+        );
+
+      case "citation-rate-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-indigo-500/10 to-indigo-500/5 border-indigo-200">
+            <p className="text-sm text-muted-foreground mb-2">Citation Rate</p>
+            <p className="text-4xl font-bold text-indigo-600">2.8</p>
+            <p className="text-sm text-muted-foreground mt-2">Citations per mention</p>
+          </Card>
+        );
+
+      case "citation-density-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-fuchsia-500/10 to-fuchsia-500/5 border-fuchsia-200">
+            <p className="text-sm text-muted-foreground mb-2">Citation Density</p>
+            <p className="text-4xl font-bold text-fuchsia-600">3.2</p>
+            <p className="text-sm text-muted-foreground mt-2">Avg per response</p>
+          </Card>
+        );
+
+      case "primary-sources-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-rose-500/10 to-rose-500/5 border-rose-200">
+            <p className="text-sm text-muted-foreground mb-2">Primary Sources</p>
+            <p className="text-4xl font-bold text-rose-600">156</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              +12 this month
+            </p>
+          </Card>
+        );
+
+      case "avg-sentiment-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-lime-500/10 to-lime-500/5 border-lime-200">
+            <p className="text-sm text-muted-foreground mb-2">Average Sentiment Score</p>
+            <p className="text-4xl font-bold text-lime-600">7.8/10</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <Smile className="h-4 w-4" />
+              Highly positive
+            </p>
+          </Card>
+        );
+
+      case "sentiment-trend-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border-emerald-200">
+            <p className="text-sm text-muted-foreground mb-2">Sentiment Trend</p>
+            <p className="text-4xl font-bold text-emerald-600">+0.4</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              Improving trend
+            </p>
+          </Card>
+        );
+
+      case "market-position-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-purple-500/10 to-purple-500/5 border-purple-200">
+            <p className="text-sm text-muted-foreground mb-2">Market Position</p>
+            <p className="text-4xl font-bold text-purple-600">#2</p>
+            <p className="text-sm text-muted-foreground mt-2">Out of 8 competitors</p>
+          </Card>
+        );
+
+      case "competitor-gap-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-orange-500/10 to-orange-500/5 border-orange-200">
+            <p className="text-sm text-muted-foreground mb-2">Competitor Gap</p>
+            <p className="text-4xl font-bold text-orange-600">-145</p>
+            <p className="text-sm text-muted-foreground mt-2">Behind leader</p>
+          </Card>
+        );
+
+      case "market-share-trend-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-amber-500/10 to-amber-500/5 border-amber-200">
+            <p className="text-sm text-muted-foreground mb-2">Market Share Trend</p>
+            <p className="text-4xl font-bold text-amber-600">+3.2%</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              Growing share
+            </p>
+          </Card>
+        );
+
+      case "health-score-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-cyan-500/10 to-cyan-500/5 border-cyan-200">
+            <p className="text-sm text-muted-foreground mb-2">Health Score</p>
+            <p className="text-4xl font-bold text-cyan-600">94/100</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <Activity className="h-4 w-4" />
+              Excellent health
+            </p>
+          </Card>
+        );
+
+      case "content-quality-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-blue-500/10 to-blue-500/5 border-blue-200">
+            <p className="text-sm text-muted-foreground mb-2">Content Quality Score</p>
+            <p className="text-4xl font-bold text-blue-600">88/100</p>
+            <p className="text-sm text-muted-foreground mt-2">High quality content</p>
+          </Card>
+        );
+
+      case "topics-covered-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-indigo-500/10 to-indigo-500/5 border-indigo-200">
+            <p className="text-sm text-muted-foreground mb-2">Topics Covered</p>
+            <p className="text-4xl font-bold text-indigo-600">24</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              +6 new topics
+            </p>
+          </Card>
+        );
+
+      case "answer-coverage-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-violet-500/10 to-violet-500/5 border-violet-200">
+            <p className="text-sm text-muted-foreground mb-2">Answer Coverage</p>
+            <p className="text-4xl font-bold text-violet-600">78%</p>
+            <p className="text-sm text-muted-foreground mt-2">Of all prompts</p>
+          </Card>
+        );
+
+      case "active-alerts-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-red-500/10 to-red-500/5 border-red-200">
+            <p className="text-sm text-muted-foreground mb-2">Active Alerts</p>
+            <p className="text-4xl font-bold text-red-600">3</p>
+            <p className="text-sm text-muted-foreground mt-2">Require attention</p>
+          </Card>
+        );
+
+      case "critical-issues-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-red-500/10 to-red-500/5 border-red-200">
+            <p className="text-sm text-muted-foreground mb-2">Critical Issues</p>
+            <p className="text-4xl font-bold text-red-600">1</p>
+            <p className="text-sm text-red-600 mt-2 flex items-center gap-1">
+              <AlertCircle className="h-4 w-4" />
+              High priority
+            </p>
+          </Card>
+        );
+
+      case "broken-links-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-yellow-500/10 to-yellow-500/5 border-yellow-200">
+            <p className="text-sm text-muted-foreground mb-2">Broken Links</p>
+            <p className="text-4xl font-bold text-yellow-600">7</p>
+            <p className="text-sm text-muted-foreground mt-2">Need fixing</p>
+          </Card>
+        );
+
+      case "misinformation-cases-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-orange-500/10 to-orange-500/5 border-orange-200">
+            <p className="text-sm text-muted-foreground mb-2">Misinformation Cases</p>
+            <p className="text-4xl font-bold text-orange-600">2</p>
+            <p className="text-sm text-orange-600 mt-2 flex items-center gap-1">
+              <AlertCircle className="h-4 w-4" />
+              Under review
+            </p>
+          </Card>
+        );
+
+      case "mention-growth-percent-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-green-500/10 to-green-500/5 border-green-200">
+            <p className="text-sm text-muted-foreground mb-2">Mention Growth %</p>
+            <p className="text-4xl font-bold text-green-600">+24.5%</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              Strong growth
+            </p>
+          </Card>
+        );
+
+      case "visibility-trend-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border-emerald-200">
+            <p className="text-sm text-muted-foreground mb-2">Visibility Trend</p>
+            <p className="text-4xl font-bold text-emerald-600">+6.3%</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              Improving visibility
+            </p>
+          </Card>
+        );
+
+      case "citation-growth-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-blue-500/10 to-blue-500/5 border-blue-200">
+            <p className="text-sm text-muted-foreground mb-2">Citation Growth</p>
+            <p className="text-4xl font-bold text-blue-600">+18.2%</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              More citations
+            </p>
+          </Card>
+        );
+
+      case "engagement-growth-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-violet-500/10 to-violet-500/5 border-violet-200">
+            <p className="text-sm text-muted-foreground mb-2">Engagement Growth</p>
+            <p className="text-4xl font-bold text-violet-600">+8.1%</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              Better engagement
+            </p>
+          </Card>
+        );
+
       default:
         return (
           <Card className="p-6 bg-muted">
