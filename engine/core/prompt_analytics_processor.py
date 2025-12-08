@@ -853,6 +853,15 @@ class PromptAnalyticsProcessor:
                         except Exception as comp_error:
                             logger.error(f"Error auto-extracting competitors for domain {domain.id}: {str(comp_error)}")
 
+                        # Sync competitor analytics after extraction
+                        try:
+                            from competitors.utils import sync_competitor_prompt_analytics
+                            logger.info(f"🔄 Syncing competitor prompt analytics for domain {domain.id}")
+                            sync_stats = sync_competitor_prompt_analytics(domain_id=domain.id)
+                            logger.info(f"✅ Competitor sync completed for domain {domain.id}: {sync_stats}")
+                        except Exception as sync_error:
+                            logger.error(f"Error syncing competitor analytics for domain {domain.id}: {str(sync_error)}")
+
                         # Auto-trigger misinformation scan
                         logger.info(f"🔍 Auto-triggering misinformation scan for domain {domain.id}")
                         domain_fresh.misinformation_scan_status = 'READY'
