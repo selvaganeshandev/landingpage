@@ -1578,10 +1578,10 @@ const ReportBuilder = () => {
         );
 
       // Platform Metrics - Mention & Citation
-      case "top-platform-mentions-metric":
+      case "top-performing-platform-metric":
         return (
           <Card className="p-6 bg-gradient-to-br from-green-500/10 to-green-500/5 border-green-200">
-            <p className="text-sm text-muted-foreground mb-2">Top Platform by Mentions</p>
+            <p className="text-sm text-muted-foreground mb-2">Top Performing Platform</p>
             <p className="text-4xl font-bold text-green-600">ChatGPT</p>
             <p className="text-sm text-muted-foreground mt-2">847 mentions</p>
           </Card>
@@ -1647,7 +1647,7 @@ const ReportBuilder = () => {
           </Card>
         );
 
-      case "platform-mentions-trend-chart":
+      case "platform-mention-trends-chart":
         return (
           <Card className="p-6">
             <h3 className="font-semibold mb-4">{widget.title}</h3>
@@ -1763,7 +1763,7 @@ const ReportBuilder = () => {
           </Card>
         );
 
-      case "platform-sentiment-trend-chart":
+      case "platform-sentiment-trends-chart":
         return (
           <Card className="p-6">
             <h3 className="font-semibold mb-4">{widget.title}</h3>
@@ -1945,37 +1945,37 @@ const ReportBuilder = () => {
         );
 
       // Platform Metrics - Health
-      case "platform-health-score-metric":
-        return (
-          <Card className="p-6 bg-gradient-to-br from-teal-500/10 to-teal-500/5 border-teal-200">
-            <p className="text-sm text-muted-foreground mb-2">Platform Health Score</p>
-            <p className="text-4xl font-bold text-teal-600">88.5</p>
-            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
-              <TrendingUp className="h-4 w-4" />
-              Healthy across all platforms
-            </p>
-          </Card>
-        );
-
-      case "platform-coverage-quality-chart":
+      case "platform-health-score-chart":
         return (
           <Card className="p-6">
             <h3 className="font-semibold mb-4">{widget.title}</h3>
             <ResponsiveContainer width="100%" height={200}>
               <RechartsBarChart data={[
-                { platform: 'ChatGPT', quality: 92 },
-                { platform: 'Claude', quality: 88 },
-                { platform: 'Gemini', quality: 85 },
-                { platform: 'Perplexity', quality: 82 },
-                { platform: 'Grok', quality: 75 },
+                { platform: 'ChatGPT', health: 92 },
+                { platform: 'Claude', health: 88 },
+                { platform: 'Gemini', health: 86 },
+                { platform: 'Perplexity', health: 84 },
+                { platform: 'Grok', health: 78 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="platform" />
                 <YAxis />
                 <Tooltip />
-                <Bar dataKey="quality" fill="#14b8a6" />
+                <Bar dataKey="health" fill="#14b8a6" />
               </RechartsBarChart>
             </ResponsiveContainer>
+          </Card>
+        );
+
+      case "platform-coverage-quality-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-teal-500/10 to-teal-500/5 border-teal-200">
+            <p className="text-sm text-muted-foreground mb-2">Platform Coverage Quality</p>
+            <p className="text-4xl font-bold text-teal-600">85.7</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              High quality coverage
+            </p>
           </Card>
         );
 
