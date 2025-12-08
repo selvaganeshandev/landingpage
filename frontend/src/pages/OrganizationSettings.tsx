@@ -1466,7 +1466,7 @@ export default function OrganizationSettings() {
                             Health
                           </div>
                         </button>
-                      ) : (
+                      ) : !isProcessing ? (
                         <button
                           onClick={() => navigate(`/organization-settings/domains/${domain.id}?tab=health`)}
                           className="flex items-center gap-1 px-2 py-1 hover:opacity-80 transition-opacity cursor-pointer"
@@ -1475,7 +1475,7 @@ export default function OrganizationSettings() {
                           <Activity className="h-3.5 w-3.5 text-primary" />
                           <span className="text-primary font-medium text-xs">Run</span>
                         </button>
-                      )}
+                      ) : null}
 
                       {/* Status Badge - Second */}
                       {isProcessing && (
