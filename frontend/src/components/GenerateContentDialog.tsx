@@ -456,16 +456,21 @@ export const GenerateContentDialog = ({
                   <Button
                     onClick={() => {
                       onOpenChange(false);
-                      // Navigate to the appropriate section based on source type
-                      const sourceType = existingContent?.sourceType;
-                      if (sourceType === 'content_gap') {
-                        navigate('/content-gaps');
-                      } else if (sourceType === 'answer_gap') {
-                        navigate('/competitors');
-                      } else if (sourceType === 'topic') {
-                        navigate('/topics');
+                      // Navigate to content editor with the generated content ID
+                      if (generatedContent?.id) {
+                        navigate(`/content-editor/${generatedContent.id}`);
                       } else {
-                        navigate('/content-calendar');
+                        // Fallback: Navigate to the appropriate section based on source type
+                        const sourceType = existingContent?.sourceType;
+                        if (sourceType === 'content_gap') {
+                          navigate('/content-gaps');
+                        } else if (sourceType === 'answer_gap') {
+                          navigate('/competitors');
+                        } else if (sourceType === 'topic') {
+                          navigate('/topics');
+                        } else {
+                          navigate('/content-calendar');
+                        }
                       }
                     }}
                     className="gradient-primary"
