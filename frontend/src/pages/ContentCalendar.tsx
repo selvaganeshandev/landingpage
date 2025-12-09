@@ -20,13 +20,6 @@ import {
   Settings,
   List
 } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { GenerateContentDialog } from "@/components/GenerateContentDialog";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
@@ -173,7 +166,7 @@ const ContentCalendar = () => {
 
   // Calculate dynamic summary stats
   const scheduledCount = contentItems.filter(item => item.status === "scheduled").length;
-  const highPriorityCount = contentItems.filter(item => item.priority === "high").length;
+  const draftCount = contentItems.filter(item => item.status === "draft").length;
   const generatedCount = contentItems.filter(item => item.status === "generated" || item.status === "published").length;
   const avgImpact = contentItems.length > 0
     ? Math.round(contentItems.reduce((sum, item) => sum + item.estimatedImpact, 0) / contentItems.length)
@@ -190,6 +183,14 @@ const ContentCalendar = () => {
           </p>
         </div>
         <div className="flex gap-3">
+          <Button 
+            variant="outline" 
+            onClick={() => navigate('/automation')}
+            className="border-border/50"
+          >
+            <Settings className="h-4 w-4 mr-2" />
+            CMS Settings
+          </Button>
           <Button onClick={handleGenerateContent} className="gradient-primary shadow-md shadow-primary/20">
             <Sparkles className="h-4 w-4 mr-2" />
             Generate Content
@@ -213,11 +214,11 @@ const ContentCalendar = () => {
         <Card className="p-4 border border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">High Priority</p>
-              <p className="text-2xl font-bold font-inter">{loading ? "-" : highPriorityCount}</p>
+              <p className="text-sm text-muted-foreground">Drafts</p>
+              <p className="text-2xl font-bold font-inter">{loading ? "-" : draftCount}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-destructive/10 flex items-center justify-center">
-              <AlertCircle className="h-5 w-5 text-destructive" />
+              <FileText className="h-5 w-5 text-destructive" />
             </div>
           </div>
         </Card>
@@ -336,14 +337,16 @@ const ContentCalendar = () => {
                       </div>
                     </div>
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleEditContent(item)}
-                    >
-                      <Edit className="h-4 w-4 mr-2" />
-                      Edit
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEditContent(item)}
+                      >
+                        <Edit className="h-4 w-4 mr-2" />
+                        Edit
+                      </Button>
+                    </div>
                   </div>
                 </Card>
               ))
@@ -399,13 +402,15 @@ const ContentCalendar = () => {
                               <p>🔑 Keywords: {item.targetKeywords.join(", ")}</p>
                             </div>
                           </div>
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => handleEditContent(item)}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => handleEditContent(item)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                       </Card>
                     ))}
@@ -493,9 +498,9 @@ const ContentCalendar = () => {
                     </div>
                   ) : (
                     contentItems.filter(i => i.status === "draft").map(item => (
-                      <Card key={item.id} className="p-3 cursor-pointer hover:shadow-md transition-all">
+                      <Card key={item.id} className="p-3 hover:shadow-md transition-all">
                         <p className="font-medium text-sm mb-2 line-clamp-2">{item.title}</p>
-                        <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center justify-between text-xs mb-2">
                           <Badge variant="outline" className={getPriorityColor(item.priority)}>
                             {item.priority}
                           </Badge>
@@ -525,9 +530,9 @@ const ContentCalendar = () => {
                     </div>
                   ) : (
                     contentItems.filter(i => i.status === "generated").map(item => (
-                      <Card key={item.id} className="p-3 cursor-pointer hover:shadow-md transition-all">
+                      <Card key={item.id} className="p-3 hover:shadow-md transition-all">
                         <p className="font-medium text-sm mb-2 line-clamp-2">{item.title}</p>
-                        <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center justify-between text-xs mb-2">
                           <Badge variant="outline" className={getPriorityColor(item.priority)}>
                             {item.priority}
                           </Badge>

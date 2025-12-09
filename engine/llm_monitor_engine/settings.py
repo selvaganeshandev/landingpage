@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from decouple import config
+from celery.schedules import crontab
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -239,5 +240,18 @@ CELERY_BEAT_SCHEDULE = {
     'report-email-scheduler-every-15s': {
         'task': 'core.processing_tasks.process_report_email_scheduler',
         'schedule': config('CELERY_BEAT_SCHEDULE_REPORT_EMAIL', default=15.0, cast=float),
+    },
+    # Weekly batch reprocessing (off-peak). Adjust crontab as needed.
+    'weekly-prompts-batch': {
+        'task': 'core.processing_tasks.schedule_weekly_prompt_batches',
+        'schedule': crontab(day_of_week='sun', hour=0, minute=0),
+    },
+    'weekly-competitors-batch': {
+        'task': 'core.processing_tasks.schedule_weekly_competitor_batches',
+        'schedule': crontab(day_of_week='sun', hour=1, minute=0),
+    },
+    'cmsmanager-scheduler-every-60s': {
+        'task': 'core.processing_tasks.process_cmsmanager_scheduler',
+        'schedule': config('CELERY_BEAT_SCHEDULE_CMSMANAGER', default=60.0, cast=float),
     },
 }

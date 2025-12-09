@@ -3,18 +3,24 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from shared_models.models import Domain
+from shared_models.models import Prompt, Competitor
 from .domain_processor import DomainProcessor
 from .prompt_analytics_processor import PromptAnalyticsProcessor
 from .competitor_processor import CompetitorProcessor
 from .misinformation_processor import MisinformationProcessor
 from .ga_insights_processor import GAInsightsProcessor
 from .gsc_insights_processor import GSCInsightsProcessor
+from .cms_manager_processor import CMSManagerProcessor
 import logging
 
 # Import from engine's integrations app
 from integrations.models import Integration
 
 logger = logging.getLogger(__name__)
+
+# Batch sizes for weekly reprocessing (tunable via settings if desired)
+WEEKLY_PROMPT_BATCH_SIZE = getattr(settings, 'WEEKLY_PROMPT_BATCH_SIZE', 5000)
+WEEKLY_COMPETITOR_BATCH_SIZE = getattr(settings, 'WEEKLY_COMPETITOR_BATCH_SIZE', 2000)
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
@@ -65,6 +71,42 @@ def process_prompt_analytics_scheduler(self):
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
+def schedule_weekly_prompt_batches(self, last_id: int = 0):
+    """
+    Weekly batch re-scheduler for prompt analytics.
+    - Resets prompts (excluding PROC) to INIT in batches
+    - Enqueues prompt analytics tasks
+    - Chains itself until all prompts are scheduled
+    """
+    qs = (
+        Prompt.objects
+        .exclude(track_status='PROC')  # don't clobber in-flight work
+        .filter(id__gt=last_id)
+        .order_by('id')
+        .values_list('id', flat=True)[:WEEKLY_PROMPT_BATCH_SIZE]
+    )
+
+    ids = list(qs)
+    if not ids:
+        logger.info("[Weekly Prompts] No more prompts to schedule")
+        return {'done': True}
+
+    now = timezone.now()
+    for pid in ids:
+        Prompt.objects.filter(id=pid).update(
+            track_status='INIT',
+            track_message=f"Weekly reprocess scheduled at {now}",
+            modified_at=now,
+        )
+        process_prompt_analytics_task.delay(pid)
+
+    # Chain next batch
+    schedule_weekly_prompt_batches.delay(last_id=ids[-1])
+    logger.info(f"[Weekly Prompts] Scheduled batch of {len(ids)} prompts (last_id={ids[-1]})")
+    return {'queued': len(ids), 'last_id': ids[-1]}
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
 def process_competitor_scheduler(self):
     """
     Periodic scheduler for competitor processing.
@@ -81,6 +123,22 @@ def process_competitor_scheduler(self):
     except Exception as e:
         logger.error(f"Error in competitor scheduler: {str(e)}", exc_info=True)
         raise self.retry(exc=e, countdown=60)  # Retry after 60 seconds on error
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_cmsmanager_scheduler(self):
+    """
+    Periodic scheduler for CMS publishing.
+    Picks due scheduled publications and publishes them.
+    """
+    try:
+        processor = CMSManagerProcessor(batch_size=getattr(settings, 'CMS_MANAGER_BATCH_SIZE', 20))
+        result = processor.schedule_tick()
+        logger.info(f"CMS manager tick completed: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error in CMS manager scheduler: {str(e)}", exc_info=True)
+        raise self.retry(exc=e, countdown=60)
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
@@ -160,6 +218,42 @@ def process_single_competitor_task(self, competitor_id: int):
         except:
             pass
         return {'error': str(e)}
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def schedule_weekly_competitor_batches(self, last_id: int = 0):
+    """
+    Weekly batch re-scheduler for competitor analytics.
+    - Resets competitors (excluding PROC) to INIT in batches
+    - Enqueues competitor processing tasks
+    - Chains itself until all competitors are scheduled
+    """
+    qs = (
+        Competitor.objects
+        .exclude(track_status='PROC')  # don't clobber in-flight work
+        .filter(id__gt=last_id)
+        .order_by('id')
+        .values_list('id', flat=True)[:WEEKLY_COMPETITOR_BATCH_SIZE]
+    )
+
+    ids = list(qs)
+    if not ids:
+        logger.info("[Weekly Competitors] No more competitors to schedule")
+        return {'done': True}
+
+    now = timezone.now()
+    for cid in ids:
+        Competitor.objects.filter(id=cid).update(
+            track_status='INIT',
+            track_message=f"Weekly reprocess scheduled at {now}",
+            modified_at=now,
+        )
+        process_single_competitor_task.delay(cid)
+
+    # Chain next batch
+    schedule_weekly_competitor_batches.delay(last_id=ids[-1])
+    logger.info(f"[Weekly Competitors] Scheduled batch of {len(ids)} competitors (last_id={ids[-1]})")
+    return {'queued': len(ids), 'last_id': ids[-1]}
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)

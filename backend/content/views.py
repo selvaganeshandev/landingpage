@@ -4,12 +4,21 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.http import Http404
+from django.utils import timezone
 import logging
+import requests
 
-from .models import GeneratedContent
-from .serializers import GeneratedContentSerializer, ContentGenerationRequestSerializer
+from .models import GeneratedContent, CMSProvider, ScheduledPublication
+from .serializers import (
+    GeneratedContentSerializer, ContentGenerationRequestSerializer,
+    CMSProviderSerializer, CMSProviderCreateSerializer,
+    ScheduledPublicationSerializer, PublishContentSerializer
+)
 from .claude_content_generator import ClaudeContentGenerator
 from domains.models import Domain
+from django.db import transaction
+from django.utils import timezone as django_timezone
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -275,6 +284,449 @@ def update_generated_content(request, content_id):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _publish_to_wordpress(content_obj, cms_provider, scheduled_at=None):
+    """
+    Helper function to publish content to WordPress
+    Returns: (success: bool, result: dict, error: str)
+    """
+    try:
+        settings = cms_provider.settings
+        wp_api_url = settings.get('api_url')
+        wp_username = settings.get('username')
+        wp_app_password = settings.get('app_password')
+        content_type = settings.get('content_type', 'pages')  # 'pages' or 'posts'
+        
+        if not wp_api_url or not wp_username or not wp_app_password:
+            return False, None, "WordPress settings incomplete"
+        
+        # Construct API endpoint
+        if not wp_api_url.endswith('/'):
+            wp_api_url += '/'
+        wp_endpoint = f"{wp_api_url}{content_type}"
+        
+        payload = {
+            "title": content_obj.title,
+            "content": content_obj.content_html or content_obj.title,
+        }
+        
+        # Set status based on schedule
+        if scheduled_at and scheduled_at > django_timezone.now():
+            payload["status"] = "future"  # WordPress scheduled status
+            payload["date"] = scheduled_at.isoformat()
+        else:
+            payload["status"] = "publish"
+        
+        resp = requests.post(
+            wp_endpoint,
+            json=payload,
+            auth=(wp_username, wp_app_password),
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+        )
+        
+        if not resp.ok:
+            try:
+                err_json = resp.json()
+                msg = err_json.get('message') or str(err_json)
+            except Exception:
+                msg = resp.text
+            return False, None, f"WordPress API error: {msg}"
+        
+        wp_result = resp.json()
+        return True, wp_result, None
+        
+    except Exception as e:
+        logger.error(f"Error publishing to WordPress: {str(e)}", exc_info=True)
+        return False, None, str(e)
+
+
+def _publish_to_strapi(content_obj, cms_provider, scheduled_at=None):
+    """
+    Helper function to publish content to Strapi
+    Assumes a collection endpoint (default: /api/articles) and bearer token auth
+    """
+    try:
+        settings = cms_provider.settings
+        api_url = settings.get('api_url')
+        token = settings.get('token')
+        collection = settings.get('collection', '/api/articles')
+
+        if not api_url or not token:
+            return False, None, "Strapi settings incomplete"
+
+        if not api_url.endswith('/'):
+            api_url += '/'
+
+        endpoint = api_url.rstrip('/') + collection
+
+        # Strapi collection in this environment expects Title/Content (case-sensitive)
+        payload = {
+            "data": {
+                "Title": content_obj.title,
+                "Content": content_obj.content_html or content_obj.title,
+            }
+        }
+
+        # For immediate publish, set publishedAt to now (or scheduled time if provided)
+        if scheduled_at and scheduled_at > django_timezone.now():
+            payload["data"]["publishedAt"] = scheduled_at.isoformat()
+        else:
+            payload["data"]["publishedAt"] = django_timezone.now().isoformat()
+
+        resp = requests.post(
+            endpoint,
+            json=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+            },
+            timeout=30,
+        )
+
+        if not resp.ok:
+            try:
+                err_json = resp.json()
+                msg = err_json.get('error', {}).get('message') or str(err_json)
+            except Exception:
+                msg = resp.text
+            return False, None, f"Strapi API error: {msg}"
+
+        return True, resp.json(), None
+
+    except Exception as e:
+        logger.error(f"Error publishing to Strapi: {str(e)}", exc_info=True)
+        return False, None, str(e)
+
+
+def _html_to_contentful_rich_text(html_content: str):
+    """
+    Very lightweight HTML -> Contentful Rich Text converter.
+    - Strips tags and wraps into a single paragraph with a text node.
+    - Keeps plain text only; does not preserve formatting/links.
+    If richer mapping is needed, plug in a real HTML-to-rich-text converter.
+    """
+    import re
+
+    if not html_content:
+        return {
+            "nodeType": "document",
+            "data": {},
+            "content": []
+        }
+
+    # Strip HTML tags to plain text
+    plain = re.sub(r'<[^>]+>', '', html_content)
+    plain = plain.strip()
+
+    return {
+        "nodeType": "document",
+        "data": {},
+        "content": [
+            {
+                "nodeType": "paragraph",
+                "data": {},
+                "content": [
+                    {
+                        "nodeType": "text",
+                        "value": plain,
+                        "marks": [],
+                        "data": {}
+                    }
+                ]
+            }
+        ]
+    }
+
+
+def _publish_to_contentful(content_obj, cms_provider):
+    """
+    Helper function to publish content to Contentful via CMA
+    Steps:
+      1) Create entry with fields
+      2) Publish entry using the returned version
+    """
+    try:
+        settings = cms_provider.settings
+        api_url = settings.get('api_url') or 'https://api.contentful.com'
+        management_token = settings.get('management_token')
+        space_id = settings.get('space_id')
+        environment_id = settings.get('environment_id') or 'master'
+        content_type_id = settings.get('content_type_id')
+
+        if not all([management_token, space_id, environment_id, content_type_id]):
+            return False, None, "Contentful settings incomplete (token, space_id, environment_id, content_type_id required)"
+
+        if not api_url.endswith('/'):
+            api_url += '/'
+        base = api_url.rstrip('/')
+
+        create_endpoint = f"{base}/spaces/{space_id}/environments/{environment_id}/entries"
+        rich_body = _html_to_contentful_rich_text(content_obj.content_html or content_obj.title)
+        fields_payload = {
+            "fields": {
+                "title": {"en-US": content_obj.title},
+                "body": {"en-US": rich_body},
+            }
+        }
+
+        create_resp = requests.post(
+            create_endpoint,
+            json=fields_payload,
+            headers={
+                "Authorization": f"Bearer {management_token}",
+                "Content-Type": "application/vnd.contentful.management.v1+json",
+                "X-Contentful-Content-Type": content_type_id,
+            },
+            timeout=30,
+        )
+
+        if not create_resp.ok:
+            try:
+                err_json = create_resp.json()
+                msg = err_json.get('message') or str(err_json)
+            except Exception:
+                msg = create_resp.text
+            return False, None, f"Contentful create error: {msg}"
+
+        entry_data = create_resp.json()
+        entry_id = entry_data.get('sys', {}).get('id')
+        entry_version = entry_data.get('sys', {}).get('version')
+
+        if not entry_id or entry_version is None:
+            return False, None, "Contentful create response missing entry id/version"
+
+        publish_endpoint = f"{base}/spaces/{space_id}/environments/{environment_id}/entries/{entry_id}/published"
+        publish_resp = requests.put(
+            publish_endpoint,
+            headers={
+                "Authorization": f"Bearer {management_token}",
+                "X-Contentful-Version": str(entry_version),
+            },
+            timeout=30,
+        )
+
+        if not publish_resp.ok:
+            try:
+                err_json = publish_resp.json()
+                msg = err_json.get('message') or str(err_json)
+            except Exception:
+                msg = publish_resp.text
+            return False, None, f"Contentful publish error: {msg}"
+
+        return True, {
+            "entry": entry_data,
+            "publish": publish_resp.json()
+        }, None
+
+    except Exception as e:
+        logger.error(f"Error publishing to Contentful: {str(e)}", exc_info=True)
+        return False, None, str(e)
+
+
+def _publish_to_joomla(content_obj, cms_provider):
+    """
+    Helper function to publish content to Joomla 4/5 via core API
+    Expects:
+      - settings.api_url: base site URL (no trailing slash)
+      - settings.endpoint: default /api/index.php/v1/content/articles
+      - settings.token: API token for Bearer auth
+      - settings.catid: category id to post into
+      - settings.state: article state (1=published, 0=unpublished)
+    """
+    try:
+        settings = cms_provider.settings
+        api_url = settings.get('api_url')
+        token = settings.get('token')
+        endpoint_path = settings.get('endpoint', '/api/index.php/v1/content/articles')
+        catid = settings.get('catid')
+        state = settings.get('state', 1)
+
+        if not api_url or not token or not catid:
+            return False, None, "Joomla settings incomplete (api_url, token, catid required)"
+
+        if not api_url.endswith('/'):
+            api_url += '/'
+        endpoint = api_url.rstrip('/') + endpoint_path
+
+        payload = {
+            "title": content_obj.title,
+            "catid": catid,
+            "state": state,
+            "introtext": content_obj.content_html or content_obj.title,
+            "fulltext": content_obj.content_html or "",
+            "language": "*",
+            "access": 1,
+        }
+
+        resp = requests.post(
+            endpoint,
+            json=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+            },
+            timeout=30,
+        )
+
+        if not resp.ok:
+            try:
+                err_json = resp.json()
+                msg = err_json.get('message') or str(err_json)
+            except Exception:
+                msg = resp.text
+            return False, None, f"Joomla API error: {msg}"
+
+        return True, resp.json(), None
+    except Exception as e:
+        logger.error(f"Error publishing to Joomla: {str(e)}", exc_info=True)
+        return False, None, str(e)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def publish_content(request):
+    """
+    Publish content to CMS provider (with scheduling support)
+    
+    Request body:
+    {
+        "content_id": int,
+        "cms_provider_id": int,
+        "publish_now": bool,
+        "scheduled_at": "2025-12-10T00:00:00Z" (optional if publish_now is True)
+    }
+    """
+    try:
+        serializer = PublishContentSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'status': 'error',
+                'message': 'Invalid request data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        data = serializer.validated_data
+        content_id = data['content_id']
+        cms_provider_id = data['cms_provider_id']
+        publish_now = data.get('publish_now', False)
+        scheduled_at = data.get('scheduled_at')
+        
+        # Fetch and validate content
+        content_obj = get_object_or_404(
+            GeneratedContent,
+            id=content_id,
+            domain__organisation=request.user.organisation
+        )
+        
+        # Fetch and validate CMS provider
+        cms_provider = get_object_or_404(
+            CMSProvider,
+            id=cms_provider_id,
+            domain=content_obj.domain,
+            is_active=True
+        )
+        
+        if publish_now:
+            # Publish immediately
+            if cms_provider.provider_type == 'wordpress':
+                success, pub_result, error = _publish_to_wordpress(content_obj, cms_provider)
+            elif cms_provider.provider_type == 'strapi':
+                success, pub_result, error = _publish_to_strapi(content_obj, cms_provider)
+            elif cms_provider.provider_type == 'joomla':
+                success, pub_result, error = _publish_to_joomla(content_obj, cms_provider)
+            elif cms_provider.provider_type == 'contentful':
+                success, pub_result, error = _publish_to_contentful(content_obj, cms_provider)
+            else:
+                return Response({
+                    'status': 'error',
+                    'message': f'Provider type {cms_provider.provider_type} not yet supported for publishing'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if not success:
+                return Response({
+                    'status': 'error',
+                    'message': error
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            # Update content status
+            content_obj.status = 'published'
+            content_obj.published_date = django_timezone.now()
+            content_obj.save(update_fields=['status', 'published_date', 'modified_at'])
+            
+            return Response({
+                'status': 'success',
+                'message': 'Published successfully',
+                'provider_response': pub_result,
+            })
+        else:
+            # Schedule for later
+            if cms_provider.provider_type in ['joomla', 'contentful']:
+                return Response({
+                    'status': 'error',
+                    'message': f'Scheduling is not yet supported for {cms_provider.provider_type} publishing'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            if not scheduled_at:
+                return Response({
+                    'status': 'error',
+                    'message': 'scheduled_at is required when publish_now is False'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Validate scheduled time is in the future
+            if scheduled_at <= django_timezone.now():
+                return Response({
+                    'status': 'error',
+                    'message': 'scheduled_at must be in the future'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Reuse existing scheduled publication if one already exists for this content
+            scheduled_pub = ScheduledPublication.objects.filter(
+                content=content_obj,
+                status__in=['scheduled', 'publishing']
+            ).order_by('-created_at').first()
+
+            if scheduled_pub:
+                # Update existing schedule
+                scheduled_pub.cms_provider = cms_provider
+                scheduled_pub.scheduled_at = scheduled_at
+                scheduled_pub.status = 'scheduled'
+                scheduled_pub.error_message = None
+                scheduled_pub.save(update_fields=[
+                    'cms_provider', 'scheduled_at', 'status', 'error_message', 'modified_at'
+                ])
+            else:
+                # Create new schedule
+                scheduled_pub = ScheduledPublication.objects.create(
+                    content=content_obj,
+                    cms_provider=cms_provider,
+                    scheduled_at=scheduled_at,
+                    status='scheduled'
+                )
+            
+            # Update content scheduled_date and status
+            content_obj.scheduled_date = scheduled_at
+            content_obj.status = 'scheduled'
+            content_obj.save(update_fields=['scheduled_date', 'status', 'modified_at'])
+            
+            return Response({
+                'status': 'success',
+                'message': 'Content scheduled for publication',
+                'scheduled_publication_id': scheduled_pub.id,
+                'scheduled_at': scheduled_at.isoformat(),
+            })
+            
+    except Http404:
+        return Response({
+            'status': 'error',
+            'message': 'Content or CMS provider not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error publishing content: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error publishing content: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_generated_content(request, content_id):
@@ -306,5 +758,186 @@ def delete_generated_content(request, content_id):
             'status': 'error',
             'message': f'Error deleting generated content: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# CMS Provider Management Endpoints
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def cms_provider_list(request):
+    """
+    List CMS providers for domains in user's organization or create a new one
+    """
+    if request.method == 'GET':
+        domain_id = request.query_params.get('domain_id')
+        
+        if domain_id:
+            # Get providers for specific domain
+            domain = get_object_or_404(
+                Domain,
+                id=domain_id,
+                organisation=request.user.organisation
+            )
+            providers = CMSProvider.objects.filter(domain=domain)
+        else:
+            # Get all providers for user's organization
+            domain_ids = Domain.objects.filter(
+                organisation=request.user.organisation
+            ).values_list('id', flat=True)
+            providers = CMSProvider.objects.filter(domain_id__in=domain_ids)
+        
+        serializer = CMSProviderSerializer(providers, many=True)
+        return Response({
+            'status': 'success',
+            'results': serializer.data
+        })
+    
+    elif request.method == 'POST':
+        serializer = CMSProviderCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'status': 'error',
+                'message': 'Invalid request data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate domain belongs to user's organization
+        domain = serializer.validated_data['domain']
+        if domain.organisation != request.user.organisation:
+            return Response({
+                'status': 'error',
+                'message': 'Domain does not belong to your organization'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        provider = serializer.save()
+        return Response({
+            'status': 'success',
+            'message': 'CMS provider created successfully',
+            'data': CMSProviderSerializer(provider).data
+        }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def cms_provider_detail(request, provider_id):
+    """
+    Get, update, or delete a specific CMS provider
+    """
+    provider = get_object_or_404(CMSProvider, id=provider_id)
+    
+    # Validate ownership
+    if provider.domain.organisation != request.user.organisation:
+        return Response({
+            'status': 'error',
+            'message': 'CMS provider does not belong to your organization'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    if request.method == 'GET':
+        serializer = CMSProviderSerializer(provider)
+        return Response({
+            'status': 'success',
+            'data': serializer.data
+        })
+    
+    elif request.method == 'PUT':
+        serializer = CMSProviderCreateSerializer(provider, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response({
+                'status': 'error',
+                'message': 'Invalid request data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate domain if being changed
+        if 'domain' in serializer.validated_data:
+            new_domain = serializer.validated_data['domain']
+            if new_domain.organisation != request.user.organisation:
+                return Response({
+                    'status': 'error',
+                    'message': 'Domain does not belong to your organization'
+                }, status=status.HTTP_403_FORBIDDEN)
+        
+        provider = serializer.save()
+        return Response({
+            'status': 'success',
+            'message': 'CMS provider updated successfully',
+            'data': CMSProviderSerializer(provider).data
+        })
+    
+    elif request.method == 'DELETE':
+        provider.delete()
+        return Response({
+            'status': 'success',
+            'message': 'CMS provider deleted successfully'
+        }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def test_cms_provider_connection(request, provider_id):
+    """
+    Test connection to a CMS provider
+    """
+    provider = get_object_or_404(CMSProvider, id=provider_id)
+    
+    # Validate ownership
+    if provider.domain.organisation != request.user.organisation:
+        return Response({
+            'status': 'error',
+            'message': 'CMS provider does not belong to your organization'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    if provider.provider_type == 'wordpress':
+        try:
+            settings = provider.settings
+            wp_api_url = settings.get('api_url')
+            wp_username = settings.get('username')
+            wp_app_password = settings.get('app_password')
+            
+            if not wp_api_url or not wp_username or not wp_app_password:
+                return Response({
+                    'status': 'error',
+                    'message': 'WordPress settings incomplete'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Test connection by fetching user info
+            if not wp_api_url.endswith('/'):
+                wp_api_url += '/'
+            test_url = f"{wp_api_url}users/me"
+            
+            resp = requests.get(
+                test_url,
+                auth=(wp_username, wp_app_password),
+                headers={"Content-Type": "application/json"},
+                timeout=10,
+            )
+            
+            if resp.ok:
+                user_data = resp.json()
+                return Response({
+                    'status': 'success',
+                    'message': 'Connection successful',
+                    'data': {
+                        'username': user_data.get('name', wp_username),
+                        'site_url': settings.get('site_url', wp_api_url)
+                    }
+                })
+            else:
+                return Response({
+                    'status': 'error',
+                    'message': f'Connection failed: {resp.text}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            logger.error(f"Error testing WordPress connection: {str(e)}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'Connection test failed: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    else:
+        return Response({
+            'status': 'error',
+            'message': f'Provider type {provider.provider_type} not supported for testing'
+        }, status=status.HTTP_400_BAD_REQUEST)
 
 

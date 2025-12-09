@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.utils import timezone
 
 
 class Organisation(models.Model):
@@ -196,6 +197,124 @@ class Domain(models.Model):
     
     def __str__(self):
         return f"{self.name} ({self.url})"
+
+
+# ---------------------------------------------------------------------------
+# CMS / Content models (read-only for engine)
+# ---------------------------------------------------------------------------
+
+
+class GeneratedContent(models.Model):
+    """
+    Read-only GeneratedContent model for engine access
+    """
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('generated', 'Generated'),
+        ('scheduled', 'Scheduled'),
+        ('published', 'Published'),
+    ]
+
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='generated_contents',
+        help_text="Domain this content belongs to"
+    )
+    title = models.CharField(max_length=500)
+    content_html = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='generated')
+    scheduled_date = models.DateTimeField(null=True, blank=True)
+    published_date = models.DateTimeField(null=True, blank=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        db_table = 'generated_contents'
+        managed = False
+        ordering = ['-modified_at']
+
+    def __str__(self):
+        return f"{self.title} ({self.status})"
+
+
+class CMSProvider(models.Model):
+    """
+    Read-only CMS Provider configuration
+    """
+    PROVIDER_CHOICES = [
+        ('wordpress', 'WordPress'),
+        ('strapi', 'Strapi'),
+        ('joomla', 'Joomla'),
+        ('drupal', 'Drupal'),
+        ('contentful', 'Contentful'),
+    ]
+
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='cms_providers'
+    )
+    provider_type = models.CharField(max_length=50, choices=PROVIDER_CHOICES, default='wordpress')
+    name = models.CharField(max_length=255)
+    settings = models.JSONField(default=dict)
+    is_active = models.BooleanField(default=True)
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        db_table = 'cms_providers'
+        managed = False
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.name} ({self.provider_type})"
+
+
+class ScheduledPublication(models.Model):
+    """
+    Scheduled publication entries
+    """
+    STATUS_CHOICES = [
+        ('scheduled', 'Scheduled'),
+        ('publishing', 'Publishing'),
+        ('published', 'Published'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    content = models.ForeignKey(
+        GeneratedContent,
+        on_delete=models.CASCADE,
+        related_name='scheduled_publications'
+    )
+    cms_provider = models.ForeignKey(
+        CMSProvider,
+        on_delete=models.CASCADE,
+        related_name='scheduled_publications'
+    )
+    scheduled_at = models.DateTimeField()
+    published_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
+    error_message = models.TextField(null=True, blank=True)
+    wordpress_post_id = models.CharField(max_length=255, blank=True, null=True)
+    wordpress_post_url = models.URLField(max_length=500, blank=True, null=True)
+    strapi_entry_id = models.CharField(max_length=255, blank=True, null=True)
+    strapi_entry_url = models.URLField(max_length=500, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        db_table = 'scheduled_publications'
+        managed = False
+        ordering = ['scheduled_at']
+        unique_together = ['content', 'cms_provider', 'scheduled_at']
+
+    def __str__(self):
+        return f"{self.content_id} @ {self.scheduled_at} -> {self.cms_provider_id}"
 
 
 class Keyword(models.Model):

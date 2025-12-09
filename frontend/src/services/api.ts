@@ -1201,6 +1201,58 @@ export const apiClient = {
     method: 'DELETE',
   }),
 
+  // ===== CMS Provider Management =====
+  getCMSProviders: (params?: { domain_id?: number }) => {
+    const queryParams = params?.domain_id ? `?domain_id=${params.domain_id}` : '';
+    return apiRequest(`/content/cms-providers/${queryParams}`);
+  },
+
+  createCMSProvider: (data: {
+    domain: number;
+    provider_type: string;
+    name: string;
+    settings: Record<string, any>;
+    is_active?: boolean;
+    is_default?: boolean;
+  }) =>
+    apiRequest('/content/cms-providers/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateCMSProvider: (providerId: number, data: Partial<{
+    name: string;
+    settings: Record<string, any>;
+    is_active: boolean;
+    is_default: boolean;
+  }>) =>
+    apiRequest(`/content/cms-providers/${providerId}/`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteCMSProvider: (providerId: number) =>
+    apiRequest(`/content/cms-providers/${providerId}/`, {
+      method: 'DELETE',
+    }),
+
+  testCMSProviderConnection: (providerId: number) =>
+    apiRequest(`/content/cms-providers/${providerId}/test/`, {
+      method: 'POST',
+    }),
+
+  // ===== Publishing =====
+  publishContent: (data: {
+    content_id: number;
+    cms_provider_id: number;
+    publish_now: boolean;
+    scheduled_at?: string;
+  }) =>
+    apiRequest('/content/publish/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   // ===== Misinformation Alerts =====
   getMisinformationDashboard: (params: { domain_id: string; days?: number }) => {
     const queryParams = `?${new URLSearchParams({

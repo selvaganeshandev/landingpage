@@ -7,6 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import PublishDialog from "@/components/PublishDialog";
 import {
   ArrowLeft,
   Save,
@@ -31,7 +32,8 @@ import {
   Quote,
   Code,
   Sparkles,
-  ChevronDown
+  ChevronDown,
+  Send
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -62,6 +64,7 @@ const ContentEditor = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [contentData, setContentData] = useState<any>(null);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
 
   // Image modal state
   const [imageModalOpen, setImageModalOpen] = useState(false);
@@ -426,6 +429,70 @@ const ContentEditor = () => {
     }
   };
 
+  // Save as draft (so it can be published later)
+  const handleSaveAsDraft = async () => {
+    if (!id) return;
+
+    try {
+      setSaving(true);
+
+      // Get latest content
+      const currentContent = editorRef.current?.innerHTML || content;
+
+      await apiClient.updateGeneratedContent(parseInt(id), {
+        title,
+        content_html: currentContent,
+        status: "draft",
+        scheduled_date: null,
+      });
+
+      // Update local state
+      setContent(currentContent);
+      setContentData((prev: any) =>
+        prev ? { ...prev, status: "draft", scheduled_date: null } : prev
+      );
+
+      toast({
+        title: "Saved as Draft",
+        description: "You can publish this content later.",
+      });
+    } catch (error) {
+      console.error("Error saving draft:", error);
+      toast({
+        title: "Error",
+        description: "Failed to save draft",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Handle publish button click - opens dialog
+  const handlePublishClick = async () => {
+    if (!id) return;
+
+    // Save content first to ensure latest version is in database
+    const currentContent = editorRef.current?.innerHTML || content;
+    const currentTitle = title;
+
+    try {
+      await apiClient.updateGeneratedContent(parseInt(id), {
+        title: currentTitle,
+        content_html: currentContent
+      });
+      
+      // Open publish dialog
+      setPublishDialogOpen(true);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: "Failed to save content before publishing",
+        variant: "destructive"
+      });
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -467,6 +534,26 @@ const ContentEditor = () => {
               <Save className="h-4 w-4 mr-2" />
               {saving ? "Saving..." : "Save"}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSaveAsDraft}
+              disabled={saving}
+            >
+              <Save className="h-4 w-4 mr-2" />
+              {saving ? "Saving..." : "Save as Draft"}
+            </Button>
+            {(contentData?.status === "draft" || contentData?.status === "generated" || !contentData?.status) && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handlePublishClick}
+                className="gradient-primary"
+              >
+                <Send className="h-4 w-4 mr-2" />
+                Publish
+              </Button>
+            )}
             <Button variant="default" size="sm">
               <Share2 className="h-4 w-4 mr-2" />
               Export
@@ -1024,6 +1111,34 @@ const ContentEditor = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Publish Dialog */}
+      {id && (
+        <PublishDialog
+          open={publishDialogOpen}
+          onOpenChange={(open) => {
+            setPublishDialogOpen(open);
+            if (!open) {
+              // Reload content to get updated status
+              if (id) {
+                const loadContent = async () => {
+                  try {
+                    const data = await apiClient.getGeneratedContent(parseInt(id));
+                    if (data?.data) {
+                      setContentData(data.data);
+                    }
+                  } catch (error) {
+                    console.error("Error reloading content:", error);
+                  }
+                };
+                loadContent();
+              }
+            }
+          }}
+          contentId={parseInt(id)}
+          contentTitle={title}
+        />
+      )}
     </div>
   );
 };

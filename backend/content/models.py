@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 from domains.models import Domain
 
 
@@ -9,6 +10,7 @@ class GeneratedContent(models.Model):
     STATUS_CHOICES = [
         ('draft', 'Draft'),
         ('generated', 'Generated'),
+        ('scheduled', 'Scheduled'),
         ('published', 'Published'),
     ]
 
@@ -166,5 +168,167 @@ class GeneratedContent(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.status})"
+
+
+class CMSProvider(models.Model):
+    """
+    CMS Provider configuration for domains
+    Supports multiple providers per domain (e.g., multiple WordPress sites)
+    """
+    PROVIDER_CHOICES = [
+        ('wordpress', 'WordPress'),
+        ('strapi', 'Strapi'),
+        ('joomla', 'Joomla'),
+        ('drupal', 'Drupal'),
+        ('contentful', 'Contentful'),
+    ]
+
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='cms_providers',
+        help_text="Domain this CMS provider belongs to"
+    )
+    provider_type = models.CharField(
+        max_length=50,
+        choices=PROVIDER_CHOICES,
+        default='wordpress',
+        help_text="Type of CMS provider"
+    )
+    name = models.CharField(
+        max_length=200,
+        help_text="Display name for this CMS provider (e.g., 'Main WordPress Site', 'Blog WordPress')"
+    )
+    
+    # WordPress-specific settings (stored as JSON for flexibility)
+    settings = models.JSONField(
+        default=dict,
+        help_text="Provider-specific settings"
+    )
+    # Example settings structure for WordPress:
+    # {
+    #     "api_url": "https://example.com/wp-json/wp/v2",
+    #     "username": "admin",
+    #     "app_password": "xxxx xxxx xxxx xxxx",  # Should be encrypted in production
+    #     "site_url": "https://example.com",
+    #     "content_type": "pages"  # or "posts"
+    # }
+    
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this CMS configuration is active"
+    )
+    is_default = models.BooleanField(
+        default=False,
+        help_text="Default CMS provider for this domain"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'cms_providers'
+        verbose_name = 'CMS Provider'
+        verbose_name_plural = 'CMS Providers'
+        ordering = ['-is_default', 'name']
+        indexes = [
+            models.Index(fields=['domain', 'provider_type']),
+            models.Index(fields=['domain', 'is_active']),
+        ]
+        # Ensure only one default per domain
+        constraints = [
+            models.UniqueConstraint(
+                fields=['domain'],
+                condition=models.Q(is_default=True),
+                name='unique_default_cms_per_domain'
+            )
+        ]
+    
+    def __str__(self):
+        return f"{self.domain.name} - {self.name} ({self.provider_type})"
+
+
+class ScheduledPublication(models.Model):
+    """
+    Scheduled publications for content
+    Stores scheduled posts with their target CMS provider and schedule time
+    """
+    STATUS_CHOICES = [
+        ('scheduled', 'Scheduled'),
+        ('publishing', 'Publishing'),
+        ('published', 'Published'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    content = models.ForeignKey(
+        GeneratedContent,
+        on_delete=models.CASCADE,
+        related_name='scheduled_publications',
+        help_text="Content to be published"
+    )
+    cms_provider = models.ForeignKey(
+        CMSProvider,
+        on_delete=models.CASCADE,
+        related_name='scheduled_publications',
+        help_text="CMS provider to publish to"
+    )
+    scheduled_at = models.DateTimeField(
+        help_text="When to publish this content"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='scheduled',
+        help_text="Publication status"
+    )
+    
+    # WordPress-specific metadata
+    wordpress_post_id = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="WordPress post/page ID after publication"
+    )
+    wordpress_url = models.URLField(
+        null=True,
+        blank=True,
+        help_text="URL of published content"
+    )
+    
+    # Error tracking
+    error_message = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Error message if publication failed"
+    )
+    published_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Actual publication time"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'scheduled_publications'
+        verbose_name = 'Scheduled Publication'
+        verbose_name_plural = 'Scheduled Publications'
+        ordering = ['scheduled_at']
+        indexes = [
+            models.Index(fields=['status', 'scheduled_at']),
+            models.Index(fields=['cms_provider', 'scheduled_at']),
+            models.Index(fields=['content', 'status']),
+        ]
+    
+    def __str__(self):
+        return f"{self.content.title} - {self.scheduled_at} ({self.status})"
+    
+    @property
+    def is_overdue(self):
+        """Check if scheduled time has passed but not yet published"""
+        return (
+            self.status == 'scheduled' and 
+            self.scheduled_at < timezone.now()
+        )
 
 

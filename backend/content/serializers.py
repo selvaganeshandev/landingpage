@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import GeneratedContent
+from .models import GeneratedContent, CMSProvider, ScheduledPublication
 from domains.models import Domain
 
 
@@ -59,5 +59,194 @@ class ContentGenerationRequestSerializer(serializers.Serializer):
         except Domain.DoesNotExist:
             raise serializers.ValidationError("Domain with this ID does not exist")
         return value
+
+
+class CMSProviderSerializer(serializers.ModelSerializer):
+    """
+    Serializer for CMSProvider model
+    """
+    domain_name = serializers.CharField(source='domain.name', read_only=True)
+    
+    class Meta:
+        model = CMSProvider
+        fields = [
+            'id', 'domain', 'domain_name', 'provider_type', 'name',
+            'settings', 'is_active', 'is_default',
+            'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at']
+    
+    def validate(self, data):
+        """Ensure only one default per domain"""
+        if data.get('is_default'):
+            domain = data.get('domain')
+            provider_id = self.instance.id if self.instance else None
+            existing_default = CMSProvider.objects.filter(
+                domain=domain,
+                is_default=True
+            ).exclude(id=provider_id).exists()
+            
+            if existing_default:
+                raise serializers.ValidationError({
+                    'is_default': 'Only one CMS provider can be set as default per domain'
+                })
+        return data
+
+
+class CMSProviderCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating CMSProvider with WordPress-specific validation
+    """
+    class Meta:
+        model = CMSProvider
+        fields = [
+            'domain', 'provider_type', 'name', 'settings',
+            'is_active', 'is_default'
+        ]
+    
+    def validate_settings(self, value):
+        """Validate WordPress settings structure"""
+        provider_type = self.initial_data.get('provider_type', 'wordpress')
+        
+        if provider_type == 'wordpress':
+            required_fields = ['api_url', 'username', 'app_password']
+            for field in required_fields:
+                if field not in value:
+                    raise serializers.ValidationError(
+                        f"WordPress settings must include '{field}'"
+                    )
+            
+            # Validate API URL format
+            api_url = value.get('api_url', '')
+            if not api_url.startswith('http'):
+                raise serializers.ValidationError(
+                    "API URL must be a valid HTTP/HTTPS URL"
+                )
+        
+        if provider_type == 'strapi':
+            required_fields = ['api_url', 'token']
+            for field in required_fields:
+                if field not in value:
+                    raise serializers.ValidationError(
+                        f"Strapi settings must include '{field}'"
+                    )
+            api_url = value.get('api_url', '')
+            if not api_url.startswith('http'):
+                raise serializers.ValidationError(
+                    "API URL must be a valid HTTP/HTTPS URL"
+                )
+            # Optional: collection endpoint default
+            if 'collection' not in value:
+                value['collection'] = '/api/articles'
+
+        if provider_type == 'joomla':
+            required_fields = ['api_url', 'token', 'catid']
+            for field in required_fields:
+                if field not in value:
+                    raise serializers.ValidationError(
+                        f"Joomla settings must include '{field}'"
+                    )
+            api_url = value.get('api_url', '')
+            if not api_url.startswith('http'):
+                raise serializers.ValidationError(
+                    "API URL must be a valid HTTP/HTTPS URL"
+                )
+            if 'endpoint' not in value:
+                value['endpoint'] = '/api/index.php/v1/content/articles'
+            if 'state' not in value:
+                value['state'] = 1  # published by default
+
+        if provider_type == 'drupal':
+            required_fields = ['api_url', 'username', 'password', 'content_type']
+            for field in required_fields:
+                if field not in value:
+                    raise serializers.ValidationError(
+                        f"Drupal settings must include '{field}'"
+                    )
+            api_url = value.get('api_url', '')
+            if not api_url.startswith('http'):
+                raise serializers.ValidationError(
+                    "API URL must be a valid HTTP/HTTPS URL"
+                )
+            if 'endpoint' not in value:
+                value['endpoint'] = '/entity/node?_format=json'
+            if 'body_format' not in value:
+                value['body_format'] = 'basic_html'
+            if 'status' not in value:
+                value['status'] = 1  # published by default
+
+        if provider_type == 'contentful':
+            required_fields = ['api_url', 'management_token', 'space_id', 'environment_id', 'content_type_id']
+            for field in required_fields:
+                if field not in value:
+                    raise serializers.ValidationError(
+                        f"Contentful settings must include '{field}'"
+                    )
+            api_url = value.get('api_url', '')
+            if not api_url.startswith('http'):
+                raise serializers.ValidationError(
+                    "API URL must be a valid HTTP/HTTPS URL"
+                )
+            # Sensible defaults
+            if 'environment_id' not in value or not value.get('environment_id'):
+                value['environment_id'] = 'master'
+            if 'api_url' not in value or not value.get('api_url'):
+                value['api_url'] = 'https://api.contentful.com'
+
+        # Generic validation for other providers: at least api_url
+        if provider_type not in ['wordpress', 'strapi', 'joomla', 'drupal', 'contentful']:
+            if 'api_url' not in value or not value.get('api_url', '').startswith('http'):
+                raise serializers.ValidationError(
+                    "API URL must be provided and be a valid HTTP/HTTPS URL"
+                )
+        
+        return value
+
+
+class ScheduledPublicationSerializer(serializers.ModelSerializer):
+    """
+    Serializer for ScheduledPublication model
+    """
+    content_title = serializers.CharField(source='content.title', read_only=True)
+    cms_provider_name = serializers.CharField(source='cms_provider.name', read_only=True)
+    
+    class Meta:
+        model = ScheduledPublication
+        fields = [
+            'id', 'content', 'content_title', 'cms_provider', 'cms_provider_name',
+            'scheduled_at', 'status', 'wordpress_post_id', 'wordpress_url',
+            'error_message', 'published_at', 'created_at', 'modified_at'
+        ]
+        read_only_fields = [
+            'id', 'status', 'wordpress_post_id', 'wordpress_url',
+            'error_message', 'published_at', 'created_at', 'modified_at'
+        ]
+
+
+class PublishContentSerializer(serializers.Serializer):
+    """
+    Serializer for publishing content
+    """
+    content_id = serializers.IntegerField(required=True)
+    cms_provider_id = serializers.IntegerField(required=True)
+    publish_now = serializers.BooleanField(default=False)
+    scheduled_at = serializers.DateTimeField(required=False, allow_null=True)
+    
+    def validate(self, data):
+        """Validate publish options"""
+        publish_now = data.get('publish_now', False)
+        scheduled_at = data.get('scheduled_at')
+        
+        if not publish_now and not scheduled_at:
+            raise serializers.ValidationError(
+                "Either 'publish_now' must be True or 'scheduled_at' must be provided"
+            )
+        
+        if publish_now and scheduled_at:
+            raise serializers.ValidationError(
+                "Cannot set both 'publish_now' and 'scheduled_at'"
+            )
+        
+        return data
 
 
