@@ -451,23 +451,57 @@ const ShareOfVoice = () => {
                   borderRadius: "var(--radius)",
                 }}
               />
-            <Scatter name="Brands" data={overallShare.map((b,idx)=>({ brand:b.brand, visibility:b.share, sentiment: b.share, mentions:b.mentions, color: idx===0?"hsl(var(--primary))":"hsl(var(--muted-foreground))" }))}>
-                {overallShare.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={(entry as any).color} />
-                ))}
+            <Scatter name="Brands" data={overallShare.map((b,idx)=>{
+              // Assign consistent colors from chart palette
+              const chartColors = [
+                'hsl(var(--chart-1))',
+                'hsl(var(--chart-2))',
+                'hsl(var(--chart-3))',
+                'hsl(var(--chart-4))',
+                'hsl(var(--chart-5))',
+              ];
+              return {
+                brand: b.brand,
+                visibility: b.share,
+                sentiment: b.share,
+                mentions: b.mentions,
+                color: chartColors[idx % chartColors.length]
+              };
+            })}>
+                {overallShare.map((entry, index) => {
+                  const chartColors = [
+                    'hsl(var(--chart-1))',
+                    'hsl(var(--chart-2))',
+                    'hsl(var(--chart-3))',
+                    'hsl(var(--chart-4))',
+                    'hsl(var(--chart-5))',
+                  ];
+                  return (
+                    <Cell key={`cell-${index}`} fill={chartColors[index % chartColors.length]} />
+                  );
+                })}
               </Scatter>
             </ScatterChart>
           </ResponsiveContainer>
           <div className="mt-4 space-y-2">
-            {overallShare.map((brand:any) => (
-              <div key={brand.brand} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: brand.brand===ownBrandName? 'hsl(var(--primary))': 'hsl(var(--muted-foreground))' }} />
-                  <span className="font-medium">{brand.brand}</span>
+            {overallShare.map((brand:any, idx:number) => {
+              const chartColors = [
+                'hsl(var(--chart-1))',
+                'hsl(var(--chart-2))',
+                'hsl(var(--chart-3))',
+                'hsl(var(--chart-4))',
+                'hsl(var(--chart-5))',
+              ];
+              return (
+                <div key={brand.brand} className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: chartColors[idx % chartColors.length] }} />
+                    <span className="font-medium">{brand.brand}</span>
+                  </div>
+                  <span className="text-muted-foreground">{brand.mentions} mentions</span>
                 </div>
-                <span className="text-muted-foreground">{brand.mentions} mentions</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       </div>

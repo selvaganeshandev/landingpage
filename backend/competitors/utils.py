@@ -135,8 +135,10 @@ def sync_competitor_prompt_analytics(domain_id=None, prompt_id=None, batch_size=
         if prompt_id:
             queryset = queryset.filter(prompt_id=prompt_id)
 
-        # Only process records that have competitor mentions
+        # Only process completed analytics with competitor mentions
+        # Use prompt__track_status since PromptAnalytics.track_status is not updated
         queryset = queryset.filter(
+            prompt__track_status='COMP',  # Only process completed prompts
             ~Q(competitor_mention_list=[]) & ~Q(competitor_mention_list__isnull=True)
         )
 

@@ -473,16 +473,17 @@ class PromptAnalyticsProcessor:
                         except Exception as sentiment_error:
                             logger.error(f"Error updating sentiment analytics for theme '{group.theme}': {str(sentiment_error)}", exc_info=True)
 
-                    # Sync competitor prompt analytics for competitors mentioned in this prompt
-                    logger.info(f"Syncing competitor prompt analytics for prompt {prompt_id}")
-                    try:
-                        from .competitor_sync import sync_competitor_prompt_analytics
-                        domain_id = prompt.group.domain_id
-                        sync_stats = sync_competitor_prompt_analytics(domain_id=domain_id, prompt_id=prompt_id)
-                        logger.info(f"Competitor sync completed for prompt {prompt_id}: {sync_stats}")
-                    except Exception as sync_error:
-                        logger.error(f"Error syncing competitor analytics for prompt {prompt_id}: {str(sync_error)}", exc_info=True)
-                        # Don't fail the entire process if sync fails
+                    # DISABLED: Per-prompt sync can cause premature processing
+                    # Competitor sync is done at domain level after all prompts complete
+                    # logger.info(f"Syncing competitor prompt analytics for prompt {prompt_id}")
+                    # try:
+                    #     from .competitor_sync import sync_competitor_prompt_analytics
+                    #     domain_id = prompt.group.domain_id
+                    #     sync_stats = sync_competitor_prompt_analytics(domain_id=domain_id, prompt_id=prompt_id)
+                    #     logger.info(f"Competitor sync completed for prompt {prompt_id}: {sync_stats}")
+                    # except Exception as sync_error:
+                    #     logger.error(f"Error syncing competitor analytics for prompt {prompt_id}: {str(sync_error)}", exc_info=True)
+                    #     # Don't fail the entire process if sync fails
             except Exception as snapshot_error:
                 logger.error(f"Error creating snapshots for prompt {prompt_id}: {str(snapshot_error)}", exc_info=True)
                 # Don't fail the entire process if snapshots fail
@@ -852,6 +853,15 @@ class PromptAnalyticsProcessor:
                                 logger.info(f"No new competitors extracted for domain {domain.id}")
                         except Exception as comp_error:
                             logger.error(f"Error auto-extracting competitors for domain {domain.id}: {str(comp_error)}")
+
+                        # Sync competitor analytics after extraction
+                        try:
+                            from competitors.utils import sync_competitor_prompt_analytics
+                            logger.info(f"🔄 Syncing competitor prompt analytics for domain {domain.id}")
+                            sync_stats = sync_competitor_prompt_analytics(domain_id=domain.id)
+                            logger.info(f"✅ Competitor sync completed for domain {domain.id}: {sync_stats}")
+                        except Exception as sync_error:
+                            logger.error(f"Error syncing competitor analytics for domain {domain.id}: {str(sync_error)}")
 
                         # Auto-trigger misinformation scan
                         logger.info(f"🔍 Auto-triggering misinformation scan for domain {domain.id}")
