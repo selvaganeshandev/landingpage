@@ -443,6 +443,8 @@ const CMSProviderManager = () => {
 
       if (editingProvider) {
         await apiClient.updateCMSProvider(editingProvider.id, {
+          domain: selectedDomain.id,
+          provider_type: formData.provider_type,
           name: formData.name,
           settings,
           is_active: formData.is_active,

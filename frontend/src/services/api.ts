@@ -1221,6 +1221,8 @@ export const apiClient = {
     }),
 
   updateCMSProvider: (providerId: number, data: Partial<{
+    domain: number;
+    provider_type: string;
     name: string;
     settings: Record<string, any>;
     is_active: boolean;
