@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
+import { generateTemplatePayload } from "@/utils/htmlTemplateCapture";
 import {
   ArrowLeft,
   Save,
@@ -101,6 +102,14 @@ const widgetModules: WidgetModule[] = [
   {
     name: "Information Metrics",
     widgets: [
+      // Prompts Metrics
+      {
+        id: "total-prompts-metric",
+        type: "metric",
+        title: "Total Prompts",
+        icon: FileText,
+        description: "Total number of prompts tracked",
+      },
       // Performance Metrics
       {
         id: "visibility-metric",
@@ -400,6 +409,60 @@ const widgetModules: WidgetModule[] = [
     ],
   },
   {
+    name: "Citations",
+    widgets: [
+      {
+        id: "total-citations-metric",
+        type: "metric",
+        title: "Total Citations",
+        icon: Link2,
+        description: "Total citations across all platforms",
+      },
+      {
+        id: "unique-sources-metric",
+        type: "metric",
+        title: "Unique Sources",
+        icon: Link2,
+        description: "Count of unique citation sources",
+      },
+      {
+        id: "domain-citations-metric",
+        type: "metric",
+        title: "Domain Citations",
+        icon: Link2,
+        description: "Citations from your domain",
+      },
+      {
+        id: "broken-links-metric",
+        type: "metric",
+        title: "Broken Links",
+        icon: AlertCircle,
+        description: "Failed citation URLs",
+      },
+      {
+        id: "citation-rate-metric",
+        type: "metric",
+        title: "Citation Rate",
+        icon: Link2,
+        description: "Citations per mention",
+      },
+      {
+        id: "valid-links-metric",
+        type: "metric",
+        title: "Valid Links",
+        icon: Link2,
+        description: "Successfully verified citation URLs",
+      },
+      {
+        id: "pending-citations-metric",
+        type: "metric",
+        title: "Pending Citations",
+        icon: Link2,
+        description: "Citations awaiting verification",
+      },
+    ],
+  },
+  {
     name: "Sentiment",
     widgets: [
       {
@@ -415,6 +478,20 @@ const widgetModules: WidgetModule[] = [
         title: "Sentiment Distribution",
         icon: PieChart,
         description: "Pie chart of sentiment breakdown",
+      },
+      {
+        id: "platform-sentiment-breakdown-chart",
+        type: "chart",
+        title: "Platform Sentiment Breakdown",
+        icon: BarChart3,
+        description: "Sentiment scores per platform",
+      },
+      {
+        id: "competitor-comparison-chart",
+        type: "chart",
+        title: "Competitor Comparison",
+        icon: Users,
+        description: "Sentiment comparison with competitors",
       },
     ],
   },
@@ -624,6 +701,112 @@ const widgetModules: WidgetModule[] = [
         title: "Platform Consistency Score",
         icon: Activity,
         description: "How consistently brand appears",
+      },
+    ],
+  },
+  {
+    name: "Topics",
+    widgets: [
+      {
+        id: "topic-distribution-chart",
+        type: "chart",
+        title: "Topic Distribution",
+        icon: PieChart,
+        description: "Distribution of mentions across topics",
+      },
+      {
+        id: "topic-trends-chart",
+        type: "chart",
+        title: "Topic Trends Over Time",
+        icon: LineChart,
+        description: "How topic mentions change over time",
+      },
+    ],
+  },
+  {
+    name: "Share of Voice",
+    widgets: [
+      {
+        id: "market-share-metric",
+        type: "metric",
+        title: "Market Share",
+        icon: Target,
+        description: "Your market share percentage",
+      },
+      {
+        id: "market-position-metric",
+        type: "metric",
+        title: "Market Position",
+        icon: TrendingUp,
+        description: "Your rank vs competitors",
+      },
+      {
+        id: "dominance-score-metric",
+        type: "metric",
+        title: "Dominance Score",
+        icon: Activity,
+        description: "Overall market dominance score",
+      },
+      {
+        id: "overall-market-share-metric",
+        type: "metric",
+        title: "Overall Market Share",
+        icon: PieChart,
+        description: "Total market share across all platforms",
+      },
+      {
+        id: "share-of-voice-trends-chart",
+        type: "chart",
+        title: "Share of Voice Trends",
+        icon: LineChart,
+        description: "Share of voice over time",
+      },
+      {
+        id: "brand-positioning-matrix-chart",
+        type: "chart",
+        title: "Brand Positioning Matrix",
+        icon: BarChart3,
+        description: "Position vs competitors visualization",
+      },
+    ],
+  },
+  {
+    name: "Historical Trends",
+    widgets: [
+      {
+        id: "visibility-growth-chart",
+        type: "chart",
+        title: "Visibility Growth",
+        icon: TrendingUp,
+        description: "Visibility score progression over time",
+      },
+      {
+        id: "mention-growth-chart",
+        type: "chart",
+        title: "Mention Growth",
+        icon: TrendingUp,
+        description: "Mention count growth trends",
+      },
+      {
+        id: "position-improvement-chart",
+        type: "chart",
+        title: "Position Improvement",
+        icon: TrendingUp,
+        description: "Average position changes over time",
+      },
+      {
+        id: "market-share-gain-chart",
+        type: "chart",
+        title: "Market Share Gain",
+        icon: TrendingUp,
+        description: "Market share growth visualization",
+      },
+      {
+        id: "visibility-score-progression-chart",
+        type: "chart",
+        title: "Visibility Score Progression",
+        icon: LineChart,
+        description: "Detailed visibility score timeline",
       },
     ],
   },
@@ -888,12 +1071,13 @@ const ReportBuilder = () => {
       return;
     }
 
-    const templatePayload = {
-      name: templateName,
-      description: templateDescription,
-      template_type: "custom",
-      grid_rows: gridRows,
-    };
+    // Generate payload with HTML template and placeholders
+    const templatePayload = generateTemplatePayload(
+      templateName,
+      templateDescription,
+      gridRows,
+      selectedDomain?.name || 'Domain'
+    );
 
     try {
       if (isEditMode && templateId) {
@@ -1988,6 +2172,342 @@ const ReportBuilder = () => {
           </Card>
         );
 
+      // New Citations widgets
+      case "unique-sources-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-cyan-500/10 to-cyan-500/5 border-cyan-200">
+            <p className="text-sm text-muted-foreground mb-2">Unique Sources</p>
+            <p className="text-4xl font-bold text-cyan-600">156</p>
+            <p className="text-sm text-muted-foreground mt-2">Distinct citation URLs</p>
+          </Card>
+        );
+
+      case "domain-citations-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-blue-500/10 to-blue-500/5 border-blue-200">
+            <p className="text-sm text-muted-foreground mb-2">Domain Citations</p>
+            <p className="text-4xl font-bold text-blue-600">89</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <Link2 className="h-4 w-4" />
+              Links to your domain
+            </p>
+          </Card>
+        );
+
+      case "valid-links-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-green-500/10 to-green-500/5 border-green-200">
+            <p className="text-sm text-muted-foreground mb-2">Valid Links</p>
+            <p className="text-4xl font-bold text-green-600">328</p>
+            <p className="text-sm text-muted-foreground mt-2">Successfully verified</p>
+          </Card>
+        );
+
+      case "pending-citations-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-amber-500/10 to-amber-500/5 border-amber-200">
+            <p className="text-sm text-muted-foreground mb-2">Pending Citations</p>
+            <p className="text-4xl font-bold text-amber-600">14</p>
+            <p className="text-sm text-muted-foreground mt-2">Awaiting verification</p>
+          </Card>
+        );
+
+      // New Sentiment widgets
+      case "competitor-comparison-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsBarChart data={[
+                { name: 'Your Brand', sentiment: 0.72 },
+                { name: 'Competitor A', sentiment: 0.58 },
+                { name: 'Competitor B', sentiment: 0.65 },
+                { name: 'Competitor C', sentiment: 0.42 },
+                { name: 'Competitor D', sentiment: 0.55 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="sentiment" fill="#8b5cf6" />
+              </RechartsBarChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      // New Topics widgets
+      case "topic-distribution-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsPieChart>
+                <Pie
+                  data={[
+                    { name: 'AI Integration', value: 35 },
+                    { name: 'Product Features', value: 28 },
+                    { name: 'Pricing', value: 18 },
+                    { name: 'Support', value: 12 },
+                    { name: 'Other', value: 7 },
+                  ]}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={(entry) => `${entry.name}: ${entry.value}%`}
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                >
+                  <Cell fill="#3b82f6" />
+                  <Cell fill="#8b5cf6" />
+                  <Cell fill="#f97316" />
+                  <Cell fill="#10b981" />
+                  <Cell fill="#94a3b8" />
+                </Pie>
+                <Tooltip />
+              </RechartsPieChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "topic-trends-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsLineChart data={[
+                { month: 'Jan', 'AI Integration': 25, 'Product Features': 18, 'Pricing': 12 },
+                { month: 'Feb', 'AI Integration': 28, 'Product Features': 20, 'Pricing': 14 },
+                { month: 'Mar', 'AI Integration': 32, 'Product Features': 24, 'Pricing': 16 },
+                { month: 'Apr', 'AI Integration': 35, 'Product Features': 28, 'Pricing': 18 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="AI Integration" stroke="#3b82f6" strokeWidth={2} />
+                <Line type="monotone" dataKey="Product Features" stroke="#8b5cf6" strokeWidth={2} />
+                <Line type="monotone" dataKey="Pricing" stroke="#f97316" strokeWidth={2} />
+              </RechartsLineChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      // New Share of Voice widgets
+      case "market-share-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-purple-500/10 to-purple-500/5 border-purple-200">
+            <p className="text-sm text-muted-foreground mb-2">Market Share</p>
+            <p className="text-4xl font-bold text-purple-600">42%</p>
+            <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+              <TrendingUp className="h-4 w-4" />
+              +5.2% growth
+            </p>
+          </Card>
+        );
+
+      case "dominance-score-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-indigo-500/10 to-indigo-500/5 border-indigo-200">
+            <p className="text-sm text-muted-foreground mb-2">Dominance Score</p>
+            <p className="text-4xl font-bold text-indigo-600">78.5</p>
+            <p className="text-sm text-muted-foreground mt-2">Out of 100</p>
+          </Card>
+        );
+
+      case "overall-market-share-metric":
+        return (
+          <Card className="p-6 bg-gradient-to-br from-violet-500/10 to-violet-500/5 border-violet-200">
+            <p className="text-sm text-muted-foreground mb-2">Overall Market Share</p>
+            <p className="text-4xl font-bold text-violet-600">42%</p>
+            <p className="text-sm text-muted-foreground mt-2">Across all platforms</p>
+          </Card>
+        );
+
+      case "share-of-voice-trends-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsLineChart data={[
+                { month: 'Jan', share: 37 },
+                { month: 'Feb', share: 39 },
+                { month: 'Mar', share: 40 },
+                { month: 'Apr', share: 42 },
+                { month: 'May', share: 41 },
+                { month: 'Jun', share: 42 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="share" stroke="#8b5cf6" strokeWidth={2} />
+              </RechartsLineChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "brand-positioning-matrix-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <div className="overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b">
+                  <tr>
+                    <th className="text-left py-2">Brand</th>
+                    <th className="text-right py-2">Mentions</th>
+                    <th className="text-right py-2">Sentiment</th>
+                    <th className="text-right py-2">Position</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b bg-blue-50">
+                    <td className="py-2 font-semibold">Your Brand</td>
+                    <td className="text-right">1,547</td>
+                    <td className="text-right text-green-600">0.72</td>
+                    <td className="text-right">#2</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-2">Competitor A</td>
+                    <td className="text-right">1,892</td>
+                    <td className="text-right text-green-600">0.58</td>
+                    <td className="text-right">#1</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-2">Competitor B</td>
+                    <td className="text-right">1,234</td>
+                    <td className="text-right text-green-600">0.65</td>
+                    <td className="text-right">#3</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2">Competitor C</td>
+                    <td className="text-right">987</td>
+                    <td className="text-right text-yellow-600">0.42</td>
+                    <td className="text-right">#4</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        );
+
+      // New Historical Trends widgets
+      case "visibility-growth-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={[
+                { month: 'Jan', visibility: 72 },
+                { month: 'Feb', visibility: 76 },
+                { month: 'Mar', visibility: 81 },
+                { month: 'Apr', visibility: 84 },
+                { month: 'May', visibility: 86 },
+                { month: 'Jun', visibility: 87.5 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Area type="monotone" dataKey="visibility" stroke="#10b981" fill="#10b981" fillOpacity={0.3} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "mention-growth-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsLineChart data={[
+                { month: 'Jan', growth: 0 },
+                { month: 'Feb', growth: 15.5 },
+                { month: 'Mar', growth: 17.3 },
+                { month: 'Apr', growth: 24.5 },
+                { month: 'May', growth: 12.8 },
+                { month: 'Jun', growth: 18.2 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="growth" stroke="#3b82f6" strokeWidth={2} />
+              </RechartsLineChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "position-improvement-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsLineChart data={[
+                { month: 'Jan', position: 3.2 },
+                { month: 'Feb', position: 2.9 },
+                { month: 'Mar', position: 2.7 },
+                { month: 'Apr', position: 2.4 },
+                { month: 'May', position: 2.5 },
+                { month: 'Jun', position: 2.4 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis reversed />
+                <Tooltip />
+                <Line type="monotone" dataKey="position" stroke="#f97316" strokeWidth={2} />
+              </RechartsLineChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "market-share-gain-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={[
+                { month: 'Jan', share: 37 },
+                { month: 'Feb', share: 39 },
+                { month: 'Mar', share: 40 },
+                { month: 'Apr', share: 42 },
+                { month: 'May', share: 41 },
+                { month: 'Jun', share: 42 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Area type="monotone" dataKey="share" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
+      case "visibility-score-progression-chart":
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold mb-4">{widget.title}</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <RechartsLineChart data={[
+                { month: 'Jan', score: 72 },
+                { month: 'Feb', score: 76 },
+                { month: 'Mar', score: 81 },
+                { month: 'Apr', score: 84 },
+                { month: 'May', score: 86 },
+                { month: 'Jun', score: 87.5 },
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="score" stroke="#10b981" strokeWidth={2} />
+              </RechartsLineChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+
       default:
         return (
           <Card className="p-6 bg-muted">
@@ -2128,7 +2648,7 @@ const ReportBuilder = () => {
         <div className="flex-1 p-8 overflow-y-auto bg-gradient-to-br from-muted/30 to-muted/50">
           <div className="max-w-[850px] mx-auto">
             {/* PDF-like white canvas */}
-            <div className="bg-white rounded-lg border border-border min-h-[1100px] p-12 space-y-6">
+            <div id="report-preview-canvas" className="bg-white rounded-lg border border-border min-h-[1100px] p-12 space-y-6">
               {/* Default Report Header */}
               {selectedDomain && (
                 <div className="border-b border-border pb-4 mb-6">

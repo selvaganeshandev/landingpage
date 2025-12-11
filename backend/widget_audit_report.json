@@ -1,0 +1,1058 @@
+[
+  {
+    "widget_id": "total-citations-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Total Citations",
+    "description": "Total citations across all responses",
+    "data_source": "PromptAnalytics.objects.aggregate(Sum(total_citations))",
+    "data_preview": "Value: 4, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "unique-sources-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Unique Sources",
+    "description": "Number of unique citation sources",
+    "data_source": "Count distinct citation URLs",
+    "data_preview": "Value: 26, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "domain-citations-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Domain Citations",
+    "description": "Citations from your own domain",
+    "data_source": "Citations where URL contains domain",
+    "data_preview": "Value: 19, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "broken-links-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Broken Links",
+    "description": "Number of broken citation links",
+    "data_source": "Citation.objects.filter(status=broken)",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "broken-links-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Broken Links",
+    "description": "Number of broken citation links",
+    "data_source": "Citation.objects.filter(status=broken)",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "citation-rate-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Citation Rate",
+    "description": "Average citations per mention",
+    "data_source": "Total Citations / Total Mentions",
+    "data_preview": "Value: 100.0, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "valid-links-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Valid Links",
+    "description": "Number of working citation URLs",
+    "data_source": "Count citations with valid HTTP responses",
+    "data_preview": "Value: 68, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "valid-links-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Valid Links",
+    "description": "Number of working citation URLs",
+    "data_source": "Count citations with valid HTTP responses",
+    "data_preview": "Value: 68, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "pending-citations-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Pending Citations",
+    "description": "Citations awaiting verification",
+    "data_source": "Count citations not yet verified",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "competitors-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Tracked Competitors",
+    "description": "Number of competitors tracked",
+    "data_source": "Competitor.objects.count()",
+    "data_preview": "Value: 5, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "share-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Share of Voice",
+    "description": "Your share of voice percentage",
+    "data_source": "Domain mentions / (Domain + Competitor mentions) * 100",
+    "data_preview": "Value: 8.9, Growth: 8.9",
+    "issues": []
+  },
+  {
+    "widget_id": "competitors-table",
+    "status": "SUCCESS",
+    "type": "table",
+    "label": null,
+    "description": "Table showing competitor rankings and metrics",
+    "data_source": "Competitor rankings with mentions, share %",
+    "data_preview": "6 rows \u00d7 4 columns",
+    "issues": []
+  },
+  {
+    "widget_id": "topics-table",
+    "status": "SUCCESS",
+    "type": "table",
+    "label": null,
+    "description": "Table of top topics with mentions",
+    "data_source": "Topics with mention counts and sentiment",
+    "data_preview": "0 rows \u00d7 4 columns",
+    "issues": [
+      "\u274c No data rows - table will be empty"
+    ]
+  },
+  {
+    "widget_id": "summary-text",
+    "status": "SUCCESS",
+    "type": "text",
+    "label": "Executive Summary",
+    "description": "Executive summary text section",
+    "data_source": "Custom data aggregation",
+    "data_preview": null,
+    "issues": []
+  },
+  {
+    "widget_id": "visibility-growth-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Visibility Trend",
+    "description": "Widget: visibility-growth-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "31 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "mention-growth-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Mention Growth %",
+    "description": "Widget: mention-growth-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "31 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "position-improvement-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Average Position Over Time",
+    "description": "Widget: position-improvement-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "31 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "market-share-gain-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Share of Voice Trend",
+    "description": "Widget: market-share-gain-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "31 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "visibility-score-progression-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Visibility Score Progression",
+    "description": "Widget: visibility-score-progression-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "31 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "total-prompts-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Total Prompts",
+    "description": "Total number of prompts tracked",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 2, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "visibility-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Visibility Score",
+    "description": "Overall visibility score across platforms",
+    "data_source": "PromptAnalytics.objects.aggregate(Avg(visibility_score))",
+    "data_preview": "Value: 84.5, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "avg-position-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Average Position",
+    "description": "Average position in AI responses",
+    "data_source": "PromptAnalytics.objects.aggregate(Avg(position))",
+    "data_preview": "Value: 1.8, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "engagement-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Engagement Score",
+    "description": "Overall engagement score",
+    "data_source": "Calculated from visibility + sentiment + citations",
+    "data_preview": "Value: 74.5, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "share-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Share of Voice",
+    "description": "Your share of voice percentage",
+    "data_source": "Domain mentions / (Domain + Competitor mentions) * 100",
+    "data_preview": "Value: 8.9, Growth: 8.9",
+    "issues": []
+  },
+  {
+    "widget_id": "total-mentions-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Total Mentions",
+    "description": "Total count of brand mentions across all platforms",
+    "data_source": "PromptAnalytics.objects.filter(is_mention=True)",
+    "data_preview": "Value: 4, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "mention-rate-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Mention Rate",
+    "description": "Percentage of prompts that resulted in mentions",
+    "data_source": "Mentions / Total Prompts * 100",
+    "data_preview": "Value: 100.0, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "mention-growth-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Mention Growth",
+    "description": "Growth in mentions compared to previous period",
+    "data_source": "Current mentions - Previous mentions",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "platform-coverage-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Platform Coverage",
+    "description": "Number of platforms where brand is mentioned",
+    "data_source": "Count of distinct platforms with mentions",
+    "data_preview": "Value: 2, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "total-citations-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Total Citations",
+    "description": "Total citations across all responses",
+    "data_source": "PromptAnalytics.objects.aggregate(Sum(total_citations))",
+    "data_preview": "Value: 4, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "citation-rate-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Citation Rate",
+    "description": "Average citations per mention",
+    "data_source": "Total Citations / Total Mentions",
+    "data_preview": "Value: 100.0, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "citation-density-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Citation Density",
+    "description": "Average citations per response",
+    "data_source": "Total Citations / Total Responses",
+    "data_preview": "Value: 17.0, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "primary-sources-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Primary Sources",
+    "description": "Count of primary source citations",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 26, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "positive-sentiment-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Positive Sentiment",
+    "description": "Percentage of positive sentiment mentions",
+    "data_source": "Count sentiment > 0 / Total * 100",
+    "data_preview": "Value: 0.0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "avg-sentiment-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Avg Sentiment",
+    "description": "Average sentiment score across mentions",
+    "data_source": "PromptAnalytics.objects.aggregate(Avg(sentiment_score))",
+    "data_preview": "Value: 0.15, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "sentiment-trend-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Sentiment Trend",
+    "description": "Change in sentiment vs previous period",
+    "data_source": "Current avg sentiment - Previous avg sentiment",
+    "data_preview": "Value: 15.0, Growth: 15.0",
+    "issues": []
+  },
+  {
+    "widget_id": "negative-sentiment-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Negative Sentiment",
+    "description": "Percentage of negative sentiment mentions",
+    "data_source": "Count sentiment < 0 / Total * 100",
+    "data_preview": "Value: 0.0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "market-position-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Market Position",
+    "description": "Your ranking among competitors",
+    "data_source": "Rank based on total mentions",
+    "data_preview": "Value: 1, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "competitor-gap-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Competitor Gap",
+    "description": "Difference from top competitor",
+    "data_source": "Top competitor mentions - Your mentions",
+    "data_preview": "Value: -9, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "market-share-trend-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Market Share Trend",
+    "description": "Trend in market share",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 8.9, Growth: 8.9",
+    "issues": []
+  },
+  {
+    "widget_id": "health-score-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Health Score",
+    "description": "Overall domain AI-friendliness score",
+    "data_source": "Weighted average of multiple quality metrics",
+    "data_preview": "Value: 83.0, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "content-quality-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Content Quality",
+    "description": "Content quality score based on engagement",
+    "data_source": "Based on sentiment, engagement, citations",
+    "data_preview": "Value: 78.8, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "topics-covered-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Topics Covered",
+    "description": "Number of topics with mentions",
+    "data_source": "Count distinct topics with mentions",
+    "data_preview": "Value: 2, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "answer-coverage-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Answer Coverage",
+    "description": "Percentage of prompts with answers",
+    "data_source": "Mentions with responses / Total prompts * 100",
+    "data_preview": "Value: 100.0, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "active-alerts-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Active Alerts",
+    "description": "Currently active misinformation alerts",
+    "data_source": "Alert.objects.filter(status=active)",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "critical-issues-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Critical Issues",
+    "description": "High-severity issues requiring attention",
+    "data_source": "Alert.objects.filter(severity=critical)",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "broken-links-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Broken Links",
+    "description": "Number of broken citation links",
+    "data_source": "Citation.objects.filter(status=broken)",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "misinformation-cases-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Misinformation Cases",
+    "description": "Detected misinformation instances",
+    "data_source": "Alert.objects.filter(type=misinformation)",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "mention-growth-percent-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Mention Growth",
+    "description": "Percentage growth in mentions",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "visibility-trend-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Visibility Trend",
+    "description": "Change in visibility score",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "citation-growth-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Citation Growth",
+    "description": "Growth in citations vs previous period",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "engagement-growth-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Engagement Growth",
+    "description": "Growth in engagement score",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 100.0, Growth: 100.0",
+    "issues": []
+  },
+  {
+    "widget_id": "mentions-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Total Mentions",
+    "description": "Widget: mentions-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 4, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "mentions-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Mentions Over Time",
+    "description": "Line chart showing mentions over time",
+    "data_source": "PromptAnalytics grouped by date, count mentions",
+    "data_preview": "2 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Distribution",
+    "description": "Bar chart of mentions by platform",
+    "data_source": "PromptAnalytics grouped by platform, count mentions",
+    "data_preview": "2 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "total-platforms-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Total Platforms",
+    "description": "Widget: total-platforms-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 2, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "total-platform-mentions-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Platform Mentions",
+    "description": "Widget: total-platform-mentions-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 4, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "total-platform-citations-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Platform Citations",
+    "description": "Widget: total-platform-citations-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 68, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "platform-coverage-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Platform Coverage",
+    "description": "Number of platforms where brand is mentioned",
+    "data_source": "Count of distinct platforms with mentions",
+    "data_preview": "Value: 2, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "gemini-visibility-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Gemini Visibility",
+    "description": "Widget: gemini-visibility-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "perplexity-visibility-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Perplexity Visibility",
+    "description": "Widget: perplexity-visibility-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "claude-visibility-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Claude Visibility",
+    "description": "Widget: claude-visibility-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "grok-visibility-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Grok Visibility",
+    "description": "Widget: grok-visibility-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "top-performing-platform-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Top Platform",
+    "description": "Widget: top-performing-platform-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 100.0, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "platform-mention-distribution-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Mention Distribution",
+    "description": "Widget: platform-mention-distribution-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "2 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-citation-distribution-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Citation Distribution",
+    "description": "Widget: platform-citation-distribution-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "1 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-mention-trends-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Mentions Trend",
+    "description": "Widget: platform-mention-trends-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "93 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-citation-distribution-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Citation Distribution",
+    "description": "Widget: platform-citation-distribution-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "1 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-mention-trends-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Mentions Trend",
+    "description": "Widget: platform-mention-trends-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "93 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "avg-position-by-platform-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Average Position by Platform",
+    "description": "Widget: avg-position-by-platform-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "4 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "best-platform-position-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Best Position",
+    "description": "Widget: best-platform-position-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 2.5, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "platform-position-comparison-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Average Position by Platform",
+    "description": "Widget: platform-position-comparison-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "4 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-sentiment-breakdown-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Sentiment Breakdown",
+    "description": "Sentiment breakdown by platform",
+    "data_source": "Custom data aggregation",
+    "data_preview": "4 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "most-positive-platform-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Most Positive",
+    "description": "Widget: most-positive-platform-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 0.16, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "platform-sentiment-trends-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Sentiment Trends",
+    "description": "Widget: platform-sentiment-trends-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "93 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-response-rate-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Response Rate",
+    "description": "Widget: platform-response-rate-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 100.0, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "platform-mention-rate-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Mention Rates",
+    "description": "Widget: platform-mention-rate-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "4 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-growth-rate-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Growth Rates",
+    "description": "Widget: platform-growth-rate-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "4 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-share-of-voice-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Share of Voice",
+    "description": "Widget: platform-share-of-voice-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "4 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-performance-matrix-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Performance Matrix",
+    "description": "Widget: platform-performance-matrix-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "4 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-citation-density-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Citation Density",
+    "description": "Widget: platform-citation-density-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "4 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-health-score-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Health Scores",
+    "description": "Widget: platform-health-score-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "4 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-coverage-quality-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Coverage Quality",
+    "description": "Quality of platform coverage",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 50.0, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "platform-consistency-score-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Consistency Score",
+    "description": "Consistency across platforms",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 0, Growth: 0",
+    "issues": [
+      "\u26a0\ufe0f  Returns all zeros - may need sample data"
+    ]
+  },
+  {
+    "widget_id": "chatgpt-visibility-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "ChatGPT Visibility",
+    "description": "Widget: chatgpt-visibility-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 100.0, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "sentiment-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Avg Sentiment",
+    "description": "Widget: sentiment-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 0.15, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "sentiment-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Sentiment Distribution",
+    "description": "Pie chart of sentiment distribution",
+    "data_source": "Distribution of positive/neutral/negative",
+    "data_preview": "3 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "platform-sentiment-breakdown-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Platform Sentiment Breakdown",
+    "description": "Sentiment breakdown by platform",
+    "data_source": "Custom data aggregation",
+    "data_preview": "4 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "competitor-comparison-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Competitor Sentiment Comparison",
+    "description": "Bar chart comparing competitors",
+    "data_source": "Competitor metrics side by side",
+    "data_preview": "6 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "market-share-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Share of Voice",
+    "description": "Widget: market-share-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 8.9, Growth: 8.9",
+    "issues": []
+  },
+  {
+    "widget_id": "market-position-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Market Position",
+    "description": "Your ranking among competitors",
+    "data_source": "Rank based on total mentions",
+    "data_preview": "Value: 1, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "dominance-score-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Dominance Score",
+    "description": "Widget: dominance-score-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 10.7, Growth: 0",
+    "issues": []
+  },
+  {
+    "widget_id": "overall-market-share-metric",
+    "status": "SUCCESS",
+    "type": "metric",
+    "label": "Share of Voice",
+    "description": "Widget: overall-market-share-metric",
+    "data_source": "Custom data aggregation",
+    "data_preview": "Value: 8.9, Growth: 8.9",
+    "issues": []
+  },
+  {
+    "widget_id": "share-of-voice-trends-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Share of Voice Trend",
+    "description": "Widget: share-of-voice-trends-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "31 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "brand-positioning-matrix-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Brand Positioning Matrix",
+    "description": "Widget: brand-positioning-matrix-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "6 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  },
+  {
+    "widget_id": "topic-distribution-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Topic Distribution",
+    "description": "Widget: topic-distribution-chart",
+    "data_source": "Custom data aggregation",
+    "data_preview": "0 data points",
+    "issues": [
+      "\u274c No data points - chart will be empty"
+    ]
+  },
+  {
+    "widget_id": "topic-trends-chart",
+    "status": "SUCCESS",
+    "type": "chart",
+    "label": "Topic Trends Over Time",
+    "description": "Line chart of topic mention trends",
+    "data_source": "Topic mentions over time",
+    "data_preview": "11 data points",
+    "issues": [
+      "\u26a0\ufe0f  All values are zero"
+    ]
+  }
+]

@@ -10,6 +10,7 @@ class ReportTemplateSerializer(serializers.ModelSerializer):
         model = ReportTemplate
         fields = [
             'id', 'name', 'description', 'template_type', 'sections', 'grid_rows',
+            'html_template', 'css_template',  # NEW: Include HTML/CSS template fields
             'organisation', 'organisation_name', 'created_by', 'created_by_email',
             'is_active', 'created_at', 'modified_at'
         ]

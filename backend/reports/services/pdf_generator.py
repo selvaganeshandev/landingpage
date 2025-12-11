@@ -23,30 +23,37 @@ import os
 class PDFReportGenerator:
     """Generate PDF reports using ReportLab"""
 
-    # Modern color palette
+    # Modern color palette matching frontend
     COLORS = {
         'primary': colors.HexColor('#6366f1'),      # Indigo
         'primary_light': colors.HexColor('#eef2ff'),
-        'success': colors.HexColor('#10b981'),      # Green
+        'blue': colors.HexColor('#3b82f6'),         # Blue for mentions
+        'blue_light': colors.HexColor('#dbeafe'),
+        'green': colors.HexColor('#22c55e'),        # Green for sentiment
+        'green_light': colors.HexColor('#dcfce7'),
+        'orange': colors.HexColor('#f97316'),       # Orange for share
+        'orange_light': colors.HexColor('#ffedd5'),
+        'purple': colors.HexColor('#8b5cf6'),       # Purple for competitors
+        'purple_light': colors.HexColor('#ede9fe'),
+        'success': colors.HexColor('#10b981'),
         'success_light': colors.HexColor('#ecfdf5'),
-        'warning': colors.HexColor('#f59e0b'),      # Amber
+        'warning': colors.HexColor('#f59e0b'),
         'warning_light': colors.HexColor('#fffbeb'),
-        'danger': colors.HexColor('#ef4444'),       # Red
+        'danger': colors.HexColor('#ef4444'),
         'danger_light': colors.HexColor('#fef2f2'),
-        'info': colors.HexColor('#3b82f6'),         # Blue
+        'info': colors.HexColor('#3b82f6'),
         'info_light': colors.HexColor('#eff6ff'),
-        'purple': colors.HexColor('#8b5cf6'),
-        'purple_light': colors.HexColor('#f5f3ff'),
         'dark': colors.HexColor('#1f2937'),
         'gray': colors.HexColor('#6b7280'),
-        'light_gray': colors.HexColor('#f3f4f6'),
+        'light_gray': colors.HexColor('#f9fafb'),
         'border': colors.HexColor('#e5e7eb'),
         'white': colors.white,
     }
 
-    def __init__(self, report_data, report_type):
+    def __init__(self, report_data, report_type, template=None):
         self.data = report_data
         self.report_type = report_type
+        self.template = template  # ReportTemplate instance
         self.buffer = BytesIO()
         self.page_width = letter[0]
         self.page_height = letter[1]
@@ -168,10 +175,14 @@ class PDFReportGenerator:
 
     def generate(self):
         """Generate the PDF and return BytesIO buffer"""
+        # Check if this is a custom template
+        if self.template and self.template.template_type == 'custom':
+            return self._generate_custom_template()
+
         # Add title header
         self._add_header()
 
-        # Add content based on report type
+        # Add content based on report type (predefined templates)
         if self.report_type == 'Executive Dashboard':
             self._generate_executive_dashboard()
         elif self.report_type == 'Detailed Analytics':
@@ -1153,3 +1164,442 @@ class PDFReportGenerator:
                     self.story.append(Paragraph(rec, self.styles['CustomBody']))
             else:
                 self.story.append(Paragraph('Maintain current content strategy and monitor for opportunities.', self.styles['CustomBody']))
+
+    # ==================== CUSTOM TEMPLATE RENDERING ====================
+
+    def _generate_custom_template(self):
+        """Generate PDF from custom template with widgets"""
+        metadata = self.data.get('_metadata', {})
+        grid_rows = metadata.get('grid_rows', [])
+
+        # Add header with metadata
+        self._add_custom_header(metadata)
+
+        # Render each grid row
+        for row in grid_rows:
+            self._render_grid_row(row)
+
+        # Build PDF
+        self.doc.build(self.story, onFirstPage=self._add_footer, onLaterPages=self._add_footer)
+        self.buffer.seek(0)
+        return self.buffer
+
+    def _add_custom_header(self, metadata):
+        """Add header for custom template"""
+        domain_name = metadata.get('domain_name', 'N/A')
+        domain_url = metadata.get('domain_url', '')
+        template_name = metadata.get('template_name', 'Custom Report')
+        period = metadata.get('period', {})
+
+        if period:
+            period_start = period['start'].strftime('%B %d, %Y')
+            period_end = period['end'].strftime('%B %d, %Y')
+        else:
+            period_start = 'N/A'
+            period_end = 'N/A'
+
+        # Domain name and favicon
+        favicon_img = None
+        if domain_url:
+            try:
+                import urllib.request
+                from urllib.parse import urlparse
+                parsed = urlparse(domain_url)
+                domain_host = parsed.netloc or domain_url.replace('https://', '').replace('http://', '').split('/')[0]
+                favicon_url = f"https://www.google.com/s2/favicons?domain={domain_host}&sz=64"
+
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
+                    urllib.request.urlretrieve(favicon_url, tmp.name)
+                    favicon_img = Image(tmp.name, width=32, height=32)
+            except:
+                favicon_img = None
+
+        # Header with favicon
+        if favicon_img:
+            domain_para = Paragraph(domain_name, ParagraphStyle(
+                'DomainName',
+                parent=self.styles['ReportTitle'],
+                fontSize=22,
+                leading=32,
+            ))
+            header_table = Table([[favicon_img, domain_para]], colWidths=[0.5*inch, self.usable_width - 0.5*inch])
+            header_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            self.story.append(header_table)
+        else:
+            self.story.append(Paragraph(domain_name, self.styles['ReportTitle']))
+
+        # Template name and date range
+        self.story.append(Paragraph(template_name, self.styles['ReportSubtitle']))
+        self.story.append(Paragraph(f"Report Period: {period_start} to {period_end}", self.styles['ReportSubtitle']))
+        self.story.append(Spacer(1, 0.3*inch))
+
+    def _render_grid_row(self, row):
+        """Render a grid row with widgets"""
+        grid_type = row.get('type')
+        slots = row.get('slots', [])
+
+        # Filter out null/empty slots
+        widgets = [slot for slot in slots if slot]
+
+        if not widgets:
+            return  # Skip empty rows
+
+        # Determine column widths based on grid type
+        if grid_type == 'single':
+            col_widths = [self.usable_width]
+        elif grid_type == 'double':
+            col_widths = [self.usable_width / 2] * 2
+        elif grid_type == 'triple':
+            col_widths = [self.usable_width / 3] * 3
+        elif grid_type == 'quad':
+            col_widths = [self.usable_width / 4] * 4
+        else:
+            col_widths = [self.usable_width]
+
+        # Render each widget
+        widget_elements = []
+        for widget in widgets:
+            widget_id = widget.get('id')
+            widget_data = self.data.get(widget_id, {})
+            element = self._render_widget(widget, widget_data)
+            widget_elements.append(element)
+
+        # Create table layout for the row
+        if len(widget_elements) > 1:
+            # Multiple widgets in one row - use table
+            table = Table([widget_elements], colWidths=col_widths[:len(widget_elements)])
+            table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            self.story.append(table)
+        else:
+            # Single widget - add directly
+            self.story.append(widget_elements[0])
+
+        self.story.append(Spacer(1, 0.2*inch))
+
+    def _render_widget(self, widget, widget_data):
+        """Render individual widget based on type"""
+        widget_type = widget_data.get('type')
+
+        if widget_type == 'metric':
+            return self._render_metric_widget(widget, widget_data)
+        elif widget_type == 'chart':
+            return self._render_chart_widget(widget, widget_data)
+        elif widget_type == 'table':
+            return self._render_table_widget(widget, widget_data)
+        else:
+            # Fallback for unknown types
+            return Paragraph(f"{widget.get('title', 'Widget')}: Data not available", self.styles['Normal'])
+
+    def _render_metric_widget(self, widget, data):
+        """Render a metric card widget matching frontend design"""
+        title = widget.get('title', 'Metric')
+        value = data.get('value', 0)
+        format_type = data.get('format', 'number')
+        growth = data.get('growth', 0)
+        subtitle = data.get('subtitle', '')
+
+        # Format value based on type
+        try:
+            if format_type == 'percentage':
+                formatted_value = f"{value}%"
+            elif format_type == 'decimal':
+                formatted_value = f"{float(value):.1f}"
+            elif format_type == 'ordinal':
+                formatted_value = f"#{int(value)}"
+            elif isinstance(value, (int, float)):
+                formatted_value = f"{value:,}"
+            else:
+                formatted_value = str(value)
+        except (ValueError, TypeError):
+            formatted_value = str(value)
+
+        # Determine color scheme based on widget type (matching frontend)
+        widget_id = widget.get('id', '').lower()
+        if 'mention' in widget_id or 'prompt' in widget_id or 'visibility' in widget_id:
+            bg_color = self.COLORS['blue_light']
+            value_color = self.COLORS['blue']
+            border_color = self.COLORS['blue']
+        elif 'sentiment' in widget_id or 'positive' in widget_id or 'health' in widget_id:
+            bg_color = self.COLORS['green_light']
+            value_color = self.COLORS['green']
+            border_color = self.COLORS['green']
+        elif 'competitor' in widget_id or 'position' in widget_id or 'rank' in widget_id:
+            bg_color = self.COLORS['purple_light']
+            value_color = self.COLORS['purple']
+            border_color = self.COLORS['purple']
+        elif 'share' in widget_id or 'voice' in widget_id or 'market' in widget_id:
+            bg_color = self.COLORS['orange_light']
+            value_color = self.COLORS['orange']
+            border_color = self.COLORS['orange']
+        else:
+            bg_color = self.COLORS['light_gray']
+            value_color = self.COLORS['dark']
+            border_color = self.COLORS['border']
+
+        # Build card content
+        card_content = []
+        
+        # Title - small muted text
+        card_content.append([Paragraph(
+            f'<font color="#6b7280" size="9">{title}</font>',
+            self.styles['Normal']
+        )])
+        
+        card_content.append([Spacer(1, 0.08*inch)])
+        
+        # Value - large bold text with color
+        card_content.append([Paragraph(
+            f'<font color="#{value_color.hexval()[2:]}" size="32"><b>{formatted_value}</b></font>',
+            self.styles['Normal']
+        )])
+        
+        # Growth indicator or subtitle
+        if growth and growth != 0:
+            try:
+                growth_val = float(growth)
+                trend_color = '#10b981' if growth_val > 0 else '#ef4444'
+                trend_symbol = '▲' if growth_val > 0 else '▼'
+                card_content.append([Spacer(1, 0.05*inch)])
+                card_content.append([Paragraph(
+                    f'<font color="{trend_color}" size="9">{trend_symbol} {abs(growth_val):.1f}% from last period</font>',
+                    self.styles['Normal']
+                )])
+            except (ValueError, TypeError):
+                pass
+        elif subtitle:
+            card_content.append([Spacer(1, 0.05*inch)])
+            card_content.append([Paragraph(
+                f'<font color="#6b7280" size="8">{subtitle}</font>',
+                self.styles['Normal']
+            )])
+
+        # Create card table with gradient-like background
+        card_table = Table(card_content, colWidths=[self.usable_width / 3 - 15])
+        card_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), bg_color),
+            ('TOPPADDING', (0, 0), (-1, -1), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 14),
+            ('LEFTPADDING', (0, 0), (-1, -1), 16),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 16),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('BOX', (0, 0), (-1, -1), 1, border_color),
+        ]))
+        
+        return card_table
+
+    def _render_chart_widget(self, widget, data):
+        """Render a chart widget with card styling"""
+        chart_type = data.get('chart_type', 'line')
+        chart_data = data.get('data', [])
+        title = widget.get('title', 'Chart')
+
+        if not chart_data:
+            # Return styled card with no data message
+            no_data_content = [[Paragraph(
+                f'<font size="10"><b>{title}</b></font>',
+                self.styles['Normal']
+            )], [Spacer(1, 0.1*inch)], [Paragraph(
+                '<font color="#6b7280" size="9">No data available</font>',
+                self.styles['Normal']
+            )]]
+            
+            card = Table(no_data_content, colWidths=[self.usable_width / 3 - 15])
+            card.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), self.COLORS['white']),
+                ('TOPPADDING', (0, 0), (-1, -1), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+                ('LEFTPADDING', (0, 0), (-1, -1), 14),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 14),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('BOX', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+            ]))
+            return card
+
+        # Create chart based on type
+        if chart_type == 'line':
+            chart = self._create_line_chart(chart_data, title)
+        elif chart_type == 'bar':
+            chart = self._create_bar_chart(chart_data, title)
+        elif chart_type == 'pie':
+            chart = self._create_pie_chart(chart_data, title)
+        else:
+            return Paragraph(f"{title}: Unsupported chart type", self.styles['Normal'])
+
+        # Wrap chart in card with title
+        card_content = [
+            [Paragraph(f'<font size="10"><b>{title}</b></font>', self.styles['Normal'])],
+            [Spacer(1, 0.15*inch)],
+            [chart]
+        ]
+
+        card_table = Table(card_content, colWidths=[self.usable_width / 3 - 15])
+        card_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), self.COLORS['white']),
+            ('TOPPADDING', (0, 0), (-1, -1), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 14),
+            ('LEFTPADDING', (0, 0), (-1, -1), 14),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 14),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('BOX', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+        ]))
+
+        return card_table
+
+    def _create_line_chart(self, data, label):
+        """Create a line chart"""
+        drawing = Drawing(280, 140)
+        chart = HorizontalLineChart()
+        chart.x = 40
+        chart.y = 25
+        chart.width = 230
+        chart.height = 100
+
+        # Extract x and y values - convert Decimals to floats
+        chart.data = [[float(d.get('value', 0) or 0) for d in data]]
+        chart.categoryAxis.categoryNames = [str(d.get('date', f'Day {i+1}'))[:10] for i, d in enumerate(data)]
+
+        # Styling to match frontend (blue line)
+        chart.lines[0].strokeColor = self.COLORS['blue']
+        chart.lines[0].strokeWidth = 2
+
+        drawing.add(chart)
+        return drawing
+
+    def _create_bar_chart(self, data, label):
+        """Create a bar chart"""
+        drawing = Drawing(280, 140)
+        chart = VerticalBarChart()
+        chart.x = 40
+        chart.y = 25
+        chart.width = 230
+        chart.height = 100
+
+        # Extract values - convert Decimals to floats
+        chart.data = [[float(d.get('value', 0) or 0) for d in data]]
+        chart.categoryAxis.categoryNames = [str(d.get('platform', d.get('name', f'Item {i+1}')))[:12] for i, d in enumerate(data)]
+
+        # Styling to match frontend (purple bars)
+        chart.bars[0].fillColor = self.COLORS['purple']
+
+        drawing.add(chart)
+        return drawing
+
+    def _create_pie_chart(self, data, label):
+        """Create a pie chart"""
+        drawing = Drawing(280, 140)
+        pie = Pie()
+        pie.x = 90
+        pie.y = 20
+        pie.width = 100
+        pie.height = 100
+
+        # Extract values and labels - convert Decimals to floats
+        pie.data = [float(d.get('value', 0) or 0) for d in data]
+        pie.labels = [str(d.get('name', f'Item {i+1}'))[:12] for i, d in enumerate(data)]
+
+        # Set colors matching frontend (green, gray, red for sentiment)
+        colors_list = [self.COLORS['green'], self.COLORS['gray'], self.COLORS['danger'],
+                      self.COLORS['blue'], self.COLORS['purple'], self.COLORS['orange']]
+        for i in range(len(data)):
+            pie.slices[i].fillColor = colors_list[i % len(colors_list)]
+
+        drawing.add(pie)
+        return drawing
+
+    def _render_table_widget(self, widget, data):
+        """Render a table widget with card styling"""
+        columns = data.get('columns', [])
+        rows = data.get('rows', [])
+        title = widget.get('title', 'Table')
+
+        if not rows:
+            # Return styled card with no data message
+            no_data_content = [[Paragraph(
+                f'<font size="10"><b>{title}</b></font>',
+                self.styles['Normal']
+            )], [Spacer(1, 0.1*inch)], [Paragraph(
+                '<font color="#6b7280" size="9">No data available</font>',
+                self.styles['Normal']
+            )]]
+            
+            card = Table(no_data_content, colWidths=[self.usable_width / 3 - 15])
+            card.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), self.COLORS['white']),
+                ('TOPPADDING', (0, 0), (-1, -1), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+                ('LEFTPADDING', (0, 0), (-1, -1), 14),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 14),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('BOX', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+            ]))
+            return card
+
+        # Create table data
+        table_data = [columns]  # Header row
+        for row in rows[:5]:  # Limit to 5 rows
+            row_values = []
+            for col in columns:
+                # Try multiple key variations
+                key = col.lower().replace(' ', '_').replace('%', '')
+                key_simple = col.lower().replace(' ', '').replace('%', '')
+                key_base = col.lower().split()[0] if ' ' in col.lower() else col.lower()
+                
+                value = row.get(key) or row.get(key_simple) or row.get(key_base) or ''
+                # Format numbers nicely
+                if isinstance(value, (int, float)):
+                    row_values.append(str(value))
+                else:
+                    row_values.append(str(value)[:25])
+            table_data.append(row_values)
+
+        # Calculate column widths
+        available_width = self.usable_width / 3 - 30
+        col_width = available_width / len(columns) if columns else 50
+
+        # Create inner data table
+        data_table = Table(table_data, colWidths=[col_width] * len(columns))
+        data_table.setStyle(TableStyle([
+            # Header styling - light gray background
+            ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['light_gray']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), self.COLORS['dark']),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 0), (-1, 0), 6),
+            ('LINEBELOW', (0, 0), (-1, 0), 1, self.COLORS['border']),
+            # Data rows styling
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('TOPPADDING', (0, 1), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+            ('LINEBELOW', (0, 1), (-1, -1), 0.5, self.COLORS['border']),
+        ]))
+
+        # Wrap table in card with title
+        card_content = [
+            [Paragraph(f'<font size="10"><b>{title}</b></font>', self.styles['Normal'])],
+            [Spacer(1, 0.1*inch)],
+            [data_table]
+        ]
+
+        card_table = Table(card_content, colWidths=[self.usable_width / 3 - 15])
+        card_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), self.COLORS['white']),
+            ('TOPPADDING', (0, 0), (-1, -1), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 14),
+            ('LEFTPADDING', (0, 0), (-1, -1), 14),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 14),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('BOX', (0, 0), (-1, -1), 0.5, self.COLORS['border']),
+        ]))
+
+        return card_table

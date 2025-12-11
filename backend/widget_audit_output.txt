@@ -1,0 +1,988 @@
+/home/hts-005/Documents/python/v3.12/env/lib/python3.12/site-packages/rest_framework_simplejwt/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import DistributionNotFound, get_distribution
+====================================================================================================
+COMPREHENSIVE WIDGET AUDIT
+====================================================================================================
+
+Found 10 report templates
+Domain: Zerodha
+Date Range: 2025-11-11 to 2025-12-11
+
+Total Unique Widgets: 85
+
+====================================================================================================
+📊 Citations Test
+====================================================================================================
+
+[1/9] Testing: total-citations-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Total Citations
+     Description: Total citations across all responses
+     Data Source: PromptAnalytics.objects.aggregate(Sum(total_citations))
+     Preview: Value: 4, Growth: 0
+
+[2/9] Testing: unique-sources-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Unique Sources
+     Description: Number of unique citation sources
+     Data Source: Count distinct citation URLs
+     Preview: Value: 26, Growth: 0
+
+[3/9] Testing: domain-citations-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Domain Citations
+     Description: Citations from your own domain
+     Data Source: Citations where URL contains domain
+     Preview: Value: 19, Growth: 0
+
+[4/9] Testing: broken-links-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Broken Links
+     Description: Number of broken citation links
+     Data Source: Citation.objects.filter(status=broken)
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[5/9] Testing: broken-links-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Broken Links
+     Description: Number of broken citation links
+     Data Source: Citation.objects.filter(status=broken)
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[6/9] Testing: citation-rate-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Citation Rate
+     Description: Average citations per mention
+     Data Source: Total Citations / Total Mentions
+     Preview: Value: 100.0, Growth: 0
+
+[7/9] Testing: valid-links-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Valid Links
+     Description: Number of working citation URLs
+     Data Source: Count citations with valid HTTP responses
+     Preview: Value: 68, Growth: 0
+
+[8/9] Testing: valid-links-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Valid Links
+     Description: Number of working citation URLs
+     Data Source: Count citations with valid HTTP responses
+     Preview: Value: 68, Growth: 0
+
+[9/9] Testing: pending-citations-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Pending Citations
+     Description: Citations awaiting verification
+     Data Source: Count citations not yet verified
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+
+====================================================================================================
+📊 Competitor Report
+====================================================================================================
+
+[1/3] Testing: competitors-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Tracked Competitors
+     Description: Number of competitors tracked
+     Data Source: Competitor.objects.count()
+     Preview: Value: 5, Growth: 0
+
+[2/3] Testing: share-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Share of Voice
+     Description: Your share of voice percentage
+     Data Source: Domain mentions / (Domain + Competitor mentions) * 100
+     Preview: Value: 8.9, Growth: 8.9
+
+[3/3] Testing: competitors-table
+  ✅ Status: SUCCESS
+     Type: table
+     Label: None
+     Description: Table showing competitor rankings and metrics
+     Data Source: Competitor rankings with mentions, share %
+     Preview: 6 rows × 4 columns
+
+
+====================================================================================================
+📊 Content - Report
+====================================================================================================
+
+[1/2] Testing: topics-table
+  ✅ Status: SUCCESS
+     Type: table
+     Label: None
+     Description: Table of top topics with mentions
+     Data Source: Topics with mention counts and sentiment
+     Preview: 0 rows × 4 columns
+     ❌ No data rows - table will be empty
+
+[2/2] Testing: summary-text
+  ✅ Status: SUCCESS
+     Type: text
+     Label: Executive Summary
+     Description: Executive summary text section
+     Data Source: Custom data aggregation
+     Preview: None
+
+
+====================================================================================================
+📊 Historical Trends
+====================================================================================================
+
+[1/5] Testing: visibility-growth-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Visibility Trend
+     Description: Widget: visibility-growth-chart
+     Data Source: Custom data aggregation
+     Preview: 31 data points
+     ⚠️  All values are zero
+
+[2/5] Testing: mention-growth-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Mention Growth %
+     Description: Widget: mention-growth-chart
+     Data Source: Custom data aggregation
+     Preview: 31 data points
+     ⚠️  All values are zero
+
+[3/5] Testing: position-improvement-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Average Position Over Time
+     Description: Widget: position-improvement-chart
+     Data Source: Custom data aggregation
+     Preview: 31 data points
+     ⚠️  All values are zero
+
+[4/5] Testing: market-share-gain-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Share of Voice Trend
+     Description: Widget: market-share-gain-chart
+     Data Source: Custom data aggregation
+     Preview: 31 data points
+     ⚠️  All values are zero
+
+[5/5] Testing: visibility-score-progression-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Visibility Score Progression
+     Description: Widget: visibility-score-progression-chart
+     Data Source: Custom data aggregation
+     Preview: 31 data points
+     ⚠️  All values are zero
+
+
+====================================================================================================
+📊 Information Metrics
+====================================================================================================
+
+[1/32] Testing: total-prompts-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Total Prompts
+     Description: Total number of prompts tracked
+     Data Source: Custom data aggregation
+     Preview: Value: 2, Growth: 0
+
+[2/32] Testing: visibility-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Visibility Score
+     Description: Overall visibility score across platforms
+     Data Source: PromptAnalytics.objects.aggregate(Avg(visibility_score))
+     Preview: Value: 84.5, Growth: 0
+
+[3/32] Testing: avg-position-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Average Position
+     Description: Average position in AI responses
+     Data Source: PromptAnalytics.objects.aggregate(Avg(position))
+     Preview: Value: 1.8, Growth: 0
+
+[4/32] Testing: engagement-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Engagement Score
+     Description: Overall engagement score
+     Data Source: Calculated from visibility + sentiment + citations
+     Preview: Value: 74.5, Growth: 0
+
+[5/32] Testing: share-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Share of Voice
+     Description: Your share of voice percentage
+     Data Source: Domain mentions / (Domain + Competitor mentions) * 100
+     Preview: Value: 8.9, Growth: 8.9
+
+[6/32] Testing: total-mentions-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Total Mentions
+     Description: Total count of brand mentions across all platforms
+     Data Source: PromptAnalytics.objects.filter(is_mention=True)
+     Preview: Value: 4, Growth: 0
+
+[7/32] Testing: mention-rate-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Mention Rate
+     Description: Percentage of prompts that resulted in mentions
+     Data Source: Mentions / Total Prompts * 100
+     Preview: Value: 100.0, Growth: 0
+
+[8/32] Testing: mention-growth-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Mention Growth
+     Description: Growth in mentions compared to previous period
+     Data Source: Current mentions - Previous mentions
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[9/32] Testing: platform-coverage-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Platform Coverage
+     Description: Number of platforms where brand is mentioned
+     Data Source: Count of distinct platforms with mentions
+     Preview: Value: 2, Growth: 0
+
+[10/32] Testing: total-citations-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Total Citations
+     Description: Total citations across all responses
+     Data Source: PromptAnalytics.objects.aggregate(Sum(total_citations))
+     Preview: Value: 4, Growth: 0
+
+[11/32] Testing: citation-rate-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Citation Rate
+     Description: Average citations per mention
+     Data Source: Total Citations / Total Mentions
+     Preview: Value: 100.0, Growth: 0
+
+[12/32] Testing: citation-density-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Citation Density
+     Description: Average citations per response
+     Data Source: Total Citations / Total Responses
+     Preview: Value: 17.0, Growth: 0
+
+[13/32] Testing: primary-sources-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Primary Sources
+     Description: Count of primary source citations
+     Data Source: Custom data aggregation
+     Preview: Value: 26, Growth: 0
+
+[14/32] Testing: positive-sentiment-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Positive Sentiment
+     Description: Percentage of positive sentiment mentions
+     Data Source: Count sentiment > 0 / Total * 100
+     Preview: Value: 0.0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[15/32] Testing: avg-sentiment-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Avg Sentiment
+     Description: Average sentiment score across mentions
+     Data Source: PromptAnalytics.objects.aggregate(Avg(sentiment_score))
+     Preview: Value: 0.15, Growth: 0
+
+[16/32] Testing: sentiment-trend-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Sentiment Trend
+     Description: Change in sentiment vs previous period
+     Data Source: Current avg sentiment - Previous avg sentiment
+     Preview: Value: 15.0, Growth: 15.0
+
+[17/32] Testing: negative-sentiment-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Negative Sentiment
+     Description: Percentage of negative sentiment mentions
+     Data Source: Count sentiment < 0 / Total * 100
+     Preview: Value: 0.0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[18/32] Testing: market-position-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Market Position
+     Description: Your ranking among competitors
+     Data Source: Rank based on total mentions
+     Preview: Value: 1, Growth: 0
+
+[19/32] Testing: competitor-gap-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Competitor Gap
+     Description: Difference from top competitor
+     Data Source: Top competitor mentions - Your mentions
+     Preview: Value: -9, Growth: 0
+
+[20/32] Testing: market-share-trend-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Market Share Trend
+     Description: Trend in market share
+     Data Source: Custom data aggregation
+     Preview: Value: 8.9, Growth: 8.9
+
+[21/32] Testing: health-score-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Health Score
+     Description: Overall domain AI-friendliness score
+     Data Source: Weighted average of multiple quality metrics
+     Preview: Value: 83.0, Growth: 0
+
+[22/32] Testing: content-quality-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Content Quality
+     Description: Content quality score based on engagement
+     Data Source: Based on sentiment, engagement, citations
+     Preview: Value: 78.8, Growth: 0
+
+[23/32] Testing: topics-covered-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Topics Covered
+     Description: Number of topics with mentions
+     Data Source: Count distinct topics with mentions
+     Preview: Value: 2, Growth: 0
+
+[24/32] Testing: answer-coverage-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Answer Coverage
+     Description: Percentage of prompts with answers
+     Data Source: Mentions with responses / Total prompts * 100
+     Preview: Value: 100.0, Growth: 0
+
+[25/32] Testing: active-alerts-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Active Alerts
+     Description: Currently active misinformation alerts
+     Data Source: Alert.objects.filter(status=active)
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[26/32] Testing: critical-issues-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Critical Issues
+     Description: High-severity issues requiring attention
+     Data Source: Alert.objects.filter(severity=critical)
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[27/32] Testing: broken-links-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Broken Links
+     Description: Number of broken citation links
+     Data Source: Citation.objects.filter(status=broken)
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[28/32] Testing: misinformation-cases-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Misinformation Cases
+     Description: Detected misinformation instances
+     Data Source: Alert.objects.filter(type=misinformation)
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[29/32] Testing: mention-growth-percent-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Mention Growth
+     Description: Percentage growth in mentions
+     Data Source: Custom data aggregation
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[30/32] Testing: visibility-trend-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Visibility Trend
+     Description: Change in visibility score
+     Data Source: Custom data aggregation
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[31/32] Testing: citation-growth-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Citation Growth
+     Description: Growth in citations vs previous period
+     Data Source: Custom data aggregation
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[32/32] Testing: engagement-growth-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Engagement Growth
+     Description: Growth in engagement score
+     Data Source: Custom data aggregation
+     Preview: Value: 100.0, Growth: 100.0
+
+
+====================================================================================================
+📊 Mentions -Report
+====================================================================================================
+
+[1/3] Testing: mentions-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Total Mentions
+     Description: Widget: mentions-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 4, Growth: 0
+
+[2/3] Testing: mentions-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Mentions Over Time
+     Description: Line chart showing mentions over time
+     Data Source: PromptAnalytics grouped by date, count mentions
+     Preview: 2 data points
+     ⚠️  All values are zero
+
+[3/3] Testing: platform-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Distribution
+     Description: Bar chart of mentions by platform
+     Data Source: PromptAnalytics grouped by platform, count mentions
+     Preview: 2 data points
+     ⚠️  All values are zero
+
+
+====================================================================================================
+📊 Platform-Metrics
+====================================================================================================
+
+[1/30] Testing: total-platforms-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Total Platforms
+     Description: Widget: total-platforms-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 2, Growth: 0
+
+[2/30] Testing: total-platform-mentions-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Platform Mentions
+     Description: Widget: total-platform-mentions-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 4, Growth: 0
+
+[3/30] Testing: total-platform-citations-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Platform Citations
+     Description: Widget: total-platform-citations-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 68, Growth: 0
+
+[4/30] Testing: platform-coverage-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Platform Coverage
+     Description: Number of platforms where brand is mentioned
+     Data Source: Count of distinct platforms with mentions
+     Preview: Value: 2, Growth: 0
+
+[5/30] Testing: gemini-visibility-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Gemini Visibility
+     Description: Widget: gemini-visibility-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[6/30] Testing: perplexity-visibility-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Perplexity Visibility
+     Description: Widget: perplexity-visibility-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[7/30] Testing: claude-visibility-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Claude Visibility
+     Description: Widget: claude-visibility-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[8/30] Testing: grok-visibility-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Grok Visibility
+     Description: Widget: grok-visibility-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[9/30] Testing: top-performing-platform-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Top Platform
+     Description: Widget: top-performing-platform-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 100.0, Growth: 0
+
+[10/30] Testing: platform-mention-distribution-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Mention Distribution
+     Description: Widget: platform-mention-distribution-chart
+     Data Source: Custom data aggregation
+     Preview: 2 data points
+     ⚠️  All values are zero
+
+[11/30] Testing: platform-citation-distribution-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Citation Distribution
+     Description: Widget: platform-citation-distribution-chart
+     Data Source: Custom data aggregation
+     Preview: 1 data points
+     ⚠️  All values are zero
+
+[12/30] Testing: platform-mention-trends-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Mentions Trend
+     Description: Widget: platform-mention-trends-chart
+     Data Source: Custom data aggregation
+     Preview: 93 data points
+     ⚠️  All values are zero
+
+[13/30] Testing: platform-citation-distribution-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Citation Distribution
+     Description: Widget: platform-citation-distribution-chart
+     Data Source: Custom data aggregation
+     Preview: 1 data points
+     ⚠️  All values are zero
+
+[14/30] Testing: platform-mention-trends-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Mentions Trend
+     Description: Widget: platform-mention-trends-chart
+     Data Source: Custom data aggregation
+     Preview: 93 data points
+     ⚠️  All values are zero
+
+[15/30] Testing: avg-position-by-platform-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Average Position by Platform
+     Description: Widget: avg-position-by-platform-chart
+     Data Source: Custom data aggregation
+     Preview: 4 data points
+     ⚠️  All values are zero
+
+[16/30] Testing: best-platform-position-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Best Position
+     Description: Widget: best-platform-position-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 2.5, Growth: 0
+
+[17/30] Testing: platform-position-comparison-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Average Position by Platform
+     Description: Widget: platform-position-comparison-chart
+     Data Source: Custom data aggregation
+     Preview: 4 data points
+     ⚠️  All values are zero
+
+[18/30] Testing: platform-sentiment-breakdown-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Sentiment Breakdown
+     Description: Sentiment breakdown by platform
+     Data Source: Custom data aggregation
+     Preview: 4 data points
+     ⚠️  All values are zero
+
+[19/30] Testing: most-positive-platform-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Most Positive
+     Description: Widget: most-positive-platform-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 0.16, Growth: 0
+
+[20/30] Testing: platform-sentiment-trends-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Sentiment Trends
+     Description: Widget: platform-sentiment-trends-chart
+     Data Source: Custom data aggregation
+     Preview: 93 data points
+     ⚠️  All values are zero
+
+[21/30] Testing: platform-response-rate-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Response Rate
+     Description: Widget: platform-response-rate-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 100.0, Growth: 0
+
+[22/30] Testing: platform-mention-rate-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Mention Rates
+     Description: Widget: platform-mention-rate-chart
+     Data Source: Custom data aggregation
+     Preview: 4 data points
+     ⚠️  All values are zero
+
+[23/30] Testing: platform-growth-rate-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Growth Rates
+     Description: Widget: platform-growth-rate-chart
+     Data Source: Custom data aggregation
+     Preview: 4 data points
+     ⚠️  All values are zero
+
+[24/30] Testing: platform-share-of-voice-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Share of Voice
+     Description: Widget: platform-share-of-voice-chart
+     Data Source: Custom data aggregation
+     Preview: 4 data points
+     ⚠️  All values are zero
+
+[25/30] Testing: platform-performance-matrix-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Performance Matrix
+     Description: Widget: platform-performance-matrix-chart
+     Data Source: Custom data aggregation
+     Preview: 4 data points
+     ⚠️  All values are zero
+
+[26/30] Testing: platform-citation-density-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Citation Density
+     Description: Widget: platform-citation-density-chart
+     Data Source: Custom data aggregation
+     Preview: 4 data points
+     ⚠️  All values are zero
+
+[27/30] Testing: platform-health-score-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Health Scores
+     Description: Widget: platform-health-score-chart
+     Data Source: Custom data aggregation
+     Preview: 4 data points
+     ⚠️  All values are zero
+
+[28/30] Testing: platform-coverage-quality-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Coverage Quality
+     Description: Quality of platform coverage
+     Data Source: Custom data aggregation
+     Preview: Value: 50.0, Growth: 0
+
+[29/30] Testing: platform-consistency-score-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Consistency Score
+     Description: Consistency across platforms
+     Data Source: Custom data aggregation
+     Preview: Value: 0, Growth: 0
+     ⚠️  Returns all zeros - may need sample data
+
+[30/30] Testing: chatgpt-visibility-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: ChatGPT Visibility
+     Description: Widget: chatgpt-visibility-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 100.0, Growth: 0
+
+
+====================================================================================================
+📊 Sentiment Analysis
+====================================================================================================
+
+[1/4] Testing: sentiment-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Avg Sentiment
+     Description: Widget: sentiment-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 0.15, Growth: 0
+
+[2/4] Testing: sentiment-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Sentiment Distribution
+     Description: Pie chart of sentiment distribution
+     Data Source: Distribution of positive/neutral/negative
+     Preview: 3 data points
+     ⚠️  All values are zero
+
+[3/4] Testing: platform-sentiment-breakdown-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Platform Sentiment Breakdown
+     Description: Sentiment breakdown by platform
+     Data Source: Custom data aggregation
+     Preview: 4 data points
+     ⚠️  All values are zero
+
+[4/4] Testing: competitor-comparison-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Competitor Sentiment Comparison
+     Description: Bar chart comparing competitors
+     Data Source: Competitor metrics side by side
+     Preview: 6 data points
+     ⚠️  All values are zero
+
+
+====================================================================================================
+📊 Share of Voice - Report
+====================================================================================================
+
+[1/6] Testing: market-share-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Share of Voice
+     Description: Widget: market-share-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 8.9, Growth: 8.9
+
+[2/6] Testing: market-position-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Market Position
+     Description: Your ranking among competitors
+     Data Source: Rank based on total mentions
+     Preview: Value: 1, Growth: 0
+
+[3/6] Testing: dominance-score-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Dominance Score
+     Description: Widget: dominance-score-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 10.7, Growth: 0
+
+[4/6] Testing: overall-market-share-metric
+  ✅ Status: SUCCESS
+     Type: metric
+     Label: Share of Voice
+     Description: Widget: overall-market-share-metric
+     Data Source: Custom data aggregation
+     Preview: Value: 8.9, Growth: 8.9
+
+[5/6] Testing: share-of-voice-trends-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Share of Voice Trend
+     Description: Widget: share-of-voice-trends-chart
+     Data Source: Custom data aggregation
+     Preview: 31 data points
+     ⚠️  All values are zero
+
+[6/6] Testing: brand-positioning-matrix-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Brand Positioning Matrix
+     Description: Widget: brand-positioning-matrix-chart
+     Data Source: Custom data aggregation
+     Preview: 6 data points
+     ⚠️  All values are zero
+
+
+====================================================================================================
+📊 Topics Report
+====================================================================================================
+
+[1/2] Testing: topic-distribution-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Topic Distribution
+     Description: Widget: topic-distribution-chart
+     Data Source: Custom data aggregation
+     Preview: 0 data points
+     ❌ No data points - chart will be empty
+
+[2/2] Testing: topic-trends-chart
+  ✅ Status: SUCCESS
+     Type: chart
+     Label: Topic Trends Over Time
+     Description: Line chart of topic mention trends
+     Data Source: Topic mentions over time
+     Preview: 11 data points
+     ⚠️  All values are zero
+
+
+====================================================================================================
+AUDIT SUMMARY
+====================================================================================================
+
+Total Widgets Tested: 96
+✅ Success: 96
+❌ Errors: 0
+⚠️  With Issues: 48
+
+ISSUES:
+  ⚠️  broken-links-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  broken-links-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  pending-citations-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  topics-table:
+      ❌ No data rows - table will be empty
+  ⚠️  visibility-growth-chart:
+      ⚠️  All values are zero
+  ⚠️  mention-growth-chart:
+      ⚠️  All values are zero
+  ⚠️  position-improvement-chart:
+      ⚠️  All values are zero
+  ⚠️  market-share-gain-chart:
+      ⚠️  All values are zero
+  ⚠️  visibility-score-progression-chart:
+      ⚠️  All values are zero
+  ⚠️  mention-growth-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  positive-sentiment-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  negative-sentiment-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  active-alerts-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  critical-issues-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  broken-links-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  misinformation-cases-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  mention-growth-percent-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  visibility-trend-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  citation-growth-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  mentions-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-chart:
+      ⚠️  All values are zero
+  ⚠️  gemini-visibility-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  perplexity-visibility-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  claude-visibility-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  grok-visibility-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  platform-mention-distribution-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-citation-distribution-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-mention-trends-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-citation-distribution-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-mention-trends-chart:
+      ⚠️  All values are zero
+  ⚠️  avg-position-by-platform-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-position-comparison-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-sentiment-breakdown-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-sentiment-trends-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-mention-rate-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-growth-rate-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-share-of-voice-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-performance-matrix-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-citation-density-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-health-score-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-consistency-score-metric:
+      ⚠️  Returns all zeros - may need sample data
+  ⚠️  sentiment-chart:
+      ⚠️  All values are zero
+  ⚠️  platform-sentiment-breakdown-chart:
+      ⚠️  All values are zero
+  ⚠️  competitor-comparison-chart:
+      ⚠️  All values are zero
+  ⚠️  share-of-voice-trends-chart:
+      ⚠️  All values are zero
+  ⚠️  brand-positioning-matrix-chart:
+      ⚠️  All values are zero
+  ⚠️  topic-distribution-chart:
+      ❌ No data points - chart will be empty
+  ⚠️  topic-trends-chart:
+      ⚠️  All values are zero
+
+📄 Detailed report saved to: widget_audit_report.json
+
+====================================================================================================

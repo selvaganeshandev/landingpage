@@ -32,6 +32,18 @@ class ReportTemplate(models.Model):
         help_text='Grid layout configuration with widgets for custom reports'
     )
 
+    # HTML template storage (for exact PDF rendering)
+    html_template = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Rendered HTML template with placeholders for data injection'
+    )
+    css_template = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Compiled CSS styles (Tailwind) for the template'
+    )
+
     # Organisation link (null for predefined, required for custom)
     organisation = models.ForeignKey(
         'authentication.Organisation',

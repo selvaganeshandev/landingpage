@@ -10,6 +10,12 @@ from .report_generator import ReportDataService
 from .pdf_generator import PDFReportGenerator
 from .excel_generator import ExcelReportGenerator
 from .powerpoint_generator import PowerPointReportGenerator
+from .widget_data_fetcher import WidgetDataFetcher
+from .html_generator import generate_html_report
+from .weasyprint_pdf_generator import WeasyPrintPDFGenerator, WEASYPRINT_AVAILABLE
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def generate_report(report_id):
@@ -20,7 +26,7 @@ def generate_report(report_id):
     Returns:
         True if successful, False otherwise
     """
-    from reports.models import GeneratedReport
+    from reports.models import GeneratedReport, ReportTemplate
     from domains.models import Domain
 
     try:
@@ -38,39 +44,155 @@ def generate_report(report_id):
         # Convert date to datetime at end of day (23:59:59)
         end_datetime = timezone.make_aware(datetime.combine(report.data_period_end, time.max))
 
-        # Initialize data service
-        data_service = ReportDataService(
-            domain=domain,
-            start_date=start_datetime,
-            end_date=end_datetime,
-            organisation=report.organisation
-        )
-
-        # Fetch data based on report type
-        if report.report_type == 'Executive Dashboard':
-            data = data_service.get_executive_summary_data()
-        elif report.report_type == 'Detailed Analytics':
-            data = data_service.get_detailed_analytics_data()
-        elif report.report_type == 'Competitor Focus':
-            data = data_service.get_competitor_focus_data()
-        elif report.report_type == 'Content Strategy':
-            data = data_service.get_content_strategy_data()
+        # Get the template if available
+        template = None
+        if report.scheduled_report:
+            template = report.scheduled_report.template
         else:
-            raise ValueError(f"Unknown report type: {report.report_type}")
+            # Try to find template by report type
+            try:
+                template = ReportTemplate.objects.get(
+                    name=report.report_type,
+                    is_active=True
+                )
+            except ReportTemplate.DoesNotExist:
+                pass
+
+        # Determine if this is a custom template with widgets
+        is_custom_template = template and template.template_type == 'custom' and template.grid_rows
+
+        if is_custom_template:
+            # Custom template - fetch data for widgets
+            widget_fetcher = WidgetDataFetcher(
+                domain=domain,
+                start_date=start_datetime,
+                end_date=end_datetime,
+                organisation=report.organisation
+            )
+
+            # Fetch data for all widgets in the template
+            data = widget_fetcher.fetch_all_widgets(template.grid_rows)
+
+            # Add metadata
+            data['_metadata'] = {
+                'template_type': 'custom',
+                'template_name': template.name,
+                'template_id': template.id,
+                'grid_rows': template.grid_rows,
+                'domain_name': domain.name,
+                'domain_url': domain.url,
+                'organisation_name': report.organisation.name,
+                'period': {
+                    'start': start_datetime,
+                    'end': end_datetime
+                }
+            }
+
+        else:
+            # Predefined template - use legacy report data service
+            data_service = ReportDataService(
+                domain=domain,
+                start_date=start_datetime,
+                end_date=end_datetime,
+                organisation=report.organisation
+            )
+
+            # Fetch data based on report type
+            if report.report_type == 'Executive Dashboard':
+                data = data_service.get_executive_summary_data()
+            elif report.report_type == 'Detailed Analytics':
+                data = data_service.get_detailed_analytics_data()
+            elif report.report_type == 'Competitor Focus':
+                data = data_service.get_competitor_focus_data()
+            elif report.report_type == 'Content Strategy':
+                data = data_service.get_content_strategy_data()
+            else:
+                raise ValueError(f"Unknown report type: {report.report_type}")
 
         # Generate the file based on format
         file_buffer = None
         file_extension = ''
 
         if report.format == 'PDF':
-            generator = PDFReportGenerator(data, report.report_type)
-            file_buffer = generator.generate()
-            file_extension = 'pdf'
+            # Use WeasyPrint for all PDFs if available (better visual quality)
+            if WEASYPRINT_AVAILABLE:
+                try:
+                    logger.info(f"Using WeasyPrint for PDF generation (report_id: {report.id})")
+                    
+                    # Generate HTML template
+                    if is_custom_template:
+                        # For custom templates, check if HTML template exists
+                        # Special-case: competitor reports should always be regenerated to avoid static placeholder tables
+                        is_competitor = template.name and 'competitor' in template.name.lower()
+                        if template.html_template and not is_competitor:
+                            logger.info("Using saved HTML template")
+                            html_template = template.html_template
+                            css_template = template.css_template or ''
+                        else:
+                            logger.info("Generating HTML from grid_rows (custom template%s)" % (" - competitor forced regen" if is_competitor else ""))
+                            html_template = generate_html_report(
+                                template.grid_rows,
+                                data,
+                                data.get('_metadata', {})
+                            )
+                            css_template = ''
+                    else:
+                        # For predefined templates, generate HTML on-the-fly
+                        logger.info("Generating HTML for predefined template")
+                        # Create a simple grid_rows structure for predefined templates
+                        grid_rows = self._create_grid_rows_for_predefined(report.report_type, data)
+                        html_template = generate_html_report(
+                            grid_rows,
+                            data,
+                            {
+                                'domain_name': domain.name,
+                                'domain_url': domain.url,
+                                'template_name': report.report_type,
+                                'organisation_name': report.organisation.name,
+                                'period': {
+                                    'start': start_datetime,
+                                    'end': end_datetime
+                                }
+                            }
+                        )
+                        css_template = ''
+                    
+                    # Generate PDF with WeasyPrint
+                    generator = WeasyPrintPDFGenerator(html_template, css_template)
+                    file_buffer = generator.generate(data, {
+                        'domain_name': domain.name,
+                        'template_name': report.report_type,
+                        'period': {
+                            'start': start_datetime,
+                            'end': end_datetime
+                        }
+                    })
+                    file_extension = 'pdf'
+                    logger.info("PDF generated successfully with WeasyPrint")
+                    
+                except Exception as e:
+                    logger.warning(f"WeasyPrint PDF generation failed, falling back to ReportLab: {str(e)}")
+                    # Fallback to ReportLab
+                    generator = PDFReportGenerator(data, report.report_type, template=template)
+                    file_buffer = generator.generate()
+                    file_extension = 'pdf'
+            else:
+                logger.info("WeasyPrint not available, using ReportLab")
+                # Fallback to ReportLab if WeasyPrint not available
+                generator = PDFReportGenerator(data, report.report_type, template=template)
+                file_buffer = generator.generate()
+                file_extension = 'pdf'
         elif report.format == 'Excel':
+            # Excel format not supported for custom templates yet
+            if is_custom_template:
+                raise ValueError("Excel format is not supported for custom templates yet. Please use PDF format.")
             generator = ExcelReportGenerator(data, report.report_type)
             file_buffer = generator.generate()
             file_extension = 'xlsx'
         elif report.format == 'PowerPoint':
+            # PowerPoint format not supported for custom templates yet
+            if is_custom_template:
+                raise ValueError("PowerPoint format is not supported for custom templates yet. Please use PDF format.")
             generator = PowerPointReportGenerator(data, report.report_type)
             file_buffer = generator.generate()
             file_extension = 'pptx'
@@ -191,3 +313,104 @@ def get_total_records(data):
         total += len(data['optimization_opportunities'])
 
     return total
+
+
+def _create_grid_rows_for_predefined(report_type, data):
+    """
+    Create grid_rows structure for predefined templates
+    Converts old report data structure to widget-based grid_rows
+    """
+    grid_rows = []
+    
+    if report_type == 'Executive Dashboard':
+        # Row 1: Key metrics (quad)
+        grid_rows.append({
+            'id': 'row-1',
+            'type': 'quad',
+            'slots': [
+                {'id': 'total-prompts', 'type': 'metric', 'title': 'Total Prompts'},
+                {'id': 'total-mentions', 'type': 'metric', 'title': 'Total Mentions'},
+                {'id': 'mention-rate', 'type': 'metric', 'title': 'Mention Rate'},
+                {'id': 'avg-sentiment', 'type': 'metric', 'title': 'Avg Sentiment'},
+            ]
+        })
+        
+        # Row 2: Charts (double)
+        if 'platform_breakdown' in data or 'sentiment_breakdown' in data:
+            grid_rows.append({
+                'id': 'row-2',
+                'type': 'double',
+                'slots': [
+                    {'id': 'platform-chart', 'type': 'chart', 'title': 'Platform Breakdown'},
+                    {'id': 'sentiment-chart', 'type': 'chart', 'title': 'Sentiment Breakdown'},
+                ]
+            })
+        
+        # Row 3: Top prompts table
+        if 'top_prompts' in data:
+            grid_rows.append({
+                'id': 'row-3',
+                'type': 'single',
+                'slots': [
+                    {'id': 'top-prompts-table', 'type': 'table', 'title': 'Top Performing Prompts'},
+                ]
+            })
+    
+    elif report_type == 'Competitor Focus':
+        # Row 1: Comparison metrics
+        grid_rows.append({
+            'id': 'row-1',
+            'type': 'triple',
+            'slots': [
+                {'id': 'our-mentions', 'type': 'metric', 'title': 'Our Mentions'},
+                {'id': 'share-of-voice', 'type': 'metric', 'title': 'Share of Voice'},
+                {'id': 'market-position', 'type': 'metric', 'title': 'Market Position'},
+            ]
+        })
+        
+        # Row 2: Competitor table
+        if 'competitors' in data:
+            grid_rows.append({
+                'id': 'row-2',
+                'type': 'single',
+                'slots': [
+                    {'id': 'competitors-table', 'type': 'table', 'title': 'Competitor Comparison'},
+                ]
+            })
+    
+    elif report_type == 'Content Strategy':
+        # Row 1: Content metrics
+        grid_rows.append({
+            'id': 'row-1',
+            'type': 'triple',
+            'slots': [
+                {'id': 'content-score', 'type': 'metric', 'title': 'Content Quality Score'},
+                {'id': 'total-topics', 'type': 'metric', 'title': 'Total Topics'},
+                {'id': 'content-gaps', 'type': 'metric', 'title': 'Content Gaps'},
+            ]
+        })
+        
+        # Row 2: Gap analysis table
+        if 'content_gaps' in data:
+            grid_rows.append({
+                'id': 'row-2',
+                'type': 'single',
+                'slots': [
+                    {'id': 'gaps-table', 'type': 'table', 'title': 'Content Gap Analysis'},
+                ]
+            })
+    
+    else:
+        # Default: Just show key metrics
+        grid_rows.append({
+            'id': 'row-1',
+            'type': 'quad',
+            'slots': [
+                {'id': 'metric-1', 'type': 'metric', 'title': 'Metric 1'},
+                {'id': 'metric-2', 'type': 'metric', 'title': 'Metric 2'},
+                {'id': 'metric-3', 'type': 'metric', 'title': 'Metric 3'},
+                {'id': 'metric-4', 'type': 'metric', 'title': 'Metric 4'},
+            ]
+        })
+    
+    return grid_rows

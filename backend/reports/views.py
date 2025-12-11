@@ -580,6 +580,167 @@ def get_report_preview_data(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+def generate_custom_template_pdf(request):
+    """
+    Generate PDF directly from custom template data without saving
+    Accepts: domain_id, template_name, grid_rows, start_date, end_date, html_template (optional), css_template (optional)
+    Returns: PDF file with real widget data
+
+    If html_template is provided, uses WeasyPrint for exact visual match.
+    Otherwise, falls back to ReportLab generator.
+    """
+    domain_id = request.data.get('domain_id')
+    template_name = request.data.get('template_name', 'Custom Report')
+    grid_rows = request.data.get('grid_rows', [])
+    html_template = request.data.get('html_template')  # NEW: Optional HTML template
+    css_template = request.data.get('css_template', '')  # NEW: Optional CSS
+    start_date_str = request.data.get('start_date')
+    end_date_str = request.data.get('end_date')
+
+    # Validation
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if not grid_rows:
+        return Response(
+            {'error': 'grid_rows is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Verify domain belongs to user's organisation
+    from domains.models import Domain
+    try:
+        domain = Domain.objects.get(
+            id=domain_id,
+            organisation=request.user.organisation
+        )
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': 'Domain not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Parse dates or use default (last 30 days)
+    from datetime import datetime, time
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            start_datetime = timezone.make_aware(datetime.combine(start_date, time.min))
+            end_datetime = timezone.make_aware(datetime.combine(end_date, time.max))
+        except ValueError:
+            return Response(
+                {'error': 'Invalid date format. Use YYYY-MM-DD'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    else:
+        end_datetime = timezone.now()
+        start_datetime = end_datetime - timedelta(days=30)
+
+    try:
+        # Fetch widget data using WidgetDataFetcher
+        from reports.services.widget_data_fetcher import WidgetDataFetcher
+
+        widget_fetcher = WidgetDataFetcher(
+            domain=domain,
+            start_date=start_datetime,
+            end_date=end_datetime,
+            organisation=request.user.organisation
+        )
+
+        # Fetch data for all widgets in grid_rows
+        data = widget_fetcher.fetch_all_widgets(grid_rows)
+
+        # Add metadata
+        data['_metadata'] = {
+            'template_type': 'custom',
+            'template_name': template_name,
+            'grid_rows': grid_rows,
+            'domain_name': domain.name,
+            'domain_url': domain.url,
+            'organisation_name': request.user.organisation.name,
+            'period': {
+                'start': start_datetime,
+                'end': end_datetime
+            }
+        }
+
+        # Generate PDF - ALWAYS try WeasyPrint first for better quality
+        pdf_buffer = None
+        
+        try:
+            from reports.services.weasyprint_pdf_generator import WeasyPrintPDFGenerator, WEASYPRINT_AVAILABLE
+            from reports.services.html_generator import generate_html_report
+            
+            if not WEASYPRINT_AVAILABLE:
+                raise ImportError("WeasyPrint not installed")
+            
+            logger.info(f"Using WeasyPrint for PDF generation")
+            
+            # Prepare metadata
+            metadata = {
+                'domain_name': domain.name,
+                'domain_url': domain.url,
+                'template_name': template_name,
+                'organisation_name': request.user.organisation.name,
+                'period': {
+                    'start': start_datetime,
+                    'end': end_datetime
+                }
+            }
+            
+            # Generate or use HTML template
+            if not html_template:
+                logger.info("Generating HTML from grid_rows")
+                html_template = generate_html_report(grid_rows, data, metadata)
+                css_template = css_template or ''
+            else:
+                logger.info("Using provided HTML template")
+            
+            # Generate PDF with WeasyPrint
+            generator = WeasyPrintPDFGenerator(html_template, css_template)
+            pdf_buffer = generator.generate(data, metadata)
+            
+        except (ImportError, Exception) as e:
+            logger.warning(f"WeasyPrint PDF generation failed, falling back to ReportLab: {str(e)}")
+            
+            # FALLBACK: Use ReportLab (original method)
+            from reports.services.pdf_generator import PDFReportGenerator
+            
+            logger.info(f"Using ReportLab for PDF generation")
+            
+            # Create a mock template object for PDF generator
+            class MockTemplate:
+                def __init__(self, name, grid_rows):
+                    self.name = name
+                    self.template_type = 'custom'
+                    self.grid_rows = grid_rows
+            
+            mock_template = MockTemplate(template_name, grid_rows)
+            generator = PDFReportGenerator(data, template_name, template=mock_template)
+            pdf_buffer = generator.generate()
+
+        # Create HTTP response with PDF
+        filename = f"{template_name.replace(' ', '_')}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        logger.info(f"Successfully generated custom template PDF: {filename}")
+        return response
+
+    except Exception as e:
+        logger.error(f"Error generating custom template PDF: {str(e)}", exc_info=True)
+        return Response(
+            {'error': f'PDF generation failed: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def convert_report_html_to_pdf(request):
     """
     Convert HTML content to PDF
