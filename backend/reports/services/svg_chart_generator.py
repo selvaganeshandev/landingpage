@@ -63,8 +63,20 @@ class SVGChartGenerator:
             return 0
         
         # Extract values with smart key detection
-        x_labels = [get_label(item) for item in data[:10]]
-        y_values = [get_value(item) for item in data[:10]]
+        # For time series data, intelligently sample across the entire range
+        max_points = 15  # Show up to 15 points for better readability
+
+        if len(data) <= max_points:
+            # Use all data if we have few points
+            sampled_data = data
+        else:
+            # Sample evenly across the range to show the full picture
+            step = len(data) / max_points
+            indices = [int(i * step) for i in range(max_points)]
+            sampled_data = [data[i] for i in indices]
+
+        x_labels = [get_label(item) for item in sampled_data]
+        y_values = [get_value(item) for item in sampled_data]
         
         # Calculate scales
         max_y = max(y_values) if y_values else 1
@@ -198,8 +210,18 @@ class SVGChartGenerator:
             return 0
         
         # Extract values with smart key detection
-        labels = [get_label(item) for item in data[:8]]
-        values = [get_value(item) for item in data[:8]]
+        # For bar charts, limit to reasonable number for readability
+        max_bars = 12  # Show up to 12 bars
+
+        if len(data) <= max_bars:
+            # Use all data if we have few items
+            sampled_data = data
+        else:
+            # Take first max_bars items (bar charts typically show top N)
+            sampled_data = data[:max_bars]
+
+        labels = [get_label(item) for item in sampled_data]
+        values = [get_value(item) for item in sampled_data]
         
         # Calculate scales
         max_value = max(values) if values else 1

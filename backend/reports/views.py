@@ -692,13 +692,12 @@ def generate_custom_template_pdf(request):
                 }
             }
             
-            # Generate or use HTML template
-            if not html_template:
-                logger.info("Generating HTML from grid_rows")
-                html_template = generate_html_report(grid_rows, data, metadata)
-                css_template = css_template or ''
-            else:
-                logger.info("Using provided HTML template")
+            # ALWAYS generate HTML from grid_rows for PDF (not from saved html_template)
+            # Saved html_template contains React components that won't render in PDF
+            # This ensures charts are generated as SVG for proper PDF rendering
+            logger.info("Generating HTML from grid_rows with SVG charts for PDF")
+            html_template = generate_html_report(grid_rows, data, metadata)
+            css_template = css_template or ''
             
             # Generate PDF with WeasyPrint
             generator = WeasyPrintPDFGenerator(html_template, css_template)

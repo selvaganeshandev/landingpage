@@ -121,21 +121,16 @@ def generate_report(report_id):
                     
                     # Generate HTML template
                     if is_custom_template:
-                        # For custom templates, check if HTML template exists
-                        # Special-case: competitor reports should always be regenerated to avoid static placeholder tables
-                        is_competitor = template.name and 'competitor' in template.name.lower()
-                        if template.html_template and not is_competitor:
-                            logger.info("Using saved HTML template")
-                            html_template = template.html_template
-                            css_template = template.css_template or ''
-                        else:
-                            logger.info("Generating HTML from grid_rows (custom template%s)" % (" - competitor forced regen" if is_competitor else ""))
-                            html_template = generate_html_report(
-                                template.grid_rows,
-                                data,
-                                data.get('_metadata', {})
-                            )
-                            css_template = ''
+                        # ALWAYS regenerate HTML from grid_rows for PDFs
+                        # Saved html_template contains React components that won't render in PDF
+                        # This ensures charts are generated as SVG for proper PDF rendering
+                        logger.info("Generating HTML from grid_rows with SVG charts for PDF")
+                        html_template = generate_html_report(
+                            template.grid_rows,
+                            data,
+                            data.get('_metadata', {})
+                        )
+                        css_template = ''
                     else:
                         # For predefined templates, generate HTML on-the-fly
                         logger.info("Generating HTML for predefined template")
