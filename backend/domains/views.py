@@ -1142,3 +1142,308 @@ def domain_health_check_history(request, domain_id):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def automated_domain_onboard(request):
+    """
+    Automated domain onboarding - triggers full processing pipeline.
+    This endpoint:
+    1. Fetches brand niches (if not provided)
+    2. Generates semantic keywords
+    3. Creates the domain with processing status
+    4. Returns domain ID for frontend to poll status
+
+    Frontend will show loading modal with progress messages while this processes.
+    """
+    # Only admins can create domains
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response(
+            {'error': 'Only organization administrators can add domains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    domain_name = request.data.get('domain_name', '').strip()
+    brand_name = request.data.get('brand_name', '').strip()
+    country_code = request.data.get('country', 'us')
+    niches = request.data.get('niches', [])
+
+    if not domain_name:
+        return Response(
+            {'error': 'domain_name is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if not brand_name:
+        return Response(
+            {'error': 'brand_name is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        # Convert country code to country name
+        country_map = {
+            'us': 'United States', 'gb': 'United Kingdom', 'ca': 'Canada',
+            'au': 'Australia', 'de': 'Germany', 'fr': 'France', 'es': 'Spain',
+            'it': 'Italy', 'jp': 'Japan', 'in': 'India', 'br': 'Brazil',
+            'mx': 'Mexico', 'nl': 'Netherlands', 'se': 'Sweden', 'no': 'Norway',
+            'dk': 'Denmark', 'fi': 'Finland', 'pl': 'Poland', 'be': 'Belgium',
+            'at': 'Austria', 'ch': 'Switzerland', 'ie': 'Ireland',
+            'nz': 'New Zealand', 'sg': 'Singapore'
+        }
+        country_name = country_map.get(country_code.lower(), 'United States')
+
+        # Normalize domain
+        normalized_domain = domain_name.lower()
+        if normalized_domain.startswith('http://'):
+            normalized_domain = normalized_domain[len('http://'):]
+        elif normalized_domain.startswith('https://'):
+            normalized_domain = normalized_domain[len('https://'):]
+        if normalized_domain.startswith('www.'):
+            normalized_domain = normalized_domain[4:]
+        for sep in ['/', '?', '#']:
+            if sep in normalized_domain:
+                normalized_domain = normalized_domain.split(sep, 1)[0]
+        if ':' in normalized_domain:
+            normalized_domain = normalized_domain.split(':', 1)[0]
+
+        domain_url = f"https://{normalized_domain}"
+
+        # Step 1: Fetch niches if not provided (Progress: Analyzing your top niches)
+        if not niches or len(niches) == 0:
+            try:
+                genai = get_google_genai_client()
+                model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+                prompt = f"""Analyze the brand "{brand_name}" (website: {domain_name}) and suggest relevant industry niches or categories.
+
+Return ONLY a JSON array of 5-8 specific industry niches/categories that best describe this brand's market positioning.
+Example format: ["Enterprise SaaS", "Cloud Infrastructure", "DevOps Tools"]
+
+Provide the response as a valid JSON array only, no additional text."""
+
+                response = model.generate_content(prompt)
+                result_text = response.text.strip()
+
+                # Parse niches
+                if result_text.startswith('```'):
+                    result_text = result_text.split('```')[1]
+                    if result_text.startswith('json'):
+                        result_text = result_text[4:]
+                    result_text = result_text.strip()
+
+                niches = json.loads(result_text)
+                if not isinstance(niches, list):
+                    niches = []
+                niches = [str(n).strip() for n in niches if n][:10]
+
+            except Exception as e:
+                logger.error(f"Error fetching niches: {str(e)}")
+                niches = []  # Continue with empty niches
+
+        # Step 2: Generate semantic keywords (Progress: Finding the best topics)
+        generated_keywords = []
+        try:
+            genai = get_google_genai_client()
+            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+            niche_text = ", ".join(niches) if niches else "general business"
+            max_keywords = 50
+
+            prompt = f"""You are an expert SEO keyword researcher. Generate a comprehensive keyword universe for:
+
+**Website:** {domain_name}
+**Brand Name:** {brand_name}
+**Country:** {country_name}
+**Industry Niches:** {niche_text}
+**Number of Keywords:** EXACTLY {max_keywords} unique, relevant keywords
+
+Generate keywords that cover:
+- Brand-related queries
+- Product/service queries
+- Informational queries
+- Commercial/transactional queries
+
+For each keyword, provide:
+1. **keyword**: The actual keyword phrase
+2. **volume_level**: Estimated search volume (very-low, low, medium, high, very-high)
+3. **intent**: Search intent type (informational, navigational, transactional, commercial)
+4. **entity**: Main subject/noun of the keyword
+5. **attribute**: Characteristic being queried (if applicable)
+6. **variable**: Modifier/qualifier (if applicable)
+7. **source**: Always set to "ai-generated"
+8. **topic**: Main topic/category
+9. **cluster_id**: Group identifier for related keywords
+
+Return ONLY a valid JSON object with this structure:
+{{
+  "project": {{
+    "country": "{country_name}",
+    "language": "en",
+    "website": "{domain_name}",
+    "niche": "{niche_text}",
+    "approx_keywords_requested": {max_keywords}
+  }},
+  "keywords": [
+    {{
+      "keyword": "example keyword",
+      "volume_level": "medium",
+      "intent": "informational",
+      "entity": "product",
+      "attribute": "price",
+      "variable": "cheap",
+      "source": "ai-generated",
+      "topic": "pricing",
+      "cluster_id": "cluster_1"
+    }}
+  ]
+}}"""
+
+            response = model.generate_content(prompt)
+            result_text = response.text.strip()
+
+            # Parse keywords
+            if result_text.startswith('```'):
+                result_text = result_text.split('```')[1]
+                if result_text.startswith('json'):
+                    result_text = result_text[4:]
+                result_text = result_text.strip()
+
+            if not result_text.startswith('{'):
+                start = result_text.find('{')
+                if start != -1:
+                    result_text = result_text[start:]
+
+            data = json.loads(result_text)
+            if 'keywords' in data and isinstance(data['keywords'], list):
+                generated_keywords = data['keywords']
+
+        except Exception as e:
+            logger.error(f"Error generating keywords: {str(e)}")
+            # Continue with empty keywords - domain will still be created
+
+        # Step 3: Fetch brand info from ChatGPT
+        brand_info = {}
+        try:
+            client = get_openai_client()
+
+            prompt = f"""Analyze the brand/website "{brand_name}" ({domain_url}) and provide the following information in JSON format.
+
+Return ONLY a valid JSON object with these fields:
+{{
+    "short_description": "A brief 1-2 sentence description of what this brand/company does",
+    "target_audience": "Description of the primary target audience demographics, interests, and needs",
+    "brand_values": "Core values and principles the brand likely stands for (as a comma-separated list)",
+    "key_competitors": "List of 3-5 likely competitors in the same space (as a comma-separated list)",
+    "tone_of_voice": "Recommended tone of voice for content (e.g., professional, friendly, authoritative)",
+    "content_style": "Recommended content style guidelines (e.g., concise, detailed, technical)",
+    "key_messages": "Key messages or themes the brand should emphasize",
+    "topics_to_avoid": "Topics or themes the brand should avoid in content"
+}}"""
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a brand analyst expert. Always respond with valid JSON only."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1000
+            )
+
+            result_text = response.choices[0].message.content.strip()
+
+            if result_text.startswith('```'):
+                result_text = result_text.split('```')[1]
+                if result_text.startswith('json'):
+                    result_text = result_text[4:]
+                result_text = result_text.strip()
+
+            brand_info = json.loads(result_text)
+
+        except Exception as e:
+            logger.error(f"Error fetching brand info: {str(e)}")
+            # Continue without brand info
+
+        # Step 4: Create domain with all collected data
+        with transaction.atomic():
+            # Prepare keywords string (all generated keywords)
+            keywords_str = ','.join([kw.get('keyword', '') for kw in generated_keywords if kw.get('keyword')])
+
+            # Create domain
+            domain = Domain.objects.create(
+                name=brand_name,
+                url=domain_url,
+                organisation=request.user.organisation,
+                country=country_name,
+                niches=niches if niches else [],
+                processing_status='COMP',  # Set to COMP immediately as we've done all processing
+                short_description=brand_info.get('short_description', ''),
+                target_audience=brand_info.get('target_audience', ''),
+                brand_values=brand_info.get('brand_values', ''),
+                key_competitors=brand_info.get('key_competitors', ''),
+                tone_of_voice=brand_info.get('tone_of_voice', ''),
+                content_style=brand_info.get('content_style', ''),
+                key_messages=brand_info.get('key_messages', ''),
+                topics_to_avoid=brand_info.get('topics_to_avoid', ''),
+            )
+
+            # Save all generated keywords to secondary_keywords table
+            if generated_keywords:
+                try:
+                    from keywords.models import SecondaryKeyword
+                    for kw_data in generated_keywords:
+                        SecondaryKeyword.objects.create(
+                            domain=domain,
+                            keyword=kw_data.get('keyword', ''),
+                            volume_level=kw_data.get('volume_level', 'medium'),
+                            intent=kw_data.get('intent', 'informational'),
+                            entity=kw_data.get('entity', ''),
+                            attribute=kw_data.get('attribute', ''),
+                            variable=kw_data.get('variable', ''),
+                            source='ai-generated',
+                            topic=kw_data.get('topic', ''),
+                            cluster_id=kw_data.get('cluster_id', ''),
+                        )
+                except Exception as e:
+                    logger.error(f"Error creating secondary keywords: {str(e)}")
+
+            # Grant access to the creating admin
+            try:
+                DomainAccess.objects.create(
+                    domain=domain,
+                    user=request.user,
+                    granted_by=request.user
+                )
+            except Exception as e:
+                logger.error(f"Error creating domain access: {str(e)}")
+
+        return Response({
+            'success': True,
+            'message': 'Domain created successfully',
+            'domain': {
+                'id': domain.id,
+                'name': domain.name,
+                'url': domain.url,
+                'country': domain.country,
+                'niches': domain.niches,
+                'processing_status': domain.processing_status,
+                'short_description': domain.short_description,
+                'target_audience': domain.target_audience,
+                'brand_values': domain.brand_values,
+                'key_competitors': domain.key_competitors,
+                'tone_of_voice': domain.tone_of_voice,
+                'content_style': domain.content_style,
+                'key_messages': domain.key_messages,
+                'topics_to_avoid': domain.topics_to_avoid,
+            },
+            'keywords_generated': len(generated_keywords),
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        logger.error(f"Error in automated domain onboarding: {str(e)}")
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

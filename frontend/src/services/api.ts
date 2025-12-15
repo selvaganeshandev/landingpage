@@ -426,6 +426,12 @@ export const apiClient = {
       body: JSON.stringify(data),
     }),
 
+  automatedDomainOnboard: (data: { domain_name: string; brand_name: string; country: string; niches?: string[] }) =>
+    apiRequest('/domains/automated-onboard/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   getDomainHealthCheck: (domainId: number) =>
     apiRequest(`/domains/${domainId}/health-check/`),
 

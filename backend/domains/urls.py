@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path('', views.domain_list, name='domain_list'),
+    path('automated-onboard/', views.automated_domain_onboard, name='automated_domain_onboard'),
     path('fetch-brand-info/', views.fetch_brand_info, name='fetch_brand_info'),
     path('fetch-brand-niches/', views.fetch_brand_niches, name='fetch_brand_niches'),
     path('generate-semantic-keywords/', views.generate_semantic_keywords, name='generate_semantic_keywords'),

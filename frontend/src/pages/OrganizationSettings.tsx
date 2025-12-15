@@ -110,6 +110,28 @@ export default function OrganizationSettings() {
   const [useManualKeywords, setUseManualKeywords] = useState(false);
   const [ignoreBrandKeywords, setIgnoreBrandKeywords] = useState(false);
 
+  // Automated onboarding state
+  const [isAutomatedOnboarding, setIsAutomatedOnboarding] = useState(false);
+  const [onboardingProgress, setOnboardingProgress] = useState(0);
+  const [createdDomainId, setCreatedDomainId] = useState<number | null>(null);
+
+  // Topic-level selection state
+  const [selectedTopics, setSelectedTopics] = useState<Set<string>>(new Set());
+
+  // Progress messages for automated onboarding
+  const progressMessages = [
+    "Analyzing your website structure and content",
+    "Reviewing your most engaging content pieces",
+    "Identifying your primary industry niches",
+    "Examining common prompts across AI platforms",
+    "Categorizing prompt patterns and user intent",
+    "Evaluating LLM response quality",
+    "Discovering your key competitors",
+    "Identifying content gaps and opportunities",
+    "Generating recommended content topics",
+    "Preparing your brand monitoring dashboard"
+  ];
+
   // Team members state
   const [teamMembers, setTeamMembers] = useState<Array<{
     id: number;
@@ -205,6 +227,23 @@ export default function OrganizationSettings() {
 
     return () => clearInterval(interval);
   }, [domains]);
+
+  // Cycle through progress messages during automated onboarding
+  useEffect(() => {
+    if (!isAutomatedOnboarding) return;
+
+    const interval = setInterval(() => {
+      setOnboardingProgress((prev) => {
+        // Keep showing the last message until processing is complete
+        if (prev < progressMessages.length - 1) {
+          return prev + 1;
+        }
+        return prev;
+      });
+    }, 4500); // Change message every 4.5 seconds
+
+    return () => clearInterval(interval);
+  }, [isAutomatedOnboarding, progressMessages.length]);
 
   const loadData = async () => {
     try {
@@ -367,16 +406,42 @@ export default function OrganizationSettings() {
   const handleGenerateKeywords = async () => {
     try {
       setIsGeneratingKeywords(true);
+      setIsAutomatedOnboarding(true);
+      setOnboardingProgress(0);
+
+      // Track animation start time
+      const animationStartTime = Date.now();
+      const TOTAL_ANIMATION_DURATION = 10 * 4500; // 10 messages * 4.5 seconds each = 45 seconds
 
       // Find the selected country name
       const selectedCountryObj = countries.find(c => c.value === newDomainCountry);
       const countryName = selectedCountryObj ? selectedCountryObj.label : 'United States';
 
+      // Step 1: Fetch niches if not already selected
+      let nichesToUse = selectedNiches;
+      if (nichesToUse.length === 0) {
+        try {
+          const nicheResponse: any = await apiClient.fetchBrandNiches(
+            newDomain.trim(),
+            newBrandName.trim()
+          );
+          if (nicheResponse.success && nicheResponse.niches) {
+            nichesToUse = nicheResponse.niches;
+            setSuggestedNiches(nicheResponse.niches);
+            setSelectedNiches(nicheResponse.niches);
+          }
+        } catch (error) {
+          console.error('Error fetching niches:', error);
+          // Continue without niches
+        }
+      }
+
+      // Step 2: Generate semantic keywords
       const response: any = await apiClient.generateSemanticKeywords({
         domain_name: newDomain.trim(),
         brand_name: newBrandName.trim(),
         country: countryName,
-        niches: selectedNiches,
+        niches: nichesToUse,
         approx_keywords: 100,
       });
 
@@ -384,15 +449,23 @@ export default function OrganizationSettings() {
         setGeneratedKeywords(response.keywords);
         // Keep all keywords unselected by default
         setSelectedKeywordIndices(new Set());
-        setWizardStep(2);
+
+        // Calculate remaining animation time
+        const elapsedTime = Date.now() - animationStartTime;
+        const remainingTime = Math.max(0, TOTAL_ANIMATION_DURATION - elapsedTime);
+
+        // Wait for remaining animation time before showing Step 2
+        setTimeout(() => {
+          setIsAutomatedOnboarding(false);
+          setOnboardingProgress(0);
+          setWizardStep(2);
+        }, remainingTime);
       } else {
-        toast({
-          title: "Failed to generate keywords",
-          description: "Could not generate semantic keywords. Please try again.",
-          variant: "destructive",
-        });
+        throw new Error("Failed to generate keywords");
       }
     } catch (error: any) {
+      setIsAutomatedOnboarding(false);
+      setOnboardingProgress(0);
       toast({
         title: "Error generating keywords",
         description: error.message || "Failed to generate keywords from AI.",
@@ -954,67 +1027,11 @@ export default function OrganizationSettings() {
       return;
     }
 
-    // Validate keywords are provided (mandatory)
-    // If using manual keywords, parse from textarea; otherwise use AI-generated keywords
-    let keywordsToSend = '';
-    let manualKeywordsArray: string[] = [];
-
-    if (useManualKeywords) {
-      // Manual mode: parse comma-separated keywords from textarea
-      manualKeywordsArray = keywordInput
-        .split(',')
-        .map(k => k.trim())
-        .filter(k => k.length > 0);
-      keywordsToSend = manualKeywordsArray.join(',');
-    } else {
-      // AI mode: use all generated keywords
-      keywordsToSend = generatedKeywords.map(kw => kw.keyword).join(',');
-    }
-
-    if (!keywordsToSend || keywordsToSend.trim() === '') {
+    // Validate at least 1 topic selected for AI mode
+    if (!useManualKeywords && generatedKeywords.length > 0 && selectedTopics.size === 0) {
       toast({
-        title: "Keywords required",
-        description: "Please add at least one keyword before creating the domain. Keywords are mandatory.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Validate maximum 10 keywords selected for semantic keywords wizard (AI mode only)
-    if (!useManualKeywords && generatedKeywords.length > 0 && selectedKeywordIndices.size > 10) {
-      toast({
-        title: "Too many keywords selected",
-        description: "Please select a maximum of 10 keywords. You have selected " + selectedKeywordIndices.size + " keywords.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Validate at least 1 keyword for manual mode
-    if (useManualKeywords && manualKeywordsArray.length === 0) {
-      toast({
-        title: "Keywords required",
-        description: "Please enter at least one keyword.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Validate maximum 10 keywords for manual mode
-    if (useManualKeywords && manualKeywordsArray.length > 10) {
-      toast({
-        title: "Too many keywords",
-        description: "Please enter a maximum of 10 keywords. You have entered " + manualKeywordsArray.length + " keywords.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Validate at least 1 keyword selected for AI mode
-    if (!useManualKeywords && generatedKeywords.length > 0 && selectedKeywordIndices.size === 0) {
-      toast({
-        title: "No keywords selected",
-        description: "Please select at least one keyword from the generated list.",
+        title: "No topics selected",
+        description: "Please select at least one topic from the list.",
         variant: "destructive",
       });
       return;
@@ -1022,123 +1039,67 @@ export default function OrganizationSettings() {
 
     try {
       setIsAddingDomain(true);
+      // Don't show the animated loading modal in Step 2
+
       const domainName = newDomain.trim();
-      const domainUrl = domainName.startsWith('http') ? domainName : `https://${domainName}`;
 
-      console.log('Creating domain with keywords:', keywordsToSend);
-      console.log('Keywords length:', keywordsToSend.length);
-      console.log('Generated keywords count:', generatedKeywords.length);
-
-      const response = await apiClient.createDomain({
-        name: newBrandName.trim() || domainName,
-        url: domainUrl,
+      // Call the automated onboarding endpoint
+      const response: any = await apiClient.automatedDomainOnboard({
+        domain_name: domainName,
+        brand_name: newBrandName.trim(),
         country: newDomainCountry,
-        niches: selectedNiches.length > 0 ? selectedNiches : null,
-        keywords: keywordsToSend, // Keywords are now mandatory, always send
+        niches: selectedNiches.length > 0 ? selectedNiches : undefined,
       });
 
-      const createdDomainId = response.domain?.id;
+      if (response.success && response.domain) {
+        const createdDomainId = response.domain.id;
 
-      if (useManualKeywords) {
-        // Manual mode: Save manual keywords as primary, all AI-generated keywords as secondary
-        if (createdDomainId && manualKeywordsArray.length > 0) {
+        // Gather all keywords from selected topics
+        if (createdDomainId && selectedTopics.size > 0) {
           try {
-            // Create simple keyword objects for manual keywords
-            const manualKeywordObjects = manualKeywordsArray.map(kw => ({ keyword: kw }));
-            await apiClient.bulkCreateKeywords(createdDomainId, manualKeywordObjects);
-          } catch (keywordError) {
-            console.error('Failed to save manual keywords:', keywordError);
-          }
-        }
-
-        // Save ALL generated keywords to secondary_keywords table
-        if (createdDomainId && generatedKeywords.length > 0) {
-          try {
-            await apiClient.bulkCreateSecondaryKeywords(createdDomainId, generatedKeywords);
-          } catch (keywordError) {
-            console.error('Failed to save generated keywords to secondary:', keywordError);
-          }
-        }
-      } else {
-        // AI mode: Save selected keywords as primary, unselected as secondary
-        if (createdDomainId && selectedKeywordIndices.size > 0) {
-          try {
-            const selectedKeywords = Array.from(selectedKeywordIndices).map(index => generatedKeywords[index]);
+            const selectedKeywords = generatedKeywords.filter(kw =>
+              selectedTopics.has(kw.topic || 'Other')
+            );
             await apiClient.bulkCreateKeywords(createdDomainId, selectedKeywords);
           } catch (keywordError) {
-            console.error('Failed to save generated keywords:', keywordError);
+            console.error('Failed to save selected keywords:', keywordError);
           }
         }
 
-        // Save unselected keywords to secondary_keywords table
-        if (createdDomainId && generatedKeywords.length > selectedKeywordIndices.size) {
-          try {
-            const unselectedKeywords = generatedKeywords.filter((_, index) => !selectedKeywordIndices.has(index));
-            await apiClient.bulkCreateSecondaryKeywords(createdDomainId, unselectedKeywords);
-          } catch (keywordError) {
-            console.error('Failed to save secondary keywords:', keywordError);
-          }
-        }
+        // Reload domains to get the updated list
+        await loadDomains();
+
+        // Also update the global domain store so DomainSelector refreshes
+        const { useDomainStore } = await import('@/stores/domainStore');
+        await useDomainStore.getState().loadDomains();
+
+        // Reset form and close modal
+        setNewDomain("");
+        setNewBrandName("");
+        setNewDomainCountry("us");
+        setSuggestedNiches([]);
+        setSelectedNiches([]);
+        setGeneratedKeywords([]);
+        setSelectedKeywordIndices(new Set());
+        setSelectedTopics(new Set());
+        setKeywordSearchQuery("");
+        setUseManualKeywords(false);
+        setIgnoreBrandKeywords(false);
+        setWizardStep(1);
+        setAddDomainDialogOpen(false);
+
+        toast({
+          title: "Domain added successfully!",
+          description: `${response.domain.name} has been created and is ready to use.`,
+          duration: 5000,
+        });
+      } else {
+        throw new Error(response.error || "Failed to create domain");
       }
-
-      // Fetch brand info from ChatGPT in the background
-      if (createdDomainId) {
-        try {
-          const brandInfoResponse = await apiClient.fetchBrandInfo(domainName, domainUrl);
-          if (brandInfoResponse.success && brandInfoResponse.brand_info) {
-            // Update the domain with fetched brand info
-            await apiClient.updateDomain(createdDomainId, {
-              short_description: brandInfoResponse.brand_info.short_description,
-              target_audience: brandInfoResponse.brand_info.target_audience,
-              brand_values: brandInfoResponse.brand_info.brand_values,
-              key_competitors: brandInfoResponse.brand_info.key_competitors,
-              tone_of_voice: brandInfoResponse.brand_info.tone_of_voice,
-              content_style: brandInfoResponse.brand_info.content_style,
-              key_messages: brandInfoResponse.brand_info.key_messages,
-              topics_to_avoid: brandInfoResponse.brand_info.topics_to_avoid,
-            });
-          }
-        } catch (brandError) {
-          // Don't fail the domain creation if brand info fetch fails
-          console.error('Failed to fetch brand info:', brandError);
-        }
-      }
-
-      // Reload domains to get the updated list (both local state and global store)
-      await loadDomains(); // Update local state for this page
-
-      // Also update the global domain store so DomainSelector refreshes
-      const { useDomainStore } = await import('@/stores/domainStore');
-      await useDomainStore.getState().loadDomains();
-
-      // Reset form
-      setNewDomain("");
-      setNewBrandName("");
-      setNewDomainCountry("us");
-      setNewDomainKeywords([]);
-      setKeywordInput("");
-      setSuggestedNiches([]);
-      setSelectedNiches([]);
-      setGeneratedKeywords([]);
-      setSelectedKeywordIndices(new Set());
-      setKeywordSearchQuery("");
-      setUseManualKeywords(false);
-      setIgnoreBrandKeywords(false);
-      setWizardStep(1);
-      setAddDomainDialogOpen(false);
-
-      toast({
-        title: "Brand added successfully!",
-        description: `${domainName} is now being processed. Brand info has been auto-populated.`,
-        duration: 5000,
-      });
     } catch (error: any) {
-      // Parse the error message for better UX
       let errorMessage = error.message || "Failed to add domain. Please try again.";
-
-      // Check for duplicate domain error
       if (error.message && error.message.includes("must make a unique set")) {
-        errorMessage = `This domain (${domainName}) already exists in your organization. Please use a different domain or delete the existing one first.`;
+        errorMessage = `This domain already exists in your organization. Please use a different domain or delete the existing one first.`;
       }
 
       toast({
@@ -1832,18 +1793,58 @@ export default function OrganizationSettings() {
         }
       }}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              Add Domain {wizardStep === 1 && <Badge variant="outline">Step 1 of 2</Badge>}
-              {wizardStep === 2 && <Badge variant="outline">Step 2 of 2</Badge>}
-            </DialogTitle>
-            <DialogDescription>
-              {wizardStep === 1 && "Enter domain details and select industry niches"}
-              {wizardStep === 2 && "Select keywords to track for your brand"}
-            </DialogDescription>
-          </DialogHeader>
+          {isAutomatedOnboarding ? (
+            // Loading Modal with Progress Messages
+            <div className="py-10 px-8">
+              <div className="flex flex-col items-center justify-center space-y-6">
+                {/* Animated GIF - 50% smaller */}
+                <div className="w-24 h-24 flex items-center justify-center">
+                  <img
+                    src={new URL('../assets/flask.gif', import.meta.url).href}
+                    alt="Processing..."
+                    className="w-full h-full object-contain"
+                  />
+                </div>
 
-          <div className="space-y-6 py-4">
+                {/* Progress Message */}
+                <div className="text-center space-y-3">
+                  <h3 className="text-xl font-semibold">
+                    Setting up your brand monitoring...
+                  </h3>
+                  <p className="text-sm text-muted-foreground animate-pulse">
+                    {progressMessages[onboardingProgress]}
+                  </p>
+                </div>
+
+                {/* Progress Indicator */}
+                <div className="w-full max-w-md space-y-2">
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Step {onboardingProgress + 1} of {progressMessages.length}</span>
+                    <span>{Math.round(((onboardingProgress + 1) / progressMessages.length) * 100)}%</span>
+                  </div>
+                  <div className="w-full bg-secondary rounded-full h-2">
+                    <div
+                      className="bg-primary h-2 rounded-full transition-all duration-500"
+                      style={{ width: `${((onboardingProgress + 1) / progressMessages.length) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  Add Domain {wizardStep === 1 && <Badge variant="outline">Step 1 of 2</Badge>}
+                  {wizardStep === 2 && <Badge variant="outline">Step 2 of 2</Badge>}
+                </DialogTitle>
+                <DialogDescription>
+                  {wizardStep === 1 && "Enter domain details and select industry niches"}
+                  {wizardStep === 2 && "Select prompt intents to track for your brand"}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-6 py-4">
             {/* Step 1: Domain Info & Niches */}
             {wizardStep === 1 && (
               <>
@@ -1930,78 +1931,44 @@ export default function OrganizationSettings() {
               </Popover>
             </div>
 
-                {/* Niche Selection with AI */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label>Industry Niches</Label>
-                    <Button
-                      type="button"
-                      variant="default"
-                      size="sm"
-                      onClick={handleFetchBrandNiches}
-                      disabled={isFetchingNiches || (!newDomain.trim() && !newBrandName.trim())}
-                      className="gap-2"
-                    >
-                      {isFetchingNiches ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-4 w-4" />
-                      )}
-                      {isFetchingNiches ? "Fetching..." : "Fetch Niches with AI"}
-                    </Button>
-                  </div>
-
-                  {suggestedNiches.length > 0 && (
-                    <div className="space-y-3">
+                {/* Industry Niches - Automated */}
+                <div className="space-y-3 bg-muted/50 p-4 rounded-lg border border-muted">
+                  <div className="flex items-start gap-2">
+                    <Sparkles className="h-5 w-5 text-primary mt-0.5" />
+                    <div className="space-y-2">
+                      <Label className="text-base">AI-Powered Analysis</Label>
                       <p className="text-sm text-muted-foreground">
-                        Select one or more industry niches that best describe your brand:
+                        We'll automatically analyze your brand and identify relevant industry niches, prompts, competitors, and content opportunities.
                       </p>
-                      <div className="flex flex-wrap gap-2">
-                        {suggestedNiches.map((niche, index) => (
-                          <Badge
-                            key={index}
-                            variant={selectedNiches.includes(niche) ? "default" : "outline"}
-                            className="cursor-pointer gap-1.5 px-3 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                            onClick={() => handleToggleNiche(niche)}
-                          >
-                            {selectedNiches.includes(niche) && (
-                              <Check className="h-3.5 w-3.5" />
-                            )}
-                            {niche}
-                          </Badge>
-                        ))}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {selectedNiches.length} niche{selectedNiches.length !== 1 ? 's' : ''} selected
+                      <p className="text-xs text-muted-foreground italic">
+                        Tip: Connect Google Search Console later for more accurate audience insights and prompt data.
                       </p>
                     </div>
-                  )}
-
-                  {!suggestedNiches.length && (
-                    <p className="text-sm text-muted-foreground italic">
-                      Click "Fetch Niches with AI" to get AI-powered suggestions
-                    </p>
-                  )}
+                  </div>
                 </div>
 
                 {/* Close Step 1 */}
               </>
             )}
 
-            {/* Step 2: Generated Keywords */}
+            {/* Step 2: Generated Prompts */}
             {wizardStep === 2 && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   {!useManualKeywords ? (
                     <>
                       <div>
-                        <h3 className="text-lg font-semibold">Generated Keywords</h3>
+                        <h3 className="text-lg font-semibold">Generated Prompts</h3>
                         <div className="flex items-center gap-3 mt-1">
                           <p className="text-sm text-muted-foreground">
-                            {generatedKeywords.length} keywords generated
+                            {generatedKeywords.length} prompts in {Object.keys(generatedKeywords.reduce((acc: any, kw: any) => {
+                              const topic = kw.topic || 'Other';
+                              acc[topic] = true;
+                              return acc;
+                            }, {})).length} topics
                           </p>
                           <Badge variant="default" className="gap-1.5">
-                            {selectedKeywordIndices.size} selected
+                            {selectedTopics.size} topics selected
                           </Badge>
                         </div>
                       </div>
@@ -2016,32 +1983,16 @@ export default function OrganizationSettings() {
                             htmlFor="ignoreBrandKeywords"
                             className="text-sm font-medium leading-none cursor-pointer"
                           >
-                            Ignore Brand Keywords
+                            Ignore Brand Prompts
                           </label>
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleSelectAllKeywords}
-                          disabled={selectedKeywordIndices.size === generatedKeywords.length}
-                        >
-                          Select All
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleDeselectAllKeywords}
-                          disabled={selectedKeywordIndices.size === 0}
-                        >
-                          Deselect All
-                        </Button>
                       </div>
                     </>
                   ) : (
                     <div>
-                      <h3 className="text-lg font-semibold">Manual Keywords</h3>
+                      <h3 className="text-lg font-semibold">Manual Prompts</h3>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Enter keywords separated by commas
+                        Enter prompts separated by commas
                       </p>
                     </div>
                   )}
@@ -2053,97 +2004,156 @@ export default function OrganizationSettings() {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
-                        placeholder="Search keywords..."
+                        placeholder="Search prompts..."
                         value={keywordSearchQuery}
                         onChange={(e) => setKeywordSearchQuery(e.target.value)}
                         className="pl-9"
                       />
                     </div>
 
-                    <div className="border rounded-lg max-h-96 overflow-y-auto">
-                      <Table>
-                        <TableHeader className="sticky top-0 bg-background z-10">
-                          <TableRow>
-                            <TableHead className="w-[50px]"></TableHead>
-                            <TableHead className="w-[250px]">Keyword</TableHead>
-                            <TableHead className="w-[120px]">Volume</TableHead>
-                            <TableHead className="w-[130px]">Intent</TableHead>
-                            <TableHead className="w-[180px]">Topic</TableHead>
-                            <TableHead>Entity</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {generatedKeywords
-                            .map((keyword, index) => ({ keyword, index }))
-                            .filter(({ keyword }) => {
-                              // Search filter
-                              const matchesSearch = keywordSearchQuery === "" ||
-                                keyword.keyword.toLowerCase().includes(keywordSearchQuery.toLowerCase()) ||
-                                (keyword.topic && keyword.topic.toLowerCase().includes(keywordSearchQuery.toLowerCase())) ||
-                                (keyword.entity && keyword.entity.toLowerCase().includes(keywordSearchQuery.toLowerCase()));
+                    {/* Prompts Grouped by Topic */}
+                    <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+                      {Object.entries(
+                        generatedKeywords
+                          .map((keyword, index) => ({ keyword, index }))
+                          .filter(({ keyword }) => {
+                            const matchesSearch = keywordSearchQuery === "" ||
+                              keyword.keyword.toLowerCase().includes(keywordSearchQuery.toLowerCase()) ||
+                              (keyword.topic && keyword.topic.toLowerCase().includes(keywordSearchQuery.toLowerCase())) ||
+                              (keyword.entity && keyword.entity.toLowerCase().includes(keywordSearchQuery.toLowerCase()));
 
-                              // Brand keyword filter
-                              const brandName = newBrandName || newDomain.replace(/^(https?:\/\/)?(www\.)?/, '').split('.')[0];
-                              const containsBrandName = ignoreBrandKeywords && brandName &&
-                                keyword.keyword.toLowerCase().includes(brandName.toLowerCase());
+                            const brandName = newBrandName || newDomain.replace(/^(https?:\/\/)?(www\.)?/, '').split('.')[0];
+                            const containsBrandName = ignoreBrandKeywords && brandName &&
+                              keyword.keyword.toLowerCase().includes(brandName.toLowerCase());
 
-                              return matchesSearch && !containsBrandName;
-                            })
-                            .map(({ keyword, index }) => (
-                            <TableRow
-                              key={index}
-                              className="cursor-pointer hover:bg-muted/50"
-                              onClick={() => handleToggleKeyword(index)}
-                            >
-                              <TableCell>
+                            return matchesSearch && !containsBrandName;
+                          })
+                          .reduce((acc: any, { keyword, index }) => {
+                            const topic = keyword.topic || 'Other';
+                            if (!acc[topic]) acc[topic] = [];
+                            acc[topic].push({ keyword, index });
+                            return acc;
+                          }, {})
+                      ).map(([topic, items]: [string, any]) => {
+                        const topicItems = items as Array<{ keyword: any; index: number }>;
+                        const topicIndices = topicItems.map(item => item.index);
+                        const selectedInTopic = topicIndices.filter((idx: number) =>
+                          selectedKeywordIndices.has(idx)
+                        ).length;
+
+                        const isTopicSelected = selectedTopics.has(topic);
+
+                        return (
+                          <div
+                            key={topic}
+                            className={cn(
+                              "rounded-lg bg-card cursor-pointer transition-all border border-border/30",
+                              isTopicSelected && "border-primary"
+                            )}
+                            onClick={() => {
+                              setSelectedTopics(prev => {
+                                const newSet = new Set(prev);
+                                if (newSet.has(topic)) {
+                                  newSet.delete(topic);
+                                } else {
+                                  newSet.add(topic);
+                                }
+                                return newSet;
+                              });
+                            }}
+                          >
+                            <div className="border-b border-border/40 p-4">
+                              <div className="flex items-center gap-3">
                                 <Checkbox
-                                  checked={selectedKeywordIndices.has(index)}
-                                  onCheckedChange={() => handleToggleKeyword(index)}
+                                  checked={isTopicSelected}
+                                  onCheckedChange={() => {
+                                    setSelectedTopics(prev => {
+                                      const newSet = new Set(prev);
+                                      if (newSet.has(topic)) {
+                                        newSet.delete(topic);
+                                      } else {
+                                        newSet.add(topic);
+                                      }
+                                      return newSet;
+                                    });
+                                  }}
                                   onClick={(e) => e.stopPropagation()}
                                 />
-                              </TableCell>
-                              <TableCell className="font-medium">{keyword.keyword}</TableCell>
-                              <TableCell>
-                                <Badge variant={
-                                  keyword.volume_level === 'very-high' ? 'default' :
-                                  keyword.volume_level === 'high' ? 'secondary' :
-                                  'outline'
-                                } className="text-xs whitespace-nowrap">
-                                  {keyword.volume_level || 'N/A'}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {keyword.intent || 'N/A'}
-                              </TableCell>
-                              <TableCell className="text-sm">{keyword.topic || 'N/A'}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {keyword.entity || 'N/A'}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                                <div className="flex-1">
+                                  <h4 className="font-semibold">Topic: {topic}</h4>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {topicItems.length} prompts in this topic
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="p-2">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead className="w-[250px]">Prompt Intent</TableHead>
+                                    <TableHead className="w-[130px]">Intent</TableHead>
+                                    <TableHead className="w-[130px]">Entity</TableHead>
+                                    <TableHead className="w-[120px]">Volume</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {topicItems.map(({ keyword, index }) => {
+                                    return (
+                                      <TableRow key={index}>
+                                        <TableCell className="font-medium">{keyword.keyword}</TableCell>
+                                        <TableCell>
+                                          <span className="text-sm capitalize">
+                                            {keyword.intent || 'N/A'}
+                                          </span>
+                                        </TableCell>
+                                        <TableCell>
+                                          <span className="text-sm text-muted-foreground">
+                                            {keyword.entity || 'N/A'}
+                                          </span>
+                                        </TableCell>
+                                        <TableCell>
+                                          <Badge
+                                            variant={
+                                              keyword.volume_level === 'very-high' || keyword.volume_level === 'high'
+                                                ? 'default'
+                                                : 'secondary'
+                                            }
+                                            className="text-xs whitespace-nowrap"
+                                          >
+                                            {keyword.volume_level || 'N/A'}
+                                          </Badge>
+                                        </TableCell>
+                                      </TableRow>
+                                    );
+                                  })}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
 
                     <p className="text-xs text-muted-foreground">
-                      Selected keywords will be saved when you add the domain. You can edit them later from the domain settings.
+                      Selected prompts will be saved when you create the domain. You can edit them later from domain settings.
                     </p>
                   </>
                 ) : (
                   <>
-                    {/* Manual Keyword Input */}
+                    {/* Manual Prompt Input */}
                     <div className="space-y-4">
                       <div>
-                        <Label htmlFor="manualKeywords">Keywords (comma separated, max 10)</Label>
+                        <Label htmlFor="manualKeywords">Prompts (comma separated, max 10)</Label>
                         <Textarea
                           id="manualKeywords"
-                          placeholder="mobile app development, app design, iOS development, Android development..."
+                          placeholder="how to build mobile apps, app design tips, iOS development tutorial..."
                           value={keywordInput}
                           onChange={(e) => setKeywordInput(e.target.value)}
                           className="min-h-[200px] mt-2"
                         />
                         <p className="text-xs text-muted-foreground mt-2">
-                          Enter up to 10 keywords separated by commas. These will be added as primary keywords.
+                          Enter up to 10 prompts separated by commas. These will be added as primary prompts.
                         </p>
                       </div>
                     </div>
@@ -2153,7 +2163,7 @@ export default function OrganizationSettings() {
             )}
           </div>
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 sticky bottom-0 bg-background border-t py-4 mt-auto">
             {wizardStep === 2 && (
               <>
                 <Button
@@ -2169,7 +2179,7 @@ export default function OrganizationSettings() {
                   className="mr-auto"
                 >
                   <Plus className="h-4 w-4 mr-2" />
-                  {useManualKeywords ? "Use AI Keywords" : "Add Manually"}
+                  {useManualKeywords ? "Use AI Prompts" : "Add Manually"}
                 </Button>
               </>
             )}
@@ -2189,12 +2199,12 @@ export default function OrganizationSettings() {
                 {isGeneratingKeywords ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Finding Keywords...
+                    Generating Keywords...
                   </>
                 ) : (
                   <>
-                    Next
-                    <ChevronRight className="h-4 w-4 ml-2" />
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Generate Keywords
                   </>
                 )}
               </Button>
@@ -2202,11 +2212,22 @@ export default function OrganizationSettings() {
 
             {wizardStep === 2 && (
               <Button onClick={handleAddDomain} disabled={isAddingDomain}>
-                {isAddingDomain ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
-                Add Domain
+                {isAddingDomain ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Creating Domain...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Domain
+                  </>
+                )}
               </Button>
             )}
           </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 
