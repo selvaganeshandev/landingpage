@@ -135,7 +135,7 @@ def generate_report(report_id):
                         # For predefined templates, generate HTML on-the-fly
                         logger.info("Generating HTML for predefined template")
                         # Create a simple grid_rows structure for predefined templates
-                        grid_rows = self._create_grid_rows_for_predefined(report.report_type, data)
+                        grid_rows = _create_grid_rows_for_predefined(report.report_type, data)
                         html_template = generate_html_report(
                             grid_rows,
                             data,
@@ -224,7 +224,7 @@ def generate_report(report_id):
         return True
 
     except Exception as e:
-        print(f"Error generating report {report_id}: {str(e)}")
+        logger.error(f"Error generating report {report_id}: {str(e)}", exc_info=True)
 
         # Update report with error
         try:

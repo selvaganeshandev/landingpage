@@ -10,6 +10,10 @@ from django.utils import timezone
 from shared_models.models import Domain, Keyword, PromptGroup, Prompt, PromptAnalytics, Organisation, SentimentAnalytics, PromptKeyword
 from .chatgpt_client import ChatGPTClient
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
 try:
     from sentence_transformers import SentenceTransformer
 except ImportError:  # pragma: no cover
