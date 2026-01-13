@@ -9,10 +9,10 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/services/api";
-import { 
-  ArrowLeft, 
-  User, 
-  Mail, 
+import {
+  ArrowLeft,
+  User,
+  Mail,
   Shield,
   LayoutDashboard,
   MessageSquare,
@@ -31,6 +31,7 @@ import {
   FileText,
   Settings,
   Loader2,
+  Calendar,
 } from "lucide-react";
 
 const featureCategories = [
@@ -63,6 +64,7 @@ const featureCategories = [
     features: [
       { id: "content_gaps", name: "Content Gaps", icon: Target, description: "Identify content opportunities" },
       { id: "competitors", name: "Competitors", icon: Users, description: "Manage competitor tracking" },
+      { id: "content_planner", name: "Content Planner", icon: Calendar, description: "Plan and schedule content" },
     ]
   },
   {

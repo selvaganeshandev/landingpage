@@ -90,7 +90,7 @@ const allNavGroups: NavGroup[] = [
     items: [
       { name: "Content Gaps", path: "/content-gaps", icon: Target, module: MODULES.CONTENT_GAPS },
       { name: "Competitors", path: "/competitors", icon: Users, module: MODULES.COMPETITORS },
-      { name: "Content Planner", path: "/content-calendar", icon: Calendar, module: MODULES.CONTENT_GAPS },
+      { name: "Content Planner", path: "/content-calendar", icon: Calendar, module: MODULES.CONTENT_PLANNER },
     ],
   },
   {
