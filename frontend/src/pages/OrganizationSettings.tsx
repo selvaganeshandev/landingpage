@@ -1205,6 +1205,38 @@ export default function OrganizationSettings() {
     }
   };
 
+  const handleSaveAllProfile = async () => {
+    try {
+      setIsUpdatingProfile(true);
+      setIsUpdatingOrg(true);
+
+      await Promise.all([
+        apiClient.updateProfile({
+          first_name: profileData.first_name,
+          last_name: profileData.last_name,
+        }),
+        apiClient.updateOrganization({
+          name: organization.name,
+          industry: organization.industry,
+        }),
+      ]);
+
+      toast({
+        title: "Changes saved",
+        description: "Your profile and organization details have been updated.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error saving changes",
+        description: error.message || "Failed to save changes. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdatingProfile(false);
+      setIsUpdatingOrg(false);
+    }
+  };
+
   const handleInviteMember = async () => {
     if (!inviteEmail.trim()) return;
 
@@ -1375,11 +1407,28 @@ export default function OrganizationSettings() {
       </div>
 
       <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-6">
-        <TabsList className="bg-muted/50 p-1 border border-border">
-          <TabsTrigger value="domains" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">All Domains</TabsTrigger>
-          <TabsTrigger value="team" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Team Members</TabsTrigger>
-          <TabsTrigger value="profile" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Profile</TabsTrigger>
-        </TabsList>
+        <div className="flex items-center justify-between">
+          <TabsList className="bg-muted/50 p-1 border border-border">
+            <TabsTrigger value="domains" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">All Domains</TabsTrigger>
+            <TabsTrigger value="team" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Team Members</TabsTrigger>
+            <TabsTrigger value="profile" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Profile</TabsTrigger>
+          </TabsList>
+
+          <div className="flex gap-2">
+            {selectedTab === "domains" && (
+              <Button onClick={() => setAddDomainDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Domain
+              </Button>
+            )}
+            {selectedTab === "team" && (
+              <Button onClick={() => setInviteDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Invite Member
+              </Button>
+            )}
+          </div>
+        </div>
 
         <TabsContent value="domains" className="space-y-6">
           <Card className="border border-border">
@@ -1389,17 +1438,8 @@ export default function OrganizationSettings() {
                 Add and manage domains for your organization. All brand monitoring will be scoped to these domains.
               </CardDescription>
             </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <Button onClick={() => setAddDomainDialogOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Domain
-            </Button>
-          </div>
-
-          <Separator />
-
-          <div className="space-y-3">
+            <CardContent className="space-y-4">
+              <div className="space-y-3">
             {domains.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <Globe className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -1524,14 +1564,7 @@ export default function OrganizationSettings() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Button onClick={() => setInviteDialogOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Invite Member
-              </Button>
-
-              <Separator />
-
-          {invitations.length > 0 && (
+              {invitations.length > 0 && (
             <div className="space-y-3">
               <h4 className="text-sm font-medium">Team Invitations</h4>
               {invitations.map((inv) => (
@@ -1694,10 +1727,6 @@ export default function OrganizationSettings() {
                   />
                   <p className="text-xs text-muted-foreground">Email cannot be changed</p>
                 </div>
-                <Button onClick={handleUpdateProfile} disabled={isUpdatingProfile}>
-                  {isUpdatingProfile ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                  Save Profile
-                </Button>
               </div>
 
               <Separator />
@@ -1706,17 +1735,21 @@ export default function OrganizationSettings() {
                 <h3 className="text-lg font-semibold">Organization</h3>
                 <div className="space-y-2">
                   <Label htmlFor="org-name">Organization Name</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="org-name"
-                      value={organization.name}
-                      onChange={(e) => setOrganization({ ...organization, name: e.target.value })}
-                    />
-                    <Button onClick={handleUpdateOrgName} disabled={isUpdatingOrg}>
-                      {isUpdatingOrg ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
-                    </Button>
-                  </div>
+                  <Input
+                    id="org-name"
+                    value={organization.name}
+                    onChange={(e) => setOrganization({ ...organization, name: e.target.value })}
+                  />
                 </div>
+              </div>
+
+              <Separator />
+
+              <div className="flex justify-end">
+                <Button onClick={handleSaveAllProfile} disabled={isUpdatingProfile || isUpdatingOrg}>
+                  {(isUpdatingProfile || isUpdatingOrg) ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Save Changes
+                </Button>
               </div>
             </CardContent>
           </Card>
