@@ -1,14 +1,9 @@
 """
 Mailgun Email Service for Report Delivery
-Handles sending emails via Mailgun SMTP
+Handles sending emails via Mailgun HTTP API
 """
-import os
-import smtplib
 import logging
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
+import requests
 from typing import List, Optional, Dict, Any
 from django.conf import settings
 
@@ -17,24 +12,26 @@ logger = logging.getLogger(__name__)
 
 class MailgunEmailService:
     """
-    Service for sending emails via Mailgun SMTP.
+    Service for sending emails via Mailgun HTTP API.
     Used for report delivery and notifications.
     """
 
     def __init__(self):
         """Initialize email service with configuration from settings"""
-        self.email_host = getattr(settings, 'EMAIL_HOST', 'smtp.mailgun.org')
-        self.email_port = getattr(settings, 'EMAIL_PORT', 587)
-        self.email_use_tls = getattr(settings, 'EMAIL_USE_TLS', True)
-        self.email_host_user = getattr(settings, 'EMAIL_HOST_USER', '')
-        self.email_host_password = getattr(settings, 'EMAIL_HOST_PASSWORD', '')
+        self.api_key = getattr(settings, 'MAILGUN_API_KEY', '')
+        self.domain = getattr(settings, 'MAILGUN_DOMAIN', '')
+        self.api_base_url = getattr(
+            settings,
+            'MAILGUN_API_URL',
+            'https://api.mailgun.net/v3'
+        )
         self.default_from_email = getattr(
-            settings, 
-            'DEFAULT_FROM_EMAIL', 
+            settings,
+            'DEFAULT_FROM_EMAIL',
             'LLM Monitor <noreply@sandbox.mailgun.org>'
         )
         self.frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:8080')
-        self.email_timeout = getattr(settings, 'EMAIL_TIMEOUT', 10)
+        self.timeout = getattr(settings, 'EMAIL_TIMEOUT', 30)
 
     def send_report_email(
         self,
@@ -46,7 +43,7 @@ class MailgunEmailService:
         reply_to: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Send report email via Mailgun SMTP.
+        Send report email via Mailgun HTTP API.
 
         Args:
             recipients: List of email addresses
@@ -59,11 +56,11 @@ class MailgunEmailService:
         Returns:
             Dict with 'success' (bool), 'message' (str), and 'failed_recipients' (list)
         """
-        if not self.email_host_user or not self.email_host_password:
-            logger.error("Email credentials not configured in settings")
+        if not self.api_key or not self.domain:
+            logger.error("Mailgun API key or domain not configured in settings")
             return {
                 'success': False,
-                'message': 'Email credentials not configured',
+                'message': 'Mailgun API credentials not configured',
                 'failed_recipients': recipients
             }
 
@@ -75,82 +72,74 @@ class MailgunEmailService:
                 'failed_recipients': []
             }
 
-        failed_recipients = []
-        successful_recipients = []
-
         try:
-            # Create message
-            msg = MIMEMultipart('alternative')
-            msg['From'] = self.default_from_email
-            msg['To'] = ', '.join(recipients)
-            msg['Subject'] = subject
+            # Build API endpoint
+            url = f"{self.api_base_url}/{self.domain}/messages"
+
+            # Build request data
+            data = {
+                'from': self.default_from_email,
+                'to': recipients,
+                'subject': subject,
+                'text': body_text,
+            }
+
+            if body_html:
+                data['html'] = body_html
 
             if reply_to:
-                msg['Reply-To'] = reply_to
+                data['h:Reply-To'] = reply_to
 
-            # Add text part
-            text_part = MIMEText(body_text, 'plain')
-            msg.attach(text_part)
-
-            # Add HTML part if provided
-            if body_html:
-                html_part = MIMEText(body_html, 'html')
-                msg.attach(html_part)
-
-            # Add attachments if provided
+            # Prepare files for attachments
+            files = []
             if attachments:
                 for attachment in attachments:
                     filename = attachment.get('filename', 'attachment')
                     content = attachment.get('content')
-                    content_type = attachment.get('content_type', 'application/octet-stream')
-
                     if content:
-                        part = MIMEBase('application', 'octet-stream')
-                        part.set_payload(content)
-                        encoders.encode_base64(part)
-                        part.add_header(
-                            'Content-Disposition',
-                            f'attachment; filename="{filename}"'
-                        )
-                        msg.attach(part)
+                        files.append(('attachment', (filename, content)))
 
-            # Connect to SMTP server and send
-            logger.info(f"Connecting to SMTP server {self.email_host}:{self.email_port}")
-            with smtplib.SMTP(self.email_host, self.email_port, timeout=self.email_timeout) as server:
-                if self.email_use_tls:
-                    logger.debug("Starting TLS...")
-                    server.starttls()
+            # Make API request
+            logger.info(f"Sending email via Mailgun API to {len(recipients)} recipients")
 
-                logger.debug(f"Logging in as {self.email_host_user}")
-                server.login(self.email_host_user, self.email_host_password)
+            response = requests.post(
+                url,
+                auth=('api', self.api_key),
+                data=data,
+                files=files if files else None,
+                timeout=self.timeout
+            )
 
-                # Send to all recipients
-                logger.info(f"Sending email to {len(recipients)} recipients")
-                server.send_message(msg, to_addrs=recipients)
-                successful_recipients = recipients
+            if response.status_code == 200:
+                logger.info(f"Email sent successfully to {len(recipients)} recipients")
+                return {
+                    'success': True,
+                    'message': f'Email sent successfully to {len(recipients)} recipients',
+                    'successful_recipients': recipients,
+                    'failed_recipients': []
+                }
+            else:
+                error_msg = response.json().get('message', response.text)
+                logger.error(f"Mailgun API error: {response.status_code} - {error_msg}")
+                return {
+                    'success': False,
+                    'message': f'Mailgun API error: {error_msg}',
+                    'failed_recipients': recipients
+                }
 
-                logger.info(f"Email sent successfully to {len(successful_recipients)} recipients")
-
-            return {
-                'success': True,
-                'message': f'Email sent successfully to {len(successful_recipients)} recipients',
-                'successful_recipients': successful_recipients,
-                'failed_recipients': failed_recipients
-            }
-
-        except smtplib.SMTPAuthenticationError as e:
-            logger.error(f"SMTP Authentication failed: {e}")
+        except requests.exceptions.Timeout:
+            logger.error("Mailgun API request timed out")
             return {
                 'success': False,
-                'message': f'SMTP Authentication failed: {str(e)}',
+                'message': 'Request timed out',
                 'failed_recipients': recipients
             }
 
-        except smtplib.SMTPException as e:
-            logger.error(f"SMTP error sending email: {e}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error sending email: {e}")
             return {
                 'success': False,
-                'message': f'SMTP error: {str(e)}',
+                'message': f'Request error: {str(e)}',
                 'failed_recipients': recipients
             }
 

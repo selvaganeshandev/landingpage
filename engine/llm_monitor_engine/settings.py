@@ -171,16 +171,11 @@ PERPLEXITY_API_KEY = config('PERPLEXITY_API_KEY', default=None)
 # ScrapingDog API Configuration (for web crawling in misinformation detection)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
 
-# ==================== EMAIL CONFIGURATION (MAILGUN SMTP) ====================
-# Mailgun SMTP Configuration for report email delivery
-EMAIL_HOST = config('EMAIL_HOST', default='smtp.mailgun.org')
-EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
-EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
-EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
-
-# Mailgun SMTP Credentials
-EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+# ==================== EMAIL CONFIGURATION (MAILGUN HTTP API) ====================
+# Mailgun HTTP API Configuration for report email delivery
+MAILGUN_API_KEY = config('MAILGUN_API_KEY', default='')
+MAILGUN_DOMAIN = config('MAILGUN_DOMAIN', default='')
+MAILGUN_API_URL = config('MAILGUN_API_URL', default='https://api.mailgun.net/v3')
 
 # Sender Email
 DEFAULT_FROM_EMAIL = config(
@@ -191,8 +186,8 @@ DEFAULT_FROM_EMAIL = config(
 # Frontend URL for email links
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:8080')
 
-# Email timeout
-EMAIL_TIMEOUT = config('EMAIL_TIMEOUT', default=10, cast=int)
+# Email timeout (seconds)
+EMAIL_TIMEOUT = config('EMAIL_TIMEOUT', default=30, cast=int)
 # ==================== END EMAIL CONFIGURATION ====================
 
 # Backend API URL for report generation
