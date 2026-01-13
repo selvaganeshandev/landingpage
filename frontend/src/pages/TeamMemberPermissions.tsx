@@ -43,15 +43,16 @@ const featureCategories = [
   {
     name: "Tracking",
     features: [
-      { id: "mentions", name: "Mentions", icon: MessageSquare, description: "View and manage brand mentions" },
       { id: "prompts", name: "Prompts", icon: Search, description: "Create and manage prompt groups" },
+      { id: "mentions", name: "Mentions", icon: MessageSquare, description: "View and manage brand mentions" },
+      { id: "citations", name: "Citations", icon: Link2, description: "View citation sources and references" },
       { id: "alerts", name: "Alerts", icon: Bell, description: "Configure and view alerts" },
     ]
   },
   {
     name: "Analytics",
     features: [
-      { id: "sentiment_analysis", name: "Sentiment Analysis", icon: TrendingUp, description: "View sentiment trends and analysis" },
+      { id: "sentiment_analysis", name: "Sentiment", icon: TrendingUp, description: "View sentiment trends and analysis" },
       { id: "topics", name: "Topics", icon: Brain, description: "Access topic analysis and trends" },
       { id: "share_of_voice", name: "Share of Voice", icon: BarChart3, description: "View competitive share of voice" },
       { id: "historical_trends", name: "Historical Trends", icon: BarChart3, description: "Access historical trend data" },
@@ -67,11 +68,6 @@ const featureCategories = [
   {
     name: "Advanced",
     features: [
-      { id: "multilingual", name: "Multilingual", icon: Globe, description: "Manage multilingual monitoring" },
-      { id: "ai_copilot", name: "AI Copilot", icon: Sparkles, description: "Access AI recommendations" },
-      { id: "prompt_insights", name: "Prompt Insights", icon: TrendingUp, description: "Advanced prompt analytics" },
-      { id: "agent_analytics", name: "Agent Analytics", icon: Network, description: "View agent performance metrics" },
-      { id: "ai_crawler", name: "AI Crawler", icon: Network, description: "Manage AI crawler settings" },
       { id: "traffic_attribution", name: "Traffic Attribution", icon: Link2, description: "Track traffic sources" },
       { id: "misinformation_alerts", name: "Misinformation Alerts", icon: AlertTriangle, description: "Monitor brand misinformation" },
     ]
