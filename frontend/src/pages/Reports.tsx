@@ -13,6 +13,7 @@ import { EditReportDialog } from "@/components/EditReportDialog";
 import { GenerateNowDialog } from "@/components/GenerateNowDialog";
 import { ScheduleReportDialog } from "@/components/ScheduleReportDialog";
 import { PDFViewerDialog } from "@/components/PDFViewerDialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
 import {
@@ -42,6 +43,8 @@ const Reports = () => {
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [htmlPreviewOpen, setHtmlPreviewOpen] = useState(false);
+  const [htmlPreviewContent, setHtmlPreviewContent] = useState<string>('');
   const [selectedReport, setSelectedReport] = useState<any>(null);
   const [viewingReportId, setViewingReportId] = useState<number | null>(null);
   const [reportToDelete, setReportToDelete] = useState<number | null>(null);
@@ -213,7 +216,13 @@ const Reports = () => {
 
   const handleRunNow = async (report: any) => {
     try {
-      await apiClient.generateReport({
+      toast({
+        title: "Generating Report",
+        description: `Generating ${report.name}...`,
+      });
+
+      // Generate the report
+      const generatedReport = await apiClient.generateReport({
         domain_id: report.domain,
         template_id: report.template,
         sections: report.sections || [],
@@ -223,14 +232,63 @@ const Reports = () => {
 
       queryClient.invalidateQueries({ queryKey: ['generatedReports'] });
 
-      toast({
-        title: "Report Generation Started",
-        description: `Generating ${report.name}...`,
-      });
+      // Download the generated report
+      if (generatedReport?.id) {
+        await apiClient.downloadReport(generatedReport.id, `${report.name}.pdf`);
+        toast({
+          title: "Download Started",
+          description: `${report.name} is downloading...`,
+        });
+      } else {
+        toast({
+          title: "Report Generated",
+          description: `${report.name} has been generated. Check Recent Reports to download.`,
+        });
+      }
     } catch (error: any) {
       toast({
         title: "Error",
         description: error.message || "Failed to generate report",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handlePreviewHtml = async (report: any) => {
+    try {
+      toast({
+        title: "Loading Preview",
+        description: "Generating HTML preview...",
+      });
+
+      // Fetch the template to get grid_rows
+      const template = templates.find((t: any) => t.id === report.template);
+      const gridRows = template?.grid_rows || [];
+
+      const response = await fetch('http://localhost:8000/reports/preview-html/', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          domain_id: report.domain,
+          template_name: report.name,
+          grid_rows: gridRows,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate preview');
+      }
+
+      const htmlContent = await response.text();
+      setHtmlPreviewContent(htmlContent);
+      setHtmlPreviewOpen(true);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to generate preview",
         variant: "destructive",
       });
     }
@@ -648,6 +706,22 @@ const Reports = () => {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <Button
                       size="sm"
+                      variant="outline"
+                      onClick={() => handlePreviewHtml(report)}
+                    >
+                      <Eye className="h-4 w-4 mr-1" />
+                      Preview
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleRunNow(report)}
+                    >
+                      <Download className="h-4 w-4 mr-1" />
+                      Run Now
+                    </Button>
+                    <Button
+                      size="sm"
                       variant="ghost"
                       onClick={() => handleDeleteReport(report.id)}
                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
@@ -868,6 +942,22 @@ const Reports = () => {
         onConfirm={confirmDelete}
         variant="destructive"
       />
+
+      {/* HTML Preview Dialog */}
+      <Dialog open={htmlPreviewOpen} onOpenChange={setHtmlPreviewOpen}>
+        <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b">
+            <DialogTitle>HTML Preview (Debug)</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto bg-white">
+            <iframe
+              srcDoc={htmlPreviewContent}
+              className="w-full h-full border-0"
+              title="HTML Preview"
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

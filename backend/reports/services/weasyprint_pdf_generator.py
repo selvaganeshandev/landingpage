@@ -9,9 +9,11 @@ import logging
 try:
     from weasyprint import HTML, CSS
     WEASYPRINT_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError) as e:
     WEASYPRINT_AVAILABLE = False
-    logging.warning("WeasyPrint not installed. PDF generation will fail.")
+    HTML = None
+    CSS = None
+    logging.warning(f"WeasyPrint not available: {e}. Will use ReportLab fallback.")
 
 from .html_template_renderer import inject_widget_data
 
@@ -122,6 +124,42 @@ class WeasyPrintPDFGenerator:
         """
         generator = WeasyPrintPDFGenerator(html_template, css_template)
         return generator.generate(widget_data, metadata)
+
+
+def convert_html_to_pdf_weasyprint(html_content: str) -> BytesIO:
+    """
+    Direct HTML to PDF conversion using WeasyPrint
+    No template processing - just converts the HTML as-is
+
+    Args:
+        html_content: Complete HTML document
+
+    Returns:
+        BytesIO buffer containing PDF
+    """
+    if not WEASYPRINT_AVAILABLE:
+        raise ImportError("WeasyPrint is not available")
+
+    try:
+        logger.info("Converting HTML to PDF with WeasyPrint (direct)")
+
+        # Create HTML object and generate PDF
+        html = HTML(string=html_content)
+        pdf_bytes = html.write_pdf(
+            presentational_hints=True,
+            optimize_images=True,
+        )
+
+        # Return as BytesIO buffer
+        buffer = BytesIO(pdf_bytes)
+        buffer.seek(0)
+
+        logger.info(f"PDF generated successfully, size: {len(pdf_bytes)} bytes")
+        return buffer
+
+    except Exception as e:
+        logger.error(f"Error converting HTML to PDF: {str(e)}", exc_info=True)
+        raise
 
 
 def test_weasyprint_installation():

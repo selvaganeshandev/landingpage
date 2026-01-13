@@ -410,13 +410,17 @@ class ReportGenerationViewSet(viewsets.ViewSet):
         # TODO: Phase 3 - Move to async Celery task for production
         from reports.services.main import generate_report
         try:
+            logger.info(f"Starting report generation for report ID: {generated_report.id}")
             success = generate_report(generated_report.id)
             if not success:
+                logger.error(f"Report generation returned False for report ID: {generated_report.id}")
                 return Response(
                     {'error': 'Report generation failed'},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
+            logger.info(f"Report generation completed successfully for report ID: {generated_report.id}")
         except Exception as e:
+            logger.error(f"Report generation error for report ID {generated_report.id}: {str(e)}", exc_info=True)
             return Response(
                 {'error': f'Report generation error: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -668,18 +672,18 @@ def generate_custom_template_pdf(request):
             }
         }
 
-        # Generate PDF - ALWAYS try WeasyPrint first for better quality
+        # Generate PDF using WeasyPrint
         pdf_buffer = None
-        
+
         try:
-            from reports.services.weasyprint_pdf_generator import WeasyPrintPDFGenerator, WEASYPRINT_AVAILABLE
             from reports.services.html_generator import generate_html_report
-            
+            from reports.services.weasyprint_pdf_generator import convert_html_to_pdf_weasyprint, WEASYPRINT_AVAILABLE
+
             if not WEASYPRINT_AVAILABLE:
-                raise ImportError("WeasyPrint not installed")
-            
+                raise ImportError("WeasyPrint not available")
+
             logger.info(f"Using WeasyPrint for PDF generation")
-            
+
             # Prepare metadata
             metadata = {
                 'domain_name': domain.name,
@@ -691,33 +695,29 @@ def generate_custom_template_pdf(request):
                     'end': end_datetime
                 }
             }
-            
-            # ALWAYS generate HTML from grid_rows for PDF (not from saved html_template)
-            # Saved html_template contains React components that won't render in PDF
-            # This ensures charts are generated as SVG for proper PDF rendering
-            logger.info("Generating HTML from grid_rows with SVG charts for PDF")
-            html_template = generate_html_report(grid_rows, data, metadata)
-            css_template = css_template or ''
-            
-            # Generate PDF with WeasyPrint
-            generator = WeasyPrintPDFGenerator(html_template, css_template)
-            pdf_buffer = generator.generate(data, metadata)
-            
-        except (ImportError, Exception) as e:
+
+            # Generate HTML from grid_rows
+            logger.info("Generating HTML from grid_rows for PDF")
+            html_content = generate_html_report(grid_rows, data, metadata)
+
+            # Generate PDF with WeasyPrint - direct conversion
+            pdf_buffer = convert_html_to_pdf_weasyprint(html_content)
+
+        except Exception as e:
             logger.warning(f"WeasyPrint PDF generation failed, falling back to ReportLab: {str(e)}")
-            
+
             # FALLBACK: Use ReportLab (original method)
             from reports.services.pdf_generator import PDFReportGenerator
-            
+
             logger.info(f"Using ReportLab for PDF generation")
-            
+
             # Create a mock template object for PDF generator
             class MockTemplate:
                 def __init__(self, name, grid_rows):
                     self.name = name
                     self.template_type = 'custom'
                     self.grid_rows = grid_rows
-            
+
             mock_template = MockTemplate(template_name, grid_rows)
             generator = PDFReportGenerator(data, template_name, template=mock_template)
             pdf_buffer = generator.generate()
@@ -736,6 +736,50 @@ def generate_custom_template_pdf(request):
             {'error': f'PDF generation failed: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def preview_report_html(request):
+    """
+    Preview HTML output before PDF conversion - for debugging
+    Returns raw HTML that would be converted to PDF
+    """
+    from reports.services.html_generator import generate_html_report
+    from reports.services.widget_data_fetcher import WidgetDataFetcher
+    from domains.models import Domain
+
+    try:
+        domain_id = request.data.get('domain_id')
+        template_name = request.data.get('template_name', 'Custom Report')
+        grid_rows = request.data.get('grid_rows', [])
+
+        logger.info(f"Preview HTML: domain_id={domain_id}, template={template_name}, grid_rows count={len(grid_rows)}")
+
+        domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
+
+        # Fetch widget data
+        end_date = timezone.now()
+        start_date = end_date - timedelta(days=30)
+        fetcher = WidgetDataFetcher(domain, start_date, end_date, request.user.organisation)
+        data = fetcher.fetch_all_widgets(grid_rows)
+
+        # Generate HTML
+        metadata = {
+            'domain_name': domain.name,
+            'domain_url': domain.url,
+            'template_name': template_name,
+            'organisation_name': request.user.organisation.name,
+            'period': {'start': start_date, 'end': end_date}
+        }
+        html_content = generate_html_report(grid_rows, data, metadata)
+
+        # Return HTML directly for preview
+        return HttpResponse(html_content, content_type='text/html')
+
+    except Exception as e:
+        logger.error(f"Preview HTML error: {str(e)}", exc_info=True)
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])

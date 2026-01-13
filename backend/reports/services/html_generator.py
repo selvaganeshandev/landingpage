@@ -9,55 +9,153 @@ from .svg_chart_generator import SVGChartGenerator
 class HTMLReportGenerator:
     """Generates styled HTML for WeasyPrint PDF conversion"""
 
-    # Color schemes matching frontend exactly - MORE VISIBLE gradients
+    # Color schemes for PDF - slightly higher opacity for better visibility in PDF
+    # WeasyPrint renders gradients differently than browsers
     COLOR_SCHEMES = {
         'blue': {
-            'gradient_start': 'rgba(59, 130, 246, 0.15)',
-            'gradient_end': 'rgba(59, 130, 246, 0.05)',
-            'border': '#93c5fd',
-            'text': '#2563eb',
-            'bg': '#eff6ff',
+            'gradient_start': 'rgba(59, 130, 246, 0.15)',   # More visible in PDF
+            'gradient_end': 'rgba(59, 130, 246, 0.08)',
+            'border': '#bfdbfe',                             # border-blue-200
+            'text': '#2563eb',                               # text-blue-600
+            'bg': '#eff6ff',                                 # bg-blue-50
             'status_text': '#2563eb',
         },
         'purple': {
-            'gradient_start': 'rgba(139, 92, 246, 0.15)',
-            'gradient_end': 'rgba(139, 92, 246, 0.05)',
-            'border': '#c4b5fd',
-            'text': '#7c3aed',
-            'bg': '#faf5ff',
-            'status_text': '#7c3aed',
+            'gradient_start': 'rgba(168, 85, 247, 0.15)',
+            'gradient_end': 'rgba(168, 85, 247, 0.08)',
+            'border': '#e9d5ff',                             # border-purple-200
+            'text': '#9333ea',                               # text-purple-600
+            'bg': '#faf5ff',                                 # bg-purple-50
+            'status_text': '#9333ea',
         },
         'green': {
             'gradient_start': 'rgba(34, 197, 94, 0.15)',
-            'gradient_end': 'rgba(34, 197, 94, 0.05)',
-            'border': '#86efac',
-            'text': '#16a34a',
-            'bg': '#f0fdf4',
+            'gradient_end': 'rgba(34, 197, 94, 0.08)',
+            'border': '#bbf7d0',                             # border-green-200
+            'text': '#16a34a',                               # text-green-600
+            'bg': '#f0fdf4',                                 # bg-green-50
             'status_text': '#16a34a',
         },
         'orange': {
             'gradient_start': 'rgba(249, 115, 22, 0.15)',
-            'gradient_end': 'rgba(249, 115, 22, 0.05)',
-            'border': '#fdba74',
-            'text': '#ea580c',
-            'bg': '#fff7ed',
+            'gradient_end': 'rgba(249, 115, 22, 0.08)',
+            'border': '#fed7aa',                             # border-orange-200
+            'text': '#ea580c',                               # text-orange-600
+            'bg': '#fff7ed',                                 # bg-orange-50
             'status_text': '#ea580c',
         },
         'red': {
             'gradient_start': 'rgba(239, 68, 68, 0.15)',
-            'gradient_end': 'rgba(239, 68, 68, 0.05)',
-            'border': '#fca5a5',
-            'text': '#dc2626',
-            'bg': '#fef2f2',
+            'gradient_end': 'rgba(239, 68, 68, 0.08)',
+            'border': '#fecaca',                             # border-red-200
+            'text': '#dc2626',                               # text-red-600
+            'bg': '#fef2f2',                                 # bg-red-50
             'status_text': '#dc2626',
         },
         'yellow': {
             'gradient_start': 'rgba(234, 179, 8, 0.15)',
-            'gradient_end': 'rgba(234, 179, 8, 0.05)',
-            'border': '#fde047',
-            'text': '#ca8a04',
-            'bg': '#fefce8',
+            'gradient_end': 'rgba(234, 179, 8, 0.08)',
+            'border': '#fef08a',                             # border-yellow-200
+            'text': '#ca8a04',                               # text-yellow-600
+            'bg': '#fefce8',                                 # bg-yellow-50
             'status_text': '#ca8a04',
+        },
+        # Additional colors to match frontend widgets
+        'indigo': {
+            'gradient_start': 'rgba(99, 102, 241, 0.15)',
+            'gradient_end': 'rgba(99, 102, 241, 0.08)',
+            'border': '#c7d2fe',                             # border-indigo-200
+            'text': '#4f46e5',                               # text-indigo-600
+            'bg': '#eef2ff',                                 # bg-indigo-50
+            'status_text': '#4f46e5',
+        },
+        'cyan': {
+            'gradient_start': 'rgba(6, 182, 212, 0.15)',
+            'gradient_end': 'rgba(6, 182, 212, 0.08)',
+            'border': '#a5f3fc',                             # border-cyan-200
+            'text': '#0891b2',                               # text-cyan-600
+            'bg': '#ecfeff',                                 # bg-cyan-50
+            'status_text': '#0891b2',
+        },
+        'teal': {
+            'gradient_start': 'rgba(20, 184, 166, 0.15)',
+            'gradient_end': 'rgba(20, 184, 166, 0.08)',
+            'border': '#99f6e4',                             # border-teal-200
+            'text': '#0d9488',                               # text-teal-600
+            'bg': '#f0fdfa',                                 # bg-teal-50
+            'status_text': '#0d9488',
+        },
+        'amber': {
+            'gradient_start': 'rgba(245, 158, 11, 0.15)',
+            'gradient_end': 'rgba(245, 158, 11, 0.08)',
+            'border': '#fde68a',                             # border-amber-200
+            'text': '#d97706',                               # text-amber-600
+            'bg': '#fffbeb',                                 # bg-amber-50
+            'status_text': '#d97706',
+        },
+        'violet': {
+            'gradient_start': 'rgba(139, 92, 246, 0.15)',
+            'gradient_end': 'rgba(139, 92, 246, 0.08)',
+            'border': '#ddd6fe',                             # border-violet-200
+            'text': '#7c3aed',                               # text-violet-600
+            'bg': '#f5f3ff',                                 # bg-violet-50
+            'status_text': '#7c3aed',
+        },
+        'emerald': {
+            'gradient_start': 'rgba(16, 185, 129, 0.15)',
+            'gradient_end': 'rgba(16, 185, 129, 0.08)',
+            'border': '#a7f3d0',                             # border-emerald-200
+            'text': '#059669',                               # text-emerald-600
+            'bg': '#ecfdf5',                                 # bg-emerald-50
+            'status_text': '#059669',
+        },
+        'sky': {
+            'gradient_start': 'rgba(14, 165, 233, 0.15)',
+            'gradient_end': 'rgba(14, 165, 233, 0.08)',
+            'border': '#bae6fd',                             # border-sky-200
+            'text': '#0284c7',                               # text-sky-600
+            'bg': '#f0f9ff',                                 # bg-sky-50
+            'status_text': '#0284c7',
+        },
+        'pink': {
+            'gradient_start': 'rgba(236, 72, 153, 0.15)',
+            'gradient_end': 'rgba(236, 72, 153, 0.08)',
+            'border': '#fbcfe8',                             # border-pink-200
+            'text': '#db2777',                               # text-pink-600
+            'bg': '#fdf2f8',                                 # bg-pink-50
+            'status_text': '#db2777',
+        },
+        'rose': {
+            'gradient_start': 'rgba(244, 63, 94, 0.15)',
+            'gradient_end': 'rgba(244, 63, 94, 0.08)',
+            'border': '#fecdd3',                             # border-rose-200
+            'text': '#e11d48',                               # text-rose-600
+            'bg': '#fff1f2',                                 # bg-rose-50
+            'status_text': '#e11d48',
+        },
+        'fuchsia': {
+            'gradient_start': 'rgba(217, 70, 239, 0.15)',
+            'gradient_end': 'rgba(217, 70, 239, 0.08)',
+            'border': '#f5d0fe',                             # border-fuchsia-200
+            'text': '#c026d3',                               # text-fuchsia-600
+            'bg': '#fdf4ff',                                 # bg-fuchsia-50
+            'status_text': '#c026d3',
+        },
+        'lime': {
+            'gradient_start': 'rgba(132, 204, 22, 0.15)',
+            'gradient_end': 'rgba(132, 204, 22, 0.08)',
+            'border': '#d9f99d',                             # border-lime-200
+            'text': '#65a30d',                               # text-lime-600
+            'bg': '#f7fee7',                                 # bg-lime-50
+            'status_text': '#65a30d',
+        },
+        'slate': {
+            'gradient_start': 'rgba(100, 116, 139, 0.15)',
+            'gradient_end': 'rgba(100, 116, 139, 0.08)',
+            'border': '#e2e8f0',                             # border-slate-200
+            'text': '#475569',                               # text-slate-600
+            'bg': '#f8fafc',                                 # bg-slate-50
+            'status_text': '#475569',
         },
     }
 
@@ -161,7 +259,8 @@ class HTMLReportGenerator:
             display: grid;
             gap: 1rem;
             margin-bottom: 1rem;
-            align-items: stretch;
+            align-items: start !important;
+            grid-auto-rows: min-content;
         }
 
         .grid-single { grid-template-columns: 1fr; }
@@ -171,8 +270,6 @@ class HTMLReportGenerator:
 
         .widget {
             break-inside: avoid;
-            display: flex;
-            flex-direction: column;
         }
 
         .metric-card {
@@ -180,32 +277,28 @@ class HTMLReportGenerator:
             border-radius: 0.75rem;
             border-width: 1px;
             border-style: solid;
-            display: flex;
-            flex-direction: column;
-            justify-content: flex-start;
             overflow: hidden;
         }
 
         .metric-label {
-            font-size: 1rem;
-            color: #374151;
+            font-size: 0.875rem;
+            color: #6b7280;
             font-weight: 500;
-            margin-bottom: 0.75rem;
-            line-height: 1.3;
+            margin-bottom: 0.5rem;
+            line-height: 1.4;
         }
 
         .metric-value {
-            font-size: 2.5rem;
+            font-size: 2.25rem;
             font-weight: 700;
-            line-height: 1;
-            margin-bottom: 0.75rem;
+            line-height: 1.2;
             letter-spacing: -0.02em;
         }
-        
+
         .metric-subtitle {
             font-size: 0.875rem;
             color: #6b7280;
-            margin-top: auto;
+            margin-top: 0.5rem;
             line-height: 1.4;
         }
         
@@ -376,49 +469,51 @@ class HTMLReportGenerator:
         if growth is not None and growth != 0:
             try:
                 growth_val = float(growth)
-                # Use nice arrow icons
                 arrow = '↗' if growth_val > 0 else '↘'
                 growth_color = '#16a34a' if growth_val > 0 else '#dc2626'
                 growth_text = f"{'+' if growth_val > 0 else ''}{growth_val:.1f}%"
 
                 growth_html = f'''
-                <div class="metric-growth">
-                    <span class="metric-growth-icon" style="color: {growth_color};">{arrow}</span>
-                    <span class="metric-growth-value" style="color: {growth_color};">{growth_text}</span>
-                    <span class="metric-growth-label">from last month</span>
-                </div>
+                <p style="font-size: 0.875rem; margin: 0.5rem 0 0 0; display: flex; align-items: center; gap: 0.25rem;">
+                    <span style="color: {growth_color};">{arrow}</span>
+                    <span style="color: {growth_color}; font-weight: 600;">{growth_text}</span>
+                    <span style="color: #6b7280;">from last month</span>
+                </p>
                 '''
             except (ValueError, TypeError):
                 pass
-        
+
         # Status text based on widget type and value
         status_html = ''
         status_text = self._get_status_text(widget_id, data)
         if status_text and not growth_html:  # Only show status if no growth
             status_color = colors.get('status_text', colors['text'])
             status_html = f'''
-            <div class="metric-status" style="color: {status_color};">
-                <span>↗</span>
-                <span>{status_text}</span>
-            </div>
+            <p style="font-size: 0.875rem; margin: 0.5rem 0 0 0; color: {status_color};">
+                ↗ {status_text}
+            </p>
             '''
-        
+
         # Subtitle
         subtitle_html = ''
         if subtitle:
-            # Truncate long subtitles
             display_subtitle = subtitle if len(str(subtitle)) <= 35 else str(subtitle)[:32] + '...'
             subtitle_html = f'''
-            <div class="metric-subtitle">{display_subtitle}</div>
+            <p style="font-size: 0.875rem; color: #6b7280; margin: 0.5rem 0 0 0;">{display_subtitle}</p>
             '''
 
         return f'''
-        <div class="widget metric-card" style="
+        <div style="
             background: linear-gradient(to bottom right, {colors['gradient_start']}, {colors['gradient_end']});
-            border-color: {colors['border']};
+            border: 1px solid {colors['border']};
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            height: auto !important;
+            min-height: 0 !important;
+            align-self: start;
         ">
-            <div class="metric-label">{label}</div>
-            <div class="metric-value" style="color: {colors['text']};">{formatted_value}</div>
+            <p style="font-size: 0.875rem; color: #6b7280; margin: 0 0 0.5rem 0;">{label}</p>
+            <p style="font-size: 2.25rem; font-weight: 700; color: {colors['text']}; margin: 0; line-height: 1.2;">{formatted_value}</p>
             {growth_html}
             {status_html}
             {subtitle_html}
@@ -563,24 +658,94 @@ class HTMLReportGenerator:
         """Determine color scheme based on widget ID - matches frontend exactly"""
         widget_id_lower = widget_id.lower()
 
-        # Critical/issues/alerts -> Red
-        if any(keyword in widget_id_lower for keyword in ['critical', 'issue', 'alert', 'error', 'misinformation']):
-            return 'red'
-        # Broken/warnings -> Yellow
-        elif any(keyword in widget_id_lower for keyword in ['broken', 'warning', 'need']):
-            return 'yellow'
-        # Sentiment/positive/health -> Green
-        elif any(keyword in widget_id_lower for keyword in ['sentiment', 'positive', 'health', 'quality', 'coverage', 'answer']):
-            return 'green'
-        # Platform/competitor/position/rank -> Purple
-        elif any(keyword in widget_id_lower for keyword in ['platform', 'competitor', 'position', 'rank', 'topic', 'source']):
-            return 'purple'
-        # Share/voice/market/growth -> Orange
-        elif any(keyword in widget_id_lower for keyword in ['share', 'voice', 'market', 'growth', 'trend']):
-            return 'orange'
-        # Citation/mention/content -> Blue (default)
-        else:
-            return 'blue'  # Default
+        # Exact matches for specific widget types (matching ReportBuilder.tsx)
+        color_mapping = {
+            # Blue family
+            'mentions': 'blue',
+            'ranking': 'blue',
+            'trends': 'blue',
+
+            # Green family
+            'sentiment': 'green',
+            'growth': 'green',
+            'revenue': 'green',
+            'authority': 'green',
+            'actions': 'green',
+            'answer': 'green',
+            'health': 'green',
+
+            # Purple family
+            'competitors': 'purple',
+            'traffic': 'purple',
+            'performance': 'purple',
+            'gaps': 'purple',
+
+            # Orange family
+            'share': 'orange',
+            'voice': 'orange',
+            'referral': 'orange',
+            'opportunities': 'orange',
+
+            # Indigo family
+            'prompts': 'indigo',
+            'accuracy': 'indigo',
+            'conversion': 'indigo',
+            'recommendations': 'indigo',
+
+            # Cyan family
+            'citations': 'cyan',
+            'consistency': 'cyan',
+
+            # Emerald family
+            'sources': 'emerald',
+            'engagement': 'emerald',
+            'freshness': 'emerald',
+
+            # Amber family
+            'response': 'amber',
+
+            # Violet family
+            'position': 'violet',
+
+            # Sky family
+            'platforms': 'sky',
+
+            # Teal family
+            'topics': 'teal',
+
+            # Pink family
+            'coverage': 'pink',
+
+            # Fuchsia family
+            'score': 'fuchsia',
+
+            # Rose family
+            'alerts': 'rose',
+
+            # Lime family
+            'reach': 'lime',
+
+            # Slate family
+            'quality': 'slate',
+
+            # Red family
+            'critical': 'red',
+            'issue': 'red',
+            'error': 'red',
+            'misinformation': 'red',
+
+            # Yellow family
+            'broken': 'yellow',
+            'warning': 'yellow',
+        }
+
+        # Check for keyword matches
+        for keyword, color in color_mapping.items():
+            if keyword in widget_id_lower:
+                return color
+
+        # Default to blue
+        return 'blue'
     
     def _get_status_text(self, widget_id: str, data: Dict[str, Any]) -> str:
         """Generate status text like 'Strong growth', 'Improving', etc."""

@@ -78,9 +78,9 @@ class ScheduledReportUpdateSerializer(serializers.ModelSerializer):
 
 
 class GeneratedReportSerializer(serializers.ModelSerializer):
-    domain_name = serializers.CharField(source='domain.name', read_only=True)
-    generated_by_email = serializers.EmailField(source='generated_by.email', read_only=True)
-    scheduled_report_name = serializers.CharField(source='scheduled_report.name', read_only=True)
+    domain_name = serializers.SerializerMethodField()
+    generated_by_email = serializers.SerializerMethodField()
+    scheduled_report_name = serializers.SerializerMethodField()
     download_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -92,6 +92,15 @@ class GeneratedReportSerializer(serializers.ModelSerializer):
             'generated_by', 'generated_by_email', 'summary_data', 'download_url'
         ]
         read_only_fields = ['id', 'generated_at']
+
+    def get_domain_name(self, obj):
+        return obj.domain.name if obj.domain else None
+
+    def get_generated_by_email(self, obj):
+        return obj.generated_by.email if obj.generated_by else None
+
+    def get_scheduled_report_name(self, obj):
+        return obj.scheduled_report.name if obj.scheduled_report else None
 
     def get_download_url(self, obj):
         if obj.file_path:

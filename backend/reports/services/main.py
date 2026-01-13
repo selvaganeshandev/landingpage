@@ -12,7 +12,7 @@ from .excel_generator import ExcelReportGenerator
 from .powerpoint_generator import PowerPointReportGenerator
 from .widget_data_fetcher import WidgetDataFetcher
 from .html_generator import generate_html_report
-from .weasyprint_pdf_generator import WeasyPrintPDFGenerator, WEASYPRINT_AVAILABLE
+from .weasyprint_pdf_generator import convert_html_to_pdf_weasyprint, WEASYPRINT_AVAILABLE
 import logging
 
 logger = logging.getLogger(__name__)
@@ -114,29 +114,25 @@ def generate_report(report_id):
         file_extension = ''
 
         if report.format == 'PDF':
-            # Use WeasyPrint for all PDFs if available (better visual quality)
+            # Use WeasyPrint for PDF generation
             if WEASYPRINT_AVAILABLE:
                 try:
                     logger.info(f"Using WeasyPrint for PDF generation (report_id: {report.id})")
-                    
+
                     # Generate HTML template
                     if is_custom_template:
-                        # ALWAYS regenerate HTML from grid_rows for PDFs
-                        # Saved html_template contains React components that won't render in PDF
-                        # This ensures charts are generated as SVG for proper PDF rendering
-                        logger.info("Generating HTML from grid_rows with SVG charts for PDF")
-                        html_template = generate_html_report(
+                        logger.info("Generating HTML from grid_rows for PDF")
+                        html_content = generate_html_report(
                             template.grid_rows,
                             data,
                             data.get('_metadata', {})
                         )
-                        css_template = ''
                     else:
                         # For predefined templates, generate HTML on-the-fly
                         logger.info("Generating HTML for predefined template")
                         # Create a simple grid_rows structure for predefined templates
                         grid_rows = _create_grid_rows_for_predefined(report.report_type, data)
-                        html_template = generate_html_report(
+                        html_content = generate_html_report(
                             grid_rows,
                             data,
                             {
@@ -150,30 +146,19 @@ def generate_report(report_id):
                                 }
                             }
                         )
-                        css_template = ''
-                    
-                    # Generate PDF with WeasyPrint
-                    generator = WeasyPrintPDFGenerator(html_template, css_template)
-                    file_buffer = generator.generate(data, {
-                        'domain_name': domain.name,
-                        'template_name': report.report_type,
-                        'period': {
-                            'start': start_datetime,
-                            'end': end_datetime
-                        }
-                    })
+
+                    # Generate PDF with WeasyPrint - direct conversion
+                    file_buffer = convert_html_to_pdf_weasyprint(html_content)
                     file_extension = 'pdf'
                     logger.info("PDF generated successfully with WeasyPrint")
-                    
+
                 except Exception as e:
                     logger.warning(f"WeasyPrint PDF generation failed, falling back to ReportLab: {str(e)}")
-                    # Fallback to ReportLab
                     generator = PDFReportGenerator(data, report.report_type, template=template)
                     file_buffer = generator.generate()
                     file_extension = 'pdf'
             else:
                 logger.info("WeasyPrint not available, using ReportLab")
-                # Fallback to ReportLab if WeasyPrint not available
                 generator = PDFReportGenerator(data, report.report_type, template=template)
                 file_buffer = generator.generate()
                 file_extension = 'pdf'
