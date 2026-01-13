@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
@@ -157,6 +158,16 @@ export default function OrganizationSettings() {
     created_at: string;
   }>>([]);
 
+  // Tab state
+  const [selectedTab, setSelectedTab] = useState("domains");
+
+  // Profile state
+  const [profileData, setProfileData] = useState({
+    first_name: "",
+    last_name: "",
+  });
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdatingOrg, setIsUpdatingOrg] = useState(false);
@@ -244,6 +255,16 @@ export default function OrganizationSettings() {
 
     return () => clearInterval(interval);
   }, [isAutomatedOnboarding, progressMessages.length]);
+
+  // Initialize profile data from user
+  useEffect(() => {
+    if (user) {
+      setProfileData({
+        first_name: user.first_name || "",
+        last_name: user.last_name || "",
+      });
+    }
+  }, [user]);
 
   const loadData = async () => {
     try {
@@ -1160,6 +1181,30 @@ export default function OrganizationSettings() {
     }
   };
 
+  const handleUpdateProfile = async () => {
+    try {
+      setIsUpdatingProfile(true);
+
+      await apiClient.updateProfile({
+        first_name: profileData.first_name,
+        last_name: profileData.last_name,
+      });
+
+      toast({
+        title: "Profile updated",
+        description: "Your profile has been updated successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error updating profile",
+        description: error.message || "Failed to update profile. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdatingProfile(false);
+    }
+  };
+
   const handleInviteMember = async () => {
     if (!inviteEmail.trim()) return;
 
@@ -1320,44 +1365,30 @@ export default function OrganizationSettings() {
 
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
-      <div>
-        <h1 className="text-3xl font-bold">Organization Settings</h1>
-        <p className="text-muted-foreground mt-2">
-          Manage your organization and domains
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Organization Settings</h1>
+          <p className="text-muted-foreground mt-2">
+            Manage your organization, domains, and team
+          </p>
+        </div>
       </div>
 
-      <Card className="border border-border">
-        <CardHeader>
-          <CardTitle>Organization Details</CardTitle>
-          <CardDescription>
-            Update your organization information
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="org-name">Organization Name</Label>
-            <div className="flex gap-2">
-              <Input
-                id="org-name"
-                value={organization.name}
-                onChange={(e) => setOrganization({ ...organization, name: e.target.value })}
-              />
-              <Button onClick={handleUpdateOrgName} disabled={isUpdatingOrg}>
-                {isUpdatingOrg ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-6">
+        <TabsList className="bg-muted/50 p-1 border border-border">
+          <TabsTrigger value="domains" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">All Domains</TabsTrigger>
+          <TabsTrigger value="team" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Team Members</TabsTrigger>
+          <TabsTrigger value="profile" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Profile</TabsTrigger>
+        </TabsList>
 
-      <Card className="border border-border">
-        <CardHeader>
-          <CardTitle>Domains</CardTitle>
-          <CardDescription>
-            Add and manage domains for your organization. All brand monitoring will be scoped to these domains.
-          </CardDescription>
-        </CardHeader>
+        <TabsContent value="domains" className="space-y-6">
+          <Card className="border border-border">
+            <CardHeader>
+              <CardTitle>Domains</CardTitle>
+              <CardDescription>
+                Add and manage domains for your organization. All brand monitoring will be scoped to these domains.
+              </CardDescription>
+            </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex gap-2">
             <Button onClick={() => setAddDomainDialogOpen(true)}>
@@ -1480,23 +1511,25 @@ export default function OrganizationSettings() {
               })
             )}
           </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+          </Card>
+        </TabsContent>
 
-      <Card className="border border-border">
-        <CardHeader>
-          <CardTitle>Team Members</CardTitle>
-          <CardDescription>
-            Manage your organization's team members and their roles
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Button onClick={() => setInviteDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Invite Member
-          </Button>
+        <TabsContent value="team" className="space-y-6">
+          <Card className="border border-border">
+            <CardHeader>
+              <CardTitle>Team Members</CardTitle>
+              <CardDescription>
+                Manage your organization's team members and their roles
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Button onClick={() => setInviteDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Invite Member
+              </Button>
 
-          <Separator />
+              <Separator />
 
           {invitations.length > 0 && (
             <div className="space-y-3">
@@ -1614,10 +1647,81 @@ export default function OrganizationSettings() {
                   </div>
                 );
               })
-            )}
-          </div>
-        </CardContent>
-      </Card>
+              )}
+            </div>
+          </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="profile" className="space-y-6">
+          <Card className="border border-border">
+            <CardHeader>
+              <CardTitle>Profile Settings</CardTitle>
+              <CardDescription>
+                Update your personal information and organization details
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold">Personal Information</h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="first-name">First Name</Label>
+                    <Input
+                      id="first-name"
+                      value={profileData.first_name}
+                      onChange={(e) => setProfileData({ ...profileData, first_name: e.target.value })}
+                      placeholder="Enter your first name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="last-name">Last Name</Label>
+                    <Input
+                      id="last-name"
+                      value={profileData.last_name}
+                      onChange={(e) => setProfileData({ ...profileData, last_name: e.target.value })}
+                      placeholder="Enter your last name"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    value={user?.email || ""}
+                    disabled
+                    className="bg-muted"
+                  />
+                  <p className="text-xs text-muted-foreground">Email cannot be changed</p>
+                </div>
+                <Button onClick={handleUpdateProfile} disabled={isUpdatingProfile}>
+                  {isUpdatingProfile ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Save Profile
+                </Button>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold">Organization</h3>
+                <div className="space-y-2">
+                  <Label htmlFor="org-name">Organization Name</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="org-name"
+                      value={organization.name}
+                      onChange={(e) => setOrganization({ ...organization, name: e.target.value })}
+                    />
+                    <Button onClick={handleUpdateOrgName} disabled={isUpdatingOrg}>
+                      {isUpdatingOrg ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
         <DialogContent>
