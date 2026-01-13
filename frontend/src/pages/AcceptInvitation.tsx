@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { AlertCircle, CheckCircle, Eye, EyeOff, User, Building2 } from "lucide-react";
+import { AlertCircle, CheckCircle, Eye, EyeOff, Building2 } from "lucide-react";
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -198,11 +198,15 @@ export default function AcceptInvitation() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
       <Card className="w-full max-w-md border border-border">
         <CardHeader className="text-center">
-          {/* Avatar */}
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-blue-500">
-            <User className="h-8 w-8 text-white" />
+          {/* Logo */}
+          <div className="mx-auto mb-4">
+            <img
+              src="/logo.png"
+              alt="PromptMaxx"
+              className="h-12 w-auto"
+            />
           </div>
-          
+
           {/* Invitation Text */}
           <CardTitle className="text-xl font-semibold">
             <span className="text-blue-600 font-bold">{invitation.invited_by_name}</span> invited you to collaborate

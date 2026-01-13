@@ -79,10 +79,10 @@ class AccountUpdateSerializer(serializers.ModelSerializer):
 class TeamInvitationSerializer(serializers.ModelSerializer):
     """Serializer for TeamInvitation model"""
     organisation_name = serializers.CharField(source='organisation.name', read_only=True)
-    invited_by_name = serializers.CharField(source='invited_by.email', read_only=True)
+    invited_by_name = serializers.SerializerMethodField()
     is_expired = serializers.SerializerMethodField()
     can_be_accepted = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = TeamInvitation
         fields = [
@@ -91,10 +91,15 @@ class TeamInvitationSerializer(serializers.ModelSerializer):
             'is_expired', 'can_be_accepted'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at', 'accepted_at']
-    
+
+    def get_invited_by_name(self, obj):
+        inviter = obj.invited_by
+        full_name = f"{inviter.first_name or ''} {inviter.last_name or ''}".strip()
+        return full_name if full_name else inviter.email
+
     def get_is_expired(self, obj):
         return obj.is_expired()
-    
+
     def get_can_be_accepted(self, obj):
         return obj.can_be_accepted()
 
