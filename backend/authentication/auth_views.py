@@ -186,6 +186,7 @@ def send_invitation(request):
             send_mail(subject=subject, message=message, from_email=settings.DEFAULT_FROM_EMAIL, recipient_list=[invitation.email], fail_silently=False)
             return Response({'message': 'Invitation sent successfully', 'invitation': TeamInvitationSerializer(invitation).data}, status=status.HTTP_201_CREATED)
         except Exception as e:
+            invitation.delete()
             return Response({'error': f'Failed to send email: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -263,6 +264,8 @@ def forgot_password(request):
         except Account.DoesNotExist:
             return Response({'message': 'If an account with this email exists, a password reset email has been sent'}, status=status.HTTP_200_OK)
         except Exception as e:
+            if 'reset_token' in locals():
+                reset_token.delete()
             return Response({'error': f'Failed to send password reset email: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
