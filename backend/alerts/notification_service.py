@@ -6,7 +6,7 @@ at engine/core/alert_evaluator.py
 This file is kept for reference only.
 """
 import logging
-from django.core.mail import send_mail
+from llm_monitor.email_utils import send_mail
 from django.conf import settings
 from django.utils import timezone
 from typing import List

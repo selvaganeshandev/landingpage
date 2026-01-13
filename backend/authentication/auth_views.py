@@ -5,7 +5,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.shortcuts import get_object_or_404
-from django.core.mail import send_mail
+from llm_monitor.email_utils import send_mail
 from django.utils import timezone
 from django.conf import settings
 from .models import Account, Organisation, TeamInvitation, UserPermission, PasswordResetToken

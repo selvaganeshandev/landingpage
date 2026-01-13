@@ -4,7 +4,7 @@ from rest_framework import status
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import authenticate
 from rest_framework.authtoken.models import Token
-from django.core.mail import send_mail
+from llm_monitor.email_utils import send_mail
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.conf import settings
