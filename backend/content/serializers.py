@@ -35,8 +35,20 @@ class ContentGenerationRequestSerializer(serializers.Serializer):
     title = serializers.CharField(required=True, max_length=500)
     keywords = serializers.CharField(required=True)
     article_type = serializers.ChoiceField(
-        choices=['blog', 'guide', 'comparison', 'listicle', 'technical'],
+        choices=[
+            # Article Types
+            'blog', 'guide', 'comparison', 'listicle', 'technical',
+            # Web Page Content Types
+            'landing_page', 'services_page', 'product_page', 'features_page', 'resource_page'
+        ],
         default='blog'
+    )
+    target_country = serializers.CharField(default='united_states')
+    target_language = serializers.CharField(default='us_english')
+    references = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        default=list
     )
     tone = serializers.CharField(default='professional')
     style = serializers.CharField(default='informative')
@@ -52,6 +64,10 @@ class ContentGenerationRequestSerializer(serializers.Serializer):
     source_reference = serializers.CharField(required=False, allow_blank=True)
     priority = serializers.CharField(default='medium')
     scheduled_date = serializers.DateTimeField(required=False, allow_null=True)
+    # Domain content guidelines (optional context for AI)
+    key_messages = serializers.CharField(required=False, allow_blank=True, default='')
+    topics_to_avoid = serializers.CharField(required=False, allow_blank=True, default='')
+    brand_values = serializers.CharField(required=False, allow_blank=True, default='')
 
     def validate_domain_id(self, value):
         try:

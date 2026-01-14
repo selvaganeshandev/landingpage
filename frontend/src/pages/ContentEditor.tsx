@@ -34,7 +34,10 @@ import {
   Sparkles,
   ChevronDown,
   Send,
-  Info
+  Info,
+  Bot,
+  User,
+  Loader2
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -57,6 +60,7 @@ const ContentEditor = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const editorRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
   const isInitialLoad = useRef(true);
 
   const [content, setContent] = useState("");
@@ -67,10 +71,17 @@ const ContentEditor = () => {
   const [contentData, setContentData] = useState<any>(null);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
 
+  // Undo/Redo history - using refs to avoid stale closure issues
+  const historyRef = useRef<string[]>([]);
+  const historyIndexRef = useRef(-1);
+  const isUndoRedoAction = useRef(false);
+  const [, forceUpdate] = useState(0); // Used to trigger re-render for button states
+
   // Image modal state
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [imageUrl, setImageUrl] = useState("");
   const [imageAlt, setImageAlt] = useState("");
+  const savedSelectionRef = useRef<Range | null>(null);
 
   // Content metrics
   const [wordCount, setWordCount] = useState(0);
@@ -89,6 +100,15 @@ const ContentEditor = () => {
   }>>([]);
   const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
   const originalContentRef = useRef<string>("");
+
+  // AI Detection state
+  const [aiDetecting, setAiDetecting] = useState(false);
+  const [aiDetectionResult, setAiDetectionResult] = useState<{
+    ai_score: number;
+    human_score: number;
+    label: string;
+    confidence: number;
+  } | null>(null);
 
   // Count keyword occurrences in text
   const countKeywordOccurrences = (text: string, keyword: string): number => {
@@ -186,7 +206,14 @@ const ContentEditor = () => {
           setContentData(contentRecord);
           setTitle(contentRecord.title);
 
-          const htmlContent = contentRecord.content_html || "";
+          // Strip H1 from content since title is now shown separately
+          // Also remove any inline line-height styles that might cause inconsistent spacing
+          let htmlContent = contentRecord.content_html || "";
+          htmlContent = htmlContent.replace(/<h1[^>]*>.*?<\/h1>/gi, '').trim();
+          // Remove line-height from inline styles
+          htmlContent = htmlContent.replace(/line-height:\s*[^;"}]+;?/gi, '');
+          // Remove empty style attributes
+          htmlContent = htmlContent.replace(/\s*style="\s*"/gi, '');
           setContent(htmlContent);
 
           // Extract keywords and count occurrences
@@ -240,12 +267,83 @@ const ContentEditor = () => {
         if (editorRef.current) {
           editorRef.current.innerHTML = content;
           originalContentRef.current = content; // Store original content for keyword highlighting
+          // Initialize undo/redo history with the loaded content
+          historyRef.current = [content];
+          historyIndexRef.current = 0;
           isInitialLoad.current = false;
+          forceUpdate(n => n + 1); // Update button states
         }
       }, 50);
       return () => clearTimeout(timeoutId);
     }
   }, [content, loading]);
+
+  // Auto-resize title textarea when title changes
+  useEffect(() => {
+    if (titleRef.current && title) {
+      titleRef.current.style.height = 'auto';
+      titleRef.current.style.height = titleRef.current.scrollHeight + 'px';
+    }
+  }, [title]);
+
+  // MutationObserver to remove inline line-height styles added by browser
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    let isProcessing = false;
+
+    const removeInlineLineHeight = (element: Element) => {
+      if (element.hasAttribute('style')) {
+        const style = element.getAttribute('style') || '';
+        if (style.includes('line-height')) {
+          const newStyle = style.replace(/line-height:\s*[^;]+;?/gi, '').trim();
+          if (newStyle) {
+            element.setAttribute('style', newStyle);
+          } else {
+            element.removeAttribute('style');
+          }
+        }
+      }
+    };
+
+    const observer = new MutationObserver((mutations) => {
+      if (isProcessing) return;
+      isProcessing = true;
+
+      try {
+        mutations.forEach((mutation) => {
+          // Check modified element
+          if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+            removeInlineLineHeight(mutation.target as Element);
+          }
+          // Check added nodes
+          if (mutation.type === 'childList') {
+            mutation.addedNodes.forEach((node) => {
+              if (node.nodeType === Node.ELEMENT_NODE) {
+                removeInlineLineHeight(node as Element);
+                // Also check children
+                (node as Element).querySelectorAll('[style]').forEach(removeInlineLineHeight);
+              }
+            });
+          }
+        });
+      } finally {
+        // Use setTimeout to reset flag after current call stack
+        setTimeout(() => {
+          isProcessing = false;
+        }, 0);
+      }
+    });
+
+    observer.observe(editorRef.current, {
+      attributes: true,
+      attributeFilter: ['style'],
+      childList: true,
+      subtree: true,
+    });
+
+    return () => observer.disconnect();
+  }, [loading]);
 
   // Update content metrics
   const updateMetrics = (html: string, keywordsList?: typeof keywords) => {
@@ -338,6 +436,25 @@ const ContentEditor = () => {
       const html = editorRef.current.innerHTML;
       setContent(html);
 
+      // Add to history only if this is not an undo/redo action
+      if (!isUndoRedoAction.current) {
+        const lastContent = historyRef.current[historyIndexRef.current] || '';
+        // Only add to history if content actually changed
+        if (html !== lastContent) {
+          // Remove any future states if we're not at the end
+          historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
+          // Add new state (limit history to 50 entries to save memory)
+          historyRef.current.push(html);
+          if (historyRef.current.length > 50) {
+            historyRef.current = historyRef.current.slice(-50);
+          }
+          historyIndexRef.current = historyRef.current.length - 1;
+          // Force re-render for button states
+          forceUpdate(n => n + 1);
+        }
+      }
+      isUndoRedoAction.current = false;
+
       // Recalculate keyword stats based on new content
       const contentText = html.replace(/<[^>]*>/g, ' ').toLowerCase();
       const wordCount = contentText.split(/\s+/).filter((w: string) => w.length > 0).length;
@@ -366,31 +483,161 @@ const ContentEditor = () => {
     }
   };
 
+  // Undo function
+  const handleUndo = () => {
+    if (historyIndexRef.current > 0) {
+      isUndoRedoAction.current = true;
+      historyIndexRef.current = historyIndexRef.current - 1;
+      const previousContent = historyRef.current[historyIndexRef.current];
+
+      if (editorRef.current && previousContent !== undefined) {
+        editorRef.current.innerHTML = previousContent;
+        setContent(previousContent);
+        updateMetrics(previousContent);
+        editorRef.current.focus();
+        // Force re-render for button states
+        forceUpdate(n => n + 1);
+      }
+    }
+  };
+
+  // Redo function
+  const handleRedo = () => {
+    if (historyIndexRef.current < historyRef.current.length - 1) {
+      isUndoRedoAction.current = true;
+      historyIndexRef.current = historyIndexRef.current + 1;
+      const nextContent = historyRef.current[historyIndexRef.current];
+
+      if (editorRef.current && nextContent !== undefined) {
+        editorRef.current.innerHTML = nextContent;
+        setContent(nextContent);
+        updateMetrics(nextContent);
+        editorRef.current.focus();
+        // Force re-render for button states
+        forceUpdate(n => n + 1);
+      }
+    }
+  };
+
+  // Check if can undo/redo
+  const canUndo = historyIndexRef.current > 0;
+  const canRedo = historyIndexRef.current < historyRef.current.length - 1;
+
+  // AI Detection function
+  const handleAiDetection = async () => {
+    const currentContent = editorRef.current?.innerHTML || content;
+
+    if (!currentContent || currentContent.length < 50) {
+      toast({
+        title: "Not enough content",
+        description: "Please add at least 50 characters of content to analyze.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      setAiDetecting(true);
+      setAiDetectionResult(null);
+
+      const response = await apiClient.detectAiContent(currentContent);
+
+      if (response.status === 'success') {
+        setAiDetectionResult({
+          ai_score: response.ai_score,
+          human_score: response.human_score,
+          label: response.label,
+          confidence: response.confidence
+        });
+      } else if (response.status === 'loading') {
+        toast({
+          title: "Model Loading",
+          description: response.message || "AI detection model is loading. Please try again in a few seconds.",
+        });
+      } else {
+        toast({
+          title: "Detection Failed",
+          description: response.message || "Failed to analyze content",
+          variant: "destructive"
+        });
+      }
+    } catch (error: any) {
+      console.error("AI detection error:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to analyze content for AI detection",
+        variant: "destructive"
+      });
+    } finally {
+      setAiDetecting(false);
+    }
+  };
+
   // Formatting functions
   const execCommand = (command: string, value?: string) => {
+    // Use custom undo/redo handlers
+    if (command === 'undo') {
+      handleUndo();
+      return;
+    }
+    if (command === 'redo') {
+      handleRedo();
+      return;
+    }
+
     // Ensure editor has focus before executing command
     editorRef.current?.focus();
     document.execCommand(command, false, value);
-    // Update content state after command
+    // Update content state and history after command
     if (editorRef.current) {
-      const html = editorRef.current.innerHTML;
-      setContent(html);
-      updateMetrics(html);
+      handleContentChange();
     }
+  };
+
+  // Handle opening image modal - save selection first
+  const handleOpenImageModal = () => {
+    // Save current selection before opening modal
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      savedSelectionRef.current = selection.getRangeAt(0).cloneRange();
+    }
+    setImageModalOpen(true);
   };
 
   // Handle image insertion
   const handleInsertImage = () => {
-    if (imageUrl) {
+    if (imageUrl && editorRef.current) {
       const imgHtml = `<img src="${imageUrl}" alt="${imageAlt || 'Image'}" style="max-width: 100%; height: auto;" />`;
-      editorRef.current?.focus();
-      document.execCommand('insertHTML', false, imgHtml);
-      // Update content state
-      if (editorRef.current) {
-        const html = editorRef.current.innerHTML;
-        setContent(html);
-        updateMetrics(html);
+
+      // Focus the editor first
+      editorRef.current.focus();
+
+      // Try to restore the saved selection
+      let inserted = false;
+      if (savedSelectionRef.current) {
+        try {
+          const selection = window.getSelection();
+          if (selection) {
+            selection.removeAllRanges();
+            selection.addRange(savedSelectionRef.current);
+            // Insert the image at cursor position
+            inserted = document.execCommand('insertHTML', false, imgHtml);
+          }
+        } catch (e) {
+          console.log('Could not restore selection, appending to end');
+        }
       }
+
+      // Fallback: append to end of editor if insertion failed
+      if (!inserted) {
+        editorRef.current.innerHTML += imgHtml;
+      }
+
+      // Update content state and add to undo history
+      handleContentChange();
+
+      // Clear saved selection
+      savedSelectionRef.current = null;
     }
     setImageModalOpen(false);
     setImageUrl("");
@@ -716,7 +963,7 @@ const ContentEditor = () => {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setImageModalOpen(true)}
+                onClick={handleOpenImageModal}
                 title="Insert Image"
               >
                 <ImageIcon className="h-4 w-4" />
@@ -756,7 +1003,9 @@ const ContentEditor = () => {
                 variant="ghost"
                 size="sm"
                 onClick={() => execCommand('undo')}
+                disabled={!canUndo}
                 title="Undo (Ctrl+Z)"
+                className={!canUndo ? 'opacity-50' : ''}
               >
                 <Undo className="h-4 w-4" />
               </Button>
@@ -764,7 +1013,9 @@ const ContentEditor = () => {
                 variant="ghost"
                 size="sm"
                 onClick={() => execCommand('redo')}
+                disabled={!canRedo}
                 title="Redo (Ctrl+Y)"
+                className={!canRedo ? 'opacity-50' : ''}
               >
                 <Redo className="h-4 w-4" />
               </Button>
@@ -774,54 +1025,97 @@ const ContentEditor = () => {
           {/* Content Editor */}
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-4xl mx-auto p-8">
+              {/* Article Title (H1) */}
+              <textarea
+                ref={titleRef}
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  // Auto-resize textarea
+                  e.target.style.height = 'auto';
+                  e.target.style.height = e.target.scrollHeight + 'px';
+                }}
+                onFocus={(e) => {
+                  // Ensure proper height on focus
+                  e.target.style.height = 'auto';
+                  e.target.style.height = e.target.scrollHeight + 'px';
+                }}
+                placeholder="Enter article title..."
+                rows={1}
+                className="w-full text-4xl font-bold mb-6 bg-transparent border-none outline-none focus:outline-none placeholder:text-muted-foreground/50 resize-none overflow-hidden"
+                style={{
+                  fontFamily: 'system-ui, -apple-system, sans-serif',
+                  lineHeight: '1.2',
+                  color: 'hsl(var(--foreground))',
+                }}
+              />
               {/* Rich Text Editor */}
               <style>{`
-                .content-editor h1 {
-                  font-size: 2.25rem;
-                  font-weight: 700;
-                  margin-top: 2rem;
-                  margin-bottom: 1rem;
-                  line-height: 1.2;
-                  color: hsl(var(--foreground));
+                .content-editor,
+                .content-editor *:not(h1):not(h2):not(h3):not(h4):not(h5):not(strong):not(b):not(th) {
+                  font-size: 16px !important;
+                  font-weight: 400 !important;
+                  line-height: 1.6 !important;
                 }
-                .content-editor h2 {
-                  font-size: 1.75rem;
-                  font-weight: 600;
-                  margin-top: 1.75rem;
-                  margin-bottom: 0.75rem;
-                  line-height: 1.3;
-                  color: hsl(var(--foreground));
-                  border-bottom: 1px solid hsl(var(--border));
-                  padding-bottom: 0.5rem;
+                .content-editor [style] {
+                  line-height: 1.6 !important;
                 }
-                .content-editor h3 {
-                  font-size: 1.35rem;
-                  font-weight: 600;
-                  margin-top: 1.5rem;
-                  margin-bottom: 0.5rem;
-                  line-height: 1.4;
-                  color: hsl(var(--foreground));
+                .content-editor p[style],
+                .content-editor div[style],
+                .content-editor span[style] {
+                  font-size: 16px !important;
+                  font-weight: 400 !important;
+                  line-height: 1.6 !important;
                 }
-                .content-editor h4 {
-                  font-size: 1.15rem;
-                  font-weight: 600;
-                  margin-top: 1.25rem;
-                  margin-bottom: 0.5rem;
-                  color: hsl(var(--foreground));
-                }
-                .content-editor h5 {
-                  font-size: 1rem;
-                  font-weight: 600;
-                  margin-top: 1rem;
-                  margin-bottom: 0.5rem;
+                .content-editor {
                   color: hsl(var(--foreground));
                 }
                 .content-editor p {
-                  margin-bottom: 1rem;
-                  line-height: 1.75;
+                  margin-top: 0 !important;
+                  margin-bottom: 1rem !important;
+                }
+                .content-editor h1 {
+                  font-size: 2.25rem !important;
+                  font-weight: 700 !important;
+                  margin-top: 2rem !important;
+                  margin-bottom: 1rem !important;
+                  line-height: 1.2 !important;
+                  color: hsl(var(--foreground));
+                }
+                .content-editor h2 {
+                  font-size: 1.75rem !important;
+                  font-weight: 600 !important;
+                  margin-top: 1.75rem !important;
+                  margin-bottom: 0.75rem !important;
+                  line-height: 1.3 !important;
+                  color: hsl(var(--foreground));
+                }
+                .content-editor h3 {
+                  font-size: 1.35rem !important;
+                  font-weight: 600 !important;
+                  margin-top: 1.5rem !important;
+                  margin-bottom: 0.5rem !important;
+                  line-height: 1.4 !important;
+                  color: hsl(var(--foreground));
+                }
+                .content-editor h4 {
+                  font-size: 1.15rem !important;
+                  font-weight: 600 !important;
+                  margin-top: 1.25rem !important;
+                  margin-bottom: 0.5rem !important;
+                  line-height: 1.5 !important;
+                  color: hsl(var(--foreground));
+                }
+                .content-editor h5 {
+                  font-size: 1rem !important;
+                  font-weight: 600 !important;
+                  margin-top: 1rem !important;
+                  margin-bottom: 0.5rem !important;
+                  line-height: 1.5 !important;
+                  color: hsl(var(--foreground));
                 }
                 .content-editor strong, .content-editor b {
-                  font-weight: 700;
+                  font-weight: 700 !important;
                 }
                 .content-editor em, .content-editor i {
                   font-style: italic;
@@ -883,7 +1177,7 @@ const ContentEditor = () => {
                 }
                 .content-editor th {
                   background: hsl(var(--muted));
-                  font-weight: 600;
+                  font-weight: 600 !important;
                 }
                 .content-editor:focus {
                   outline: none;
@@ -902,11 +1196,75 @@ const ContentEditor = () => {
                 ref={editorRef}
                 contentEditable
                 onInput={handleContentChange}
+                onKeyDown={(e) => {
+                  // Handle Ctrl+Z for undo
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleUndo();
+                  }
+                  // Handle Ctrl+Y or Ctrl+Shift+Z for redo
+                  if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+                    e.preventDefault();
+                    handleRedo();
+                  }
+                  // Handle backspace/delete on empty heading elements
+                  if (e.key === 'Backspace' || e.key === 'Delete') {
+                    const selection = window.getSelection();
+                    if (selection && selection.rangeCount > 0) {
+                      const range = selection.getRangeAt(0);
+                      let currentNode = range.startContainer;
+
+                      // Find parent heading element
+                      while (currentNode && currentNode !== editorRef.current) {
+                        if (currentNode.nodeType === Node.ELEMENT_NODE) {
+                          const tagName = (currentNode as Element).tagName?.toLowerCase();
+                          if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName)) {
+                            const heading = currentNode as HTMLElement;
+                            const textContent = heading.textContent?.trim() || '';
+
+                            // If heading is empty or will be empty after delete
+                            if (textContent === '' || textContent.length <= 1) {
+                              e.preventDefault();
+
+                              // Get next sibling to place cursor
+                              const nextElement = heading.nextElementSibling;
+                              const prevElement = heading.previousElementSibling;
+
+                              // Remove the empty heading
+                              heading.remove();
+
+                              // Place cursor at start of next element or end of previous
+                              if (nextElement) {
+                                const newRange = document.createRange();
+                                newRange.setStart(nextElement, 0);
+                                newRange.collapse(true);
+                                selection.removeAllRanges();
+                                selection.addRange(newRange);
+                              } else if (prevElement) {
+                                const newRange = document.createRange();
+                                newRange.selectNodeContents(prevElement);
+                                newRange.collapse(false);
+                                selection.removeAllRanges();
+                                selection.addRange(newRange);
+                              }
+
+                              handleContentChange();
+                              return;
+                            }
+                            break;
+                          }
+                        }
+                        currentNode = currentNode.parentNode as Node;
+                      }
+                    }
+                  }
+                }}
                 className="content-editor min-h-[600px] focus:outline-none"
                 style={{
                   fontFamily: 'system-ui, -apple-system, sans-serif',
                   fontSize: '16px',
-                  lineHeight: '1.75',
+                  fontWeight: 400,
+                  lineHeight: '1.6',
                   color: 'hsl(var(--foreground))',
                   caretColor: 'hsl(var(--foreground))',
                   cursor: 'text'
@@ -921,59 +1279,134 @@ const ContentEditor = () => {
         <div className="w-80 border-l border-border bg-card overflow-y-auto">
           <div className="p-6 space-y-6">
             {/* Content Score */}
-            <div>
-              <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-4">
+              <div className="relative w-16 h-16 flex-shrink-0">
+                <svg className="w-full h-full transform -rotate-90">
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="28"
+                    stroke="hsl(var(--muted))"
+                    strokeWidth="6"
+                    fill="none"
+                  />
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="28"
+                    stroke={contentScore >= 70 ? "#22c55e" : contentScore >= 50 ? "#f59e0b" : "#ef4444"}
+                    strokeWidth="6"
+                    fill="none"
+                    strokeDasharray={`${(contentScore / 100) * 175.93} 175.93`}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-lg font-bold">{contentScore}</span>
+                </div>
+              </div>
+              <div className="flex-1">
                 <div className="flex items-center gap-1">
                   <h3 className="font-semibold">Content Score</h3>
-                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setScoreInfoOpen(true)}>
-                    <Info className="h-4 w-4 text-muted-foreground" />
+                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => setScoreInfoOpen(true)}>
+                    <Info className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
                 </div>
-                <Button variant="ghost" size="sm">
-                  <Settings className="h-4 w-4" />
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {contentScore >= 70 ? "Great content!" : contentScore >= 50 ? "Good progress" : "Needs improvement"}
+                </p>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* AI Detection */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold">AI Detection</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={handleAiDetection}
+                  disabled={aiDetecting}
+                >
+                  {aiDetecting ? (
+                    <>
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      <Bot className="h-3 w-3 mr-1" />
+                      Analyze
+                    </>
+                  )}
                 </Button>
               </div>
 
-              <div className="relative flex items-center justify-center mb-4">
-                <div className="relative w-32 h-32">
-                  <svg className="w-full h-full transform -rotate-90">
-                    <circle
-                      cx="64"
-                      cy="64"
-                      r="56"
-                      stroke="hsl(var(--muted))"
-                      strokeWidth="12"
-                      fill="none"
-                    />
-                    <circle
-                      cx="64"
-                      cy="64"
-                      r="56"
-                      stroke={contentScore >= 70 ? "#22c55e" : contentScore >= 50 ? "#f59e0b" : "#ef4444"}
-                      strokeWidth="12"
-                      fill="none"
-                      strokeDasharray={`${(contentScore / 100) * 351.86} 351.86`}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="text-3xl font-bold">{contentScore}</div>
-                      <div className="text-xs text-muted-foreground">/100</div>
+              {aiDetectionResult ? (
+                <div className="space-y-3">
+                  {/* Result Label */}
+                  <div className={`p-3 rounded-lg border ${
+                    aiDetectionResult.label === "Human-written"
+                      ? "bg-green-500/10 border-green-500/30"
+                      : "bg-amber-500/10 border-amber-500/30"
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      {aiDetectionResult.label === "Human-written" ? (
+                        <User className="h-5 w-5 text-green-500" />
+                      ) : (
+                        <Bot className="h-5 w-5 text-amber-500" />
+                      )}
+                      <div>
+                        <p className={`font-semibold text-sm ${
+                          aiDetectionResult.label === "Human-written"
+                            ? "text-green-600"
+                            : "text-amber-600"
+                        }`}>
+                          {aiDetectionResult.label}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {aiDetectionResult.confidence.toFixed(1)}% confidence
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Score Bars */}
+                  <div className="space-y-2">
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="flex items-center gap-1">
+                          <User className="h-3 w-3" /> Human
+                        </span>
+                        <span className="font-medium">{aiDetectionResult.human_score.toFixed(1)}%</span>
+                      </div>
+                      <Progress
+                        value={aiDetectionResult.human_score}
+                        className="h-2"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="flex items-center gap-1">
+                          <Bot className="h-3 w-3" /> AI
+                        </span>
+                        <span className="font-medium">{aiDetectionResult.ai_score.toFixed(1)}%</span>
+                      </div>
+                      <Progress
+                        value={aiDetectionResult.ai_score}
+                        className="h-2"
+                      />
                     </div>
                   </div>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Avg <span className="font-medium">72</span></span>
-                <span className="text-muted-foreground">Top <span className="font-medium">85</span></span>
-              </div>
-
-              <Button className="w-full mt-4" variant="default">
-                <Sparkles className="h-4 w-4 mr-2" />
-                Auto-Optimize
-              </Button>
+              ) : (
+                <p className="text-xs text-muted-foreground text-center py-4">
+                  Click "Analyze" to check if content appears AI-generated
+                </p>
+              )}
             </div>
 
             <Separator />

@@ -1185,6 +1185,16 @@ export const apiClient = {
     body: JSON.stringify(data),
   }),
 
+  generateOutline: (data: any) => apiRequest('/content/generate-outline/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  generateContentFromOutline: (data: any) => apiRequest('/content/generate-from-outline/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
   getGeneratedContents: (params?: { domain_id?: string; status?: string; source_type?: string; page?: number; page_size?: string }, options?: RequestOptions) => {
     const queryParams = params ? `?${new URLSearchParams({
       ...(params.domain_id ? { domain_id: params.domain_id } : {}),
@@ -1205,6 +1215,12 @@ export const apiClient = {
 
   deleteGeneratedContent: (contentId: number) => apiRequest(`/content/${contentId}/delete/`, {
     method: 'DELETE',
+  }),
+
+  // AI Content Detection
+  detectAiContent: (text: string) => apiRequest('/content/detect-ai/', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
   }),
 
   // ===== CMS Provider Management =====

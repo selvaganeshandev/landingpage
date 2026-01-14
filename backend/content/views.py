@@ -5,8 +5,10 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.http import Http404
 from django.utils import timezone
+from decouple import config
 import logging
 import requests
+import re
 
 from .models import GeneratedContent, CMSProvider, ScheduledPublication
 from .serializers import (
@@ -81,13 +83,20 @@ def generate_content(request):
             'title': validated_data['title'],
             'keywords': validated_data['keywords'],
             'article_type': validated_data.get('article_type', 'blog'),
+            'target_country': validated_data.get('target_country', 'united_states'),
+            'target_language': validated_data.get('target_language', 'us_english'),
+            'references': validated_data.get('references', []),
             'tone': validated_data.get('tone', 'professional'),
             'style': validated_data.get('style', 'informative'),
             'goal': validated_data.get('goal', 'educate'),
             'audience': validated_data.get('audience', 'general'),
             'depth': validated_data.get('depth', 'comprehensive'),
             'word_count': validated_data.get('word_count', 1500),
-            'source_reference': validated_data.get('source_reference', '')
+            'source_reference': validated_data.get('source_reference', ''),
+            # Domain content guidelines
+            'key_messages': validated_data.get('key_messages', ''),
+            'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
+            'brand_values': validated_data.get('brand_values', ''),
         }
 
         # Generate content using Claude
@@ -135,6 +144,188 @@ def generate_content(request):
         return Response({
             'status': 'error',
             'message': f'Error generating content: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_outline(request):
+    """
+    Generate a content outline using Claude API
+
+    Expected request body: Same as generate_content
+    Returns: JSON outline with sections
+    """
+    try:
+        # Validate request data
+        serializer = ContentGenerationRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'status': 'error',
+                'message': 'Invalid request data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        validated_data = serializer.validated_data
+
+        # Get domain and verify it belongs to user's organization
+        domain_id = validated_data['domain_id']
+        try:
+            domain = Domain.objects.get(
+                id=domain_id,
+                organisation=request.user.organisation
+            )
+        except Domain.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': 'Domain not found or you do not have access to this domain'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Initialize Claude content generator
+        generator = ClaudeContentGenerator()
+
+        # Prepare generation parameters
+        generation_params = {
+            'title': validated_data['title'],
+            'keywords': validated_data['keywords'],
+            'article_type': validated_data.get('article_type', 'blog'),
+            'target_country': validated_data.get('target_country', 'united_states'),
+            'target_language': validated_data.get('target_language', 'us_english'),
+            'tone': validated_data.get('tone', 'professional'),
+            'style': validated_data.get('style', 'informative'),
+            'audience': validated_data.get('audience', 'general'),
+            'word_count': validated_data.get('word_count', 1500),
+            'key_messages': validated_data.get('key_messages', ''),
+            'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
+        }
+
+        # Generate outline
+        logger.info(f"Generating outline for domain {domain.id}: {validated_data['title']}")
+        outline_result = generator.generate_outline(generation_params)
+
+        logger.info(f"Successfully generated outline with {len(outline_result['outline'])} sections")
+
+        return Response({
+            'status': 'success',
+            'message': 'Outline generated successfully',
+            'data': outline_result
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.error(f"Error generating outline: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error generating outline: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_content_from_outline(request):
+    """
+    Generate full content from an approved outline
+
+    Expected request body:
+    - All fields from generate_content
+    - outline: List of outline sections
+    """
+    try:
+        # Validate request data
+        serializer = ContentGenerationRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'status': 'error',
+                'message': 'Invalid request data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        validated_data = serializer.validated_data
+
+        # Get outline from request
+        outline = request.data.get('outline')
+        if not outline or not isinstance(outline, list):
+            return Response({
+                'status': 'error',
+                'message': 'Outline is required and must be a list of sections'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get domain and verify it belongs to user's organization
+        domain_id = validated_data['domain_id']
+        try:
+            domain = Domain.objects.get(
+                id=domain_id,
+                organisation=request.user.organisation
+            )
+        except Domain.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': 'Domain not found or you do not have access to this domain'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Initialize Claude content generator
+        generator = ClaudeContentGenerator()
+
+        # Prepare generation parameters
+        generation_params = {
+            'title': validated_data['title'],
+            'keywords': validated_data['keywords'],
+            'article_type': validated_data.get('article_type', 'blog'),
+            'target_country': validated_data.get('target_country', 'united_states'),
+            'target_language': validated_data.get('target_language', 'us_english'),
+            'tone': validated_data.get('tone', 'professional'),
+            'style': validated_data.get('style', 'informative'),
+            'audience': validated_data.get('audience', 'general'),
+            'word_count': validated_data.get('word_count', 1500),
+            'key_messages': validated_data.get('key_messages', ''),
+            'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
+            'brand_values': validated_data.get('brand_values', ''),
+        }
+
+        # Generate content from outline
+        logger.info(f"Generating content from outline for domain {domain.id}: {validated_data['title']}")
+        generation_result = generator.generate_content_from_outline(generation_params, outline)
+
+        # Create GeneratedContent record
+        generated_content = GeneratedContent.objects.create(
+            domain=domain,
+            title=validated_data['title'],
+            content_html=generation_result['content_html'],
+            source_type=validated_data.get('source_type', 'manual'),
+            source_id=validated_data.get('source_id'),
+            source_reference=validated_data.get('source_reference', ''),
+            article_type=validated_data.get('article_type', 'blog'),
+            keywords=validated_data['keywords'],
+            tone=validated_data.get('tone', 'professional'),
+            style=validated_data.get('style', 'informative'),
+            goal=validated_data.get('goal', 'educate'),
+            audience=validated_data.get('audience', 'general'),
+            depth=validated_data.get('depth', 'comprehensive'),
+            word_count=validated_data.get('word_count', 1500),
+            actual_word_count=generation_result['actual_word_count'],
+            status='generated',
+            priority=validated_data.get('priority', 'medium'),
+            scheduled_date=validated_data.get('scheduled_date'),
+            model_used=generation_result['model_used'],
+            generation_time_seconds=generation_result['generation_time_seconds'],
+            prompt_tokens=generation_result['prompt_tokens'],
+            completion_tokens=generation_result['completion_tokens']
+        )
+
+        # Return response with generated content
+        response_serializer = GeneratedContentSerializer(generated_content)
+        logger.info(f"Successfully generated content ID {generated_content.id} from outline")
+
+        return Response({
+            'status': 'success',
+            'message': 'Content generated successfully from outline',
+            'data': response_serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        logger.error(f"Error generating content from outline: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error generating content from outline: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -941,3 +1132,148 @@ def test_cms_provider_connection(request, provider_id):
         }, status=status.HTTP_400_BAD_REQUEST)
 
 
+def _strip_html_tags(html_content: str) -> str:
+    """Strip HTML tags from content and return plain text"""
+    if not html_content:
+        return ""
+    # Remove HTML tags
+    clean = re.sub(r'<[^>]+>', '', html_content)
+    # Remove extra whitespace
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    return clean
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def detect_ai_content(request):
+    """
+    Detect if content is AI-generated using Hugging Face API
+
+    Expected request body:
+    {
+        "text": str (plain text or HTML content to analyze)
+    }
+
+    Returns:
+    {
+        "status": "success",
+        "ai_score": float (0-100, higher = more likely AI-generated),
+        "human_score": float (0-100, higher = more likely human-written),
+        "label": str ("AI-generated" or "Human-written"),
+        "confidence": float (0-100)
+    }
+    """
+    try:
+        text = request.data.get('text', '')
+
+        if not text:
+            return Response({
+                'status': 'error',
+                'message': 'Text is required for AI detection'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Strip HTML tags if present
+        plain_text = _strip_html_tags(text)
+
+        if len(plain_text) < 50:
+            return Response({
+                'status': 'error',
+                'message': 'Text must be at least 50 characters for accurate detection'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Truncate to ~1500 characters (RoBERTa has 514 token limit, ~3 chars per token)
+        if len(plain_text) > 1500:
+            plain_text = plain_text[:1500]
+
+        # Get Hugging Face API key from settings
+        hf_api_key = config('HUGGINGFACE_API_KEY', default='')
+
+        if not hf_api_key:
+            return Response({
+                'status': 'error',
+                'message': 'Hugging Face API key not configured. Please add HUGGINGFACE_API_KEY to your environment.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Call Hugging Face Inference API with ChatGPT detector model (more accurate for modern AI)
+        api_url = "https://router.huggingface.co/hf-inference/models/Hello-SimpleAI/chatgpt-detector-roberta"
+
+        headers = {
+            "Authorization": f"Bearer {hf_api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "inputs": plain_text
+        }
+
+        response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+
+        if response.status_code == 503:
+            # Model is loading
+            return Response({
+                'status': 'loading',
+                'message': 'AI detection model is loading. Please try again in a few seconds.',
+                'estimated_time': response.json().get('estimated_time', 20)
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        if not response.ok:
+            logger.error(f"Hugging Face API error: {response.status_code} - {response.text}")
+            return Response({
+                'status': 'error',
+                'message': f'AI detection service error: {response.text}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        result = response.json()
+
+        # Parse the response - roberta-base-openai-detector returns classifications
+        # Example: [[{"label": "Fake", "score": 0.9}, {"label": "Real", "score": 0.1}]]
+        if isinstance(result, list) and len(result) > 0:
+            classifications = result[0] if isinstance(result[0], list) else result
+
+            ai_score = 0
+            human_score = 0
+
+            for item in classifications:
+                label = item.get('label', '').lower()
+                score = item.get('score', 0) * 100
+
+                # Handle different model label formats
+                if label in ['fake', 'chatgpt', 'ai', 'gpt']:  # AI-generated labels
+                    ai_score = score
+                elif label in ['real', 'human']:  # Human-written labels
+                    human_score = score
+
+            # Determine label and confidence
+            if ai_score > human_score:
+                label = "AI-generated"
+                confidence = ai_score
+            else:
+                label = "Human-written"
+                confidence = human_score
+
+            return Response({
+                'status': 'success',
+                'ai_score': round(ai_score, 1),
+                'human_score': round(human_score, 1),
+                'label': label,
+                'confidence': round(confidence, 1),
+                'text_analyzed_length': len(plain_text)
+            }, status=status.HTTP_200_OK)
+        else:
+            logger.error(f"Unexpected response format from Hugging Face: {result}")
+            return Response({
+                'status': 'error',
+                'message': 'Unexpected response from AI detection service'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except requests.exceptions.Timeout:
+        return Response({
+            'status': 'error',
+            'message': 'AI detection service timed out. Please try again.'
+        }, status=status.HTTP_504_GATEWAY_TIMEOUT)
+    except Exception as e:
+        logger.error(f"Error detecting AI content: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error detecting AI content: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

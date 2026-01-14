@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,7 +34,24 @@ import {
   Calendar,
   Target,
   CheckCircle2,
-  ArrowRight
+  ArrowRight,
+  Rocket,
+  Briefcase,
+  Package,
+  LayoutGrid,
+  BookOpen,
+  Link2,
+  Video,
+  Image,
+  Plus,
+  X,
+  Globe,
+  GripVertical,
+  Trash2,
+  Edit3,
+  ChevronDown,
+  ChevronUp,
+  ListOrdered
 } from "lucide-react";
 
 interface GenerateContentDialogProps {
@@ -56,19 +74,119 @@ export const GenerateContentDialog = ({
   const [generatedContent, setGeneratedContent] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+
+  // Outline state
+  const [outline, setOutline] = useState<Array<{
+    id: string;
+    type: 'h2' | 'h3';
+    title: string;
+    key_points: string[];
+    estimated_words: number;
+  }>>([]);
+  const [isGeneratingOutline, setIsGeneratingOutline] = useState(false);
+  const [outlineGenerated, setOutlineGenerated] = useState(false);
+  const [editingSection, setEditingSection] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
     articleType: existingContent?.type || "blog",
     title: existingContent?.title || "",
     keywords: existingContent?.targetKeywords?.join(", ") || "",
-    tone: "professional",
-    style: "informative",
-    goal: "educate",
+    targetCountry: "united_states",
+    targetLanguage: "us_english",
+    references: [] as Array<{ type: 'article' | 'video' | 'image'; url: string; description: string }>,
+    tone: "",
+    style: "",
+    keyMessages: "",
+    topicsToAvoid: "",
     audience: "general",
     depth: "comprehensive",
     wordCount: existingContent?.wordCount || 1500,
     scheduledDate: existingContent?.scheduledDate || new Date(),
   });
+
+  const countries = [
+    { id: "united_states", name: "United States" },
+    { id: "united_kingdom", name: "United Kingdom" },
+    { id: "canada", name: "Canada" },
+    { id: "australia", name: "Australia" },
+    { id: "germany", name: "Germany" },
+    { id: "france", name: "France" },
+    { id: "spain", name: "Spain" },
+    { id: "italy", name: "Italy" },
+    { id: "netherlands", name: "Netherlands" },
+    { id: "sweden", name: "Sweden" },
+    { id: "norway", name: "Norway" },
+    { id: "denmark", name: "Denmark" },
+    { id: "finland", name: "Finland" },
+    { id: "switzerland", name: "Switzerland" },
+    { id: "austria", name: "Austria" },
+    { id: "belgium", name: "Belgium" },
+    { id: "ireland", name: "Ireland" },
+    { id: "portugal", name: "Portugal" },
+    { id: "poland", name: "Poland" },
+    { id: "india", name: "India" },
+    { id: "singapore", name: "Singapore" },
+    { id: "japan", name: "Japan" },
+    { id: "south_korea", name: "South Korea" },
+    { id: "china", name: "China" },
+    { id: "brazil", name: "Brazil" },
+    { id: "mexico", name: "Mexico" },
+    { id: "argentina", name: "Argentina" },
+    { id: "south_africa", name: "South Africa" },
+    { id: "uae", name: "United Arab Emirates" },
+    { id: "saudi_arabia", name: "Saudi Arabia" },
+    { id: "global", name: "Global (No specific country)" },
+  ];
+
+  const languages = [
+    { id: "us_english", name: "US English" },
+    { id: "uk_english", name: "UK English" },
+    { id: "australian_english", name: "Australian English" },
+    { id: "canadian_english", name: "Canadian English" },
+    { id: "indian_english", name: "Indian English" },
+    { id: "irish_english", name: "Irish English" },
+    { id: "south_african_english", name: "South African English" },
+    { id: "new_zealand_english", name: "New Zealand English" },
+    { id: "singapore_english", name: "Singapore English" },
+  ];
+
+  // Helper function to map free-text domain values to dropdown options
+  const mapDomainValueToOption = (
+    value: string | null | undefined,
+    options: string[],
+    defaultValue: string
+  ): string => {
+    if (!value) return defaultValue;
+    const lowerValue = value.toLowerCase();
+
+    // Try to find a matching option
+    for (const option of options) {
+      if (lowerValue.includes(option.toLowerCase())) {
+        return option;
+      }
+    }
+    return defaultValue;
+  };
+
+  // Get content guidelines from selected domain
+  const domainGuidelines = selectedDomain ? {
+    toneOfVoice: selectedDomain.tone_of_voice || null,
+    contentStyle: selectedDomain.content_style || null,
+    targetAudience: selectedDomain.target_audience || null,
+    keyMessages: selectedDomain.key_messages || null,
+    topicsToAvoid: selectedDomain.topics_to_avoid || null,
+    brandValues: selectedDomain.brand_values || null,
+    keyCompetitors: selectedDomain.key_competitors || null,
+  } : null;
+
+  // Check if domain has any content guidelines set
+  const hasContentGuidelines = domainGuidelines && (
+    domainGuidelines.toneOfVoice ||
+    domainGuidelines.contentStyle ||
+    domainGuidelines.targetAudience ||
+    domainGuidelines.keyMessages ||
+    domainGuidelines.topicsToAvoid
+  );
 
   // Reset state when dialog closes, initialize when it opens
   useEffect(() => {
@@ -80,28 +198,46 @@ export const GenerateContentDialog = ({
       setError(null);
       setShowSuccess(false);
       setGeneratedContent(null);
+      // Reset outline state
+      setOutline([]);
+      setOutlineGenerated(false);
+      setIsGeneratingOutline(false);
+      setEditingSection(null);
     }
   }, [open]);
 
   // Update form data when existingContent changes (on dialog open)
+  // Also load domain content guidelines if available
   useEffect(() => {
-    if (existingContent && open && !showSuccess) {
+    if (open && !showSuccess) {
+      // Map domain guidelines to form fields (editable text)
+      const audienceOptions = ["general", "beginners", "professionals", "experts"];
+      const mappedAudience = mapDomainValueToOption(
+        domainGuidelines?.targetAudience,
+        audienceOptions,
+        "general"
+      );
+
       setFormData({
         articleType: existingContent?.type || "blog",
         title: existingContent?.title || "",
         keywords: Array.isArray(existingContent?.targetKeywords)
           ? existingContent.targetKeywords.join(", ")
           : (existingContent?.targetKeywords || ""),
-        tone: "professional",
-        style: "informative",
-        goal: "educate",
-        audience: "general",
+        targetCountry: "united_states",
+        targetLanguage: "us_english",
+        references: [],
+        tone: domainGuidelines?.toneOfVoice || "",
+        style: domainGuidelines?.contentStyle || "",
+        keyMessages: domainGuidelines?.keyMessages || "",
+        topicsToAvoid: domainGuidelines?.topicsToAvoid || "",
+        audience: mappedAudience,
         depth: "comprehensive",
         wordCount: existingContent?.wordCount || 1500,
         scheduledDate: existingContent?.scheduledDate || new Date(),
       });
     }
-  }, [existingContent, open, showSuccess]);
+  }, [existingContent, open, showSuccess, selectedDomain]);
 
   const articleTypes = [
     {
@@ -141,6 +277,44 @@ export const GenerateContentDialog = ({
     }
   ];
 
+  const webPageTypes = [
+    {
+      id: "landing_page",
+      icon: Rocket,
+      title: "Landing Page",
+      description: "Conversion-focused pages for campaigns/products",
+      examples: ["Product launch", "Campaign page", "Lead capture"]
+    },
+    {
+      id: "services_page",
+      icon: Briefcase,
+      title: "Services Page",
+      description: "Description of services offered",
+      examples: ["Service overview", "What we offer", "Solutions"]
+    },
+    {
+      id: "product_page",
+      icon: Package,
+      title: "Product Page",
+      description: "Product descriptions, features, specifications",
+      examples: ["Product details", "Features & specs", "Pricing info"]
+    },
+    {
+      id: "features_page",
+      icon: LayoutGrid,
+      title: "Features Page",
+      description: "Detailed feature breakdowns",
+      examples: ["Feature list", "Capabilities", "What's included"]
+    },
+    {
+      id: "resource_page",
+      icon: BookOpen,
+      title: "Resource/Guide Page",
+      description: "Downloadable content landing pages",
+      examples: ["Ebook landing", "Whitepaper", "Free guide"]
+    }
+  ];
+
   const handleGenerate = async () => {
     if (!selectedDomain) {
       toast({
@@ -177,9 +351,12 @@ export const GenerateContentDialog = ({
         title: formData.title,
         keywords: formData.keywords,
         article_type: formData.articleType,
+        target_country: formData.targetCountry,
+        target_language: formData.targetLanguage,
+        references: formData.references.filter(ref => ref.url.trim() !== ''),
         tone: formData.tone,
         style: formData.style,
-        goal: formData.goal,
+        goal: 'educate', // Default goal
         audience: formData.audience,
         depth: formData.depth,
         word_count: formData.wordCount,
@@ -189,7 +366,11 @@ export const GenerateContentDialog = ({
         priority: existingContent?.priority || 'medium',
         scheduled_date: formData.scheduledDate instanceof Date
           ? formData.scheduledDate.toISOString().split('T')[0]  // Convert to YYYY-MM-DD format
-          : formData.scheduledDate
+          : formData.scheduledDate,
+        // Content guidelines from form (editable)
+        key_messages: formData.keyMessages,
+        topics_to_avoid: formData.topicsToAvoid,
+        brand_values: domainGuidelines?.brandValues || '',
       };
 
       // Log the data being sent for debugging
@@ -231,66 +412,339 @@ export const GenerateContentDialog = ({
     }
   };
 
+  // Generate outline handler
+  const handleGenerateOutline = async () => {
+    if (!selectedDomain) {
+      toast({
+        title: "Error",
+        description: "Please select a domain first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGeneratingOutline(true);
+    setError(null);
+
+    try {
+      const outlineData = {
+        domain_id: selectedDomain.id,
+        title: formData.title,
+        keywords: formData.keywords,
+        article_type: formData.articleType,
+        target_country: formData.targetCountry,
+        target_language: formData.targetLanguage,
+        tone: formData.tone,
+        style: formData.style,
+        audience: formData.audience,
+        word_count: formData.wordCount,
+        key_messages: formData.keyMessages,
+        topics_to_avoid: formData.topicsToAvoid,
+      };
+
+      console.log('Outline generation request:', outlineData);
+
+      const response = await apiClient.generateOutline(outlineData);
+
+      if (response.status === 'success') {
+        setOutline(response.data.outline);
+        setOutlineGenerated(true);
+
+        toast({
+          title: "Outline Generated!",
+          description: `Created ${response.data.outline.length} sections in ${response.data.generation_time_seconds}s`,
+        });
+      } else {
+        throw new Error(response.message || 'Outline generation failed');
+      }
+
+    } catch (err: any) {
+      console.error('Outline generation error:', err);
+      const errorMessage = err.message || 'Failed to generate outline. Please try again.';
+      setError(errorMessage);
+
+      toast({
+        title: "Outline Generation Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingOutline(false);
+    }
+  };
+
+  // Generate content from outline handler
+  const handleGenerateFromOutline = async () => {
+    if (!selectedDomain || outline.length === 0) {
+      toast({
+        title: "Error",
+        description: "Please generate an outline first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+    setProgress(0);
+    setError(null);
+
+    const progressInterval = setInterval(() => {
+      setProgress(prev => {
+        if (prev >= 90) {
+          clearInterval(progressInterval);
+          return 90;
+        }
+        return prev + 3;
+      });
+    }, 1000);
+
+    try {
+      const sourceReference = existingContent?.sourceReference || formData.title;
+
+      const generationData = {
+        domain_id: selectedDomain.id,
+        title: formData.title,
+        keywords: formData.keywords,
+        article_type: formData.articleType,
+        target_country: formData.targetCountry,
+        target_language: formData.targetLanguage,
+        references: formData.references.filter(ref => ref.url.trim() !== ''),
+        tone: formData.tone,
+        style: formData.style,
+        goal: 'educate',
+        audience: formData.audience,
+        depth: formData.depth,
+        word_count: formData.wordCount,
+        source_type: existingContent?.sourceType || 'manual',
+        source_id: existingContent?.sourceId,
+        source_reference: sourceReference,
+        priority: existingContent?.priority || 'medium',
+        scheduled_date: formData.scheduledDate instanceof Date
+          ? formData.scheduledDate.toISOString().split('T')[0]
+          : formData.scheduledDate,
+        key_messages: formData.keyMessages,
+        topics_to_avoid: formData.topicsToAvoid,
+        brand_values: domainGuidelines?.brandValues || '',
+        outline: outline,
+      };
+
+      console.log('Content from outline request:', generationData);
+
+      const response = await apiClient.generateContentFromOutline(generationData);
+
+      clearInterval(progressInterval);
+      setProgress(100);
+
+      if (response.status === 'success') {
+        setGeneratedContent(response.data);
+        setIsGenerating(false);
+        setShowSuccess(true);
+
+        toast({
+          title: "Content Generated Successfully!",
+          description: `Generated ${response.data.actual_word_count} words in ${response.data.generation_time_seconds}s`,
+        });
+      } else {
+        throw new Error(response.message || 'Generation failed');
+      }
+
+    } catch (err: any) {
+      clearInterval(progressInterval);
+      setIsGenerating(false);
+      setProgress(0);
+
+      console.error('Content generation error:', err);
+      const errorMessage = err.message || 'Failed to generate content. Please try again.';
+      setError(errorMessage);
+
+      toast({
+        title: "Generation Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Outline editing functions
+  const updateSectionTitle = (id: string, newTitle: string) => {
+    setOutline(prev => prev.map(section =>
+      section.id === id ? { ...section, title: newTitle } : section
+    ));
+  };
+
+  const updateKeyPoint = (sectionId: string, pointIndex: number, newValue: string) => {
+    setOutline(prev => prev.map(section =>
+      section.id === sectionId
+        ? {
+            ...section,
+            key_points: section.key_points.map((point, i) =>
+              i === pointIndex ? newValue : point
+            )
+          }
+        : section
+    ));
+  };
+
+  const addKeyPoint = (sectionId: string) => {
+    setOutline(prev => prev.map(section =>
+      section.id === sectionId
+        ? { ...section, key_points: [...section.key_points, 'New point'] }
+        : section
+    ));
+  };
+
+  const removeKeyPoint = (sectionId: string, pointIndex: number) => {
+    setOutline(prev => prev.map(section =>
+      section.id === sectionId
+        ? {
+            ...section,
+            key_points: section.key_points.filter((_, i) => i !== pointIndex)
+          }
+        : section
+    ));
+  };
+
+  const removeSection = (id: string) => {
+    setOutline(prev => prev.filter(section => section.id !== id));
+  };
+
+  const moveSection = (id: string, direction: 'up' | 'down') => {
+    setOutline(prev => {
+      const index = prev.findIndex(s => s.id === id);
+      if (index === -1) return prev;
+      if (direction === 'up' && index === 0) return prev;
+      if (direction === 'down' && index === prev.length - 1) return prev;
+
+      const newOutline = [...prev];
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      [newOutline[index], newOutline[targetIndex]] = [newOutline[targetIndex], newOutline[index]];
+      return newOutline;
+    });
+  };
+
+  const addSection = (type: 'h2' | 'h3') => {
+    const newId = `new-${Date.now()}`;
+    setOutline(prev => [...prev, {
+      id: newId,
+      type,
+      title: type === 'h2' ? 'New Section' : 'New Subsection',
+      key_points: ['Key point 1'],
+      estimated_words: 150
+    }]);
+  };
+
   const renderStepContent = () => {
     switch (step) {
       case 1:
+        const currentTab = articleTypes.some(t => t.id === formData.articleType) ? 'articles' : 'webpages';
+
         return (
           <div className="space-y-4">
-            <div className="pb-4 border-b border-border">
-              <h3 className="text-lg font-semibold mb-1">Choose an Article Type</h3>
-              <p className="text-sm text-muted-foreground">
-                Choose the type of article you want to create
-              </p>
-            </div>
+            <Tabs defaultValue={currentTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-4">
+                <TabsTrigger value="articles" className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Article Types
+                </TabsTrigger>
+                <TabsTrigger value="webpages" className="flex items-center gap-2">
+                  <LayoutGrid className="h-4 w-4" />
+                  Web Page Content
+                </TabsTrigger>
+              </TabsList>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {articleTypes.map((type) => {
-                const Icon = type.icon;
-                const isSelected = formData.articleType === type.id;
-                
-                return (
-                  <Card
-                    key={type.id}
-                    className={`p-3 cursor-pointer transition-all hover:shadow-md ${
-                      isSelected ? 'ring-2 ring-primary' : ''
-                    }`}
-                    onClick={() => setFormData({ ...formData, articleType: type.id })}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg gradient-primary flex items-center justify-center flex-shrink-0">
-                        <Icon className="h-5 w-5 text-white" />
-                      </div>
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-sm mb-0.5">{type.title}</h4>
-                        <p className="text-xs text-muted-foreground">
-                          {type.description}
-                        </p>
-                      </div>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
+              <TabsContent value="articles" className="mt-0">
+                <p className="text-sm text-muted-foreground mb-4">
+                  Blog posts, guides, and informational content
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {articleTypes.map((type) => {
+                    const Icon = type.icon;
+                    const isSelected = formData.articleType === type.id;
+
+                    return (
+                      <Card
+                        key={type.id}
+                        className={`p-3 cursor-pointer transition-all hover:shadow-md ${
+                          isSelected ? 'ring-2 ring-primary' : ''
+                        }`}
+                        onClick={() => setFormData({ ...formData, articleType: type.id })}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg gradient-primary flex items-center justify-center flex-shrink-0">
+                            <Icon className="h-5 w-5 text-white" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-sm mb-0.5">{type.title}</h4>
+                            <p className="text-xs text-muted-foreground line-clamp-2">
+                              {type.description}
+                            </p>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="webpages" className="mt-0">
+                <p className="text-sm text-muted-foreground mb-4">
+                  Marketing pages, product pages, and website content
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {webPageTypes.map((type) => {
+                    const Icon = type.icon;
+                    const isSelected = formData.articleType === type.id;
+
+                    return (
+                      <Card
+                        key={type.id}
+                        className={`p-3 cursor-pointer transition-all hover:shadow-md ${
+                          isSelected ? 'ring-2 ring-primary' : ''
+                        }`}
+                        onClick={() => setFormData({ ...formData, articleType: type.id })}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center flex-shrink-0">
+                            <Icon className="h-5 w-5 text-white" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-sm mb-0.5">{type.title}</h4>
+                            <p className="text-xs text-muted-foreground line-clamp-2">
+                              {type.description}
+                            </p>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         );
 
       case 2:
+        const isWebPage = webPageTypes.some(t => t.id === formData.articleType);
+        const selectedType = [...articleTypes, ...webPageTypes].find(t => t.id === formData.articleType);
+
         return (
           <div className="space-y-6">
             <div className="pb-4 border-b border-border">
-              <h3 className="text-lg font-semibold mb-1">Article Details</h3>
+              <h3 className="text-lg font-semibold mb-1">Content Details</h3>
               <p className="text-sm text-muted-foreground">
-                Provide title and target keywords
+                Provide title and target keywords for your {selectedType?.title || 'content'}
               </p>
             </div>
 
             <div className="space-y-4">
               <div>
-                <Label>Article Title</Label>
+                <Label>{isWebPage ? 'Page Title' : 'Article Title'}</Label>
                 <Input
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder="Best Plant-Based Protein Powders for Athletes"
+                  placeholder={isWebPage
+                    ? "Transform Your Business with Our Solutions"
+                    : "Best Plant-Based Protein Powders for Athletes"}
                 />
               </div>
 
@@ -299,18 +753,190 @@ export const GenerateContentDialog = ({
                 <Textarea
                   value={formData.keywords}
                   onChange={(e) => setFormData({ ...formData, keywords: e.target.value })}
-                  placeholder="plant protein, vegan protein powder, athlete supplements"
+                  placeholder={isWebPage
+                    ? "business solutions, enterprise software, digital transformation"
+                    : "plant protein, vegan protein powder, athlete supplements"}
                   rows={3}
                 />
                 <p className="text-xs text-muted-foreground mt-1">
                   These keywords will be naturally integrated into your content
                 </p>
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Target Country</Label>
+                  <Select
+                    value={formData.targetCountry}
+                    onValueChange={(v) => setFormData({ ...formData, targetCountry: v })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select country" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {countries.map((country) => (
+                        <SelectItem key={country.id} value={country.id}>
+                          {country.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Content will be localized for this market
+                  </p>
+                </div>
+
+                <div>
+                  <Label>Target Language</Label>
+                  <Select
+                    value={formData.targetLanguage}
+                    onValueChange={(v) => setFormData({ ...formData, targetLanguage: v })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {languages.map((language) => (
+                        <SelectItem key={language.id} value={language.id}>
+                          {language.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Content will be written in this language
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         );
 
       case 3:
+        const addReference = (type: 'article' | 'video' | 'image') => {
+          setFormData({
+            ...formData,
+            references: [...formData.references, { type, url: '', description: '' }]
+          });
+        };
+
+        const removeReference = (index: number) => {
+          setFormData({
+            ...formData,
+            references: formData.references.filter((_, i) => i !== index)
+          });
+        };
+
+        const updateReference = (index: number, field: 'url' | 'description', value: string) => {
+          const updated = [...formData.references];
+          updated[index] = { ...updated[index], [field]: value };
+          setFormData({ ...formData, references: updated });
+        };
+
+        return (
+          <div className="space-y-6">
+            <div className="pb-4 border-b border-border">
+              <h3 className="text-lg font-semibold mb-1">References</h3>
+              <p className="text-sm text-muted-foreground">
+                Add articles, videos, or images as reference material for content generation (optional)
+              </p>
+            </div>
+
+            {/* Add Reference Buttons */}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => addReference('article')}
+                className="flex items-center gap-2"
+              >
+                <Globe className="h-4 w-4" />
+                Add Article URL
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => addReference('video')}
+                className="flex items-center gap-2"
+              >
+                <Video className="h-4 w-4" />
+                Add Video URL
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => addReference('image')}
+                className="flex items-center gap-2"
+              >
+                <Image className="h-4 w-4" />
+                Add Image URL
+              </Button>
+            </div>
+
+            {/* References List */}
+            <div className={`space-y-3 ${formData.references.length > 0 ? 'max-h-[300px] overflow-y-auto pr-2' : ''}`}>
+              {formData.references.length === 0 ? (
+                <div className="text-center py-8 border border-dashed rounded-lg">
+                  <Link2 className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                  <p className="text-sm text-muted-foreground">
+                    No references added yet. Add URLs to articles, videos, or images that should inform your content.
+                  </p>
+                </div>
+              ) : (
+                formData.references.map((ref, index) => (
+                  <Card key={index} className="p-4">
+                    <div className="flex items-start gap-3">
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        ref.type === 'article' ? 'bg-blue-500/10' :
+                        ref.type === 'video' ? 'bg-red-500/10' : 'bg-green-500/10'
+                      }`}>
+                        {ref.type === 'article' && <Globe className="h-5 w-5 text-blue-500" />}
+                        {ref.type === 'video' && <Video className="h-5 w-5 text-red-500" />}
+                        {ref.type === 'image' && <Image className="h-5 w-5 text-green-500" />}
+                      </div>
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Badge variant="secondary" className="capitalize">{ref.type}</Badge>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeReference(index)}
+                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <Input
+                          placeholder={`Enter ${ref.type} URL...`}
+                          value={ref.url}
+                          onChange={(e) => updateReference(index, 'url', e.target.value)}
+                        />
+                        <Input
+                          placeholder="Brief description (optional)"
+                          value={ref.description}
+                          onChange={(e) => updateReference(index, 'description', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </Card>
+                ))
+              )}
+            </div>
+
+            {formData.references.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {formData.references.length} reference{formData.references.length !== 1 ? 's' : ''} added.
+                The AI will analyze these materials to create more relevant and informed content.
+              </p>
+            )}
+          </div>
+        );
+
+      case 4:
         return (
           <div className="space-y-6">
             <div className="pb-4 border-b border-border">
@@ -320,117 +946,114 @@ export const GenerateContentDialog = ({
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            {/* Simple one-line notice about loaded guidelines */}
+            {hasContentGuidelines && (
+              <p className="text-sm text-muted-foreground italic">
+                Pre-filled from your domain's content guidelines. You can edit these for this content.
+              </p>
+            )}
+
+            <div className="space-y-4">
+              {/* Tone of Voice */}
               <div>
-                <Label>Tone</Label>
-                <Select value={formData.tone} onValueChange={(v) => setFormData({ ...formData, tone: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="professional">Professional</SelectItem>
-                    <SelectItem value="casual">Casual</SelectItem>
-                    <SelectItem value="friendly">Friendly</SelectItem>
-                    <SelectItem value="authoritative">Authoritative</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>Tone of Voice</Label>
+                <Input
+                  value={formData.tone}
+                  onChange={(e) => setFormData({ ...formData, tone: e.target.value })}
+                  placeholder="e.g., Professional, friendly, authoritative..."
+                />
               </div>
 
+              {/* Content Style */}
               <div>
-                <Label>Style</Label>
-                <Select value={formData.style} onValueChange={(v) => setFormData({ ...formData, style: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="informative">Informative</SelectItem>
-                    <SelectItem value="persuasive">Persuasive</SelectItem>
-                    <SelectItem value="storytelling">Storytelling</SelectItem>
-                    <SelectItem value="analytical">Analytical</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>Content Style</Label>
+                <Input
+                  value={formData.style}
+                  onChange={(e) => setFormData({ ...formData, style: e.target.value })}
+                  placeholder="e.g., Informative, persuasive, storytelling..."
+                />
               </div>
 
+              {/* Key Messages */}
               <div>
-                <Label>Goal</Label>
-                <Select value={formData.goal} onValueChange={(v) => setFormData({ ...formData, goal: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="educate">Educate</SelectItem>
-                    <SelectItem value="convert">Convert</SelectItem>
-                    <SelectItem value="engage">Engage</SelectItem>
-                    <SelectItem value="inform">Inform</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>Key Messages</Label>
+                <Textarea
+                  value={formData.keyMessages}
+                  onChange={(e) => setFormData({ ...formData, keyMessages: e.target.value })}
+                  placeholder="Key messages to incorporate in the content..."
+                  rows={2}
+                />
               </div>
 
+              {/* Topics to Avoid */}
               <div>
-                <Label>Target Audience</Label>
-                <Select value={formData.audience} onValueChange={(v) => setFormData({ ...formData, audience: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="general">General</SelectItem>
-                    <SelectItem value="beginners">Beginners</SelectItem>
-                    <SelectItem value="professionals">Professionals</SelectItem>
-                    <SelectItem value="experts">Experts</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>Topics to Avoid</Label>
+                <Textarea
+                  value={formData.topicsToAvoid}
+                  onChange={(e) => setFormData({ ...formData, topicsToAvoid: e.target.value })}
+                  placeholder="Topics or themes to avoid in the content..."
+                  rows={2}
+                />
               </div>
 
-              <div>
-                <Label>Content Depth</Label>
-                <Select value={formData.depth} onValueChange={(v) => setFormData({ ...formData, depth: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="overview">Overview</SelectItem>
-                    <SelectItem value="detailed">Detailed</SelectItem>
-                    <SelectItem value="comprehensive">Comprehensive</SelectItem>
-                    <SelectItem value="extensive">Extensive</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Target Audience</Label>
+                  <Select value={formData.audience} onValueChange={(v) => setFormData({ ...formData, audience: v })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="general">General</SelectItem>
+                      <SelectItem value="beginners">Beginners</SelectItem>
+                      <SelectItem value="professionals">Professionals</SelectItem>
+                      <SelectItem value="experts">Experts</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div>
-                <Label>Word Count</Label>
-                <Select 
-                  value={formData.wordCount.toString()} 
-                  onValueChange={(v) => setFormData({ ...formData, wordCount: parseInt(v) })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="800">800-1,000 words</SelectItem>
-                    <SelectItem value="1500">1,000-2,000 words</SelectItem>
-                    <SelectItem value="2500">2,000-3,000 words</SelectItem>
-                    <SelectItem value="3500">3,000+ words</SelectItem>
-                  </SelectContent>
+                <div>
+                  <Label>Word Count</Label>
+                  <Select
+                    value={formData.wordCount.toString()}
+                    onValueChange={(v) => setFormData({ ...formData, wordCount: parseInt(v) })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="800">800-1,000 words</SelectItem>
+                      <SelectItem value="1500">1,000-2,000 words</SelectItem>
+                      <SelectItem value="2500">2,000-3,000 words</SelectItem>
+                      <SelectItem value="3500">3,000+ words</SelectItem>
+                    </SelectContent>
                 </Select>
+                </div>
               </div>
             </div>
           </div>
         );
 
-      case 4:
+      case 5:
+        // Calculate total estimated words from outline
+        const totalEstimatedWords = outline.reduce((sum, s) => sum + (s.estimated_words || 0), 0);
+
         return (
           <div className="space-y-6">
             <div className="pb-4 border-b border-border">
               <h3 className="text-lg font-semibold mb-1">
-                {showSuccess ? "Content Generated!" : "Review & Generate"}
+                {showSuccess ? "Content Generated!" : outlineGenerated ? "Review Outline" : "Generate Outline"}
               </h3>
               <p className="text-sm text-muted-foreground">
                 {showSuccess
                   ? "Your content has been successfully generated"
-                  : "Review your settings and generate content"}
+                  : outlineGenerated
+                    ? "Review and edit the outline, then generate content"
+                    : "First, generate an outline to review the structure"}
               </p>
             </div>
 
+            {/* Success State */}
             {showSuccess ? (
               <div className="py-8 space-y-6">
                 <div className="flex items-center justify-center">
@@ -456,11 +1079,9 @@ export const GenerateContentDialog = ({
                   <Button
                     onClick={() => {
                       onOpenChange(false);
-                      // Navigate to content editor with the generated content ID
                       if (generatedContent?.id) {
                         navigate(`/content-editor/${generatedContent.id}`);
                       } else {
-                        // Fallback: Navigate to the appropriate section based on source type
                         const sourceType = existingContent?.sourceType;
                         if (sourceType === 'content_gap') {
                           navigate('/content-gaps');
@@ -478,14 +1099,13 @@ export const GenerateContentDialog = ({
                     <ArrowRight className="h-4 w-4 mr-2" />
                     View Content
                   </Button>
-                  <Button
-                    onClick={() => onOpenChange(false)}
-                    variant="outline"
-                  >
+                  <Button onClick={() => onOpenChange(false)} variant="outline">
                     Close
                   </Button>
                 </div>
               </div>
+
+            /* Generating Content State */
             ) : isGenerating ? (
               <div className="py-12 space-y-6">
                 <div className="flex items-center justify-center">
@@ -494,34 +1114,201 @@ export const GenerateContentDialog = ({
                   </div>
                 </div>
                 <div className="space-y-3">
-                  <p className="text-center font-medium">Generating your content...</p>
+                  <p className="text-center font-medium">Generating your content from outline...</p>
                   <Progress value={progress} className="h-2" />
                   <p className="text-center text-sm text-muted-foreground">{progress}% complete</p>
                 </div>
               </div>
+
+            /* Outline Generated - Show Editable Outline */
+            ) : outlineGenerated ? (
+              <div className="space-y-4">
+                {/* Summary Card */}
+                <Card className="p-4 border border-border bg-muted/30">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <ListOrdered className="h-5 w-5 text-primary" />
+                      <span className="font-medium">{formData.title || "Untitled"}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <Badge variant="secondary">{outline.length} sections</Badge>
+                      <Badge variant="outline">~{totalEstimatedWords} words</Badge>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* Outline Sections - Scrollable */}
+                <div className="max-h-[400px] overflow-y-auto pr-2 space-y-3">
+                  {outline.map((section, index) => (
+                    <Card key={section.id} className={`p-4 ${section.type === 'h3' ? 'ml-6' : ''}`}>
+                      <div className="space-y-3">
+                        {/* Section Header */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-1">
+                            <Badge variant={section.type === 'h2' ? 'default' : 'secondary'} className="text-xs">
+                              {section.type.toUpperCase()}
+                            </Badge>
+                            {editingSection === section.id ? (
+                              <Input
+                                value={section.title}
+                                onChange={(e) => updateSectionTitle(section.id, e.target.value)}
+                                onBlur={() => setEditingSection(null)}
+                                onKeyDown={(e) => e.key === 'Enter' && setEditingSection(null)}
+                                autoFocus
+                                className="h-8"
+                              />
+                            ) : (
+                              <span
+                                className="font-medium cursor-pointer hover:text-primary"
+                                onClick={() => setEditingSection(section.id)}
+                              >
+                                {section.title}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => moveSection(section.id, 'up')}
+                              disabled={index === 0}
+                            >
+                              <ChevronUp className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => moveSection(section.id, 'down')}
+                              disabled={index === outline.length - 1}
+                            >
+                              <ChevronDown className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                              onClick={() => removeSection(section.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Key Points */}
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground font-medium">Key Points:</p>
+                          {section.key_points.map((point, pointIndex) => (
+                            <div key={pointIndex} className="flex items-center gap-2">
+                              <span className="text-muted-foreground">•</span>
+                              <Input
+                                value={point}
+                                onChange={(e) => updateKeyPoint(section.id, pointIndex, e.target.value)}
+                                className="h-7 text-sm"
+                              />
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                                onClick={() => removeKeyPoint(section.id, pointIndex)}
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => addKeyPoint(section.id)}
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Add Point
+                          </Button>
+                        </div>
+
+                        {/* Estimated Words */}
+                        <p className="text-xs text-muted-foreground">
+                          ~{section.estimated_words} words
+                        </p>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Add Section Buttons */}
+                <div className="flex gap-2 pt-2">
+                  <Button variant="outline" size="sm" onClick={() => addSection('h2')}>
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Section (H2)
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => addSection('h3')}>
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Subsection (H3)
+                  </Button>
+                </div>
+
+                {/* Regenerate Outline Option */}
+                <div className="flex items-center justify-between pt-4 border-t">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setOutline([]);
+                      setOutlineGenerated(false);
+                    }}
+                  >
+                    Start Over
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleGenerateOutline}
+                    disabled={isGeneratingOutline}
+                  >
+                    {isGeneratingOutline ? (
+                      <>
+                        <Sparkles className="h-4 w-4 mr-2 animate-spin" />
+                        Regenerating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4 mr-2" />
+                        Regenerate Outline
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+            /* Initial State - Generate Outline */
             ) : (
               <div className="space-y-4">
+                {/* Summary Card */}
                 <Card className="p-5 border border-border bg-muted/30">
                   <div className="space-y-3">
                     <div className="flex items-center gap-2">
                       <FileText className="h-5 w-5 text-primary" />
                       <h4 className="font-semibold">{formData.title || "Untitled Article"}</h4>
                     </div>
-                    
+
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="secondary">{formData.articleType}</Badge>
                       <Badge variant="outline">{formData.wordCount} words</Badge>
-                      <Badge variant="outline">{formData.tone} tone</Badge>
+                      {formData.tone && <Badge variant="outline">{formData.tone}</Badge>}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 text-sm pt-3 border-t border border-border">
+                    <div className="grid grid-cols-2 gap-3 text-sm pt-3 border-t border-border">
+                      {formData.style && (
+                        <div>
+                          <p className="text-muted-foreground mb-1">Style</p>
+                          <p className="font-medium">{formData.style}</p>
+                        </div>
+                      )}
                       <div>
-                        <p className="text-muted-foreground mb-1">Style & Goal</p>
-                        <p className="font-medium capitalize">{formData.style} / {formData.goal}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground mb-1">Audience & Depth</p>
-                        <p className="font-medium capitalize">{formData.audience} / {formData.depth}</p>
+                        <p className="text-muted-foreground mb-1">Target Audience</p>
+                        <p className="font-medium capitalize">{formData.audience}</p>
                       </div>
                       {formData.keywords && (
                         <div className="col-span-2">
@@ -533,17 +1320,40 @@ export const GenerateContentDialog = ({
                   </div>
                 </Card>
 
+                {/* Info Card */}
                 <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
                   <div className="flex items-start gap-3">
-                    <Sparkles className="h-5 w-5 text-primary mt-0.5" />
+                    <ListOrdered className="h-5 w-5 text-primary mt-0.5" />
                     <div className="text-sm">
-                      <p className="font-medium mb-1">AI-Powered Generation</p>
+                      <p className="font-medium mb-1">Two-Step Generation</p>
                       <p className="text-muted-foreground">
-                        Content will be optimized for AI visibility and designed to appear in relevant AI model responses.
+                        First, we'll generate an outline so you can review and customize the structure.
+                        Then you can generate the full content from the approved outline.
                       </p>
                     </div>
                   </div>
                 </div>
+
+                {/* Generating Outline State */}
+                {isGeneratingOutline && (
+                  <div className="py-6 space-y-4">
+                    <div className="flex items-center justify-center">
+                      <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
+                        <ListOrdered className="h-8 w-8 text-primary" />
+                      </div>
+                    </div>
+                    <p className="text-center text-sm text-muted-foreground">
+                      Generating outline structure...
+                    </p>
+                  </div>
+                )}
+
+                {/* Error Display */}
+                {error && (
+                  <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 text-destructive text-sm">
+                    {error}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -564,10 +1374,10 @@ export const GenerateContentDialog = ({
         {/* Wizard Step Indicator - Only show when not in success state */}
         {!showSuccess && (
           <div className="mb-6">
-            <div className="flex items-center justify-center gap-3">
-              {[1, 2, 3, 4].map((stepNumber) => (
+            <div className="flex items-center justify-center gap-2">
+              {[1, 2, 3, 4, 5].map((stepNumber) => (
                 <div key={stepNumber} className="flex items-center">
-                  <div className={`flex items-center justify-center w-10 h-10 rounded-full transition-all ${
+                  <div className={`flex items-center justify-center w-9 h-9 rounded-full transition-all ${
                     stepNumber === step
                       ? 'bg-primary text-white shadow-md shadow-primary/30'
                       : stepNumber < step
@@ -576,8 +1386,8 @@ export const GenerateContentDialog = ({
                   }`}>
                     <span className="text-sm font-semibold">{stepNumber}</span>
                   </div>
-                  {stepNumber < 4 && (
-                    <div className={`w-16 h-0.5 mx-1 transition-all ${
+                  {stepNumber < 5 && (
+                    <div className={`w-10 h-0.5 mx-1 transition-all ${
                       stepNumber < step ? 'bg-primary' : 'bg-muted'
                     }`} />
                   )}
@@ -586,10 +1396,11 @@ export const GenerateContentDialog = ({
             </div>
             <div className="text-center mt-3">
               <p className="text-sm font-medium">
-                {step === 1 && "Choose Article Type"}
-                {step === 2 && "Article Details"}
-                {step === 3 && "Content Settings"}
-                {step === 4 && "Review & Generate"}
+                {step === 1 && "Choose Content Type"}
+                {step === 2 && "Content Details"}
+                {step === 3 && "References"}
+                {step === 4 && "Content Settings"}
+                {step === 5 && (outlineGenerated ? "Review Outline" : "Generate Outline")}
               </p>
             </div>
           </div>
@@ -602,24 +1413,43 @@ export const GenerateContentDialog = ({
           <div className="flex items-center justify-between pt-6 border-t border-border">
             <Button
               variant="outline"
-              onClick={() => step > 1 ? setStep(step - 1) : onOpenChange(false)}
-              disabled={isGenerating}
+              onClick={() => {
+                if (step === 5 && outlineGenerated) {
+                  // Go back to outline not generated state
+                  setOutline([]);
+                  setOutlineGenerated(false);
+                } else if (step > 1) {
+                  setStep(step - 1);
+                } else {
+                  onOpenChange(false);
+                }
+              }}
+              disabled={isGenerating || isGeneratingOutline}
             >
-              {step === 1 ? "Cancel" : "Previous"}
+              {step === 1 ? "Cancel" : step === 5 && outlineGenerated ? "Back to Settings" : "Previous"}
             </Button>
 
-            {step < 4 ? (
+            {step < 5 ? (
               <Button onClick={() => setStep(step + 1)} disabled={!formData.title && step === 2}>
                 Next Step
               </Button>
-            ) : (
+            ) : outlineGenerated ? (
               <Button
-                onClick={handleGenerate}
-                disabled={isGenerating}
+                onClick={handleGenerateFromOutline}
+                disabled={isGenerating || outline.length === 0}
                 className="gradient-primary"
               >
                 <Sparkles className="h-4 w-4 mr-2" />
                 {isGenerating ? "Generating..." : "Generate Content"}
+              </Button>
+            ) : (
+              <Button
+                onClick={handleGenerateOutline}
+                disabled={isGeneratingOutline}
+                className="gradient-primary"
+              >
+                <ListOrdered className="h-4 w-4 mr-2" />
+                {isGeneratingOutline ? "Generating..." : "Generate Outline"}
               </Button>
             )}
           </div>
