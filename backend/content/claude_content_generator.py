@@ -615,3 +615,66 @@ IMPORTANT:
         except Exception as e:
             raise Exception(f"Claude API error: {str(e)}")
 
+    def rewrite_text(self, original_text, prompt, max_retries=3):
+        """
+        Rewrite a portion of text based on user instructions
+
+        Args:
+            original_text (str): The text to rewrite
+            prompt (str): Instructions for how to rewrite the text
+            max_retries (int): Maximum number of retries for transient errors
+
+        Returns:
+            str: The rewritten text
+        """
+        system_prompt = """You are a skilled editor and content writer. Your task is to rewrite the provided text according to the user's instructions.
+
+Guidelines:
+- Maintain the core meaning and information unless explicitly asked to change it
+- Match the approximate length of the original text unless asked to make it longer or shorter
+- Return ONLY the rewritten text, no explanations or comments
+- Do not add any HTML tags unless the original text contains them
+- Preserve any formatting style from the original text"""
+
+        user_prompt = f"""Please rewrite the following text according to these instructions:
+
+Instructions: {prompt}
+
+Original text:
+{original_text}
+
+Rewritten text:"""
+
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=2048,
+                    temperature=0.7,
+                    system=system_prompt,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": user_prompt
+                        }
+                    ]
+                )
+
+                rewritten_text = response.content[0].text.strip()
+                return rewritten_text
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+                # Retry on overloaded or rate limit errors
+                if 'overloaded' in error_str or '529' in error_str or 'rate' in error_str:
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 2  # 2, 4, 6 seconds
+                        time.sleep(wait_time)
+                        continue
+                # For other errors, raise immediately
+                raise Exception(f"Claude API error during rewrite: {str(e)}")
+
+        raise Exception(f"Claude API error during rewrite after {max_retries} retries: {str(last_error)}")
+

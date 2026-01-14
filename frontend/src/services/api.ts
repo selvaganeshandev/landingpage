@@ -1195,6 +1195,11 @@ export const apiClient = {
     body: JSON.stringify(data),
   }),
 
+  rewriteContent: (data: { original_text: string; prompt: string; domain_id?: number }) => apiRequest('/content/rewrite/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
   getGeneratedContents: (params?: { domain_id?: string; status?: string; source_type?: string; page?: number; page_size?: string }, options?: RequestOptions) => {
     const queryParams = params ? `?${new URLSearchParams({
       ...(params.domain_id ? { domain_id: params.domain_id } : {}),

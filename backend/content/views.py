@@ -329,6 +329,59 @@ def generate_content_from_outline(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def rewrite_content(request):
+    """
+    Rewrite a portion of content using Claude API
+
+    Expected request body:
+    {
+        "original_text": str,
+        "prompt": str,
+        "domain_id": int (optional)
+    }
+    """
+    try:
+        original_text = request.data.get('original_text')
+        prompt = request.data.get('prompt')
+        domain_id = request.data.get('domain_id')
+
+        if not original_text:
+            return Response({
+                'status': 'error',
+                'message': 'Original text is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not prompt:
+            return Response({
+                'status': 'error',
+                'message': 'Rewrite prompt is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Initialize Claude content generator
+        generator = ClaudeContentGenerator()
+
+        # Generate rewritten content
+        logger.info(f"Rewriting content with prompt: {prompt[:50]}...")
+        rewritten_text = generator.rewrite_text(original_text, prompt)
+
+        logger.info(f"Successfully rewrote content")
+
+        return Response({
+            'status': 'success',
+            'message': 'Content rewritten successfully',
+            'rewritten_text': rewritten_text
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.error(f"Error rewriting content: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error rewriting content: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_generated_contents(request):

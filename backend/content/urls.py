@@ -8,6 +8,7 @@ urlpatterns = [
     path('generate/', views.generate_content, name='generate_content'),
     path('generate-outline/', views.generate_outline, name='generate_outline'),
     path('generate-from-outline/', views.generate_content_from_outline, name='generate_content_from_outline'),
+    path('rewrite/', views.rewrite_content, name='rewrite_content'),
     path('', views.get_generated_contents, name='get_generated_contents'),
     path('<int:content_id>/', views.get_generated_content, name='get_generated_content'),
     path('<int:content_id>/update/', views.update_generated_content, name='update_generated_content'),

@@ -37,7 +37,8 @@ import {
   Info,
   Bot,
   User,
-  Loader2
+  Loader2,
+  RefreshCw
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -53,6 +54,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/services/api";
 
 const ContentEditor = () => {
@@ -109,6 +111,15 @@ const ContentEditor = () => {
     label: string;
     confidence: number;
   } | null>(null);
+
+  // Rewrite state
+  const [hasSelection, setHasSelection] = useState(false);
+  const [rewriteDialogOpen, setRewriteDialogOpen] = useState(false);
+  const [rewritePrompt, setRewritePrompt] = useState("");
+  const [isRewriting, setIsRewriting] = useState(false);
+  const [selectedTextForDialog, setSelectedTextForDialog] = useState("");
+  const selectedTextRef = useRef<string>("");
+  const selectedRangeRef = useRef<Range | null>(null);
 
   // Count keyword occurrences in text
   const countKeywordOccurrences = (text: string, keyword: string): number => {
@@ -345,6 +356,37 @@ const ContentEditor = () => {
     return () => observer.disconnect();
   }, [loading]);
 
+  // Track text selection in editor for rewrite button
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      // Don't update selection tracking when rewrite dialog is open
+      // This preserves the selection data for the rewrite operation
+      if (rewriteDialogOpen) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      if (selection && editorRef.current) {
+        const selectedText = selection.toString().trim();
+        // Check if selection is within the editor
+        if (selectedText && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          if (editorRef.current.contains(range.commonAncestorContainer)) {
+            setHasSelection(true);
+            selectedTextRef.current = selectedText;
+            selectedRangeRef.current = range.cloneRange();
+            return;
+          }
+        }
+      }
+      setHasSelection(false);
+      selectedTextRef.current = "";
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => document.removeEventListener('selectionchange', handleSelectionChange);
+  }, [rewriteDialogOpen]);
+
   // Update content metrics
   const updateMetrics = (html: string, keywordsList?: typeof keywords) => {
     const tempDiv = document.createElement('div');
@@ -570,6 +612,95 @@ const ContentEditor = () => {
       });
     } finally {
       setAiDetecting(false);
+    }
+  };
+
+  // Open rewrite dialog
+  const handleOpenRewriteDialog = () => {
+    if (!hasSelection || !selectedTextRef.current) {
+      toast({
+        title: "No text selected",
+        description: "Please select some text to rewrite.",
+        variant: "destructive"
+      });
+      return;
+    }
+    setSelectedTextForDialog(selectedTextRef.current);
+    setRewritePrompt("");
+    setRewriteDialogOpen(true);
+  };
+
+  // Handle rewrite submission
+  const handleRewrite = async () => {
+    if (!rewritePrompt.trim()) {
+      toast({
+        title: "Prompt required",
+        description: "Please enter instructions for how to rewrite the text.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!selectedTextRef.current || !selectedRangeRef.current) {
+      toast({
+        title: "Selection lost",
+        description: "Please select the text again and try.",
+        variant: "destructive"
+      });
+      setRewriteDialogOpen(false);
+      return;
+    }
+
+    try {
+      setIsRewriting(true);
+
+      const response = await apiClient.rewriteContent({
+        original_text: selectedTextRef.current,
+        prompt: rewritePrompt,
+        domain_id: contentData?.domain_id
+      });
+
+      if (response.status === 'success' && response.rewritten_text) {
+        // Focus editor and restore selection
+        editorRef.current?.focus();
+
+        const selection = window.getSelection();
+        if (selection && selectedRangeRef.current) {
+          selection.removeAllRanges();
+          selection.addRange(selectedRangeRef.current);
+
+          // Replace selected text with rewritten content
+          document.execCommand('insertText', false, response.rewritten_text);
+
+          // Update content state
+          handleContentChange();
+
+          toast({
+            title: "Content rewritten",
+            description: "The selected text has been rewritten successfully.",
+          });
+        }
+      } else {
+        toast({
+          title: "Rewrite failed",
+          description: response.message || "Failed to rewrite content",
+          variant: "destructive"
+        });
+      }
+    } catch (error: any) {
+      console.error("Rewrite error:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to rewrite content",
+        variant: "destructive"
+      });
+    } finally {
+      setIsRewriting(false);
+      setRewriteDialogOpen(false);
+      setRewritePrompt("");
+      selectedTextRef.current = "";
+      selectedRangeRef.current = null;
+      setHasSelection(false);
     }
   };
 
@@ -878,49 +1009,48 @@ const ContentEditor = () => {
                 <Strikethrough className="h-4 w-4" />
               </Button>
               <Separator orientation="vertical" className="h-6 mx-1" />
-              {/* Lists */}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => execCommand('insertUnorderedList')}
-                title="Bullet List"
-              >
-                <List className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => execCommand('insertOrderedList')}
-                title="Numbered List"
-              >
-                <ListOrdered className="h-4 w-4" />
-              </Button>
-              <Separator orientation="vertical" className="h-6 mx-1" />
-              {/* Alignment */}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => execCommand('justifyLeft')}
-                title="Align Left"
-              >
-                <AlignLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => execCommand('justifyCenter')}
-                title="Align Center"
-              >
-                <AlignCenter className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => execCommand('justifyRight')}
-                title="Align Right"
-              >
-                <AlignRight className="h-4 w-4" />
-              </Button>
+              {/* Lists Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="gap-1" title="Lists">
+                    <List className="h-4 w-4" />
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => execCommand('insertUnorderedList')}>
+                    <List className="h-4 w-4 mr-2" />
+                    Bullet List
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => execCommand('insertOrderedList')}>
+                    <ListOrdered className="h-4 w-4 mr-2" />
+                    Numbered List
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {/* Alignment Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="gap-1" title="Alignment">
+                    <AlignLeft className="h-4 w-4" />
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => execCommand('justifyLeft')}>
+                    <AlignLeft className="h-4 w-4 mr-2" />
+                    Align Left
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => execCommand('justifyCenter')}>
+                    <AlignCenter className="h-4 w-4 mr-2" />
+                    Align Center
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => execCommand('justifyRight')}>
+                    <AlignRight className="h-4 w-4 mr-2" />
+                    Align Right
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Separator orientation="vertical" className="h-6 mx-1" />
               {/* Block Elements */}
               <Button
@@ -1018,6 +1148,19 @@ const ContentEditor = () => {
                 className={!canRedo ? 'opacity-50' : ''}
               >
                 <Redo className="h-4 w-4" />
+              </Button>
+              <Separator orientation="vertical" className="h-6 mx-1" />
+              {/* AI Rewrite */}
+              <Button
+                variant={hasSelection ? "default" : "ghost"}
+                size="sm"
+                onClick={handleOpenRewriteDialog}
+                disabled={!hasSelection}
+                title="Rewrite selected text with AI"
+                className={`gap-1 ${hasSelection ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}
+              >
+                <RefreshCw className="h-4 w-4" />
+                Rewrite
               </Button>
             </div>
           </div>
@@ -1212,6 +1355,12 @@ const ContentEditor = () => {
                     const selection = window.getSelection();
                     if (selection && selection.rangeCount > 0) {
                       const range = selection.getRangeAt(0);
+
+                      // If there's a text selection, let browser handle it normally
+                      if (!range.collapsed) {
+                        return;
+                      }
+
                       let currentNode = range.startContainer;
 
                       // Find parent heading element
@@ -1220,10 +1369,10 @@ const ContentEditor = () => {
                           const tagName = (currentNode as Element).tagName?.toLowerCase();
                           if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName)) {
                             const heading = currentNode as HTMLElement;
-                            const textContent = heading.textContent?.trim() || '';
+                            const textContent = heading.textContent || '';
 
-                            // If heading is empty or will be empty after delete
-                            if (textContent === '' || textContent.length <= 1) {
+                            // Only remove if heading is completely empty
+                            if (textContent === '') {
                               e.preventDefault();
 
                               // Get next sibling to place cursor
@@ -1547,6 +1696,64 @@ const ContentEditor = () => {
             </Button>
             <Button onClick={handleInsertImage} disabled={!imageUrl}>
               Insert Image
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rewrite Dialog */}
+      <Dialog open={rewriteDialogOpen} onOpenChange={setRewriteDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5" />
+              Rewrite with AI
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Selected Text</Label>
+              <div className="p-3 bg-muted rounded-lg text-sm max-h-32 overflow-y-auto">
+                {selectedTextForDialog || "No text selected"}
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="rewritePrompt">How would you like to rewrite this?</Label>
+              <Textarea
+                id="rewritePrompt"
+                placeholder="e.g., Make it more concise, Add more detail, Change tone to professional, Simplify the language..."
+                value={rewritePrompt}
+                onChange={(e) => setRewritePrompt(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRewriteDialogOpen(false);
+                setRewritePrompt("");
+              }}
+              disabled={isRewriting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRewrite}
+              disabled={!rewritePrompt.trim() || isRewriting}
+            >
+              {isRewriting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Rewriting...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Rewrite
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
