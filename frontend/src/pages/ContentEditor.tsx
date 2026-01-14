@@ -33,7 +33,8 @@ import {
   Code,
   Sparkles,
   ChevronDown,
-  Send
+  Send,
+  Info
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -77,6 +78,7 @@ const ContentEditor = () => {
   const [paragraphsCount, setParagraphsCount] = useState(0);
   const [imagesCount, setImagesCount] = useState(0);
   const [contentScore, setContentScore] = useState(0);
+  const [scoreInfoOpen, setScoreInfoOpen] = useState(false);
 
   // Keywords tracking
   const [keywords, setKeywords] = useState<Array<{
@@ -921,7 +923,12 @@ const ContentEditor = () => {
             {/* Content Score */}
             <div>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold">Content Score</h3>
+                <div className="flex items-center gap-1">
+                  <h3 className="font-semibold">Content Score</h3>
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setScoreInfoOpen(true)}>
+                    <Info className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </div>
                 <Button variant="ghost" size="sm">
                   <Settings className="h-4 w-4" />
                 </Button>
@@ -1139,6 +1146,79 @@ const ContentEditor = () => {
           contentTitle={title}
         />
       )}
+
+      {/* Content Score Info Dialog */}
+      <Dialog open={scoreInfoOpen} onOpenChange={setScoreInfoOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>How Content Score is Calculated</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Your content score is calculated based on 5 key factors:
+            </p>
+
+            <div className="space-y-3">
+              <div className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                <div className="flex-shrink-0 w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <span className="text-lg font-bold text-primary">30</span>
+                </div>
+                <div>
+                  <h4 className="font-medium">Word Count</h4>
+                  <p className="text-xs text-muted-foreground">1500-2500 words is ideal. Shorter or longer content scores lower.</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                <div className="flex-shrink-0 w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <span className="text-lg font-bold text-primary">25</span>
+                </div>
+                <div>
+                  <h4 className="font-medium">Keyword Usage</h4>
+                  <p className="text-xs text-muted-foreground">Use target keywords naturally throughout your content within the recommended range.</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                <div className="flex-shrink-0 w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <span className="text-lg font-bold text-primary">20</span>
+                </div>
+                <div>
+                  <h4 className="font-medium">Headings Structure</h4>
+                  <p className="text-xs text-muted-foreground">Aim for 1 heading per 200-300 words to improve readability.</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                <div className="flex-shrink-0 w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <span className="text-lg font-bold text-primary">15</span>
+                </div>
+                <div>
+                  <h4 className="font-medium">Paragraph Structure</h4>
+                  <p className="text-xs text-muted-foreground">Use 5+ paragraphs to break up content and improve readability.</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                <div className="flex-shrink-0 w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <span className="text-lg font-bold text-primary">10</span>
+                </div>
+                <div>
+                  <h4 className="font-medium">Images</h4>
+                  <p className="text-xs text-muted-foreground">Include at least 2 images to enhance visual appeal and engagement.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Total possible score:</span>
+                <span className="font-bold">100 points</span>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
