@@ -3,8 +3,10 @@ import {
   Hero,
   LogoCloud,
   Features,
+  HowItWorks,
   SocialProof,
   Statistics,
+  Pricing,
   CTA,
   FAQ,
   Footer,
@@ -17,8 +19,10 @@ export default function Home() {
       <Hero />
       <LogoCloud />
       <Features />
+      <HowItWorks />
       <SocialProof />
       <Statistics />
+      <Pricing />
       <CTA />
       <FAQ />
       <Footer />

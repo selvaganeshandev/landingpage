@@ -9,28 +9,28 @@ import {
 
 const faqs = [
   {
-    question: "What AI platforms does PromptMaxx monitor?",
-    answer: "PromptMaxx monitors all major AI platforms including ChatGPT (GPT-4, GPT-4o), Claude (Anthropic), Google Gemini, Perplexity AI, and Grok (xAI). We continuously add support for new platforms as they emerge.",
+    question: "How does PromptMaxx detect misinformation about my brand?",
+    answer: "We automatically compare what AI platforms say about your brand against your actual website content using semantic analysis. When ChatGPT, Claude, or other AIs give wrong pricing, outdated features, or inaccurate information, you get instant alerts with the exact discrepancy highlighted.",
   },
   {
-    question: "How does PromptMaxx track AI mentions?",
-    answer: "We use a combination of automated queries and AI-powered analysis to track how different AI platforms respond to questions about your brand, products, and industry. Our system runs thousands of relevant prompts daily and analyzes the responses for mentions, sentiment, and accuracy.",
+    question: "How do you track traffic coming from AI platforms?",
+    answer: "PromptMaxx integrates with Google Analytics and Google Search Console to identify visitors referred from AI platforms like ChatGPT, Claude, Perplexity, and Gemini. You'll see exactly how many visitors each AI sends to your site and which pages they land on.",
   },
   {
-    question: "Can I track my competitors as well?",
-    answer: "Yes! PromptMaxx allows you to track unlimited competitors. You can compare your brand's share of voice, sentiment, and mention frequency against competitors to understand your position in the AI search landscape.",
+    question: "What is citation tracking and why does it matter?",
+    answer: "When AI platforms recommend brands, they often cite sources. Citation tracking shows you which URLs the AI is pulling information from—whether it's your website or a competitor's. This helps you understand why AI might be giving certain answers and what content you need to optimize.",
   },
   {
-    question: "What kind of reports can I generate?",
-    answer: "You can generate various reports including Executive Dashboards, Detailed Analytics, Content Strategy reports, and Competitor Analysis. All reports can be exported as PDF or Excel files and can be scheduled for automatic delivery.",
+    question: "Which AI platforms does PromptMaxx monitor?",
+    answer: "We monitor all major AI platforms including ChatGPT (GPT-4, GPT-4o), Claude (Anthropic), Google Gemini, Perplexity AI, and Grok (xAI). Our system runs relevant prompts frequently and analyzes responses for mentions, sentiment, and accuracy.",
   },
   {
-    question: "How quickly can I get started?",
-    answer: "You can get started in less than 5 minutes. Simply sign up, add your brand and competitors, and PromptMaxx will begin monitoring immediately. Initial insights are typically available within 24 hours.",
+    question: "Can I monitor my brand in multiple languages?",
+    answer: "Yes! PromptMaxx supports 50+ languages. You can track how AI platforms describe your brand in different regions and languages, catch regional misinformation, and understand your global AI presence—all from one dashboard.",
   },
   {
-    question: "Is there a free trial available?",
-    answer: "Yes, we offer a 14-day free trial with full access to all features. No credit card is required to start your trial. You can upgrade to a paid plan at any time during or after the trial.",
+    question: "How does the AI Content Editor help with AI visibility?",
+    answer: "Our content editor is built specifically for AI optimization, not just SEO. It includes AI-powered rewriting, content scoring for AI visibility, internal link mapping, and two-phase generation (outline then full article) to create content that AI platforms are more likely to cite and recommend.",
   },
 ];
 
@@ -71,7 +71,7 @@ export function FAQ() {
                   value={`item-${i}`}
                   className="bg-white rounded-xl border border-gray-200 px-6 data-[state=open]:shadow-sm transition-shadow"
                 >
-                  <AccordionTrigger className="text-left text-gray-900 hover:text-primary py-5 text-sm font-medium [&[data-state=open]]:text-primary">
+                  <AccordionTrigger className="text-left text-gray-900 hover:no-underline py-5 text-sm font-medium cursor-pointer [&[data-state=open]]:text-primary">
                     {faq.question}
                   </AccordionTrigger>
                   <AccordionContent className="text-gray-600 text-sm pb-5 leading-relaxed">

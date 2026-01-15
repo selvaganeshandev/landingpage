@@ -1,4 +1,4 @@
-import { Eye, BarChart3, AlertTriangle, Users, FileText } from "lucide-react";
+import { AlertTriangle, TrendingUp, Link2, FileEdit, Globe } from "lucide-react";
 
 export function Features() {
   return (
@@ -6,95 +6,18 @@ export function Features() {
       <div className="max-w-7xl mx-auto">
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto mb-16">
-          <p className="text-sm font-medium text-primary uppercase tracking-wider mb-4">Features</p>
+          <p className="text-sm font-medium text-primary uppercase tracking-wider mb-4">Why PromptMaxx</p>
           <h2 className="text-3xl sm:text-4xl font-semibold text-gray-900 mb-6">
-            Everything you need to dominate AI search
+            Features you won&apos;t find anywhere else
           </h2>
           <p className="text-lg text-gray-600">
-            Monitor, analyze, and optimize your brand&apos;s presence across all major AI platforms.
+            We built what other tools forgot. These capabilities exist only in PromptMaxx.
           </p>
         </div>
 
         {/* Top Row - 3 Cards */}
         <div className="grid md:grid-cols-3 gap-6 mb-6">
-          {/* Card 1: AI Mention Tracking */}
-          <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
-            <div className="h-48 mb-6 relative overflow-hidden rounded-2xl bg-gray-50/50">
-              {/* Dotted pattern background */}
-              <div className="absolute inset-0" style={{
-                backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)',
-                backgroundSize: '16px 16px'
-              }} />
-              {/* Visual content */}
-              <div className="relative h-full flex items-center justify-center p-4">
-                <div className="space-y-2 w-full max-w-[200px]">
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-6 h-6 rounded bg-green-500 flex items-center justify-center">
-                        <span className="text-white text-xs font-bold">G</span>
-                      </div>
-                      <span className="text-xs font-medium text-gray-700">ChatGPT</span>
-                      <span className="ml-auto text-xs text-green-600 font-medium">+24</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded bg-orange-500 flex items-center justify-center">
-                        <span className="text-white text-xs font-bold">C</span>
-                      </div>
-                      <span className="text-xs font-medium text-gray-700">Claude</span>
-                      <span className="ml-auto text-xs text-green-600 font-medium">+18</span>
-                    </div>
-                  </div>
-                  <div className="bg-green-50 rounded-lg p-2 border border-green-200">
-                    <div className="flex items-center gap-2">
-                      <Eye className="w-4 h-4 text-green-600" />
-                      <span className="text-xs font-medium text-green-700">Live Tracking</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">AI Mention Tracking</h3>
-            <p className="text-gray-600">
-              Monitor brand mentions in real-time across ChatGPT, Claude, Gemini, Perplexity, and Grok.
-            </p>
-          </div>
-
-          {/* Card 2: Share of Voice */}
-          <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
-            <div className="h-48 mb-6 relative overflow-hidden rounded-2xl bg-gray-50/50">
-              <div className="absolute inset-0" style={{
-                backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)',
-                backgroundSize: '16px 16px'
-              }} />
-              <div className="relative h-full flex items-center justify-center p-4">
-                <div className="w-full max-w-[200px]">
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                    <div className="text-center mb-3">
-                      <span className="text-2xl font-bold text-primary">45%</span>
-                      <p className="text-xs text-gray-500">Share of Voice</p>
-                    </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-primary rounded-full" style={{ width: '45%' }} />
-                    </div>
-                    <div className="flex justify-between mt-2 text-xs text-gray-500">
-                      <span>You</span>
-                      <span>Competitors</span>
-                    </div>
-                  </div>
-                  <div className="mt-2 flex items-center justify-center gap-1">
-                    <BarChart3 className="w-4 h-4 text-gray-400" />
-                    <span className="text-xs text-gray-500">vs 12 competitors</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Share of Voice</h3>
-            <p className="text-gray-600">
-              See exactly how your brand visibility compares to competitors in AI responses.
-            </p>
-          </div>
-
-          {/* Card 3: Misinformation Alerts */}
+          {/* Card 1: Misinformation Detection */}
           <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
             <div className="h-48 mb-6 relative overflow-hidden rounded-2xl bg-gray-50/50">
               <div className="absolute inset-0" style={{
@@ -109,37 +32,157 @@ export function Features() {
                         <AlertTriangle className="w-4 h-4 text-red-500" />
                       </div>
                       <div>
-                        <p className="text-xs font-medium text-gray-900">Alert Detected</p>
-                        <p className="text-[10px] text-gray-500">Inaccurate pricing info</p>
+                        <p className="text-xs font-medium text-gray-900">AI Said Wrong Price</p>
+                        <p className="text-[10px] text-gray-500">&quot;$99/mo&quot; → Actually $49/mo</p>
                       </div>
                     </div>
                     <div className="mt-2 h-1.5 bg-red-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-red-500 rounded-full" style={{ width: '70%' }} />
+                      <div className="h-full bg-red-500 rounded-full" style={{ width: '85%' }} />
                     </div>
                   </div>
-                  <div className="bg-green-50 rounded-lg p-2 border border-green-200">
+                  <div className="bg-primary/10 rounded-lg p-2 border border-primary/20">
                     <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 rounded-full bg-green-500 flex items-center justify-center">
+                      <div className="w-4 h-4 rounded-full bg-primary flex items-center justify-center">
                         <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                         </svg>
                       </div>
-                      <span className="text-xs font-medium text-green-700">Correction Sent</span>
+                      <span className="text-xs font-medium text-primary">Alert Sent to Team</span>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Misinformation Alerts</h3>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Catch AI Lies Instantly</h3>
             <p className="text-gray-600">
-              Get instant notifications when AI platforms spread incorrect information about your brand.
+              AI makes mistakes about your brand. Get real-time alerts when platforms spread wrong pricing, outdated features, or inaccurate info.
+            </p>
+          </div>
+
+          {/* Card 2: Traffic Attribution */}
+          <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
+            <div className="h-48 mb-6 relative overflow-hidden rounded-2xl bg-gray-50/50">
+              <div className="absolute inset-0" style={{
+                backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)',
+                backgroundSize: '16px 16px'
+              }} />
+              <div className="relative h-full flex items-center justify-center p-4">
+                <div className="w-full max-w-[200px]">
+                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <TrendingUp className="w-4 h-4 text-primary" />
+                      <span className="text-xs font-medium text-gray-700">AI Traffic Sources</span>
+                    </div>
+                    <div className="text-center mb-3">
+                      <span className="text-2xl font-bold text-primary">12,847</span>
+                      <p className="text-xs text-green-600 font-medium">+89% visitors from AI</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      {[
+                        { name: "ChatGPT", value: "5,420" },
+                        { name: "Perplexity", value: "4,127" },
+                        { name: "Claude", value: "3,300" },
+                      ].map((item, i) => (
+                        <div key={i} className="flex justify-between text-xs">
+                          <span className="text-gray-500">{item.name}</span>
+                          <span className="font-medium text-gray-900">{item.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Track Traffic from AI</h3>
+            <p className="text-gray-600">
+              See exactly how many visitors come from AI platforms. Know which AI—ChatGPT, Claude, or Perplexity—sends you the most traffic.
+            </p>
+          </div>
+
+          {/* Card 3: Citation Tracking */}
+          <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
+            <div className="h-48 mb-6 relative overflow-hidden rounded-2xl bg-gray-50/50">
+              <div className="absolute inset-0" style={{
+                backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)',
+                backgroundSize: '16px 16px'
+              }} />
+              <div className="relative h-full flex items-center justify-center p-4">
+                <div className="w-full max-w-[220px] space-y-2">
+                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Link2 className="w-4 h-4 text-primary" />
+                      <span className="text-xs font-medium text-gray-700">Sources AI Cites</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                        <span className="text-[10px] text-gray-600 truncate">yourbrand.com/pricing</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                        <span className="text-[10px] text-gray-600 truncate">yourbrand.com/features</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                        <span className="text-[10px] text-gray-600 truncate">competitor.com/compare</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-amber-50 rounded-lg p-2 border border-amber-200">
+                    <span className="text-xs font-medium text-amber-700">1 competitor source detected</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">See What Sources AI Trusts</h3>
+            <p className="text-gray-600">
+              Know which URLs AI platforms cite when recommending brands. Track if they&apos;re using your content—or your competitor&apos;s.
             </p>
           </div>
         </div>
 
         {/* Bottom Row - 2 Cards */}
         <div className="grid md:grid-cols-2 gap-6">
-          {/* Card 4: Competitor Analysis */}
+          {/* Card 4: AI Content Editor */}
+          <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
+            <div className="h-56 mb-6 relative overflow-hidden rounded-2xl bg-gray-50/50">
+              <div className="absolute inset-0" style={{
+                backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)',
+                backgroundSize: '16px 16px'
+              }} />
+              <div className="relative h-full flex items-center justify-center p-4">
+                <div className="w-full max-w-[300px]">
+                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <FileEdit className="w-4 h-4 text-primary" />
+                        <span className="text-xs font-medium text-gray-700">AI Content Editor</span>
+                      </div>
+                      <div className="flex items-center gap-1 bg-green-100 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-medium text-green-700">Score: 94</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2 mb-3">
+                      <div className="h-2 bg-gray-200 rounded w-full"></div>
+                      <div className="h-2 bg-gray-200 rounded w-4/5"></div>
+                      <div className="h-2 bg-primary/30 rounded w-3/5"></div>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="text-[10px] px-2 py-1 bg-primary/10 text-primary rounded-full">AI Rewrite</span>
+                      <span className="text-[10px] px-2 py-1 bg-primary/10 text-primary rounded-full">Link Map</span>
+                      <span className="text-[10px] px-2 py-1 bg-primary/10 text-primary rounded-full">Outline</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Content That Ranks in AI</h3>
+            <p className="text-gray-600">
+              Create content optimized for AI recommendations, not just Google. AI-powered rewriting, internal link mapping, and visibility scoring built-in.
+            </p>
+          </div>
+
+          {/* Card 5: Multilingual Monitoring */}
           <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
             <div className="h-56 mb-6 relative overflow-hidden rounded-2xl bg-gray-50/50">
               <div className="absolute inset-0" style={{
@@ -150,21 +193,25 @@ export function Features() {
                 <div className="w-full max-w-[300px]">
                   <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                     <div className="flex items-center gap-2 mb-4">
-                      <Users className="w-5 h-5 text-gray-400" />
-                      <span className="text-sm font-medium text-gray-900">Competitor Analysis</span>
+                      <Globe className="w-5 h-5 text-primary" />
+                      <span className="text-sm font-medium text-gray-900">Global AI Monitoring</span>
                     </div>
-                    <div className="space-y-3">
+                    <div className="grid grid-cols-3 gap-2">
                       {[
-                        { name: "Your Brand", score: 87, color: "bg-primary" },
-                        { name: "Competitor A", score: 65, color: "bg-gray-300" },
-                        { name: "Competitor B", score: 52, color: "bg-gray-200" },
+                        { lang: "EN", flag: "🇺🇸", sentiment: "positive" },
+                        { lang: "DE", flag: "🇩🇪", sentiment: "positive" },
+                        { lang: "FR", flag: "🇫🇷", sentiment: "neutral" },
+                        { lang: "ES", flag: "🇪🇸", sentiment: "positive" },
+                        { lang: "JP", flag: "🇯🇵", sentiment: "positive" },
+                        { lang: "BR", flag: "🇧🇷", sentiment: "negative" },
                       ].map((item, i) => (
-                        <div key={i} className="flex items-center gap-3">
-                          <span className="text-xs text-gray-600 w-24">{item.name}</span>
-                          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div className={`h-full ${item.color} rounded-full`} style={{ width: `${item.score}%` }} />
-                          </div>
-                          <span className="text-xs font-medium text-gray-900 w-8">{item.score}</span>
+                        <div key={i} className="flex items-center gap-1.5 bg-gray-50 rounded-lg p-2">
+                          <span className="text-sm">{item.flag}</span>
+                          <span className="text-[10px] font-medium text-gray-700">{item.lang}</span>
+                          <div className={`w-1.5 h-1.5 rounded-full ml-auto ${
+                            item.sentiment === 'positive' ? 'bg-green-500' :
+                            item.sentiment === 'negative' ? 'bg-red-500' : 'bg-yellow-500'
+                          }`}></div>
                         </div>
                       ))}
                     </div>
@@ -172,50 +219,9 @@ export function Features() {
                 </div>
               </div>
             </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Competitor Analysis</h3>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Monitor Your Brand Globally</h3>
             <p className="text-gray-600">
-              Benchmark your AI visibility against competitors. Identify gaps and opportunities to outperform them in AI search results.
-            </p>
-          </div>
-
-          {/* Card 5: Automated Reports */}
-          <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
-            <div className="h-56 mb-6 relative overflow-hidden rounded-2xl bg-gray-50/50">
-              <div className="absolute inset-0" style={{
-                backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)',
-                backgroundSize: '16px 16px'
-              }} />
-              <div className="relative h-full flex flex-col items-center justify-center p-4">
-                <div className="flex items-center gap-4 mb-4">
-                  {[
-                    { icon: BarChart3, label: "Executive", color: "bg-blue-50 border-blue-100 text-blue-600" },
-                    { icon: ({ className }: { className?: string }) => (
-                      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M3 3v18h18" />
-                        <path d="M18 9l-5 5-4-4-3 3" />
-                      </svg>
-                    ), label: "Analytics", color: "bg-orange-50 border-orange-100 text-orange-600" },
-                    { icon: FileText, label: "Content", color: "bg-yellow-50 border-yellow-100 text-yellow-600" },
-                  ].map((report, i) => (
-                    <div key={i} className={`rounded-xl p-4 border shadow-sm bg-white`}>
-                      <div className={`w-10 h-10 rounded-lg ${report.color.split(' ').slice(0, 2).join(' ')} flex items-center justify-center mb-2`}>
-                        <report.icon className={`w-5 h-5 ${report.color.split(' ')[2]}`} />
-                      </div>
-                      <p className="text-xs font-medium text-gray-700">{report.label}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="bg-primary/10 rounded-full px-4 py-1.5 border border-primary/20">
-                  <div className="flex items-center gap-2">
-                    <FileText className="w-3.5 h-3.5 text-primary" />
-                    <span className="text-xs font-medium text-primary">PDF & Excel Export</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Automated Reports</h3>
-            <p className="text-gray-600">
-              Generate beautiful, stakeholder-ready reports. Schedule weekly or monthly delivery with custom templates.
+              AI speaks every language. Track how AI describes your brand in 50+ languages. Catch regional misinformation before it spreads.
             </p>
           </div>
         </div>

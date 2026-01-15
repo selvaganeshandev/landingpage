@@ -23,7 +23,7 @@ const testimonials = [
 
 export function SocialProof() {
   return (
-    <section className="py-24 px-4 sm:px-6 lg:px-8 bg-gray-50">
+    <section className="py-24 px-4 sm:px-6 lg:px-8 bg-white">
       <div className="max-w-7xl mx-auto">
         {/* Testimonials */}
         <div className="text-center mb-12">

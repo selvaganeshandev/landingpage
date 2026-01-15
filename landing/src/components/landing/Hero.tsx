@@ -9,21 +9,21 @@ export function Hero() {
         {/* Badge */}
         <div className="flex justify-center mb-6">
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary/5 rounded-full border border-primary/20">
-            <span className="w-2 h-2 bg-primary rounded-full"></span>
-            <span className="text-sm text-gray-600">Now tracking 5 major AI platforms</span>
+            <span className="w-2 h-2 bg-primary rounded-full animate-pulse"></span>
+            <span className="text-sm text-gray-600">2B+ monthly AI searches and growing</span>
           </div>
         </div>
 
         {/* Headline */}
         <div className="text-center max-w-4xl mx-auto mb-8">
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-semibold text-gray-900 leading-tight mb-6">
-            AI search analytics
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-semibold text-gray-900 leading-tight mb-6">
+            Your customers stopped Googling.
             <br />
-            <span className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">for marketing teams</span>
+            <span className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">Are you visible where they search now?</span>
           </h1>
-          <p className="text-lg sm:text-xl text-gray-600 max-w-2xl mx-auto">
-            Monitor how AI platforms like ChatGPT, Claude, Gemini, and Perplexity
-            talk about your brand. Get actionable insights to improve your visibility.
+          <p className="text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
+            Millions now ask ChatGPT, Claude, Gemini, and Perplexity instead of Google.
+            Discover what AI tells them about your brand—before your competitors do.
           </p>
         </div>
 
