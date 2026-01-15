@@ -1,0 +1,9 @@
+export { Header } from "./Header";
+export { Hero } from "./Hero";
+export { LogoCloud } from "./LogoCloud";
+export { Features } from "./Features";
+export { SocialProof } from "./SocialProof";
+export { Statistics } from "./Statistics";
+export { CTA } from "./CTA";
+export { FAQ } from "./FAQ";
+export { Footer } from "./Footer";
