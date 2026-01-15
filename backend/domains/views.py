@@ -8,10 +8,11 @@ from django.db import transaction, connection
 from django.db import IntegrityError
 from django.db.utils import ProgrammingError
 from django.conf import settings
-from .models import Domain, DomainAccess
+from .models import Domain, DomainAccess, InternalLinkMap
 from .serializers import (
     DomainSerializer, DomainDetailSerializer,
-    DomainAccessSerializer, DomainAccessCreateSerializer
+    DomainAccessSerializer, DomainAccessCreateSerializer,
+    InternalLinkMapSerializer, InternalLinkMapCreateSerializer
 )
 from authentication.serializers import AccountSerializer
 from authentication.models import Account
@@ -1447,3 +1448,190 @@ Return ONLY a valid JSON object with these fields:
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Internal Link Map Management
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def internal_link_map_list(request, domain_id):
+    """
+    List all internal link mappings for a domain or create a new one
+    """
+    # Verify domain access
+    try:
+        if request.user.role == 'super_admin':
+            domain = Domain.objects.get(pk=domain_id, organisation=request.user.organisation)
+        else:
+            domain_access = DomainAccess.objects.get(
+                user=request.user,
+                domain_id=domain_id,
+                domain__organisation=request.user.organisation
+            )
+            domain = domain_access.domain
+    except (Domain.DoesNotExist, DomainAccess.DoesNotExist):
+        return Response(
+            {'error': 'Domain not found or you do not have access to this domain'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if request.method == 'GET':
+        links = InternalLinkMap.objects.filter(domain=domain)
+        serializer = InternalLinkMapSerializer(links, many=True)
+        return Response({
+            'internal_links': serializer.data,
+            'total': links.count()
+        })
+
+    elif request.method == 'POST':
+        # Only admins can create internal links
+        if request.user.role not in ['admin', 'super_admin']:
+            return Response(
+                {'error': 'Only organization administrators can manage internal links'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = InternalLinkMapCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            link = serializer.save(domain=domain)
+            return Response({
+                'message': 'Internal link created successfully',
+                'link': InternalLinkMapSerializer(link).data
+            }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def internal_link_map_detail(request, domain_id, link_id):
+    """
+    Retrieve, update or delete an internal link mapping
+    """
+    # Verify domain access
+    try:
+        if request.user.role == 'super_admin':
+            domain = Domain.objects.get(pk=domain_id, organisation=request.user.organisation)
+        else:
+            domain_access = DomainAccess.objects.get(
+                user=request.user,
+                domain_id=domain_id,
+                domain__organisation=request.user.organisation
+            )
+            domain = domain_access.domain
+    except (Domain.DoesNotExist, DomainAccess.DoesNotExist):
+        return Response(
+            {'error': 'Domain not found or you do not have access to this domain'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    try:
+        link = InternalLinkMap.objects.get(pk=link_id, domain=domain)
+    except InternalLinkMap.DoesNotExist:
+        return Response(
+            {'error': 'Internal link not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if request.method == 'GET':
+        serializer = InternalLinkMapSerializer(link)
+        return Response(serializer.data)
+
+    elif request.method == 'PUT':
+        if request.user.role not in ['admin', 'super_admin']:
+            return Response(
+                {'error': 'Only organization administrators can update internal links'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = InternalLinkMapCreateSerializer(link, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                'message': 'Internal link updated successfully',
+                'link': InternalLinkMapSerializer(link).data
+            })
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        if request.user.role not in ['admin', 'super_admin']:
+            return Response(
+                {'error': 'Only organization administrators can delete internal links'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        link.delete()
+        return Response({
+            'message': 'Internal link deleted successfully'
+        })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def internal_link_map_import_csv(request, domain_id):
+    """
+    Import internal link mappings from CSV data
+    Expected CSV format: topic,keywords,url (with header row)
+    """
+    # Verify domain access and admin permission
+    try:
+        if request.user.role == 'super_admin':
+            domain = Domain.objects.get(pk=domain_id, organisation=request.user.organisation)
+        else:
+            domain_access = DomainAccess.objects.get(
+                user=request.user,
+                domain_id=domain_id,
+                domain__organisation=request.user.organisation
+            )
+            domain = domain_access.domain
+    except (Domain.DoesNotExist, DomainAccess.DoesNotExist):
+        return Response(
+            {'error': 'Domain not found or you do not have access to this domain'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response(
+            {'error': 'Only organization administrators can import internal links'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Get CSV data from request
+    csv_data = request.data.get('csv_data', [])
+    if not csv_data or not isinstance(csv_data, list):
+        return Response(
+            {'error': 'csv_data must be a non-empty array of objects with topic, keywords, and url fields'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    created_count = 0
+    errors = []
+
+    with transaction.atomic():
+        for index, row in enumerate(csv_data):
+            topic = row.get('topic', '').strip()
+            keywords = row.get('keywords', '').strip()
+            url = row.get('url', '').strip()
+
+            if not topic or not keywords or not url:
+                errors.append(f"Row {index + 1}: Missing required fields (topic, keywords, or url)")
+                continue
+
+            if not url.startswith(('http://', 'https://')):
+                errors.append(f"Row {index + 1}: URL must start with http:// or https://")
+                continue
+
+            try:
+                InternalLinkMap.objects.create(
+                    domain=domain,
+                    topic=topic,
+                    keywords=keywords,
+                    url=url
+                )
+                created_count += 1
+            except Exception as e:
+                errors.append(f"Row {index + 1}: {str(e)}")
+
+    return Response({
+        'message': f'Successfully imported {created_count} internal link(s)',
+        'created_count': created_count,
+        'errors': errors if errors else None
+    }, status=status.HTTP_201_CREATED if created_count > 0 else status.HTTP_400_BAD_REQUEST)

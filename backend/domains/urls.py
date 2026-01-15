@@ -16,4 +16,9 @@ urlpatterns = [
     path('<int:domain_id>/access/', views.domain_access_list, name='domain_access_list'),
     path('<int:domain_id>/access/<int:user_id>/', views.domain_access_detail, name='domain_access_detail'),
     path('<int:domain_id>/access/available-users/', views.available_users_for_domain, name='available_users_for_domain'),
+
+    # Internal Link Map Management
+    path('<int:domain_id>/internal-links/', views.internal_link_map_list, name='internal_link_map_list'),
+    path('<int:domain_id>/internal-links/<int:link_id>/', views.internal_link_map_detail, name='internal_link_map_detail'),
+    path('<int:domain_id>/internal-links/import/', views.internal_link_map_import_csv, name='internal_link_map_import_csv'),
 ]

@@ -261,3 +261,48 @@ class DomainHealthCheck(models.Model):
 
     def __str__(self):
         return f"{self.domain.name} - {self.percentage}% ({self.grade}) - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+
+
+class InternalLinkMap(models.Model):
+    """
+    Stores internal link mapping for domains
+    Used for inserting contextual links during content generation
+    """
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='internal_links',
+        help_text="Domain this link map belongs to"
+    )
+    topic = models.CharField(
+        max_length=255,
+        help_text="Topic or subject for the link"
+    )
+    keywords = models.TextField(
+        help_text="Comma-separated keywords that should trigger this link"
+    )
+    url = models.URLField(
+        max_length=500,
+        help_text="URL to link to when keywords are matched"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Timestamp when the link map entry was created"
+    )
+    modified_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Timestamp when the link map entry was last modified"
+    )
+
+    class Meta:
+        db_table = 'internal_link_maps'
+        verbose_name = 'Internal Link Map'
+        verbose_name_plural = 'Internal Link Maps'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['domain', '-created_at']),
+            models.Index(fields=['domain', 'topic']),
+        ]
+
+    def __str__(self):
+        return f"{self.domain.name} - {self.topic}"

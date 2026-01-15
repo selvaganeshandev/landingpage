@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Domain, DomainAccess
+from .models import Domain, DomainAccess, InternalLinkMap
 
 
 class DomainSerializer(serializers.ModelSerializer):
@@ -86,7 +86,34 @@ class DomainAccessCreateSerializer(serializers.ModelSerializer):
         user_id = validated_data.pop('user_id')
         from authentication.models import Account
         validated_data['user'] = Account.objects.get(id=user_id)
-        
+
         # Set granted_by to the current user from context
         validated_data['granted_by'] = self.context['request'].user
         return super().create(validated_data)
+
+
+class InternalLinkMapSerializer(serializers.ModelSerializer):
+    """Serializer for InternalLinkMap model"""
+    domain_name = serializers.CharField(source='domain.name', read_only=True)
+
+    class Meta:
+        model = InternalLinkMap
+        fields = [
+            'id', 'domain', 'domain_name', 'topic', 'keywords', 'url',
+            'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at']
+
+
+class InternalLinkMapCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating InternalLinkMap entries"""
+
+    class Meta:
+        model = InternalLinkMap
+        fields = ['topic', 'keywords', 'url']
+
+    def validate_url(self, value):
+        """Ensure URL is valid"""
+        if not value.startswith(('http://', 'https://')):
+            raise serializers.ValidationError("URL must start with http:// or https://")
+        return value

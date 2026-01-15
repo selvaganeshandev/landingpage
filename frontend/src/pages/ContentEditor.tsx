@@ -38,7 +38,10 @@ import {
   Bot,
   User,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  Link2,
+  ExternalLink,
+  Check
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -55,6 +58,13 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { apiClient } from "@/services/api";
 
 const ContentEditor = () => {
@@ -120,6 +130,34 @@ const ContentEditor = () => {
   const [selectedTextForDialog, setSelectedTextForDialog] = useState("");
   const selectedTextRef = useRef<string>("");
   const selectedRangeRef = useRef<Range | null>(null);
+
+  // Link dialog state
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkText, setLinkText] = useState("");
+  const [linkTarget, setLinkTarget] = useState<"_self" | "_blank">("_self");
+  const [linkRel, setLinkRel] = useState<string>("dofollow"); // dofollow, nofollow, sponsored, ugc
+  const [editingLinkElement, setEditingLinkElement] = useState<HTMLAnchorElement | null>(null);
+  const linkSelectionRef = useRef<Range | null>(null);
+
+  // Internal Links state
+  const [internalLinks, setInternalLinks] = useState<Array<{
+    id: number;
+    topic: string;
+    keywords: string;
+    url: string;
+  }>>([]);
+  const [linkOpportunities, setLinkOpportunities] = useState<Array<{
+    linkId: number;
+    topic: string;
+    keyword: string;
+    url: string;
+    count: number;
+  }>>([]);
+  const [appliedLinksCount, setAppliedLinksCount] = useState(0);
+  const [totalLinkOpportunities, setTotalLinkOpportunities] = useState(0);
+  const [isLoadingLinks, setIsLoadingLinks] = useState(false);
+  const [isApplyingLinks, setIsApplyingLinks] = useState(false);
 
   // Count keyword occurrences in text
   const countKeywordOccurrences = (text: string, keyword: string): number => {
@@ -254,6 +292,15 @@ const ContentEditor = () => {
 
           // Calculate initial metrics and content score with keywords
           updateMetrics(contentRecord.content_html || "", keywordStats);
+
+          // Fetch internal links for the domain and find opportunities
+          const domainId = contentRecord.domain_id || contentRecord.domain;
+          if (domainId) {
+            const links = await fetchInternalLinks(domainId);
+            if (links.length > 0) {
+              findLinkOpportunities(contentRecord.content_html || "", links);
+            }
+          }
         }
       } catch (error) {
         console.error("Error loading content:", error);
@@ -518,6 +565,11 @@ const ContentEditor = () => {
       setKeywords(updatedKeywords);
       updateMetrics(html, updatedKeywords);
 
+      // Recalculate internal link opportunities
+      if (internalLinks.length > 0) {
+        findLinkOpportunities(html, internalLinks);
+      }
+
       // Update original content ref when user edits (only if no keyword is selected)
       if (!selectedKeyword) {
         originalContentRef.current = html;
@@ -702,6 +754,289 @@ const ContentEditor = () => {
       selectedRangeRef.current = null;
       setHasSelection(false);
     }
+  };
+
+  // Fetch internal links for the domain
+  const fetchInternalLinks = async (domainId: number) => {
+    try {
+      setIsLoadingLinks(true);
+      const response: any = await apiClient.getInternalLinkMaps(domainId);
+      const links = response.internal_links || [];
+      setInternalLinks(links);
+      return links;
+    } catch (error) {
+      console.error("Error fetching internal links:", error);
+      return [];
+    } finally {
+      setIsLoadingLinks(false);
+    }
+  };
+
+  // Find link opportunities in content
+  const findLinkOpportunities = (htmlContent: string, links: typeof internalLinks) => {
+    if (!links || links.length === 0) {
+      setLinkOpportunities([]);
+      setTotalLinkOpportunities(0);
+      setAppliedLinksCount(0);
+      return;
+    }
+
+    // Get plain text from content
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlContent;
+    const plainText = tempDiv.textContent?.toLowerCase() || '';
+
+    // Extract all text content from anchor tags to check what's already linked
+    const anchorTexts: string[] = [];
+    const anchors = tempDiv.querySelectorAll('a');
+    anchors.forEach(anchor => {
+      const text = anchor.textContent?.toLowerCase() || '';
+      if (text) anchorTexts.push(text);
+    });
+
+    // Find which keywords appear in the content (excluding already linked text)
+    const opportunities: typeof linkOpportunities = [];
+    let appliedKeywordsCount = 0;
+    let totalKeywordsFound = 0;
+
+    links.forEach(link => {
+      // Split keywords by comma and check each one
+      const keywordList = link.keywords.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
+
+      keywordList.forEach(keyword => {
+        if (keyword.length < 2) return; // Skip very short keywords
+
+        // Count occurrences of keyword in plain text
+        const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+        const matches = plainText.match(regex);
+        const count = matches ? matches.length : 0;
+
+        if (count > 0) {
+          totalKeywordsFound++;
+
+          // Check if this keyword is already inside any anchor tag
+          const keywordRegex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+          const alreadyLinked = anchorTexts.some(anchorText => keywordRegex.test(anchorText));
+
+          if (alreadyLinked) {
+            appliedKeywordsCount++;
+          } else {
+            opportunities.push({
+              linkId: link.id,
+              topic: link.topic,
+              keyword: keyword,
+              url: link.url,
+              count: count
+            });
+          }
+        }
+      });
+    });
+
+    // Sort by count descending
+    opportunities.sort((a, b) => b.count - a.count);
+    setLinkOpportunities(opportunities);
+    setTotalLinkOpportunities(totalKeywordsFound);
+    setAppliedLinksCount(appliedKeywordsCount);
+  };
+
+  // Apply internal links to content
+  const handleApplyInternalLinks = () => {
+    if (!editorRef.current || linkOpportunities.length === 0) return;
+
+    setIsApplyingLinks(true);
+
+    try {
+      let html = editorRef.current.innerHTML;
+
+      // Apply each link opportunity (limit to first occurrence to avoid over-linking)
+      linkOpportunities.forEach(opportunity => {
+        // Create a regex that matches the keyword but not if it's already in a link
+        const keywordRegex = new RegExp(
+          `(?<!<a[^>]*>)\\b(${opportunity.keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b(?![^<]*</a>)`,
+          'i'
+        );
+
+        // Replace only the first occurrence
+        html = html.replace(keywordRegex, `<a href="${opportunity.url}" target="_blank" rel="noopener noreferrer">$1</a>`);
+      });
+
+      // Update the editor
+      editorRef.current.innerHTML = html;
+      handleContentChange();
+
+      // Recalculate opportunities
+      findLinkOpportunities(html, internalLinks);
+
+      toast({
+        title: "Links Applied",
+        description: `Applied ${linkOpportunities.length} internal link(s) to your content.`,
+      });
+    } catch (error) {
+      console.error("Error applying internal links:", error);
+      toast({
+        title: "Error",
+        description: "Failed to apply internal links",
+        variant: "destructive"
+      });
+    } finally {
+      setIsApplyingLinks(false);
+    }
+  };
+
+  // Open link dialog
+  const handleOpenLinkDialog = () => {
+    const selection = window.getSelection();
+
+    // Check if cursor/selection is inside an existing link
+    let existingLink: HTMLAnchorElement | null = null;
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      let node: Node | null = range.startContainer;
+
+      // Walk up the DOM tree to find an anchor element
+      while (node && node !== editorRef.current) {
+        if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === 'A') {
+          existingLink = node as HTMLAnchorElement;
+          break;
+        }
+        node = node.parentNode;
+      }
+
+      if (existingLink) {
+        // Editing existing link - pre-populate with existing values
+        setEditingLinkElement(existingLink);
+        setLinkUrl(existingLink.href || "");
+        setLinkText(existingLink.textContent || "");
+        setLinkTarget(existingLink.target === "_blank" ? "_blank" : "_self");
+
+        // Detect rel attribute
+        const rel = existingLink.rel || "";
+        if (rel.includes("sponsored")) {
+          setLinkRel("sponsored");
+        } else if (rel.includes("ugc")) {
+          setLinkRel("ugc");
+        } else if (rel.includes("nofollow")) {
+          setLinkRel("nofollow");
+        } else {
+          setLinkRel("dofollow");
+        }
+
+        // Select the entire link for replacement
+        const linkRange = document.createRange();
+        linkRange.selectNode(existingLink);
+        linkSelectionRef.current = linkRange;
+        setLinkDialogOpen(true);
+        return;
+      }
+
+      // No existing link - use selected text
+      const selectedText = selection.toString().trim();
+      linkSelectionRef.current = range.cloneRange();
+      setEditingLinkElement(null);
+      setLinkText(selectedText);
+      setLinkUrl("");
+      setLinkTarget("_self");
+      setLinkRel("dofollow");
+      setLinkDialogOpen(true);
+    } else {
+      // No selection, still allow inserting link
+      linkSelectionRef.current = null;
+      setEditingLinkElement(null);
+      setLinkText("");
+      setLinkUrl("");
+      setLinkTarget("_self");
+      setLinkRel("dofollow");
+      setLinkDialogOpen(true);
+    }
+  };
+
+  // Build rel attribute based on settings
+  const buildRelAttribute = () => {
+    const relParts: string[] = [];
+
+    // Add noopener noreferrer for new window links
+    if (linkTarget === "_blank") {
+      relParts.push("noopener", "noreferrer");
+    }
+
+    // Add SEO-related rel values
+    if (linkRel === "nofollow") {
+      relParts.push("nofollow");
+    } else if (linkRel === "sponsored") {
+      relParts.push("sponsored", "nofollow");
+    } else if (linkRel === "ugc") {
+      relParts.push("ugc", "nofollow");
+    }
+    // dofollow = no additional rel needed
+
+    return relParts.length > 0 ? relParts.join(" ") : "";
+  };
+
+  // Insert or update link
+  const handleInsertLink = () => {
+    if (!linkUrl) {
+      toast({
+        title: "URL Required",
+        description: "Please enter a URL for the link.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    editorRef.current?.focus();
+    const relValue = buildRelAttribute();
+
+    // If editing an existing link, update it directly
+    if (editingLinkElement && editingLinkElement.parentNode) {
+      editingLinkElement.href = linkUrl;
+      editingLinkElement.textContent = linkText || linkUrl;
+
+      if (linkTarget === "_blank") {
+        editingLinkElement.target = "_blank";
+      } else {
+        editingLinkElement.removeAttribute("target");
+      }
+
+      if (relValue) {
+        editingLinkElement.rel = relValue;
+      } else {
+        editingLinkElement.removeAttribute("rel");
+      }
+
+      handleContentChange();
+    } else if (linkSelectionRef.current) {
+      // Restore selection and insert new link
+      const selection = window.getSelection();
+      if (selection) {
+        selection.removeAllRanges();
+        selection.addRange(linkSelectionRef.current);
+
+        // Create the link HTML
+        const textToLink = linkText || linkUrl;
+        const targetAttr = linkTarget === "_blank" ? ' target="_blank"' : '';
+        const relAttr = relValue ? ` rel="${relValue}"` : '';
+        const linkHtml = `<a href="${linkUrl}"${targetAttr}${relAttr}>${textToLink}</a>`;
+
+        document.execCommand('insertHTML', false, linkHtml);
+        handleContentChange();
+      }
+    } else {
+      // No selection, insert link at cursor or end
+      const textToLink = linkText || linkUrl;
+      const targetAttr = linkTarget === "_blank" ? ' target="_blank"' : '';
+      const relAttr = relValue ? ` rel="${relValue}"` : '';
+      const linkHtml = `<a href="${linkUrl}"${targetAttr}${relAttr}>${textToLink}</a>`;
+      document.execCommand('insertHTML', false, linkHtml);
+      handleContentChange();
+    }
+
+    setLinkDialogOpen(false);
+    setLinkUrl("");
+    setLinkText("");
+    setLinkRel("dofollow");
+    setEditingLinkElement(null);
+    linkSelectionRef.current = null;
   };
 
   // Formatting functions
@@ -1082,10 +1417,7 @@ const ContentEditor = () => {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => {
-                  const url = prompt('Enter URL:');
-                  if (url) execCommand('createLink', url);
-                }}
+                onClick={handleOpenLinkDialog}
                 title="Insert Link"
               >
                 <Link className="h-4 w-4" />
@@ -1600,6 +1932,81 @@ const ContentEditor = () => {
 
             <Separator />
 
+            {/* Internal Links */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold">Internal Links</h3>
+                {isLoadingLinks && (
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                )}
+              </div>
+
+              {internalLinks.length === 0 ? (
+                <div className="text-center py-4">
+                  <Link2 className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-xs text-muted-foreground">
+                    No internal links configured for this domain.
+                  </p>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="text-xs mt-1 h-auto p-0"
+                    onClick={() => {
+                      const domainId = contentData?.domain_id || contentData?.domain;
+                      if (domainId) {
+                        window.open(`/organization-settings/domains/${domainId}?tab=internal-links`, '_blank');
+                      }
+                    }}
+                  >
+                    Configure in Domain Settings
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Counts */}
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Opportunities:</span>
+                      <span className="font-semibold">{linkOpportunities.length}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Applied:</span>
+                      <span className="font-semibold text-green-600">{appliedLinksCount}/{totalLinkOpportunities}</span>
+                    </div>
+                  </div>
+
+                  {/* Apply button */}
+                  {linkOpportunities.length > 0 ? (
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      onClick={handleApplyInternalLinks}
+                      disabled={isApplyingLinks}
+                    >
+                      {isApplyingLinks ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Applying...
+                        </>
+                      ) : (
+                        <>
+                          <Link2 className="h-4 w-4 mr-2" />
+                          Apply Internal Links
+                        </>
+                      )}
+                    </Button>
+                  ) : (
+                    <div className="flex items-center justify-center gap-2 py-2 text-green-600">
+                      <Check className="h-4 w-4" />
+                      <span className="text-xs">All links applied</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <Separator />
+
             {/* Terms */}
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -1696,6 +2103,93 @@ const ContentEditor = () => {
             </Button>
             <Button onClick={handleInsertImage} disabled={!imageUrl}>
               Insert Image
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Link Insert Dialog */}
+      <Dialog open={linkDialogOpen} onOpenChange={(open) => {
+        setLinkDialogOpen(open);
+        if (!open) {
+          setLinkUrl("");
+          setLinkText("");
+          setLinkRel("dofollow");
+          setEditingLinkElement(null);
+          linkSelectionRef.current = null;
+        }
+      }}>
+        <DialogContent className="sm:max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Link className="h-5 w-5" />
+              {editingLinkElement ? "Edit Link" : "Insert Link"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="linkText">Link Text</Label>
+              <Input
+                id="linkText"
+                placeholder="Text to display"
+                value={linkText}
+                onChange={(e) => setLinkText(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Leave empty to use the URL as link text
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="linkUrl">URL</Label>
+              <Input
+                id="linkUrl"
+                placeholder="https://example.com"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="linkTarget">Target</Label>
+                <Select value={linkTarget} onValueChange={(value: "_self" | "_blank") => setLinkTarget(value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select target" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_self">Same window</SelectItem>
+                    <SelectItem value="_blank">New window</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="linkRel">Link Type</Label>
+                <Select value={linkRel} onValueChange={setLinkRel}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="dofollow">Dofollow</SelectItem>
+                    <SelectItem value="nofollow">Nofollow</SelectItem>
+                    <SelectItem value="sponsored">Sponsored</SelectItem>
+                    <SelectItem value="ugc">UGC</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setLinkDialogOpen(false);
+              setLinkUrl("");
+              setLinkText("");
+              setLinkRel("dofollow");
+              setEditingLinkElement(null);
+              linkSelectionRef.current = null;
+            }}>
+              Cancel
+            </Button>
+            <Button onClick={handleInsertLink} disabled={!linkUrl}>
+              {editingLinkElement ? "Update Link" : "Insert Link"}
             </Button>
           </DialogFooter>
         </DialogContent>

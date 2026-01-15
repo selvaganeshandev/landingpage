@@ -39,7 +39,18 @@ import {
   CheckCircle2,
   AlertCircle,
   XCircle,
+  Trash2,
+  Edit2,
+  ExternalLink,
 } from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { PageLoader } from "@/components/PageLoader";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
@@ -128,6 +139,22 @@ export default function DomainSettings() {
   const [healthHistory, setHealthHistory] = useState<any>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
+  // Internal Link Map state
+  const [internalLinks, setInternalLinks] = useState<any[]>([]);
+  const [isLoadingInternalLinks, setIsLoadingInternalLinks] = useState(false);
+  const [showAddLinkDialog, setShowAddLinkDialog] = useState(false);
+  const [showEditLinkDialog, setShowEditLinkDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [editingLink, setEditingLink] = useState<any>(null);
+  const [newLinkTopic, setNewLinkTopic] = useState("");
+  const [newLinkKeywords, setNewLinkKeywords] = useState("");
+  const [newLinkUrl, setNewLinkUrl] = useState("");
+  const [isSavingLink, setIsSavingLink] = useState(false);
+  const [isDeletingLink, setIsDeletingLink] = useState(false);
+  const [csvImportText, setCsvImportText] = useState("");
+  const [csvFileName, setCsvFileName] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
+
   const MAX_KEYWORD_LENGTH = 255;
 
   const initialTab = searchParams.get("tab") || "basic-info";
@@ -145,6 +172,13 @@ export default function DomainSettings() {
     if (activeTab === 'health' && domainId && !healthHistory) {
       console.log('Health tab is active, fetching health history');
       fetchHealthHistory();
+    }
+  }, [activeTab, domainId]);
+
+  // Fetch internal links when internal-links tab is active
+  useEffect(() => {
+    if (activeTab === 'internal-links' && domainId && internalLinks.length === 0) {
+      fetchInternalLinks();
     }
   }, [activeTab, domainId]);
 
@@ -166,6 +200,11 @@ export default function DomainSettings() {
         console.log('Fetching health history (have data, need history)');
         fetchHealthHistory();
       }
+    }
+
+    // Fetch internal links when Internal Links tab is activated
+    if (value === 'internal-links' && domainId && internalLinks.length === 0) {
+      fetchInternalLinks();
     }
   };
 
@@ -230,6 +269,254 @@ export default function DomainSettings() {
     } finally {
       setIsLoadingHistory(false);
     }
+  };
+
+  // Fetch internal links
+  const fetchInternalLinks = async () => {
+    if (!domainId) return;
+
+    setIsLoadingInternalLinks(true);
+    try {
+      const response: any = await apiClient.getInternalLinkMaps(parseInt(domainId));
+      setInternalLinks(response.internal_links || []);
+    } catch (error: any) {
+      console.error('Error fetching internal links:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to fetch internal links.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingInternalLinks(false);
+    }
+  };
+
+  // Add internal link
+  const handleAddInternalLink = async () => {
+    if (!domain || !newLinkTopic.trim() || !newLinkKeywords.trim() || !newLinkUrl.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all fields.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSavingLink(true);
+    try {
+      await apiClient.createInternalLinkMap(domain.id, {
+        topic: newLinkTopic.trim(),
+        keywords: newLinkKeywords.trim(),
+        url: newLinkUrl.trim(),
+      });
+
+      toast({
+        title: "Link Added",
+        description: "Internal link has been added successfully.",
+      });
+
+      setNewLinkTopic("");
+      setNewLinkKeywords("");
+      setNewLinkUrl("");
+      setShowAddLinkDialog(false);
+      fetchInternalLinks();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add internal link.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingLink(false);
+    }
+  };
+
+  // Update internal link
+  const handleUpdateInternalLink = async () => {
+    if (!domain || !editingLink || !newLinkTopic.trim() || !newLinkKeywords.trim() || !newLinkUrl.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all fields.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSavingLink(true);
+    try {
+      await apiClient.updateInternalLinkMap(domain.id, editingLink.id, {
+        topic: newLinkTopic.trim(),
+        keywords: newLinkKeywords.trim(),
+        url: newLinkUrl.trim(),
+      });
+
+      toast({
+        title: "Link Updated",
+        description: "Internal link has been updated successfully.",
+      });
+
+      setNewLinkTopic("");
+      setNewLinkKeywords("");
+      setNewLinkUrl("");
+      setEditingLink(null);
+      setShowEditLinkDialog(false);
+      fetchInternalLinks();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update internal link.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingLink(false);
+    }
+  };
+
+  // Delete internal link
+  const handleDeleteInternalLink = async (linkId: number) => {
+    if (!domain) return;
+
+    setIsDeletingLink(true);
+    try {
+      await apiClient.deleteInternalLinkMap(domain.id, linkId);
+
+      toast({
+        title: "Link Deleted",
+        description: "Internal link has been deleted successfully.",
+      });
+
+      fetchInternalLinks();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete internal link.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingLink(false);
+    }
+  };
+
+  // Open edit dialog
+  const handleOpenEditDialog = (link: any) => {
+    setEditingLink(link);
+    setNewLinkTopic(link.topic);
+    setNewLinkKeywords(link.keywords);
+    setNewLinkUrl(link.url);
+    setShowEditLinkDialog(true);
+  };
+
+  // Import CSV
+  const handleImportCSV = async () => {
+    if (!domain || !csvImportText.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Please select a CSV file.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      // Parse CSV text
+      const lines = csvImportText.trim().split('\n');
+      const csvData: Array<{ topic: string; keywords: string; url: string }> = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        // Skip header row if it contains "topic", "keywords", "url", or "target"
+        const lowerLine = line.toLowerCase();
+        if (i === 0 && (lowerLine.includes('topic') || lowerLine.includes('keywords') || lowerLine.includes('url') || lowerLine.includes('target'))) {
+          continue;
+        }
+
+        // Parse CSV line (handle quoted values)
+        const values: string[] = [];
+        let current = '';
+        let inQuotes = false;
+
+        for (let j = 0; j < line.length; j++) {
+          const char = line[j];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            values.push(current.trim().replace(/^"|"$/g, ''));
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        values.push(current.trim().replace(/^"|"$/g, ''));
+
+        if (values.length >= 3) {
+          csvData.push({
+            topic: values[0],
+            keywords: values[1],
+            url: values[2],
+          });
+        }
+      }
+
+      if (csvData.length === 0) {
+        toast({
+          title: "No Data",
+          description: "No valid rows found in CSV data.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const response: any = await apiClient.importInternalLinkMaps(domain.id, csvData);
+
+      toast({
+        title: "Import Complete",
+        description: response.message || `Imported ${response.created_count} links.`,
+      });
+
+      setCsvImportText("");
+      setShowImportDialog(false);
+      fetchInternalLinks();
+    } catch (error: any) {
+      toast({
+        title: "Import Error",
+        description: error.message || "Failed to import CSV data.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  // Handle CSV file upload
+  const handleCSVFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      toast({
+        title: "Invalid File",
+        description: "Please upload a CSV file.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      setCsvImportText(text);
+      setCsvFileName(file.name);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to read file.",
+        variant: "destructive",
+      });
+    }
+
+    event.target.value = '';
   };
 
   // Load domain data
@@ -1124,6 +1411,10 @@ export default function DomainSettings() {
             <FileText className="h-4 w-4" />
             Content Guidelines
           </TabsTrigger>
+          <TabsTrigger value="internal-links" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+            <Link2 className="h-4 w-4" />
+            Internal Links
+          </TabsTrigger>
           <TabsTrigger value="brand-identity" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
             <Palette className="h-4 w-4" />
             Brand Identity
@@ -1870,7 +2161,347 @@ export default function DomainSettings() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Internal Links Tab */}
+        <TabsContent value="internal-links" className="space-y-4 mt-6">
+          <Card className="border border-border">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Internal Link Map</CardTitle>
+                <CardDescription>
+                  Manage internal links that can be automatically inserted into content during generation
+                </CardDescription>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowImportDialog(true)}
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Import CSV
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setNewLinkTopic("");
+                    setNewLinkKeywords("");
+                    setNewLinkUrl("");
+                    setShowAddLinkDialog(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Link
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {isLoadingInternalLinks ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : internalLinks.length === 0 ? (
+                <div className="text-center py-12">
+                  <Link2 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">No Internal Links Yet</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Add internal links to automatically include them in generated content
+                  </p>
+                  <Button
+                    onClick={() => {
+                      setNewLinkTopic("");
+                      setNewLinkKeywords("");
+                      setNewLinkUrl("");
+                      setShowAddLinkDialog(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add First Link
+                  </Button>
+                </div>
+              ) : (
+                <div className="border rounded-lg">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[200px]">Topic</TableHead>
+                        <TableHead className="w-[300px]">Keywords</TableHead>
+                        <TableHead>Associated URL</TableHead>
+                        <TableHead className="w-[100px] text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {internalLinks.map((link) => (
+                        <TableRow key={link.id}>
+                          <TableCell className="font-medium">{link.topic}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                              {link.keywords.split(',').slice(0, 3).map((kw: string, idx: number) => (
+                                <Badge key={idx} variant="secondary" className="text-xs">
+                                  {kw.trim()}
+                                </Badge>
+                              ))}
+                              {link.keywords.split(',').length > 3 && (
+                                <Badge variant="outline" className="text-xs">
+                                  +{link.keywords.split(',').length - 3} more
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <a
+                              href={link.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline flex items-center gap-1 max-w-[300px] truncate"
+                            >
+                              {link.url}
+                              <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                            </a>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleOpenEditDialog(link)}
+                              >
+                                <Edit2 className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeleteInternalLink(link.id)}
+                                disabled={isDeletingLink}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
+
+      {/* Add Internal Link Dialog */}
+      <Dialog open={showAddLinkDialog} onOpenChange={setShowAddLinkDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Internal Link</DialogTitle>
+            <DialogDescription>
+              Add a new internal link mapping for content generation
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="link-topic">Topic</Label>
+              <Input
+                id="link-topic"
+                value={newLinkTopic}
+                onChange={(e) => setNewLinkTopic(e.target.value)}
+                placeholder="e.g., SEO Best Practices"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="link-keywords">Keywords</Label>
+              <Textarea
+                id="link-keywords"
+                value={newLinkKeywords}
+                onChange={(e) => setNewLinkKeywords(e.target.value)}
+                placeholder="e.g., seo, search engine optimization, ranking"
+                className="min-h-[80px]"
+              />
+              <p className="text-xs text-muted-foreground">
+                Comma-separated keywords that should trigger this link
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="link-url">Associated URL</Label>
+              <Input
+                id="link-url"
+                value={newLinkUrl}
+                onChange={(e) => setNewLinkUrl(e.target.value)}
+                placeholder="https://example.com/seo-guide"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddLinkDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddInternalLink} disabled={isSavingLink}>
+              {isSavingLink ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                "Add Link"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Internal Link Dialog */}
+      <Dialog open={showEditLinkDialog} onOpenChange={(open) => {
+        setShowEditLinkDialog(open);
+        if (!open) {
+          setEditingLink(null);
+          setNewLinkTopic("");
+          setNewLinkKeywords("");
+          setNewLinkUrl("");
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Internal Link</DialogTitle>
+            <DialogDescription>
+              Update the internal link mapping
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-link-topic">Topic</Label>
+              <Input
+                id="edit-link-topic"
+                value={newLinkTopic}
+                onChange={(e) => setNewLinkTopic(e.target.value)}
+                placeholder="e.g., SEO Best Practices"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-link-keywords">Keywords</Label>
+              <Textarea
+                id="edit-link-keywords"
+                value={newLinkKeywords}
+                onChange={(e) => setNewLinkKeywords(e.target.value)}
+                placeholder="e.g., seo, search engine optimization, ranking"
+                className="min-h-[80px]"
+              />
+              <p className="text-xs text-muted-foreground">
+                Comma-separated keywords that should trigger this link
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-link-url">Associated URL</Label>
+              <Input
+                id="edit-link-url"
+                value={newLinkUrl}
+                onChange={(e) => setNewLinkUrl(e.target.value)}
+                placeholder="https://example.com/seo-guide"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditLinkDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateInternalLink} disabled={isSavingLink}>
+              {isSavingLink ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                "Update Link"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import CSV Dialog */}
+      <Dialog open={showImportDialog} onOpenChange={(open) => {
+        setShowImportDialog(open);
+        if (!open) {
+          setCsvImportText("");
+          setCsvFileName("");
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import Internal Links from CSV</DialogTitle>
+            <DialogDescription>
+              Upload a CSV file with your internal link mappings
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="bg-muted/50 rounded-lg p-4 border">
+              <p className="text-sm font-medium mb-2">Expected CSV columns:</p>
+              <div className="flex gap-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-primary"></div>
+                  <span className="text-sm">Topic</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-primary"></div>
+                  <span className="text-sm">Keywords</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-primary"></div>
+                  <span className="text-sm">Target</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col items-center gap-3 py-4">
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleCSVFileUpload}
+                className="hidden"
+                id="csv-file-upload"
+              />
+              {csvFileName ? (
+                <div className="w-full p-3 border rounded-lg bg-muted/30 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-primary" />
+                    <span className="text-sm font-medium">{csvFileName}</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => document.getElementById('csv-file-upload')?.click()}
+                  >
+                    Change
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={() => document.getElementById('csv-file-upload')?.click()}
+                  className="w-full"
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Choose CSV File
+                </Button>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowImportDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleImportCSV} disabled={isImporting || !csvImportText.trim()}>
+              {isImporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                "Import"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Property/Site Selection Dialog */}
       <Dialog open={showPropertySelection} onOpenChange={setShowPropertySelection}>

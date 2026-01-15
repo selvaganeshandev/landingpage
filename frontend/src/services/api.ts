@@ -467,8 +467,35 @@ export const apiClient = {
       method: 'DELETE',
     }),
 
-  getAvailableUsersForDomain: (domainId: number) => 
+  getAvailableUsersForDomain: (domainId: number) =>
     apiRequest(`/domains/${domainId}/access/available-users/`),
+
+  // ===== Internal Link Map =====
+  getInternalLinkMaps: (domainId: number) =>
+    apiRequest(`/domains/${domainId}/internal-links/`),
+
+  createInternalLinkMap: (domainId: number, data: { topic: string; keywords: string; url: string }) =>
+    apiRequest(`/domains/${domainId}/internal-links/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateInternalLinkMap: (domainId: number, linkId: number, data: Partial<{ topic: string; keywords: string; url: string }>) =>
+    apiRequest(`/domains/${domainId}/internal-links/${linkId}/`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteInternalLinkMap: (domainId: number, linkId: number) =>
+    apiRequest(`/domains/${domainId}/internal-links/${linkId}/`, {
+      method: 'DELETE',
+    }),
+
+  importInternalLinkMaps: (domainId: number, csvData: Array<{ topic: string; keywords: string; url: string }>) =>
+    apiRequest(`/domains/${domainId}/internal-links/import/`, {
+      method: 'POST',
+      body: JSON.stringify({ csv_data: csvData }),
+    }),
 
   // ===== Keywords =====
   getKeywords: (params?: any) => {
