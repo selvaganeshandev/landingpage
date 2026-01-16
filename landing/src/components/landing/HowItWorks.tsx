@@ -4,6 +4,7 @@ const steps = [
   {
     step: "STEP ONE",
     title: "Add Your Brand",
+    content: "Enter your brand name, website URL, confirm your niche, and review the prompts.",
     description: "Quick Setup!",
     visual: (
       <div className="space-y-2">
@@ -21,6 +22,7 @@ const steps = [
   {
     step: "STEP TWO",
     title: "We Monitor AI",
+    content: "Sit back—PromptMaxx handles the rest across all major LLMs automatically.",
     description: "Frequent Monitoring!",
     visual: (
       <div className="relative">
@@ -50,6 +52,7 @@ const steps = [
   {
     step: "STEP THREE",
     title: "Get Insights",
+    content: "See mentions, sentiment, citations, and misinformation alerts in your dashboard.",
     description: "Data-Driven!",
     visual: (
       <div className="bg-white rounded-lg shadow-sm border border-primary/20 p-3 w-36">
@@ -65,6 +68,7 @@ const steps = [
   {
     step: "STEP FOUR",
     title: "Take Action",
+    content: "Use AI-powered content tools to improve your visibility and outrank competitors.",
     description: "Grow Visibility!",
     visual: (
       <div className="space-y-2">
@@ -105,9 +109,14 @@ export function HowItWorks() {
                 </p>
 
                 {/* Title */}
-                <h3 className="text-xl font-semibold text-gray-900 mb-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
                   {step.title}
                 </h3>
+
+                {/* Content */}
+                <p className="text-sm text-gray-600 mb-4">
+                  {step.content}
+                </p>
 
                 {/* Visual Area */}
                 <div className="h-40 flex items-center justify-center mb-4">
