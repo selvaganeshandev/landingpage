@@ -510,7 +510,7 @@ const PromptDetail = () => {
                           className={FORMATTED_MESSAGE_CLASSES}
                           dangerouslySetInnerHTML={{
                             __html: DOMPurify.sanitize(formatMessage(platformResponse), {
-                              ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'blockquote', 'code', 'pre', 'br', 'div', 'span'],
+                              ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'blockquote', 'code', 'pre', 'br', 'div', 'span', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
                               ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'id']
                             })
                           }}
@@ -608,8 +608,8 @@ const PromptDetail = () => {
                     <TableRow key={variant.id}>
                         <TableCell>
                           <div className="flex items-start gap-2">
-                            <p 
-                              className={`text-sm max-w-xs truncate flex-1 ${variant.latest_mention_id ? 'cursor-pointer hover:text-primary' : ''}`}
+                            <p
+                              className={`text-sm flex-1 ${variant.latest_mention_id ? 'cursor-pointer hover:text-primary' : ''}`}
                               onClick={() => {
                                 if (variant.latest_mention_id) {
                                   navigate(`/mentions/${variant.latest_mention_id}`);

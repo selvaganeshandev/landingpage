@@ -80,6 +80,7 @@ const Mentions = () => {
   const [offset, setOffset] = useState(0);
   const limit = 20;
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [availablePlatforms, setAvailablePlatforms] = useState<string[]>(["ChatGPT", "Google Gemini", "Perplexity"]);
   const [availableSentiments, setAvailableSentiments] = useState<string[]>(["Positive", "Negative", "Neutral"]);
   const [showAll, setShowAll] = useState(false);
@@ -100,7 +101,10 @@ const Mentions = () => {
 
   const loadMentions = async (startOffset: number = offset, replace: boolean = false) => {
     try {
-      setIsLoading(true);
+      // Only show full page loader on initial load/filter change, not on "Load More"
+      if (replace) {
+        setIsLoading(true);
+      }
       // Use unified helper to get active domain ID (from localStorage, synced with server)
       const activeDomainId = selectedDomain?.id ?? getActiveDomainIdNumber(user);
       const response = await apiClient.getMentions({
@@ -125,7 +129,7 @@ const Mentions = () => {
       // Only show error for actual errors, not empty data
       const isNetworkError = errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Network');
       const isServerError = errorMessage.includes('500') || errorMessage.includes('503') || errorMessage.includes('502');
-      
+
       // Only show error toast for actual errors, not for empty data (404 is normal for empty data)
       if (isNetworkError || isServerError || (!errorMessage.includes('404') && !errorMessage.includes('Not Found'))) {
         toast({
@@ -135,21 +139,28 @@ const Mentions = () => {
         });
       }
       // For empty data, just set empty array without showing error
-      if (reset) {
+      if (replace) {
         setMentions([]);
       }
     } finally {
-      setIsLoading(false);
+      if (replace) {
+        setIsLoading(false);
+      }
     }
   };
 
   const canLoadMore = mentions.length < totalCount;
   const handleLoadMore = async () => {
-    // Calculate next offset using current offset value
-    const nextOffset = offset + limit;
-    setOffset(nextOffset);
-    // Load more with the new offset
-    await loadMentions(nextOffset, false);
+    setIsLoadingMore(true);
+    try {
+      // Calculate next offset using current offset value
+      const nextOffset = offset + limit;
+      setOffset(nextOffset);
+      // Load more with the new offset
+      await loadMentions(nextOffset, false);
+    } finally {
+      setIsLoadingMore(false);
+    }
   };
 
   const loadFilters = async () => {
@@ -422,8 +433,8 @@ const Mentions = () => {
           ))}
           {canLoadMore && (
             <div className="flex justify-center">
-              <Button variant="outline" onClick={handleLoadMore} disabled={isLoading} className="border border-border">
-                {isLoading ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin"/> Loading...</>) : 'Load More'}
+              <Button type="button" variant="outline" onClick={handleLoadMore} disabled={isLoadingMore} className="border border-border">
+                {isLoadingMore ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin"/> Loading...</>) : 'Load More'}
               </Button>
             </div>
           )}

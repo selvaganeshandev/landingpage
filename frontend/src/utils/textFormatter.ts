@@ -4,11 +4,86 @@
  */
 
 /**
+ * Converts markdown tables to HTML tables
+ * @param text - The text potentially containing markdown tables
+ * @returns Text with markdown tables converted to HTML
+ */
+const convertMarkdownTables = (text: string): string => {
+  const lines = text.split('\n');
+  const result: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Check if this line looks like a table row (starts with |)
+    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      // Collect all consecutive table lines
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+
+      // Need at least 2 lines for a valid table (header + separator)
+      if (tableLines.length >= 2) {
+        // Check if second line is a separator (contains dashes)
+        const secondLine = tableLines[1].trim();
+        const isSeparator = /^\|[\s\-:|]+\|$/.test(secondLine);
+
+        if (isSeparator) {
+          // Parse the table
+          let tableHtml = '<table class="markdown-table">';
+
+          // Header row
+          const headerCells = tableLines[0].split('|').filter(cell => cell.trim() !== '');
+          tableHtml += '<thead><tr>';
+          headerCells.forEach(cell => {
+            tableHtml += `<th>${cell.trim()}</th>`;
+          });
+          tableHtml += '</tr></thead>';
+
+          // Body rows (skip separator at index 1)
+          if (tableLines.length > 2) {
+            tableHtml += '<tbody>';
+            for (let j = 2; j < tableLines.length; j++) {
+              const cells = tableLines[j].split('|').filter(cell => cell.trim() !== '');
+              tableHtml += '<tr>';
+              cells.forEach(cell => {
+                tableHtml += `<td>${cell.trim()}</td>`;
+              });
+              tableHtml += '</tr>';
+            }
+            tableHtml += '</tbody>';
+          }
+
+          tableHtml += '</table>';
+          result.push(tableHtml);
+          continue;
+        }
+      }
+
+      // Not a valid table, add lines as-is
+      tableLines.forEach(tl => result.push(tl));
+      continue;
+    }
+
+    result.push(line);
+    i++;
+  }
+
+  return result.join('\n');
+};
+
+/**
  * Formats LLM message content with proper list handling, headers, and inline formatting
  * @param text - The raw text content to format
  * @returns HTML-formatted string
  */
 export const formatMessage = (text: string): string => {
+  // First, convert markdown tables to HTML
+  const textWithTables = convertMarkdownTables(text);
+
   // Apply inline formatting (bold, links)
   const applyInlineFormatting = (str: string): string => {
     return str
@@ -19,7 +94,7 @@ export const formatMessage = (text: string): string => {
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">$1</a>');
   };
 
-  const lines = text.split('\n');
+  const lines = textWithTables.split('\n');
   const result: string[] = [];
   let inNumberedList = false;
   let inBulletList = false;
@@ -247,6 +322,16 @@ export const formatMessage = (text: string): string => {
       continue;
     }
 
+    // Check if line is an HTML table (already converted)
+    if (trimmed.startsWith('<table')) {
+      flushParagraph();
+      if (inBulletList) { result.push('</ul>'); inBulletList = false; }
+      if (inNumberedList) { result.push('</ol>'); inNumberedList = false; }
+      if (lastWasNumbered) { result.push('</li>'); lastWasNumbered = false; }
+      result.push(trimmed);
+      continue;
+    }
+
     // Regular text
     if (inBulletList && !lastWasNumbered) {
       result.push('</ul>');
@@ -285,4 +370,4 @@ export const formatMessage = (text: string): string => {
  * CSS classes for properly styled formatted content
  * Apply these to the container with dangerouslySetInnerHTML
  */
-export const FORMATTED_MESSAGE_CLASSES = "text-[15px] leading-relaxed [&_p]:mb-3 [&_p]:leading-relaxed [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mb-2 [&_h1]:mt-4 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mb-2 [&_h2]:mt-3 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mb-2 [&_h3]:mt-3 [&_h4]:text-[15px] [&_h4]:font-bold [&_h4]:mb-2 [&_h4]:mt-2 [&_ul]:my-2 [&_ul]:pl-6 [&_ul]:list-disc [&_ul_ul]:mt-1 [&_ul_ul]:mb-1 [&_.nested-list]:mt-2 [&_.nested-list]:mb-2 [&_.nested-list]:pl-6 [&_.nested-list]:list-circle [&_ol]:my-2 [&_ol]:pl-6 [&_ol]:list-decimal [&_li]:leading-relaxed [&_li]:mb-2 [&_li_ul]:mt-2 [&_strong]:font-semibold [&_a]:text-primary [&_a]:underline [&_a]:hover:text-primary/80";
+export const FORMATTED_MESSAGE_CLASSES = "text-[15px] leading-relaxed [&_p]:mb-3 [&_p]:leading-relaxed [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mb-2 [&_h1]:mt-4 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mb-2 [&_h2]:mt-3 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mb-2 [&_h3]:mt-3 [&_h4]:text-[15px] [&_h4]:font-bold [&_h4]:mb-2 [&_h4]:mt-2 [&_ul]:my-2 [&_ul]:pl-6 [&_ul]:list-disc [&_ul_ul]:mt-1 [&_ul_ul]:mb-1 [&_.nested-list]:mt-2 [&_.nested-list]:mb-2 [&_.nested-list]:pl-6 [&_.nested-list]:list-circle [&_ol]:my-2 [&_ol]:pl-6 [&_ol]:list-decimal [&_li]:leading-relaxed [&_li]:mb-2 [&_li_ul]:mt-2 [&_strong]:font-semibold [&_a]:text-primary [&_a]:underline [&_a]:hover:text-primary/80 [&_table]:w-full [&_table]:my-4 [&_table]:border-collapse [&_table]:border [&_table]:border-border [&_table]:rounded-lg [&_table]:overflow-hidden [&_table]:text-sm [&_th]:bg-muted/50 [&_th]:px-4 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:border [&_th]:border-border [&_td]:px-4 [&_td]:py-2 [&_td]:border [&_td]:border-border [&_tr:hover]:bg-muted/30";

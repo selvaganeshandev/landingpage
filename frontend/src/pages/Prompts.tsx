@@ -32,6 +32,7 @@ const Prompts = () => {
   const [offset, setOffset] = useState(0);
   const limit = 20;
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const { selectedDomain, setDomainSwitching } = useDomainStore();
@@ -49,11 +50,16 @@ const Prompts = () => {
 
   const loadPromptGroups = async (startOffset: number = offset, replace: boolean = false) => {
     try {
-      setIsLoading(true);
+      // Only show full page loader on initial load, not on "Load More"
+      if (replace) {
+        setIsLoading(true);
+      }
       // Use unified helper to get active domain ID (from localStorage, synced with server)
       const activeDomainId = selectedDomain?.id ?? getActiveDomainIdNumber(user);
       if (!activeDomainId) {
-        setIsLoading(false);
+        if (replace) {
+          setIsLoading(false);
+        }
         if (isInitialLoad) {
           setDomainSwitching(false);
           setIsInitialLoad(false);
@@ -78,7 +84,7 @@ const Prompts = () => {
       // Only show error for actual errors, not empty data
       const isNetworkError = errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Network');
       const isServerError = errorMessage.includes('500') || errorMessage.includes('503') || errorMessage.includes('502');
-      
+
       // Only show error toast for actual errors, not for empty data (404 is normal for empty data)
       if (isNetworkError || isServerError || (!errorMessage.includes('404') && !errorMessage.includes('Not Found'))) {
         toast({
@@ -92,7 +98,9 @@ const Prompts = () => {
         setPromptGroups([]);
       }
     } finally {
-      setIsLoading(false);
+      if (replace) {
+        setIsLoading(false);
+      }
       if (isInitialLoad) {
         setDomainSwitching(false);
         setIsInitialLoad(false);
@@ -102,11 +110,16 @@ const Prompts = () => {
 
   const canLoadMore = promptGroups.length < totalCount;
   const handleLoadMore = async () => {
-    // Calculate next offset using current offset value
-    const nextOffset = offset + limit;
-    setOffset(nextOffset);
-    // Load more with the new offset
-    await loadPromptGroups(nextOffset, false);
+    setIsLoadingMore(true);
+    try {
+      // Calculate next offset using current offset value
+      const nextOffset = offset + limit;
+      setOffset(nextOffset);
+      // Load more with the new offset
+      await loadPromptGroups(nextOffset, false);
+    } finally {
+      setIsLoadingMore(false);
+    }
   };
 
   const handleViewDetails = (groupId: number) => {
@@ -203,15 +216,24 @@ const Prompts = () => {
                   Prompt Variants ({group.secondary_prompts?.length || 0})
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {(group.secondary_prompts || []).map((variant: string, idx: number) => (
-                    <Badge 
-                      key={idx} 
-                      variant="secondary" 
+                  {(group.secondary_prompts || []).slice(0, 5).map((variant: string, idx: number) => (
+                    <Badge
+                      key={idx}
+                      variant="secondary"
                       className="font-mono text-xs px-3 py-1.5"
                     >
                       {variant}
                     </Badge>
                   ))}
+                  {(group.secondary_prompts?.length || 0) > 5 && (
+                    <Badge
+                      variant="outline"
+                      className="font-mono text-xs px-3 py-1.5 cursor-pointer hover:bg-muted"
+                      onClick={() => handleViewDetails(group.id)}
+                    >
+                      +{group.secondary_prompts.length - 5} more
+                    </Badge>
+                  )}
                 </div>
               </div>
 
@@ -234,8 +256,8 @@ const Prompts = () => {
         ))}
         {canLoadMore && (
           <div className="flex justify-center">
-            <Button variant="outline" onClick={handleLoadMore} disabled={isLoading} className="border border-border">
-              Load More
+            <Button type="button" variant="outline" onClick={handleLoadMore} disabled={isLoadingMore} className="border border-border">
+              {isLoadingMore ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin"/> Loading...</>) : 'Load More'}
             </Button>
           </div>
         )}
