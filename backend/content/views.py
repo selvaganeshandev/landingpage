@@ -1204,7 +1204,8 @@ def detect_ai_content(request):
 
     Expected request body:
     {
-        "text": str (plain text or HTML content to analyze)
+        "text": str (plain text or HTML content to analyze),
+        "content_id": int (optional - if provided, saves the result to the content record)
     }
 
     Returns:
@@ -1213,11 +1214,13 @@ def detect_ai_content(request):
         "ai_score": float (0-100, higher = more likely AI-generated),
         "human_score": float (0-100, higher = more likely human-written),
         "label": str ("AI-generated" or "Human-written"),
-        "confidence": float (0-100)
+        "confidence": float (0-100),
+        "checked_at": str (ISO timestamp, only if content_id provided)
     }
     """
     try:
         text = request.data.get('text', '')
+        content_id = request.data.get('content_id')
 
         if not text:
             return Response({
@@ -1304,14 +1307,39 @@ def detect_ai_content(request):
                 label = "Human-written"
                 confidence = human_score
 
-            return Response({
+            checked_at = None
+            # Save results to database if content_id is provided
+            if content_id:
+                try:
+                    content_obj = GeneratedContent.objects.get(
+                        id=content_id,
+                        domain__organisation=request.user.organisation
+                    )
+                    content_obj.ai_detection_score = round(ai_score, 2)
+                    content_obj.human_detection_score = round(human_score, 2)
+                    content_obj.ai_detection_label = label
+                    content_obj.ai_detection_checked_at = timezone.now()
+                    content_obj.save(update_fields=[
+                        'ai_detection_score', 'human_detection_score',
+                        'ai_detection_label', 'ai_detection_checked_at'
+                    ])
+                    checked_at = content_obj.ai_detection_checked_at.isoformat()
+                    logger.info(f"AI detection results saved for content {content_id}")
+                except GeneratedContent.DoesNotExist:
+                    logger.warning(f"Content {content_id} not found for AI detection save")
+
+            response_data = {
                 'status': 'success',
                 'ai_score': round(ai_score, 1),
                 'human_score': round(human_score, 1),
                 'label': label,
                 'confidence': round(confidence, 1),
                 'text_analyzed_length': len(plain_text)
-            }, status=status.HTTP_200_OK)
+            }
+            if checked_at:
+                response_data['checked_at'] = checked_at
+
+            return Response(response_data, status=status.HTTP_200_OK)
         else:
             logger.error(f"Unexpected response format from Hugging Face: {result}")
             return Response({

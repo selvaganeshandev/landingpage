@@ -1250,9 +1250,9 @@ export const apiClient = {
   }),
 
   // AI Content Detection
-  detectAiContent: (text: string) => apiRequest('/content/detect-ai/', {
+  detectAiContent: (text: string, contentId?: number) => apiRequest('/content/detect-ai/', {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, content_id: contentId }),
   }),
 
   // ===== CMS Provider Management =====

@@ -18,6 +18,7 @@ class GeneratedContentSerializer(serializers.ModelSerializer):
             'word_count', 'actual_word_count',
             'status', 'scheduled_date', 'published_date', 'priority',
             'model_used', 'generation_time_seconds', 'prompt_tokens', 'completion_tokens',
+            'ai_detection_score', 'human_detection_score', 'ai_detection_label', 'ai_detection_checked_at',
             'created_at', 'modified_at'
         ]
         read_only_fields = [

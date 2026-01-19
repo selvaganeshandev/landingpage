@@ -151,6 +151,33 @@ class GeneratedContent(models.Model):
         help_text="Number of completion tokens used"
     )
 
+    # AI Detection results
+    ai_detection_score = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="AI-generated content probability score (0-100)"
+    )
+    human_detection_score = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Human-written content probability score (0-100)"
+    )
+    ai_detection_label = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="AI detection label (e.g., 'AI-generated', 'Human-written', 'Mixed')"
+    )
+    ai_detection_checked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time AI detection was run"
+    )
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)

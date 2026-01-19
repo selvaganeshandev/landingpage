@@ -121,6 +121,7 @@ const ContentEditor = () => {
     human_score: number;
     label: string;
     confidence: number;
+    checked_at?: string;
   } | null>(null);
 
   // Rewrite state
@@ -303,6 +304,20 @@ const ContentEditor = () => {
             if (links.length > 0) {
               findLinkOpportunities(contentRecord.content_html || "", links);
             }
+          }
+
+          // Load saved AI detection results if available
+          if (contentRecord.ai_detection_score !== null && contentRecord.ai_detection_score !== undefined) {
+            setAiDetectionResult({
+              ai_score: parseFloat(contentRecord.ai_detection_score),
+              human_score: parseFloat(contentRecord.human_detection_score || 0),
+              label: contentRecord.ai_detection_label || "Unknown",
+              confidence: Math.max(
+                parseFloat(contentRecord.ai_detection_score || 0),
+                parseFloat(contentRecord.human_detection_score || 0)
+              ),
+              checked_at: contentRecord.ai_detection_checked_at
+            });
           }
         }
       } catch (error) {
@@ -637,14 +652,17 @@ const ContentEditor = () => {
       setAiDetecting(true);
       setAiDetectionResult(null);
 
-      const response = await apiClient.detectAiContent(currentContent);
+      // Pass content id to save results to database
+      const contentId = id ? parseInt(id) : undefined;
+      const response = await apiClient.detectAiContent(currentContent, contentId);
 
       if (response.status === 'success') {
         setAiDetectionResult({
           ai_score: response.ai_score,
           human_score: response.human_score,
           label: response.label,
-          confidence: response.confidence
+          confidence: response.confidence,
+          checked_at: response.checked_at || new Date().toISOString()
         });
       } else if (response.status === 'loading') {
         toast({
@@ -1854,7 +1872,10 @@ const ContentEditor = () => {
             {/* AI Detection */}
             <div>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold">AI Detection</h3>
+                <div>
+                  <h3 className="font-semibold">AI Detection</h3>
+                  <p className="text-xs text-muted-foreground">Powered by <a href="https://huggingface.co/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Hugging Face</a></p>
+                </div>
                 <Button
                   variant="outline"
                   size="sm"
@@ -1932,6 +1953,13 @@ const ContentEditor = () => {
                       />
                     </div>
                   </div>
+
+                  {/* Last Checked Time */}
+                  {aiDetectionResult.checked_at && (
+                    <p className="text-xs text-muted-foreground text-center pt-2 border-t">
+                      Last checked: {new Date(aiDetectionResult.checked_at).toLocaleString()}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground text-center py-4">
