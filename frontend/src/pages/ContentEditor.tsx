@@ -58,6 +58,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -158,6 +159,8 @@ const ContentEditor = () => {
   const [totalLinkOpportunities, setTotalLinkOpportunities] = useState(0);
   const [isLoadingLinks, setIsLoadingLinks] = useState(false);
   const [isApplyingLinks, setIsApplyingLinks] = useState(false);
+  const [linkOpportunitiesModalOpen, setLinkOpportunitiesModalOpen] = useState(false);
+  const [selectedLinkOpportunities, setSelectedLinkOpportunities] = useState<Set<string>>(new Set());
 
   // Count keyword occurrences in text
   const countKeywordOccurrences = (text: string, keyword: string): number => {
@@ -840,17 +843,26 @@ const ContentEditor = () => {
     setAppliedLinksCount(appliedKeywordsCount);
   };
 
-  // Apply internal links to content
-  const handleApplyInternalLinks = () => {
-    if (!editorRef.current || linkOpportunities.length === 0) return;
+  // Generate unique key for a link opportunity
+  const getLinkOpportunityKey = (opportunity: typeof linkOpportunities[0]) => {
+    return `${opportunity.linkId}-${opportunity.keyword}`;
+  };
+
+  // Apply selected internal links to content
+  const handleApplySelectedLinks = () => {
+    if (!editorRef.current || selectedLinkOpportunities.size === 0) return;
 
     setIsApplyingLinks(true);
 
     try {
       let html = editorRef.current.innerHTML;
+      let appliedCount = 0;
 
-      // Apply each link opportunity (limit to first occurrence to avoid over-linking)
+      // Apply only selected link opportunities
       linkOpportunities.forEach(opportunity => {
+        const key = getLinkOpportunityKey(opportunity);
+        if (!selectedLinkOpportunities.has(key)) return;
+
         // Create a regex that matches the keyword but not if it's already in a link
         const keywordRegex = new RegExp(
           `(?<!<a[^>]*>)\\b(${opportunity.keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b(?![^<]*</a>)`,
@@ -858,7 +870,11 @@ const ContentEditor = () => {
         );
 
         // Replace only the first occurrence
-        html = html.replace(keywordRegex, `<a href="${opportunity.url}" target="_blank" rel="noopener noreferrer">$1</a>`);
+        const newHtml = html.replace(keywordRegex, `<a href="${opportunity.url}" target="_blank" rel="noopener noreferrer">$1</a>`);
+        if (newHtml !== html) {
+          appliedCount++;
+          html = newHtml;
+        }
       });
 
       // Update the editor
@@ -868,9 +884,13 @@ const ContentEditor = () => {
       // Recalculate opportunities
       findLinkOpportunities(html, internalLinks);
 
+      // Close modal and reset selection
+      setLinkOpportunitiesModalOpen(false);
+      setSelectedLinkOpportunities(new Set());
+
       toast({
         title: "Links Applied",
-        description: `Applied ${linkOpportunities.length} internal link(s) to your content.`,
+        description: `Applied ${appliedCount} internal link(s) to your content.`,
       });
     } catch (error) {
       console.error("Error applying internal links:", error);
@@ -882,6 +902,36 @@ const ContentEditor = () => {
     } finally {
       setIsApplyingLinks(false);
     }
+  };
+
+  // Toggle selection of a link opportunity
+  const toggleLinkOpportunitySelection = (opportunity: typeof linkOpportunities[0]) => {
+    const key = getLinkOpportunityKey(opportunity);
+    setSelectedLinkOpportunities(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(key)) {
+        newSet.delete(key);
+      } else {
+        newSet.add(key);
+      }
+      return newSet;
+    });
+  };
+
+  // Toggle all link opportunities selection
+  const toggleAllLinkOpportunities = (selectAll: boolean) => {
+    if (selectAll) {
+      const allKeys = linkOpportunities.map(getLinkOpportunityKey);
+      setSelectedLinkOpportunities(new Set(allKeys));
+    } else {
+      setSelectedLinkOpportunities(new Set());
+    }
+  };
+
+  // Open the link opportunities modal
+  const handleOpenLinkOpportunitiesModal = () => {
+    setSelectedLinkOpportunities(new Set());
+    setLinkOpportunitiesModalOpen(true);
   };
 
   // Open link dialog
@@ -1975,25 +2025,15 @@ const ContentEditor = () => {
                     </div>
                   </div>
 
-                  {/* Apply button */}
+                  {/* Explore button */}
                   {linkOpportunities.length > 0 ? (
                     <Button
                       size="sm"
                       className="w-full"
-                      onClick={handleApplyInternalLinks}
-                      disabled={isApplyingLinks}
+                      onClick={handleOpenLinkOpportunitiesModal}
                     >
-                      {isApplyingLinks ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Applying...
-                        </>
-                      ) : (
-                        <>
-                          <Link2 className="h-4 w-4 mr-2" />
-                          Apply Internal Links
-                        </>
-                      )}
+                      <Link2 className="h-4 w-4 mr-2" />
+                      Explore Opportunities
                     </Button>
                   ) : (
                     <div className="flex items-center justify-center gap-2 py-2 text-green-600">
@@ -2351,6 +2391,112 @@ const ContentEditor = () => {
               </div>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Internal Link Opportunities Modal */}
+      <Dialog open={linkOpportunitiesModalOpen} onOpenChange={setLinkOpportunitiesModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Internal Link Opportunities</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto">
+            {linkOpportunities.length === 0 ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground">
+                No link opportunities found
+              </div>
+            ) : (
+              <div className="border rounded-lg">
+                <table className="w-full">
+                  <thead className="bg-muted/50 sticky top-0">
+                    <tr className="border-b">
+                      <th className="p-3 text-left w-12">
+                        <Checkbox
+                          checked={selectedLinkOpportunities.size === linkOpportunities.length && linkOpportunities.length > 0}
+                          onCheckedChange={(checked) => toggleAllLinkOpportunities(!!checked)}
+                        />
+                      </th>
+                      <th className="p-3 text-left text-sm font-medium">Target Text</th>
+                      <th className="p-3 text-left text-sm font-medium">Topic</th>
+                      <th className="p-3 text-left text-sm font-medium">Target Link</th>
+                      <th className="p-3 text-center text-sm font-medium w-20">Count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {linkOpportunities.map((opportunity) => {
+                      const key = getLinkOpportunityKey(opportunity);
+                      const isSelected = selectedLinkOpportunities.has(key);
+                      return (
+                        <tr
+                          key={key}
+                          className={`border-b last:border-b-0 hover:bg-muted/30 cursor-pointer ${isSelected ? 'bg-primary/5' : ''}`}
+                          onClick={() => toggleLinkOpportunitySelection(opportunity)}
+                        >
+                          <td className="p-3">
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={() => toggleLinkOpportunitySelection(opportunity)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </td>
+                          <td className="p-3">
+                            <span className="font-medium">{opportunity.keyword}</span>
+                          </td>
+                          <td className="p-3 text-sm text-muted-foreground">
+                            {opportunity.topic}
+                          </td>
+                          <td className="p-3">
+                            <a
+                              href={opportunity.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-primary hover:underline flex items-center gap-1 max-w-[250px] truncate"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {opportunity.url}
+                              <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                            </a>
+                          </td>
+                          <td className="p-3 text-center">
+                            <Badge variant="secondary">{opportunity.count}</Badge>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="flex items-center justify-between border-t pt-4">
+            <div className="text-sm text-muted-foreground">
+              {selectedLinkOpportunities.size} of {linkOpportunities.length} selected
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setLinkOpportunitiesModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleApplySelectedLinks}
+                disabled={selectedLinkOpportunities.size === 0 || isApplyingLinks}
+              >
+                {isApplyingLinks ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Applying...
+                  </>
+                ) : (
+                  <>
+                    <Link2 className="h-4 w-4 mr-2" />
+                    Apply Selected ({selectedLinkOpportunities.size})
+                  </>
+                )}
+              </Button>
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

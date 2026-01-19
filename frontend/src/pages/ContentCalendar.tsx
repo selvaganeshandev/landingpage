@@ -18,8 +18,20 @@ import {
   CheckCircle2,
   Edit,
   Settings,
-  List
+  List,
+  Trash2,
+  Loader2
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { GenerateContentDialog } from "@/components/GenerateContentDialog";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
@@ -47,6 +59,9 @@ const ContentCalendar = () => {
   const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null);
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<ContentItem | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Fetch generated content from API
   useEffect(() => {
@@ -94,6 +109,39 @@ const ContentCalendar = () => {
   const handleEditContent = (item: ContentItem) => {
     // Navigate to the content editor page
     navigate(`/content-editor/${item.id}`);
+  };
+
+  const handleDeleteClick = (item: ContentItem) => {
+    setItemToDelete(item);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!itemToDelete) return;
+
+    setIsDeleting(true);
+    try {
+      await apiClient.deleteGeneratedContent(parseInt(itemToDelete.id));
+
+      // Remove from local state
+      setContentItems(prev => prev.filter(item => item.id !== itemToDelete.id));
+
+      toast({
+        title: "Content Deleted",
+        description: `"${itemToDelete.title}" has been deleted successfully.`,
+      });
+    } catch (error) {
+      console.error("Error deleting content:", error);
+      toast({
+        title: "Error",
+        description: "Failed to delete content. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsDeleting(false);
+      setDeleteDialogOpen(false);
+      setItemToDelete(null);
+    }
   };
 
   // Listen for content generation requests from other pages
@@ -346,6 +394,15 @@ const ContentCalendar = () => {
                         <Edit className="h-4 w-4 mr-2" />
                         Edit
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteClick(item)}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </Button>
                     </div>
                   </div>
                 </Card>
@@ -403,12 +460,20 @@ const ContentCalendar = () => {
                             </div>
                           </div>
                           <div className="flex gap-2">
-                            <Button 
-                              variant="ghost" 
+                            <Button
+                              variant="ghost"
                               size="sm"
                               onClick={() => handleEditContent(item)}
                             >
                               <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteClick(item)}
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </div>
@@ -582,11 +647,40 @@ const ContentCalendar = () => {
         </TabsContent>
       </Tabs>
 
-      <GenerateContentDialog 
+      <GenerateContentDialog
         open={generateDialogOpen}
         onOpenChange={setGenerateDialogOpen}
         existingContent={selectedContent}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Content</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{itemToDelete?.title}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
