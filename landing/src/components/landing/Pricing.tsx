@@ -11,10 +11,12 @@ const plans = [
     monthlyPrice: 29,
     originalPrice: 49,
     features: [
+      "1 user",
       "1 domain",
       "3 AI platforms",
       "25 prompts/month",
       "1 competitor",
+      "5 AI articles/month",
     ],
     additionalFeatures: [],
     extraFeatures: [],
@@ -25,10 +27,12 @@ const plans = [
     monthlyPrice: 39,
     originalPrice: 66,
     features: [
+      "3 users",
       "3 domains",
       "All 5 AI platforms",
       "50 prompts/month",
-      "5 competitors",
+      "3 competitors",
+      "15 AI articles/month",
     ],
     additionalFeatures: [
       "Citation tracking",
@@ -43,19 +47,18 @@ const plans = [
     monthlyPrice: 129,
     originalPrice: 219,
     features: [
+      "10 users",
       "Unlimited domains",
       "All 5 AI platforms",
       "200 prompts/month",
-      "Unlimited competitors",
+      "5 competitors",
+      "50 AI articles/month",
     ],
     additionalFeatures: [
       "Citation tracking",
       "Content Editor + AI Rewrite",
     ],
-    extraFeatures: [
-      "50+ languages",
-      "AI Copilot",
-    ],
+    extraFeatures: [],
   },
 ];
 
@@ -147,15 +150,17 @@ export function Pricing() {
               </div>
 
               {/* CTA Button */}
-              <Button
-                className={`w-full rounded-full h-11 text-sm font-medium mb-6 ${
-                  plan.popular
-                    ? "bg-primary text-white hover:bg-primary/90"
-                    : "bg-gray-900 text-white hover:bg-gray-800"
-                }`}
-              >
-                Get Started
-              </Button>
+              <a href="https://app.promptmaxx.co/" className="block mb-6">
+                <Button
+                  className={`w-full rounded-full h-11 text-sm font-medium cursor-pointer ${
+                    plan.popular
+                      ? "bg-primary text-white hover:bg-primary/90"
+                      : "bg-gray-900 text-white hover:bg-gray-800"
+                  }`}
+                >
+                  Get Started
+                </Button>
+              </a>
 
               {/* Features */}
               <div className="space-y-3">

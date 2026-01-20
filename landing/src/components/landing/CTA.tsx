@@ -24,15 +24,14 @@ export function CTA() {
           Join hundreds of marketing teams already using PromptMaxx to monitor and optimize their brand presence across AI platforms.
         </p>
 
-        {/* CTA Buttons */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <Button className="bg-primary text-white hover:bg-primary/90 rounded-full h-12 !px-8 text-base font-medium">
-            <span>Start free trial</span>
-            <ArrowRight className="w-4 h-4" />
-          </Button>
-          <Button variant="outline" className="rounded-full h-12 !px-8 text-base font-medium border-gray-600 text-gray-300 hover:bg-gray-800 hover:text-white">
-            Schedule a demo
-          </Button>
+        {/* CTA Button */}
+        <div className="flex items-center justify-center">
+          <a href="https://app.promptmaxx.co/">
+            <Button className="bg-primary text-white hover:bg-primary/90 rounded-full h-12 !px-8 text-base font-medium cursor-pointer">
+              <span>Start free trial</span>
+              <ArrowRight className="w-4 h-4" />
+            </Button>
+          </a>
         </div>
 
         {/* Trust Indicators */}

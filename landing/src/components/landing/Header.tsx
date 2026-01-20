@@ -9,6 +9,22 @@ import { Menu, X } from "lucide-react";
 export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const scrollToSection = (e: React.MouseEvent<HTMLAnchorElement>, sectionId: string) => {
+    e.preventDefault();
+    const element = document.getElementById(sectionId);
+    if (element) {
+      const headerOffset = 80; // Account for fixed header
+      const elementPosition = element.getBoundingClientRect().top;
+      const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: "smooth"
+      });
+    }
+    setMobileMenuOpen(false);
+  };
+
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
       <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -29,28 +45,32 @@ export function Header() {
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-8">
-            <Link href="#features" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">
+            <a href="#features" onClick={(e) => scrollToSection(e, "features")} className="text-sm text-gray-600 hover:text-gray-900 transition-colors cursor-pointer">
               Features
-            </Link>
-            <Link href="#how-it-works" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">
+            </a>
+            <a href="#how-it-works" onClick={(e) => scrollToSection(e, "how-it-works")} className="text-sm text-gray-600 hover:text-gray-900 transition-colors cursor-pointer">
               How it works
-            </Link>
-            <Link href="#pricing" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">
+            </a>
+            <a href="#pricing" onClick={(e) => scrollToSection(e, "pricing")} className="text-sm text-gray-600 hover:text-gray-900 transition-colors cursor-pointer">
               Pricing
-            </Link>
-            <Link href="#faq" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">
+            </a>
+            <a href="#faq" onClick={(e) => scrollToSection(e, "faq")} className="text-sm text-gray-600 hover:text-gray-900 transition-colors cursor-pointer">
               FAQ
-            </Link>
+            </a>
           </div>
 
           {/* CTA Buttons */}
           <div className="hidden md:flex items-center gap-3">
-            <Button variant="ghost" className="text-sm text-gray-600 hover:text-gray-900">
-              Sign in
-            </Button>
-            <Button className="text-sm bg-primary text-white hover:bg-primary/90 rounded-full px-5">
-              Get started
-            </Button>
+            <Link href="https://app.promptmaxx.co/">
+              <Button variant="ghost" className="text-sm text-gray-600 hover:text-gray-900 cursor-pointer">
+                Sign in
+              </Button>
+            </Link>
+            <Link href="https://app.promptmaxx.co/">
+              <Button className="text-sm bg-primary text-white hover:bg-primary/90 rounded-full px-5 cursor-pointer">
+                Get started
+              </Button>
+            </Link>
           </div>
 
           {/* Mobile Menu Button */}
@@ -70,25 +90,29 @@ export function Header() {
         {mobileMenuOpen && (
           <div className="md:hidden py-4 border-t border-gray-100">
             <div className="flex flex-col gap-4">
-              <Link href="#features" className="text-sm text-gray-600 hover:text-gray-900">
+              <a href="#features" onClick={(e) => scrollToSection(e, "features")} className="text-sm text-gray-600 hover:text-gray-900 cursor-pointer">
                 Features
-              </Link>
-              <Link href="#how-it-works" className="text-sm text-gray-600 hover:text-gray-900">
+              </a>
+              <a href="#how-it-works" onClick={(e) => scrollToSection(e, "how-it-works")} className="text-sm text-gray-600 hover:text-gray-900 cursor-pointer">
                 How it works
-              </Link>
-              <Link href="#pricing" className="text-sm text-gray-600 hover:text-gray-900">
+              </a>
+              <a href="#pricing" onClick={(e) => scrollToSection(e, "pricing")} className="text-sm text-gray-600 hover:text-gray-900 cursor-pointer">
                 Pricing
-              </Link>
-              <Link href="#faq" className="text-sm text-gray-600 hover:text-gray-900">
+              </a>
+              <a href="#faq" onClick={(e) => scrollToSection(e, "faq")} className="text-sm text-gray-600 hover:text-gray-900 cursor-pointer">
                 FAQ
-              </Link>
+              </a>
               <div className="flex flex-col gap-2 pt-4 border-t border-gray-100">
-                <Button variant="ghost" className="justify-start text-sm text-gray-600">
-                  Sign in
-                </Button>
-                <Button className="text-sm bg-primary text-white hover:bg-primary/90 rounded-full">
-                  Get started
-                </Button>
+                <Link href="https://app.promptmaxx.co/">
+                  <Button variant="ghost" className="justify-start text-sm text-gray-600 w-full cursor-pointer">
+                    Sign in
+                  </Button>
+                </Link>
+                <Link href="https://app.promptmaxx.co/">
+                  <Button className="text-sm bg-primary text-white hover:bg-primary/90 rounded-full w-full cursor-pointer">
+                    Get started
+                  </Button>
+                </Link>
               </div>
             </div>
           </div>
