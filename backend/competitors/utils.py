@@ -138,8 +138,9 @@ def sync_competitor_prompt_analytics(domain_id=None, prompt_id=None, batch_size=
         # Only process completed analytics with competitor mentions
         # Use prompt__track_status since PromptAnalytics.track_status is not updated
         queryset = queryset.filter(
-            prompt__track_status='COMP',  # Only process completed prompts
-            ~Q(competitor_mention_list=[]) & ~Q(competitor_mention_list__isnull=True)
+            Q(prompt__track_status='COMP') &  # Only process completed prompts
+            ~Q(competitor_mention_list=[]) &
+            ~Q(competitor_mention_list__isnull=True)
         )
 
         total_records = queryset.count()

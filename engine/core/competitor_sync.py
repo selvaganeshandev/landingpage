@@ -5,6 +5,7 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 from shared_models.models import Competitor, PromptAnalytics
+from .competitor_processor import extract_competitor_citations
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +46,15 @@ def sync_competitor_prompt_analytics(domain_id=None, prompt_id=None):
 
         # Get all competitors for the domain(s) for name matching
         if domain_id:
-            competitors = list(Competitor.objects.filter(domain_id=domain_id).values('id', 'name', 'domain_id'))
+            competitors = list(Competitor.objects.filter(domain_id=domain_id).values('id', 'name', 'url', 'domain_id'))
         else:
-            competitors = list(Competitor.objects.all().values('id', 'name', 'domain_id'))
+            competitors = list(Competitor.objects.all().values('id', 'name', 'url', 'domain_id'))
 
-        # Build competitor name lookup map (case-insensitive)
+        # Build competitor name lookup map (case-insensitive) with id and url
         competitor_map = {}
         for comp in competitors:
             key = (comp['domain_id'], comp['name'].lower())
-            competitor_map[key] = comp['id']
+            competitor_map[key] = {'id': comp['id'], 'url': comp['url']}
 
         logger.info(f"Starting competitor sync for {queryset.count()} PromptAnalytics records...")
 
@@ -70,14 +71,24 @@ def sync_competitor_prompt_analytics(domain_id=None, prompt_id=None):
                     if not competitor_name:
                         continue
 
-                    # Find competitor ID
+                    # Find competitor ID and URL
                     key = (domain_id_for_prompt, competitor_name.lower())
-                    competitor_id = competitor_map.get(key)
+                    competitor_info = competitor_map.get(key)
 
-                    if not competitor_id:
+                    if not competitor_info:
                         logger.debug(f"Competitor '{competitor_name}' not found for domain {domain_id_for_prompt}")
                         stats['skipped'] += 1
                         continue
+
+                    competitor_id = competitor_info['id']
+                    competitor_url = competitor_info['url']
+
+                    # Filter citations to only those relevant to this specific competitor
+                    filtered_citations = extract_competitor_citations(
+                        pa.citation_list or [],
+                        competitor_name,
+                        competitor_url
+                    )
 
                     # Create or update CompetitorPromptAnalytics
                     with transaction.atomic():
@@ -91,7 +102,7 @@ def sync_competitor_prompt_analytics(domain_id=None, prompt_id=None):
                                 'position': int(pa.position) if pa.position else None,
                                 'sentiment_category': pa.sentiment_category,
                                 'sentiment_score': pa.sentiment_score,
-                                'citation_list': pa.citation_list or [],
+                                'citation_list': filtered_citations,
                                 'track_status': 'COMP',
                                 'tracked_at': timezone.now(),
                             }

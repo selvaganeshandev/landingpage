@@ -16,6 +16,7 @@ Note:
 
 import json
 import logging
+import re
 from typing import Dict, Any, List, Tuple
 from datetime import date, datetime
 from decimal import Decimal
@@ -41,6 +42,65 @@ from .analytics_helpers import get_openai_client
 
 
 logger = logging.getLogger(__name__)
+
+
+def extract_competitor_citations(citation_list: list, competitor_name: str, competitor_url: str = None) -> list:
+    """
+    Extract citations that are relevant to a specific competitor.
+
+    A citation is considered relevant if the competitor name or URL domain
+    appears in the citation text/URL.
+
+    Args:
+        citation_list: List of citation objects/dicts or URL strings from PromptAnalytics
+        competitor_name: Name of the competitor to search for
+        competitor_url: Optional URL of the competitor to match domain
+
+    Returns:
+        List of citations relevant to this competitor
+    """
+    if not citation_list or not competitor_name:
+        return []
+
+    competitor_citations = []
+
+    # Create case-insensitive pattern for competitor name
+    name_pattern = re.compile(re.escape(competitor_name), re.IGNORECASE)
+
+    # Extract domain from competitor URL if provided
+    url_pattern = None
+    if competitor_url:
+        # Extract domain from URL (e.g., "microsoft.com" from "https://www.microsoft.com/")
+        domain_match = re.search(r'(?:https?://)?(?:www\.)?([^/]+)', competitor_url.lower())
+        if domain_match:
+            domain = domain_match.group(1)
+            # Create pattern to match the domain in citations
+            url_pattern = re.compile(re.escape(domain), re.IGNORECASE)
+
+    for citation in citation_list:
+        citation_text = ""
+
+        # Handle different citation formats
+        if isinstance(citation, dict):
+            # Dict format: may have 'text', 'source', 'url', 'link' fields
+            citation_text = ' '.join([
+                str(citation.get('text', '')),
+                str(citation.get('source', '')),
+                str(citation.get('url', '')),
+                str(citation.get('link', ''))
+            ])
+        elif isinstance(citation, str):
+            citation_text = citation
+        else:
+            citation_text = str(citation)
+
+        # Check if competitor name or URL domain appears in citation
+        if name_pattern.search(citation_text):
+            competitor_citations.append(citation)
+        elif url_pattern and url_pattern.search(citation_text):
+            competitor_citations.append(citation)
+
+    return competitor_citations
 
 
 class CompetitorProcessor:
@@ -422,7 +482,12 @@ class CompetitorProcessor:
                 cp.sentiment_category = analytics['sentiment_category']
                 cp.sentiment_score = analytics['sentiment_score']
                 cp.response_text = response_text  # Store the context_summary we used
-                cp.citation_list = prompt_analytics.citation_list  # Reuse citations from PromptAnalytics
+                # Filter citations to only those relevant to this specific competitor
+                cp.citation_list = extract_competitor_citations(
+                    prompt_analytics.citation_list,
+                    competitor_name,
+                    comp_prompt.competitor.url
+                )
                 cp.platform = prompt_analytics.platform  # Use same platform as PromptAnalytics
                 cp.save()
             
