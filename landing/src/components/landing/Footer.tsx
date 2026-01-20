@@ -22,10 +22,8 @@ const footerLinks = {
     { name: "Press", href: "#" },
   ],
   legal: [
-    { name: "Privacy Policy", href: "#" },
-    { name: "Terms of Service", href: "#" },
-    { name: "Cookie Policy", href: "#" },
-    { name: "GDPR", href: "#" },
+    { name: "Privacy Policy", href: "/privacy" },
+    { name: "Terms of Service", href: "/terms" },
   ],
 };
 
@@ -125,14 +123,11 @@ export function Footer() {
               &copy; {new Date().getFullYear()} PromptMaxx. All rights reserved.
             </p>
             <div className="flex items-center gap-6 text-sm text-gray-500">
-              <Link href="#" className="hover:text-gray-900 transition-colors">
+              <Link href="/privacy" className="hover:text-gray-900 transition-colors">
                 Privacy
               </Link>
-              <Link href="#" className="hover:text-gray-900 transition-colors">
+              <Link href="/terms" className="hover:text-gray-900 transition-colors">
                 Terms
-              </Link>
-              <Link href="#" className="hover:text-gray-900 transition-colors">
-                Cookies
               </Link>
             </div>
           </div>
