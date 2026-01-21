@@ -917,7 +917,7 @@ def domain_health_check(request, domain_id):
                 'importance': 'critical'
             })
 
-        # 9. robots.txt Check (2 points)
+        # 9. robots.txt Check (5 points)
         try:
             robots_url = urljoin(url, '/robots.txt')
             robots_response = requests.get(robots_url, timeout=5)
@@ -925,10 +925,10 @@ def domain_health_check(request, domain_id):
             robots_check = {
                 'name': 'robots.txt',
                 'status': 'pass' if robots_exists else 'warning',
-                'score': 2 if robots_exists else 0,
-                'max_score': 2,
+                'score': 5 if robots_exists else 0,
+                'max_score': 5,
                 'message': 'robots.txt found' if robots_exists else 'robots.txt not found (optional but recommended)',
-                'importance': 'low'
+                'importance': 'medium'
             }
             checks.append(robots_check)
             health_score += robots_check['score']
@@ -937,9 +937,9 @@ def domain_health_check(request, domain_id):
                 'name': 'robots.txt',
                 'status': 'warning',
                 'score': 0,
-                'max_score': 2,
+                'max_score': 5,
                 'message': 'Unable to check robots.txt',
-                'importance': 'low'
+                'importance': 'medium'
             })
 
         # 10. llms.txt Check (5 points) - AI/LLM crawler instructions
@@ -967,28 +967,88 @@ def domain_health_check(request, domain_id):
                 'importance': 'medium'
             })
 
-        # 11. sitemap.xml Check (8 points)
+        # 11. Sitemap Check (10 points) - Check multiple sitemap formats
         try:
-            sitemap_url = urljoin(url, '/sitemap.xml')
-            sitemap_response = requests.get(sitemap_url, timeout=5)
-            sitemap_exists = sitemap_response.status_code == 200
-            sitemap_check = {
-                'name': 'XML Sitemap',
-                'status': 'pass' if sitemap_exists else 'fail',
-                'score': 8 if sitemap_exists else 0,
-                'max_score': 8,
-                'message': 'sitemap.xml found' if sitemap_exists else 'sitemap.xml not found',
-                'importance': 'high'
-            }
+            sitemap_found = False
+            sitemap_location = None
+
+            # List of common sitemap paths to check
+            sitemap_paths = [
+                '/sitemap.xml',
+                '/sitemap_index.xml',
+                '/sitemap.xml.gz',
+                '/sitemap_index.xml.gz',
+                '/sitemap.txt',
+                '/sitemap/',
+                '/sitemaps/sitemap.xml',
+            ]
+
+            # First, check robots.txt for Sitemap directives
+            # If sitemap is declared in robots.txt, trust it (even if URL verification fails due to WAF/CDN)
+            try:
+                robots_url = urljoin(url, '/robots.txt')
+                robots_resp = requests.get(robots_url, timeout=5)
+                if robots_resp.status_code == 200:
+                    # Parse robots.txt for Sitemap: lines
+                    for line in robots_resp.text.split('\n'):
+                        line = line.strip()
+                        if line.lower().startswith('sitemap:'):
+                            sitemap_from_robots = line.split(':', 1)[1].strip()
+                            if sitemap_from_robots:
+                                # Trust robots.txt declaration - sitemap is officially declared
+                                sitemap_found = True
+                                sitemap_location = f"robots.txt ({sitemap_from_robots})"
+                                break
+            except:
+                pass
+
+            # If not found in robots.txt, check common sitemap paths
+            if not sitemap_found:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+                }
+                for path in sitemap_paths:
+                    try:
+                        sitemap_url = urljoin(url, path)
+                        sitemap_response = requests.get(sitemap_url, timeout=5, allow_redirects=True, headers=headers)
+                        if sitemap_response.status_code == 200:
+                            # Verify it's actually a sitemap (check content)
+                            content = sitemap_response.text[:500].lower()
+                            if ('<?xml' in content or '<urlset' in content or
+                                '<sitemapindex' in content or 'http' in content):
+                                sitemap_found = True
+                                sitemap_location = path
+                                break
+                    except:
+                        continue
+
+            if sitemap_found:
+                sitemap_check = {
+                    'name': 'XML Sitemap',
+                    'status': 'pass',
+                    'score': 10,
+                    'max_score': 10,
+                    'message': f'Sitemap found at {sitemap_location}',
+                    'importance': 'high'
+                }
+            else:
+                sitemap_check = {
+                    'name': 'XML Sitemap',
+                    'status': 'fail',
+                    'score': 0,
+                    'max_score': 10,
+                    'message': 'No sitemap found (checked sitemap.xml, sitemap_index.xml, robots.txt)',
+                    'importance': 'high'
+                }
             checks.append(sitemap_check)
             health_score += sitemap_check['score']
-        except:
+        except Exception as e:
             checks.append({
                 'name': 'XML Sitemap',
                 'status': 'fail',
                 'score': 0,
-                'max_score': 8,
-                'message': 'Unable to check sitemap.xml',
+                'max_score': 10,
+                'message': f'Unable to check sitemap: {str(e)}',
                 'importance': 'high'
             })
 

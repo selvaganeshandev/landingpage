@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "./Sidebar";
 import { PageLoader } from "./PageLoader";
 import { ProcessingStateCard } from "./ProcessingStateCard";
+import { OnboardingModal } from "./OnboardingModal";
 import { Outlet, useLocation } from "react-router-dom";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useDomainStore } from "@/stores/domainStore";
@@ -9,9 +10,27 @@ import { isDomainProcessing, isCompetitorProcessing, isMisinformationProcessing 
 
 export const Layout = () => {
   const [isLoading, setIsLoading] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const location = useLocation();
   const { isOpen: sidebarOpen } = useSidebar();
-  const { selectedDomain, isDomainSwitching } = useDomainStore();
+  const { domains, selectedDomain, isDomainSwitching, isLoading: domainsLoading, loadDomains, setSelectedDomain } = useDomainStore();
+
+  // Show onboarding when domains are loaded but empty
+  useEffect(() => {
+    if (!domainsLoading && domains.length === 0) {
+      setShowOnboarding(true);
+    } else {
+      setShowOnboarding(false);
+    }
+  }, [domains, domainsLoading]);
+
+  // Handle onboarding complete
+  const handleOnboardingComplete = async (newDomain: any) => {
+    setShowOnboarding(false);
+    // Reload domains and select the new one
+    await loadDomains();
+    setSelectedDomain(newDomain);
+  };
 
   // Pages that require completed prompt processing
   const promptDataPages = [
@@ -89,6 +108,11 @@ export const Layout = () => {
 
     return () => clearTimeout(timer);
   }, [location.pathname]);
+
+  // Show onboarding modal if no domains
+  if (showOnboarding) {
+    return <OnboardingModal onComplete={handleOnboardingComplete} />;
+  }
 
   return (
     <div className="flex min-h-screen gradient-subtle">

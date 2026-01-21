@@ -12,6 +12,16 @@ export const metadata: Metadata = {
   description: "Monitor your brand visibility across AI platforms like ChatGPT, Claude, Gemini, and Perplexity. Get actionable insights to optimize your AI search presence.",
   keywords: ["AI search analytics", "brand monitoring", "ChatGPT", "Claude", "Gemini", "Perplexity", "AI visibility", "marketing analytics"],
   authors: [{ name: "PromptMaxx" }],
+  icons: {
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png" },
+    ],
+  },
   openGraph: {
     title: "PromptMaxx - AI Search Analytics for Marketing Teams",
     description: "Monitor your brand visibility across AI platforms like ChatGPT, Claude, Gemini, and Perplexity.",

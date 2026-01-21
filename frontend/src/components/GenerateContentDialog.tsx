@@ -51,8 +51,11 @@ import {
   Edit3,
   ChevronDown,
   ChevronUp,
-  ListOrdered
+  ListOrdered,
+  Download,
+  Loader2
 } from "lucide-react";
+import { GSCKeywordsModal } from "./GSCKeywordsModal";
 
 interface GenerateContentDialogProps {
   open: boolean;
@@ -74,6 +77,17 @@ export const GenerateContentDialog = ({
   const [generatedContent, setGeneratedContent] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+
+  // GSC keywords state
+  const [isLoadingGSCKeywords, setIsLoadingGSCKeywords] = useState(false);
+  const [showGSCModal, setShowGSCModal] = useState(false);
+  const [gscKeywords, setGscKeywords] = useState<Array<{
+    keyword: string;
+    clicks: number;
+    impressions: number;
+    ctr: number;
+    position: number;
+  }>>([]);
 
   // Outline state
   const [outline, setOutline] = useState<Array<{
@@ -633,6 +647,80 @@ export const GenerateContentDialog = ({
     }]);
   };
 
+  // Pull keywords from GSC
+  const handlePullFromGSC = async () => {
+    if (!selectedDomain) {
+      toast({
+        title: "Error",
+        description: "Please select a domain first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsLoadingGSCKeywords(true);
+    setShowGSCModal(true);
+
+    try {
+      const response = await apiClient.getGSCKeywords(selectedDomain.id);
+
+      if (!response.connected) {
+        setShowGSCModal(false);
+        toast({
+          title: "GSC Not Connected",
+          description: response.message || "Google Search Console is not connected for this domain. Please connect it in Settings.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (!response.keywords || response.keywords.length === 0) {
+        setShowGSCModal(false);
+        toast({
+          title: "No Keywords Found",
+          description: response.message || "No GSC data available yet. Please sync your GSC integration first.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setGscKeywords(response.keywords);
+
+    } catch (err: any) {
+      console.error('Error fetching GSC keywords:', err);
+      setShowGSCModal(false);
+      toast({
+        title: "Error",
+        description: err.message || "Failed to fetch keywords from GSC",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingGSCKeywords(false);
+    }
+  };
+
+  // Handle adding selected keywords from GSC modal
+  const handleAddGSCKeywords = (selectedKeywords: string[]) => {
+    if (selectedKeywords.length === 0) return;
+
+    const updatedKeywords = formData.keywords
+      ? `${formData.keywords}, ${selectedKeywords.join(', ')}`
+      : selectedKeywords.join(', ');
+
+    setFormData({ ...formData, keywords: updatedKeywords });
+
+    toast({
+      title: "Keywords Added",
+      description: `Added ${selectedKeywords.length} keyword${selectedKeywords.length !== 1 ? 's' : ''} from GSC`,
+    });
+  };
+
+  // Get existing keywords as array for the modal
+  const existingKeywordsArray = formData.keywords
+    .split(',')
+    .map(k => k.trim())
+    .filter(k => k);
+
   const renderStepContent = () => {
     switch (step) {
       case 1:
@@ -749,7 +837,29 @@ export const GenerateContentDialog = ({
               </div>
 
               <div>
-                <Label>Target Keywords (comma-separated)</Label>
+                <div className="flex items-center justify-between mb-1">
+                  <Label>Target Keywords (comma-separated)</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handlePullFromGSC}
+                    disabled={isLoadingGSCKeywords}
+                    className="h-7 text-xs"
+                  >
+                    {isLoadingGSCKeywords ? (
+                      <>
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        Loading...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="h-3 w-3 mr-1" />
+                        Pull from GSC
+                      </>
+                    )}
+                  </Button>
+                </div>
                 <Textarea
                   value={formData.keywords}
                   onChange={(e) => setFormData({ ...formData, keywords: e.target.value })}
@@ -1455,6 +1565,16 @@ export const GenerateContentDialog = ({
           </div>
         )}
       </DialogContent>
+
+      {/* GSC Keywords Selection Modal */}
+      <GSCKeywordsModal
+        open={showGSCModal}
+        onOpenChange={setShowGSCModal}
+        keywords={gscKeywords}
+        isLoading={isLoadingGSCKeywords}
+        onAddKeywords={handleAddGSCKeywords}
+        existingKeywords={existingKeywordsArray}
+      />
     </Dialog>
   );
 };

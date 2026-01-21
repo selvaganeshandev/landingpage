@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import IntegrationViewSet, start_traffic_processing, get_traffic_insights
+from .views import IntegrationViewSet, start_traffic_processing, get_traffic_insights, get_gsc_keywords
 from .google_oauth import (
     google_auth_url,
     google_callback,
@@ -32,5 +32,6 @@ urlpatterns = [
     # Traffic insights endpoints
     path('start/', start_traffic_processing, name='start_traffic_processing'),  # Deprecated - use engine endpoints
     path('traffic-insights/', get_traffic_insights, name='get_traffic_insights'),
+    path('gsc-keywords/', get_gsc_keywords, name='get_gsc_keywords'),
 ]
 

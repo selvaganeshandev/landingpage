@@ -497,13 +497,54 @@ def organization_management(request):
     if request.user.role not in ['admin', 'super_admin']:
         return Response({'error': 'Only organisation administrators can manage organization settings'}, status=status.HTTP_403_FORBIDDEN)
     organization = request.user.organisation
+    user = request.user
+
     if request.method == 'GET':
-        return Response({'id': organization.id, 'name': organization.name, 'team_count': organization.team_count, 'created_at': organization.created_at, 'modified_at': organization.modified_at})
-    name = request.data.get('name')
-    if name:
-        organization.name = name
+        return Response({
+            'id': organization.id,
+            'name': organization.name,
+            'industry': organization.industry,
+            'company_size': organization.company_size,
+            'goals': organization.goals,
+            'using_ai_monitoring': organization.using_ai_monitoring,
+            'team_count': organization.team_count,
+            'created_at': organization.created_at,
+            'modified_at': organization.modified_at
+        })
+
+    # Update organization fields
+    if 'name' in request.data:
+        organization.name = request.data.get('name')
+    if 'industry' in request.data:
+        organization.industry = request.data.get('industry')
+    if 'company_size' in request.data:
+        organization.company_size = request.data.get('company_size')
+    if 'goals' in request.data:
+        organization.goals = request.data.get('goals', [])
+    if 'using_ai_monitoring' in request.data:
+        organization.using_ai_monitoring = request.data.get('using_ai_monitoring')
+
     organization.save()
-    return Response({'message': 'Organization updated successfully', 'organization': {'id': organization.id, 'name': organization.name, 'team_count': organization.team_count, 'created_at': organization.created_at, 'modified_at': organization.modified_at}})
+
+    # Update user's job role if provided
+    if 'user_role' in request.data:
+        user.job_role = request.data.get('user_role')
+        user.save(update_fields=['job_role', 'modified_at'])
+
+    return Response({
+        'message': 'Organization updated successfully',
+        'organization': {
+            'id': organization.id,
+            'name': organization.name,
+            'industry': organization.industry,
+            'company_size': organization.company_size,
+            'goals': organization.goals,
+            'using_ai_monitoring': organization.using_ai_monitoring,
+            'team_count': organization.team_count,
+            'created_at': organization.created_at,
+            'modified_at': organization.modified_at
+        }
+    })
 
 
 @api_view(['GET'])

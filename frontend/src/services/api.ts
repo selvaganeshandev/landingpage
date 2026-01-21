@@ -1114,6 +1114,20 @@ export const apiClient = {
   getTrafficInsights: (domainId: number) =>
     apiRequest(`/integrations/traffic-insights/?domain_id=${domainId}`),
 
+  getGSCKeywords: (domainId: number) =>
+    apiRequest<{
+      connected: boolean;
+      keywords?: Array<{
+        keyword: string;
+        clicks: number;
+        impressions: number;
+        ctr: number;
+        position: number;
+      }>;
+      message?: string;
+      total_keywords?: number;
+    }>(`/integrations/gsc-keywords/?domain_id=${domainId}`),
+
   getGAData: (domainId: number, startDate?: string, endDate?: string) => {
     const queryParams = new URLSearchParams({ domain_id: String(domainId) });
     if (startDate) queryParams.set('start_date', startDate);

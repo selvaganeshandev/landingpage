@@ -181,6 +181,81 @@ def start_traffic_processing(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def get_gsc_keywords(request):
+    """
+    Get GSC keywords (top queries) for a domain.
+    GET /api/integrations/gsc-keywords/?domain_id=1
+    """
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        # Check if GSC integration exists and is active
+        gsc_integration = Integration.objects.filter(
+            domain_id=domain_id,
+            type='search_console',
+            status='active'
+        ).first()
+
+        if not gsc_integration:
+            return Response({
+                'connected': False,
+                'message': 'Google Search Console is not connected for this domain'
+            })
+
+        # Get latest GSC insight with top queries
+        gsc_insight = GSCTrafficInsight.objects.filter(
+            domain_id=domain_id,
+            track_status='COMP'
+        ).order_by('-end_date', '-created_at').first()
+
+        if not gsc_insight or not gsc_insight.top_queries:
+            return Response({
+                'connected': True,
+                'keywords': [],
+                'message': 'No GSC data available yet. Please sync your GSC integration first.'
+            })
+
+        # Extract keywords from top_queries with full data
+        # top_queries is a list of dicts like [{"query": "keyword", "clicks": 100, "impressions": 500, ...}, ...]
+        keywords = []
+        for query_data in gsc_insight.top_queries:
+            if isinstance(query_data, dict) and 'query' in query_data:
+                keywords.append({
+                    'keyword': query_data['query'],
+                    'clicks': query_data.get('clicks', 0),
+                    'impressions': query_data.get('impressions', 0),
+                    'ctr': query_data.get('ctr', 0),
+                    'position': query_data.get('position', 0),
+                })
+            elif isinstance(query_data, str):
+                keywords.append({
+                    'keyword': query_data,
+                    'clicks': 0,
+                    'impressions': 0,
+                    'ctr': 0,
+                    'position': 0,
+                })
+
+        return Response({
+            'connected': True,
+            'keywords': keywords[:100],  # Limit to top 100 keywords
+            'total_keywords': len(keywords)
+        })
+
+    except Exception as e:
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_traffic_insights(request):
     """
     Get traffic insights for a domain.

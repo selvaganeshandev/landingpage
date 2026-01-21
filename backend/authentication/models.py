@@ -20,7 +20,50 @@ class Organisation(models.Model):
     """
     Organisation model representing companies or entities using the LLM Monitor
     """
+    INDUSTRY_CHOICES = [
+        ('technology', 'Technology & Software'),
+        ('ecommerce', 'E-Commerce & Retail'),
+        ('marketing', 'Marketing & Advertising'),
+        ('finance', 'Finance & Banking'),
+        ('healthcare', 'Healthcare & Medical'),
+        ('education', 'Education & Training'),
+        ('saas', 'SaaS & B2B Services'),
+        ('agency', 'Agency & Consulting'),
+        ('other', 'Other'),
+    ]
+
+    COMPANY_SIZE_CHOICES = [
+        ('1-10', '1-10 employees'),
+        ('11-50', '11-50 employees'),
+        ('51-200', '51-200 employees'),
+        ('200+', '200+ employees'),
+    ]
+
     name = models.CharField(max_length=255, help_text="Name of the organisation")
+    industry = models.CharField(
+        max_length=50,
+        choices=INDUSTRY_CHOICES,
+        blank=True,
+        null=True,
+        help_text="Industry vertical of the organisation"
+    )
+    company_size = models.CharField(
+        max_length=20,
+        choices=COMPANY_SIZE_CHOICES,
+        blank=True,
+        null=True,
+        help_text="Number of employees in the organisation"
+    )
+    goals = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of primary goals for using the platform"
+    )
+    using_ai_monitoring = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text="Whether the organisation is currently using AI monitoring tools"
+    )
     team_count = models.PositiveIntegerField(default=1, help_text="Number of team members")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the organisation was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the organisation was last modified")
@@ -44,7 +87,16 @@ class Account(AbstractUser):
         ('admin', 'Administrator'),
         ('user', 'User'),
     ]
-    
+
+    JOB_ROLE_CHOICES = [
+        ('founder', 'Founder / CEO'),
+        ('marketing', 'Marketing Manager'),
+        ('seo', 'SEO Specialist'),
+        ('content', 'Content Strategist'),
+        ('agency', 'Agency / Consultant'),
+        ('other', 'Other'),
+    ]
+
     email = models.EmailField(unique=True, help_text="Email address of the account")
     role = models.CharField(
         max_length=12,
@@ -52,9 +104,16 @@ class Account(AbstractUser):
         default='user',
         help_text="Role of the account (super-admin, admin or user)"
     )
+    job_role = models.CharField(
+        max_length=20,
+        choices=JOB_ROLE_CHOICES,
+        blank=True,
+        null=True,
+        help_text="Job role/title of the user"
+    )
     organisation = models.ForeignKey(
-        Organisation, 
-        on_delete=models.CASCADE, 
+        Organisation,
+        on_delete=models.CASCADE,
         related_name='accounts',
         help_text="Organisation this account belongs to"
     )

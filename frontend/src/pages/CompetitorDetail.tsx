@@ -5,6 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { TimeFilter } from "@/components/TimeFilter";
 import { PageLoader } from "@/components/PageLoader";
 import { ViewMentionsDialog } from "@/components/ViewMentionsDialog";
@@ -21,7 +24,8 @@ import {
   MessageSquare,
   ArrowLeftRight,
   Lightbulb,
-  AlertTriangle
+  AlertTriangle,
+  Trash2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
@@ -60,6 +64,9 @@ const CompetitorDetail = () => {
   const [marketRank, setMarketRank] = useState<number | null>(null);
   const [viewMentionsDialogOpen, setViewMentionsDialogOpen] = useState(false);
   const [compareMetricsDialogOpen, setCompareMetricsDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
   const [platformBreakdown, setPlatformBreakdown] = useState<any[]>([]);
   const [sentimentData, setSentimentData] = useState([
     { name: "Positive", value: 0, color: "hsl(var(--success))" },
@@ -453,6 +460,32 @@ const CompetitorDetail = () => {
     });
   };
 
+  const handleDeleteCompetitor = async () => {
+    if (!competitor || deleteConfirmText !== competitor.name) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await apiClient.deleteCompetitor(Number(id));
+      toast({
+        title: "Competitor Deleted",
+        description: `${competitor.name} has been successfully deleted.`,
+      });
+      setDeleteDialogOpen(false);
+      navigate("/competitors");
+    } catch (error: any) {
+      console.error("Failed to delete competitor:", error);
+      toast({
+        title: "Delete Failed",
+        description: error?.message || "Could not delete the competitor. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const renderSwotList = (items: string[], emptyText: string) => {
     if (!items || items.length === 0) {
       return <p className="text-sm text-muted-foreground">{emptyText}</p>;
@@ -518,6 +551,17 @@ const CompetitorDetail = () => {
               </div>
             </div>
           </div>
+          <Button
+            variant="ghost"
+            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            onClick={() => {
+              setDeleteConfirmText("");
+              setDeleteDialogOpen(true);
+            }}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete Competitor
+          </Button>
         </div>
       </div>
 
@@ -891,6 +935,52 @@ const CompetitorDetail = () => {
         competitorName={competitor.name}
         competitorUrl={competitor.url}
       />
+
+      {/* Delete Competitor Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-destructive flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5" />
+              Delete Competitor
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              This action cannot be undone. This will permanently delete{" "}
+              <strong>{competitor.name}</strong> and all associated analytics data.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="confirm-name">
+                Type <strong>{competitor.name}</strong> to confirm:
+              </Label>
+              <Input
+                id="confirm-name"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="Enter competitor name"
+                className="w-full"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteCompetitor}
+              disabled={deleteConfirmText !== competitor.name || isDeleting}
+            >
+              {isDeleting ? "Deleting..." : "Delete Competitor"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
