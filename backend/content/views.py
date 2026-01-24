@@ -158,11 +158,14 @@ def generate_outline(request):
     """
     try:
         # Validate request data
+        logger.info(f"Outline generation request data: {request.data}")
         serializer = ContentGenerationRequestSerializer(data=request.data)
         if not serializer.is_valid():
+            logger.error(f"Outline generation validation errors: {serializer.errors}")
+            error_details = "; ".join([f"{k}: {v}" for k, v in serializer.errors.items()])
             return Response({
                 'status': 'error',
-                'message': 'Invalid request data',
+                'message': f'Invalid request data: {error_details}',
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 

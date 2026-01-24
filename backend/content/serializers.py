@@ -51,8 +51,8 @@ class ContentGenerationRequestSerializer(serializers.Serializer):
         required=False,
         default=list
     )
-    tone = serializers.CharField(default='professional')
-    style = serializers.CharField(default='informative')
+    tone = serializers.CharField(default='professional', allow_blank=True)
+    style = serializers.CharField(default='informative', allow_blank=True)
     goal = serializers.CharField(default='educate')
     audience = serializers.CharField(default='general')
     depth = serializers.CharField(default='comprehensive')

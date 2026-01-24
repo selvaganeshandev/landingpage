@@ -66,6 +66,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiClient } from "@/services/api";
 
 const ContentEditor = () => {
@@ -1826,8 +1827,19 @@ const ContentEditor = () => {
 
         {/* Right Sidebar */}
         <div className="w-80 border-l border-border bg-card overflow-y-auto">
-          <div className="p-6 space-y-6">
-            {/* Content Score */}
+          <Tabs defaultValue="content" className="h-full flex flex-col">
+            <div className="border-b border-border bg-card p-3">
+              <div className="flex items-center gap-1">
+                <TabsList className="h-9 w-full p-1 bg-muted rounded-lg">
+                  <TabsTrigger value="content" className="flex-1 h-7 rounded-md text-sm font-medium">Content</TabsTrigger>
+                  <TabsTrigger value="reviews" className="flex-1 h-7 rounded-md text-sm font-medium">Reviews (0)</TabsTrigger>
+                </TabsList>
+              </div>
+            </div>
+
+            <TabsContent value="content" className="flex-1 overflow-y-auto mt-0">
+              <div className="p-6 space-y-6">
+                {/* Content Score */}
             <div className="flex items-center gap-4">
               <div className="relative w-16 h-16 flex-shrink-0">
                 <svg className="w-full h-full transform -rotate-90">
@@ -2118,7 +2130,17 @@ const ContentEditor = () => {
                 </p>
               )}
             </div>
-          </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="reviews" className="flex-1 overflow-y-auto mt-0">
+              <div className="p-6">
+                <div className="text-center py-8 text-muted-foreground">
+                  <p className="text-sm">No reviews yet</p>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
 

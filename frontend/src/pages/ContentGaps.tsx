@@ -140,33 +140,8 @@ const ContentGaps = () => {
         domain_id: domainId
       });
 
-      // Extract meaningful keywords from the question (remove common words)
-      const commonWords = ['what', 'how', 'why', 'when', 'where', 'is', 'are', 'the', 'a', 'an', 'to', 'for', 'of', 'in', 'on', 'with'];
-      let keywords = gap.question
-        .toLowerCase()
-        .replace(/[?.,!]/g, '')
-        .split(' ')
-        .filter((word: string) => word.length > 3 && !commonWords.includes(word))
-        .slice(0, 5) // Take top 5 keywords
-        .join(', ');
-
-      // Enhance keywords with SEO suggestions if available
-      if (detailData?.seoSuggestions && detailData.seoSuggestions.length > 0) {
-        // Extract keywords from SEO suggestions
-        const seoKeywords = detailData.seoSuggestions
-          .filter((sug: any) => sug.suggestion.toLowerCase().includes('keyword'))
-          .map((sug: any) => {
-            // Try to extract quoted keywords
-            const match = sug.suggestion.match(/'([^']+)'|"([^"]+)"/);
-            return match ? (match[1] || match[2]) : null;
-          })
-          .filter(Boolean)
-          .join(', ');
-
-        if (seoKeywords) {
-          keywords = keywords + (keywords ? ', ' : '') + seoKeywords;
-        }
-      }
+      // Use the question/title as the keyword
+      let keywords = gap.question.replace(/[?]/g, '').trim();
 
       // Determine article type based on question or content recommendations
       let articleType = "guide";
@@ -248,7 +223,7 @@ const ContentGaps = () => {
       setSelectedContentForGeneration({
         title: gap.question,
         type: articleType,
-        targetKeywords: keywords.split(', ').filter((k: string) => k.length > 0),
+        targetKeywords: [keywords],
         priority: gap.priority,
         wordCount: wordCount,
         sourceType: "content_gap",
@@ -277,19 +252,12 @@ const ContentGaps = () => {
       });
 
       // Fallback to basic mode if API fails
-      const commonWords = ['what', 'how', 'why', 'when', 'where', 'is', 'are', 'the', 'a', 'an', 'to', 'for', 'of', 'in', 'on', 'with'];
-      const keywords = gap.question
-        .toLowerCase()
-        .replace(/[?.,!]/g, '')
-        .split(' ')
-        .filter((word: string) => word.length > 3 && !commonWords.includes(word))
-        .slice(0, 5)
-        .join(', ');
+      const keywords = gap.question.replace(/[?]/g, '').trim();
 
       setSelectedContentForGeneration({
         title: gap.question,
         type: "guide",
-        targetKeywords: keywords.split(', '),
+        targetKeywords: [keywords],
         priority: gap.priority,
         wordCount: 1500,
         sourceType: "content_gap",
