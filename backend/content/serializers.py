@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import GeneratedContent, CMSProvider, ScheduledPublication
+from .models import GeneratedContent, CMSProvider, ScheduledPublication, ContentComment
 from domains.models import Domain
 
 
@@ -263,7 +263,50 @@ class PublishContentSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "Cannot set both 'publish_now' and 'scheduled_at'"
             )
-        
+
         return data
+
+
+class ContentCommentSerializer(serializers.ModelSerializer):
+    """
+    Serializer for ContentComment model (Google Docs-style comments)
+    """
+    author_name = serializers.SerializerMethodField()
+    author_email = serializers.CharField(source='author.email', read_only=True)
+    resolved_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ContentComment
+        fields = [
+            'id', 'content', 'author', 'author_name', 'author_email',
+            'selected_text', 'comment', 'suggestion', 'status',
+            'resolved_by', 'resolved_by_name', 'resolved_at',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'author', 'resolved_by', 'resolved_at',
+            'created_at', 'updated_at'
+        ]
+
+    def get_author_name(self, obj):
+        if obj.author.first_name:
+            return f"{obj.author.first_name} {obj.author.last_name or ''}".strip()
+        return obj.author.email
+
+    def get_resolved_by_name(self, obj):
+        if obj.resolved_by:
+            if obj.resolved_by.first_name:
+                return f"{obj.resolved_by.first_name} {obj.resolved_by.last_name or ''}".strip()
+            return obj.resolved_by.email
+        return None
+
+
+class CreateContentCommentSerializer(serializers.Serializer):
+    """
+    Serializer for creating a new content comment
+    """
+    selected_text = serializers.CharField(required=True)
+    comment = serializers.CharField(required=True)
+    suggestion = serializers.CharField(required=False, allow_blank=True, default='')
 
 

@@ -1458,6 +1458,35 @@ export const apiClient = {
     apiRequest(`/chat/${conversationId}/delete_conversation/`, {
       method: 'DELETE',
     }),
+
+  // ===== Content Comments (Google Docs-style) =====
+  getContentComments: (contentId: number) =>
+    apiRequest(`/content/${contentId}/comments/`),
+
+  addContentComment: (contentId: number, data: {
+    selected_text: string;
+    comment: string;
+    suggestion?: string;
+  }) =>
+    apiRequest(`/content/${contentId}/comments/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateContentComment: (contentId: number, commentId: number, data: {
+    comment?: string;
+    suggestion?: string;
+    status?: 'pending' | 'accepted' | 'rejected';
+  }) =>
+    apiRequest(`/content/${contentId}/comments/${commentId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  deleteContentComment: (contentId: number, commentId: number) =>
+    apiRequest(`/content/${contentId}/comments/${commentId}/`, {
+      method: 'DELETE',
+    }),
 };
 
 // Also export as 'api' for flexibility

@@ -24,6 +24,10 @@ urlpatterns = [
     path('cms-providers/', views.cms_provider_list, name='cms_provider_list'),
     path('cms-providers/<int:provider_id>/', views.cms_provider_detail, name='cms_provider_detail'),
     path('cms-providers/<int:provider_id>/test/', views.test_cms_provider_connection, name='test_cms_provider_connection'),
+
+    # Content Comment endpoints (Google Docs-style)
+    path('<int:content_id>/comments/', views.content_comments, name='content_comments'),
+    path('<int:content_id>/comments/<int:comment_id>/', views.content_comment_detail, name='content_comment_detail'),
 ]
 
 

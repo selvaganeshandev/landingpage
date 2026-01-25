@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 from django.utils import timezone
 from domains.models import Domain
 
@@ -354,8 +355,80 @@ class ScheduledPublication(models.Model):
     def is_overdue(self):
         """Check if scheduled time has passed but not yet published"""
         return (
-            self.status == 'scheduled' and 
+            self.status == 'scheduled' and
             self.scheduled_at < timezone.now()
         )
+
+
+class ContentComment(models.Model):
+    """
+    Google Docs-style comments on selected text within content.
+    Reviewers select text and add comments/suggestions.
+    Content owner can accept or reject each comment.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+    ]
+
+    content = models.ForeignKey(
+        GeneratedContent,
+        on_delete=models.CASCADE,
+        related_name='comments',
+        help_text="Content being commented on"
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='content_comments',
+        help_text="User who made the comment"
+    )
+    selected_text = models.TextField(
+        help_text="The text that was highlighted/selected"
+    )
+    comment = models.TextField(
+        help_text="The reviewer's comment or feedback"
+    )
+    suggestion = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Suggested replacement text (optional)"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        help_text="Comment status"
+    )
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='resolved_comments',
+        help_text="User who accepted/rejected the comment"
+    )
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the comment was resolved"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'content_comments'
+        verbose_name = 'Content Comment'
+        verbose_name_plural = 'Content Comments'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['content', 'status']),
+            models.Index(fields=['content', 'author']),
+            models.Index(fields=['content', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"Comment by {self.author} on '{self.selected_text[:30]}...'"
 
 

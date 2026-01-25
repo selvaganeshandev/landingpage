@@ -41,7 +41,13 @@ import {
   RefreshCw,
   Link2,
   ExternalLink,
-  Check
+  Check,
+  MessageSquare,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Users,
+  Play
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -163,6 +169,37 @@ const ContentEditor = () => {
   const [isApplyingLinks, setIsApplyingLinks] = useState(false);
   const [linkOpportunitiesModalOpen, setLinkOpportunitiesModalOpen] = useState(false);
   const [selectedLinkOpportunities, setSelectedLinkOpportunities] = useState<Set<string>>(new Set());
+
+  // Content Comments state (Google Docs-style)
+  const [comments, setComments] = useState<Array<{
+    id: number;
+    author_name: string;
+    author_email: string;
+    selected_text: string;
+    comment: string;
+    suggestion: string | null;
+    status: 'pending' | 'accepted' | 'rejected';
+    resolved_by_name: string | null;
+    resolved_at: string | null;
+    created_at: string;
+  }>>([]);
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const [selectedText, setSelectedText] = useState('');
+  const [showCommentDialog, setShowCommentDialog] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [suggestionText, setSuggestionText] = useState('');
+  const [isSavingComment, setIsSavingComment] = useState(false);
+  const [activeCommentId, setActiveCommentId] = useState<number | null>(null);
+  const [viewingComment, setViewingComment] = useState<{
+    id: number;
+    author_name: string;
+    selected_text: string;
+    comment: string;
+    suggestion: string | null;
+    status: 'accepted' | 'rejected';
+    resolved_by_name: string | null;
+    resolved_at: string | null;
+  } | null>(null);
 
   // Count keyword occurrences in text
   const countKeywordOccurrences = (text: string, keyword: string): number => {
@@ -335,6 +372,231 @@ const ContentEditor = () => {
 
     loadContent();
   }, [id, toast]);
+
+  // Load comments
+  useEffect(() => {
+    const loadComments = async () => {
+      if (!id) return;
+      setIsLoadingComments(true);
+      try {
+        const response = await apiClient.getContentComments(parseInt(id));
+        if (response.status === 'success') {
+          setComments(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to load comments:', error);
+      } finally {
+        setIsLoadingComments(false);
+      }
+    };
+    loadComments();
+  }, [id]);
+
+  // Handle text selection in editor
+  const handleTextSelection = () => {
+    const selection = window.getSelection();
+    if (selection && selection.toString().trim().length > 0) {
+      setSelectedText(selection.toString().trim());
+      setActiveCommentId(null); // Clear active comment when selecting new text
+    } else {
+      setSelectedText('');
+      // Don't clear activeCommentId here - only clear when explicitly clicking away
+    }
+  };
+
+  // Open comment dialog with selected text
+  const openCommentDialog = () => {
+    if (!selectedText) return;
+    setCommentText('');
+    setSuggestionText('');
+    setShowCommentDialog(true);
+  };
+
+  // Save new comment
+  const saveComment = async () => {
+    if (!id || !selectedText || !commentText.trim()) return;
+
+    setIsSavingComment(true);
+    try {
+      const response = await apiClient.addContentComment(parseInt(id), {
+        selected_text: selectedText,
+        comment: commentText.trim(),
+        suggestion: suggestionText.trim() || undefined
+      });
+
+      if (response.status === 'success') {
+        // Refresh comments
+        const commentsResponse = await apiClient.getContentComments(parseInt(id));
+        if (commentsResponse.status === 'success') {
+          setComments(commentsResponse.data);
+        }
+
+        setShowCommentDialog(false);
+        setSelectedText('');
+        setCommentText('');
+        setSuggestionText('');
+        toast({
+          title: "Comment Added",
+          description: "Your comment has been added",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add comment",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingComment(false);
+    }
+  };
+
+  // Accept a comment (apply suggestion if any)
+  const acceptComment = async (commentId: number, suggestion: string | null) => {
+    if (!id) return;
+
+    try {
+      // If there's a suggestion, apply it to the content
+      if (suggestion && editorRef.current) {
+        const comment = comments.find(c => c.id === commentId);
+        if (comment) {
+          const currentHtml = editorRef.current.innerHTML;
+          const updatedHtml = currentHtml.replace(comment.selected_text, suggestion);
+          editorRef.current.innerHTML = updatedHtml;
+          handleContentChange();
+        }
+      }
+
+      // Update comment status
+      const response = await apiClient.updateContentComment(parseInt(id), commentId, {
+        status: 'accepted'
+      });
+
+      if (response.status === 'success') {
+        // Refresh comments
+        const commentsResponse = await apiClient.getContentComments(parseInt(id));
+        if (commentsResponse.status === 'success') {
+          setComments(commentsResponse.data);
+        }
+        toast({
+          title: "Comment Accepted",
+          description: suggestion ? "Suggestion applied to content" : "Comment marked as accepted",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to accept comment",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Reject a comment
+  const rejectComment = async (commentId: number) => {
+    if (!id) return;
+
+    try {
+      const response = await apiClient.updateContentComment(parseInt(id), commentId, {
+        status: 'rejected'
+      });
+
+      if (response.status === 'success') {
+        // Refresh comments
+        const commentsResponse = await apiClient.getContentComments(parseInt(id));
+        if (commentsResponse.status === 'success') {
+          setComments(commentsResponse.data);
+        }
+        toast({
+          title: "Comment Rejected",
+          description: "Comment has been dismissed",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reject comment",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Delete a comment
+  const deleteComment = async (commentId: number) => {
+    if (!id) return;
+
+    try {
+      const response = await apiClient.deleteContentComment(parseInt(id), commentId);
+
+      if (response.status === 'success') {
+        setComments(comments.filter(c => c.id !== commentId));
+        toast({
+          title: "Comment Deleted",
+          description: "Your comment has been deleted",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete comment",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Highlight selected text in editor when a comment is active
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    // Remove existing highlights
+    const existingHighlights = editorRef.current.querySelectorAll('.comment-highlight');
+    existingHighlights.forEach((el) => {
+      const parent = el.parentNode;
+      if (parent) {
+        parent.replaceChild(document.createTextNode(el.textContent || ''), el);
+        parent.normalize(); // Merge adjacent text nodes
+      }
+    });
+
+    // If no active comment, we're done
+    if (!activeCommentId) return;
+
+    // Find the active comment
+    const activeComment = comments.find(c => c.id === activeCommentId);
+    if (!activeComment) return;
+
+    // Find and highlight the selected text
+    const searchText = activeComment.selected_text;
+    const editorHtml = editorRef.current.innerHTML;
+
+    // Escape special regex characters in the search text
+    const escapedText = searchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Create a regex that matches the text (case-insensitive for flexibility)
+    const regex = new RegExp(`(${escapedText})`, 'gi');
+
+    // Only replace the first match to avoid multiple highlights
+    let replaced = false;
+    const newHtml = editorHtml.replace(regex, (match) => {
+      if (replaced) return match;
+      replaced = true;
+      return `<span class="comment-highlight" style="background-color: #fef08a; border-bottom: 2px solid #eab308; padding: 2px 0;">${match}</span>`;
+    });
+
+    if (replaced) {
+      // Save cursor position
+      const selection = window.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+
+      editorRef.current.innerHTML = newHtml;
+
+      // Scroll the highlight into view
+      const highlight = editorRef.current.querySelector('.comment-highlight');
+      if (highlight) {
+        highlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [activeCommentId, comments]);
 
   // Set the HTML content only on initial load
   useEffect(() => {
@@ -1735,11 +1997,25 @@ const ContentEditor = () => {
                   border-radius: 0.25rem;
                   border-bottom: 2px solid hsl(var(--primary));
                 }
+                .content-editor .comment-highlight {
+                  background-color: #fef08a !important;
+                  border-bottom: 2px solid #eab308 !important;
+                  padding: 2px 0 !important;
+                  transition: background-color 0.3s ease;
+                }
+                @keyframes pulse-highlight {
+                  0%, 100% { background-color: #fef08a; }
+                  50% { background-color: #fde047; }
+                }
+                .content-editor .comment-highlight {
+                  animation: pulse-highlight 1.5s ease-in-out 2;
+                }
               `}</style>
               <div
                 ref={editorRef}
                 contentEditable
                 onInput={handleContentChange}
+                onMouseUp={handleTextSelection}
                 onKeyDown={(e) => {
                   // Handle Ctrl+Z for undo
                   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
@@ -1832,7 +2108,7 @@ const ContentEditor = () => {
               <div className="flex items-center gap-1">
                 <TabsList className="h-9 w-full p-1 bg-muted rounded-lg">
                   <TabsTrigger value="content" className="flex-1 h-7 rounded-md text-sm font-medium">Content</TabsTrigger>
-                  <TabsTrigger value="reviews" className="flex-1 h-7 rounded-md text-sm font-medium">Reviews (0)</TabsTrigger>
+                  <TabsTrigger value="reviews" className="flex-1 h-7 rounded-md text-sm font-medium">Comments ({comments.filter(c => c.status === 'pending').length})</TabsTrigger>
                 </TabsList>
               </div>
             </div>
@@ -2134,10 +2410,141 @@ const ContentEditor = () => {
             </TabsContent>
 
             <TabsContent value="reviews" className="flex-1 overflow-y-auto mt-0">
-              <div className="p-6">
-                <div className="text-center py-8 text-muted-foreground">
-                  <p className="text-sm">No reviews yet</p>
-                </div>
+              <div className="p-4 space-y-4">
+                {/* Add Comment Section */}
+                {selectedText && (
+                  <Card className="p-3 border-primary">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-primary">Selected Text</span>
+                      <Button size="sm" variant="default" onClick={openCommentDialog}>
+                        <MessageSquare className="h-3 w-3 mr-1" />
+                        Add Comment
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground bg-muted p-2 rounded">
+                      "{selectedText.slice(0, 100)}{selectedText.length > 100 ? '...' : ''}"
+                    </p>
+                  </Card>
+                )}
+
+                {/* Instructions */}
+                {!selectedText && comments.length === 0 && (
+                  <Card className="p-4">
+                    <div className="text-center">
+                      <MessageSquare className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                      <p className="text-sm font-medium mb-1">Add Comments</p>
+                      <p className="text-xs text-muted-foreground">
+                        Select text in the editor to add a comment or suggestion
+                      </p>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Pending Comments */}
+                {comments.filter(c => c.status === 'pending').length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-yellow-500" />
+                      Pending ({comments.filter(c => c.status === 'pending').length})
+                    </h4>
+                    {comments.filter(c => c.status === 'pending').map((comment) => (
+                      <Card
+                        key={comment.id}
+                        className={`p-3 cursor-pointer hover:bg-muted/50 transition-colors ${activeCommentId === comment.id ? 'ring-2 ring-primary bg-primary/5' : ''}`}
+                        onClick={() => setActiveCommentId(activeCommentId === comment.id ? null : comment.id)}
+                      >
+                        <div className="flex items-start gap-2 mb-2">
+                          <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            <span className="text-xs font-medium text-primary">
+                              {comment.author_name?.charAt(0) || '?'}
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium">{comment.author_name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(comment.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded text-xs mb-2">
+                          <span className="text-muted-foreground">On: </span>
+                          "{comment.selected_text.slice(0, 50)}{comment.selected_text.length > 50 ? '...' : ''}"
+                        </div>
+                        <p className="text-sm mb-2">{comment.comment}</p>
+                        {comment.suggestion && (
+                          <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded text-xs mb-2">
+                            <span className="font-medium">Suggestion: </span>
+                            {comment.suggestion}
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1 h-7 text-xs"
+                            onClick={(e) => { e.stopPropagation(); acceptComment(comment.id, comment.suggestion); }}
+                          >
+                            <CheckCircle className="h-3 w-3 mr-1 text-green-500" />
+                            {comment.suggestion ? 'Accept' : 'Resolve'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1 h-7 text-xs"
+                            onClick={(e) => { e.stopPropagation(); rejectComment(comment.id); }}
+                          >
+                            <XCircle className="h-3 w-3 mr-1 text-red-500" />
+                            Reject
+                          </Button>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+
+                {/* Resolved Comments */}
+                {comments.filter(c => c.status !== 'pending').length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4" />
+                      Resolved ({comments.filter(c => c.status !== 'pending').length})
+                    </h4>
+                    {comments.filter(c => c.status !== 'pending').map((comment) => (
+                      <Card
+                        key={comment.id}
+                        className={`p-3 opacity-60 cursor-pointer hover:opacity-80 transition-opacity ${activeCommentId === comment.id ? 'ring-2 ring-primary opacity-100' : ''}`}
+                        onClick={() => {
+                          setActiveCommentId(comment.id);
+                          setViewingComment({
+                            id: comment.id,
+                            author_name: comment.author_name,
+                            selected_text: comment.selected_text,
+                            comment: comment.comment,
+                            suggestion: comment.suggestion,
+                            status: comment.status as 'accepted' | 'rejected',
+                            resolved_by_name: comment.resolved_by_name,
+                            resolved_at: comment.resolved_at
+                          });
+                        }}
+                      >
+                        <div className="flex items-start gap-2 mb-2">
+                          <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                            <span className="text-xs font-medium">
+                              {comment.author_name?.charAt(0) || '?'}
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium">{comment.author_name}</p>
+                            <Badge variant={comment.status === 'accepted' ? 'default' : 'secondary'} className="text-xs mt-1">
+                              {comment.status === 'accepted' ? 'Accepted' : 'Rejected'}
+                            </Badge>
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">{comment.comment}</p>
+                      </Card>
+                    ))}
+                  </div>
+                )}
               </div>
             </TabsContent>
           </Tabs>
@@ -2546,6 +2953,130 @@ const ContentEditor = () => {
                 )}
               </Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Comment Dialog */}
+      <Dialog open={showCommentDialog} onOpenChange={setShowCommentDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Add Comment</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg">
+              <p className="text-xs text-muted-foreground mb-1">Selected text:</p>
+              <p className="text-sm">"{selectedText.slice(0, 150)}{selectedText.length > 150 ? '...' : ''}"</p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="commentText">Your Comment *</Label>
+              <textarea
+                id="commentText"
+                className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                placeholder="What feedback do you have about this text?"
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="suggestionText">Suggested Replacement (optional)</Label>
+              <textarea
+                id="suggestionText"
+                className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                placeholder="Suggest alternative text to replace the selection..."
+                value={suggestionText}
+                onChange={(e) => setSuggestionText(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                If provided, the content owner can accept to replace the selected text with your suggestion.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCommentDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={saveComment} disabled={isSavingComment || !commentText.trim()}>
+              {isSavingComment ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Adding...</>
+              ) : (
+                <><MessageSquare className="h-4 w-4 mr-2" /> Add Comment</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Resolved Comment Dialog */}
+      <Dialog open={viewingComment !== null} onOpenChange={(open) => {
+        if (!open) {
+          setViewingComment(null);
+          setActiveCommentId(null);
+        }
+      }}>
+        <DialogContent className="sm:max-w-[550px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {viewingComment?.status === 'accepted' ? (
+                <><CheckCircle className="h-5 w-5 text-green-500" /> Accepted Comment</>
+              ) : (
+                <><XCircle className="h-5 w-5 text-red-500" /> Rejected Comment</>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {viewingComment && (
+            <div className="grid gap-4 py-4">
+              {/* Author Info */}
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <User className="h-4 w-4" />
+                <span>Comment by <strong>{viewingComment.author_name}</strong></span>
+              </div>
+
+              {/* Selected Text */}
+              <div>
+                <Label className="text-xs text-muted-foreground mb-2 block">Original Text</Label>
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                  <p className="text-sm">"{viewingComment.selected_text}"</p>
+                </div>
+              </div>
+
+              {/* Comment */}
+              <div>
+                <Label className="text-xs text-muted-foreground mb-2 block">Comment</Label>
+                <div className="bg-muted p-3 rounded-lg">
+                  <p className="text-sm">{viewingComment.comment}</p>
+                </div>
+              </div>
+
+              {/* Suggestion (if any) */}
+              {viewingComment.suggestion && (
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-2 block">
+                    Suggested Change {viewingComment.status === 'accepted' && <Badge variant="default" className="ml-2 text-xs">Applied</Badge>}
+                  </Label>
+                  <div className={`p-3 rounded-lg border ${viewingComment.status === 'accepted' ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-muted border-border'}`}>
+                    <p className="text-sm">{viewingComment.suggestion}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Resolution Info */}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground border-t pt-3">
+                <Clock className="h-3 w-3" />
+                <span>
+                  {viewingComment.status === 'accepted' ? 'Accepted' : 'Rejected'} by {viewingComment.resolved_by_name || 'Unknown'}
+                  {viewingComment.resolved_at && ` on ${new Date(viewingComment.resolved_at).toLocaleDateString()}`}
+                </span>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setViewingComment(null);
+              setActiveCommentId(null);
+            }}>
+              Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -10,11 +10,12 @@ import logging
 import requests
 import re
 
-from .models import GeneratedContent, CMSProvider, ScheduledPublication
+from .models import GeneratedContent, CMSProvider, ScheduledPublication, ContentComment
 from .serializers import (
     GeneratedContentSerializer, ContentGenerationRequestSerializer,
     CMSProviderSerializer, CMSProviderCreateSerializer,
-    ScheduledPublicationSerializer, PublishContentSerializer
+    ScheduledPublicationSerializer, PublishContentSerializer,
+    ContentCommentSerializer, CreateContentCommentSerializer
 )
 from .claude_content_generator import ClaudeContentGenerator
 from domains.models import Domain
@@ -1361,3 +1362,149 @@ def detect_ai_content(request):
             'status': 'error',
             'message': f'Error detecting AI content: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================
+# Content Review Endpoints
+# ============================================
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def content_comments(request, content_id):
+    """
+    GET: Get all comments for a content
+    POST: Add a new comment on selected text
+    """
+    # Verify content exists and user has access
+    try:
+        content = GeneratedContent.objects.get(id=content_id)
+        # Verify user has access to this domain
+        if content.domain.organisation != request.user.organisation:
+            return Response({
+                'status': 'error',
+                'message': 'You do not have access to this content'
+            }, status=status.HTTP_403_FORBIDDEN)
+    except GeneratedContent.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': 'Content not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        comments = ContentComment.objects.filter(content=content)
+        serializer = ContentCommentSerializer(comments, many=True)
+        return Response({
+            'status': 'success',
+            'data': serializer.data,
+            'total': comments.count(),
+            'pending': comments.filter(status='pending').count()
+        })
+
+    elif request.method == 'POST':
+        serializer = CreateContentCommentSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'status': 'error',
+                'message': 'Invalid data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+
+        # Create new comment
+        comment = ContentComment.objects.create(
+            content=content,
+            author=request.user,
+            selected_text=data['selected_text'],
+            comment=data['comment'],
+            suggestion=data.get('suggestion', ''),
+            status='pending'
+        )
+        response_serializer = ContentCommentSerializer(comment)
+        return Response({
+            'status': 'success',
+            'message': 'Comment added',
+            'data': response_serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def content_comment_detail(request, content_id, comment_id):
+    """
+    GET: Get a specific comment
+    PATCH: Update comment or resolve (accept/reject)
+    DELETE: Delete a comment (only by author)
+    """
+    try:
+        comment = ContentComment.objects.get(id=comment_id, content_id=content_id)
+        # Verify user has access
+        if comment.content.domain.organisation != request.user.organisation:
+            return Response({
+                'status': 'error',
+                'message': 'You do not have access to this comment'
+            }, status=status.HTTP_403_FORBIDDEN)
+    except ContentComment.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': 'Comment not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = ContentCommentSerializer(comment)
+        return Response({
+            'status': 'success',
+            'data': serializer.data
+        })
+
+    elif request.method == 'PATCH':
+        # Check what action is being performed
+        new_status = request.data.get('status')
+
+        if new_status in ['accepted', 'rejected']:
+            # Resolving a comment - anyone in the org can do this
+            comment.status = new_status
+            comment.resolved_by = request.user
+            comment.resolved_at = timezone.now()
+            comment.save()
+
+            serializer = ContentCommentSerializer(comment)
+            return Response({
+                'status': 'success',
+                'message': f'Comment {new_status}',
+                'data': serializer.data
+            })
+
+        # Updating comment text - only author can do this
+        if comment.author != request.user:
+            return Response({
+                'status': 'error',
+                'message': 'Only the author can edit this comment'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if 'comment' in request.data:
+            comment.comment = request.data['comment']
+        if 'suggestion' in request.data:
+            comment.suggestion = request.data['suggestion']
+        comment.save()
+
+        serializer = ContentCommentSerializer(comment)
+        return Response({
+            'status': 'success',
+            'message': 'Comment updated',
+            'data': serializer.data
+        })
+
+    elif request.method == 'DELETE':
+        # Only author can delete their comment
+        if comment.author != request.user:
+            return Response({
+                'status': 'error',
+                'message': 'Only the author can delete this comment'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        comment.delete()
+        return Response({
+            'status': 'success',
+            'message': 'Comment deleted'
+        }, status=status.HTTP_204_NO_CONTENT)
