@@ -580,7 +580,7 @@ const ContentEditor = () => {
     const newHtml = editorHtml.replace(regex, (match) => {
       if (replaced) return match;
       replaced = true;
-      return `<span class="comment-highlight" style="background-color: #fef08a; border-bottom: 2px solid #eab308; padding: 2px 0;">${match}</span>`;
+      return `<span class="comment-highlight">${match}</span>`;
     });
 
     if (replaced) {
@@ -1998,14 +1998,15 @@ const ContentEditor = () => {
                   border-bottom: 2px solid hsl(var(--primary));
                 }
                 .content-editor .comment-highlight {
-                  background-color: #fef08a !important;
-                  border-bottom: 2px solid #eab308 !important;
+                  background-color: hsl(var(--primary) / 0.2) !important;
+                  border-bottom: 2px solid hsl(var(--primary)) !important;
                   padding: 2px 0 !important;
                   transition: background-color 0.3s ease;
+                  border-radius: 2px;
                 }
                 @keyframes pulse-highlight {
-                  0%, 100% { background-color: #fef08a; }
-                  50% { background-color: #fde047; }
+                  0%, 100% { background-color: hsl(var(--primary) / 0.2); }
+                  50% { background-color: hsl(var(--primary) / 0.35); }
                 }
                 .content-editor .comment-highlight {
                   animation: pulse-highlight 1.5s ease-in-out 2;
@@ -2105,12 +2106,17 @@ const ContentEditor = () => {
         <div className="w-80 border-l border-border bg-card overflow-y-auto">
           <Tabs defaultValue="content" className="h-full flex flex-col">
             <div className="border-b border-border bg-card p-3">
-              <div className="flex items-center gap-1">
-                <TabsList className="h-9 w-full p-1 bg-muted rounded-lg">
-                  <TabsTrigger value="content" className="flex-1 h-7 rounded-md text-sm font-medium">Content</TabsTrigger>
-                  <TabsTrigger value="reviews" className="flex-1 h-7 rounded-md text-sm font-medium">Comments ({comments.filter(c => c.status === 'pending').length})</TabsTrigger>
-                </TabsList>
-              </div>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="content">Content</TabsTrigger>
+                <TabsTrigger value="reviews">
+                  Comments
+                  {comments.filter(c => c.status === 'pending').length > 0 && (
+                    <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-5 px-1.5 text-xs font-medium rounded-full bg-primary text-primary-foreground">
+                      {comments.filter(c => c.status === 'pending').length}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
             </div>
 
             <TabsContent value="content" className="flex-1 overflow-y-auto mt-0">
@@ -2466,14 +2472,14 @@ const ContentEditor = () => {
                             </p>
                           </div>
                         </div>
-                        <div className="bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded text-xs mb-2">
+                        <div className="bg-muted p-2 rounded text-xs mb-2 border border-border">
                           <span className="text-muted-foreground">On: </span>
                           "{comment.selected_text.slice(0, 50)}{comment.selected_text.length > 50 ? '...' : ''}"
                         </div>
                         <p className="text-sm mb-2">{comment.comment}</p>
                         {comment.suggestion && (
-                          <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded text-xs mb-2">
-                            <span className="font-medium">Suggestion: </span>
+                          <div className="bg-primary/10 p-2 rounded text-xs mb-2 border border-primary/20">
+                            <span className="font-medium text-primary">Suggestion: </span>
                             {comment.suggestion}
                           </div>
                         )}
@@ -2481,19 +2487,19 @@ const ContentEditor = () => {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="flex-1 h-7 text-xs"
+                            className="flex-1 h-7 text-xs hover:bg-primary/10 hover:text-primary hover:border-primary"
                             onClick={(e) => { e.stopPropagation(); acceptComment(comment.id, comment.suggestion); }}
                           >
-                            <CheckCircle className="h-3 w-3 mr-1 text-green-500" />
+                            <CheckCircle className="h-3 w-3 mr-1" />
                             {comment.suggestion ? 'Accept' : 'Resolve'}
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
-                            className="flex-1 h-7 text-xs"
+                            className="flex-1 h-7 text-xs hover:bg-destructive/10 hover:text-destructive hover:border-destructive"
                             onClick={(e) => { e.stopPropagation(); rejectComment(comment.id); }}
                           >
-                            <XCircle className="h-3 w-3 mr-1 text-red-500" />
+                            <XCircle className="h-3 w-3 mr-1" />
                             Reject
                           </Button>
                         </div>
@@ -2964,7 +2970,7 @@ const ContentEditor = () => {
             <DialogTitle>Add Comment</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg">
+            <div className="bg-muted p-3 rounded-lg border border-border">
               <p className="text-xs text-muted-foreground mb-1">Selected text:</p>
               <p className="text-sm">"{selectedText.slice(0, 150)}{selectedText.length > 150 ? '...' : ''}"</p>
             </div>
@@ -3018,9 +3024,9 @@ const ContentEditor = () => {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {viewingComment?.status === 'accepted' ? (
-                <><CheckCircle className="h-5 w-5 text-green-500" /> Accepted Comment</>
+                <><CheckCircle className="h-5 w-5 text-primary" /> Accepted Comment</>
               ) : (
-                <><XCircle className="h-5 w-5 text-red-500" /> Rejected Comment</>
+                <><XCircle className="h-5 w-5 text-destructive" /> Rejected Comment</>
               )}
             </DialogTitle>
           </DialogHeader>
@@ -3029,13 +3035,13 @@ const ContentEditor = () => {
               {/* Author Info */}
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <User className="h-4 w-4" />
-                <span>Comment by <strong>{viewingComment.author_name}</strong></span>
+                <span>Comment by <strong className="text-foreground">{viewingComment.author_name}</strong></span>
               </div>
 
               {/* Selected Text */}
               <div>
                 <Label className="text-xs text-muted-foreground mb-2 block">Original Text</Label>
-                <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                <div className="bg-muted p-3 rounded-lg border border-border">
                   <p className="text-sm">"{viewingComment.selected_text}"</p>
                 </div>
               </div>
@@ -3043,7 +3049,7 @@ const ContentEditor = () => {
               {/* Comment */}
               <div>
                 <Label className="text-xs text-muted-foreground mb-2 block">Comment</Label>
-                <div className="bg-muted p-3 rounded-lg">
+                <div className="bg-muted p-3 rounded-lg border border-border">
                   <p className="text-sm">{viewingComment.comment}</p>
                 </div>
               </div>
@@ -3054,7 +3060,7 @@ const ContentEditor = () => {
                   <Label className="text-xs text-muted-foreground mb-2 block">
                     Suggested Change {viewingComment.status === 'accepted' && <Badge variant="default" className="ml-2 text-xs">Applied</Badge>}
                   </Label>
-                  <div className={`p-3 rounded-lg border ${viewingComment.status === 'accepted' ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-muted border-border'}`}>
+                  <div className={`p-3 rounded-lg border ${viewingComment.status === 'accepted' ? 'bg-primary/10 border-primary/20' : 'bg-muted border-border'}`}>
                     <p className="text-sm">{viewingComment.suggestion}</p>
                   </div>
                 </div>

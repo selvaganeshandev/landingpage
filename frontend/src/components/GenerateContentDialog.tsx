@@ -53,7 +53,19 @@ import {
   ChevronUp,
   ListOrdered,
   Download,
-  Loader2
+  Loader2,
+  // Social Media icons
+  Twitter,
+  Linkedin,
+  Facebook,
+  Instagram,
+  Share2,
+  // Community icons
+  MessageCircle,
+  HelpCircle,
+  MessagesSquare,
+  Mail,
+  Users
 } from "lucide-react";
 import { GSCKeywordsModal } from "./GSCKeywordsModal";
 
@@ -328,6 +340,99 @@ export const GenerateContentDialog = ({
       examples: ["Ebook landing", "Whitepaper", "Free guide"]
     }
   ];
+
+  const socialMediaTypes = [
+    {
+      id: "twitter_post",
+      icon: Twitter,
+      title: "Twitter/X Post",
+      description: "Short, punchy posts with hashtags (280 chars)",
+      examples: ["Announcements", "Tips & insights", "Engagement posts"]
+    },
+    {
+      id: "linkedin_post",
+      icon: Linkedin,
+      title: "LinkedIn Post",
+      description: "Professional thought leadership content",
+      examples: ["Industry insights", "Career advice", "Company updates"]
+    },
+    {
+      id: "facebook_post",
+      icon: Facebook,
+      title: "Facebook Post",
+      description: "Engaging community-focused content",
+      examples: ["Community updates", "Event promotions", "Story sharing"]
+    },
+    {
+      id: "instagram_caption",
+      icon: Instagram,
+      title: "Instagram Caption",
+      description: "Visual-focused captions with CTAs",
+      examples: ["Product showcases", "Behind-the-scenes", "User stories"]
+    },
+    {
+      id: "social_thread",
+      icon: ListOrdered,
+      title: "Thread/Carousel",
+      description: "Multi-part content series for storytelling",
+      examples: ["Educational threads", "Story breakdowns", "Tips series"]
+    }
+  ];
+
+  const communityPostTypes = [
+    {
+      id: "reddit_post",
+      icon: MessageCircle,
+      title: "Reddit Post",
+      description: "Discussion-style content for subreddits",
+      examples: ["AMAs", "Discussion starters", "Resource sharing"]
+    },
+    {
+      id: "quora_answer",
+      icon: HelpCircle,
+      title: "Quora Answer",
+      description: "Detailed expert answers to questions",
+      examples: ["How-to answers", "Expert opinions", "Comparisons"]
+    },
+    {
+      id: "forum_post",
+      icon: MessagesSquare,
+      title: "Forum Post",
+      description: "Community discussion & help content",
+      examples: ["Tutorials", "Q&A responses", "Community guides"]
+    },
+    {
+      id: "product_hunt",
+      icon: Rocket,
+      title: "Product Hunt Launch",
+      description: "Launch day content & descriptions",
+      examples: ["Product taglines", "Feature highlights", "Maker stories"]
+    },
+    {
+      id: "newsletter_snippet",
+      icon: Mail,
+      title: "Newsletter Snippet",
+      description: "Email newsletter sections & updates",
+      examples: ["Weekly roundups", "Feature announcements", "Tips & tricks"]
+    }
+  ];
+
+  // Update word count default when content type changes
+  useEffect(() => {
+    const isSocialMedia = socialMediaTypes.some(t => t.id === formData.articleType);
+    const isCommunity = communityPostTypes.some(t => t.id === formData.articleType);
+
+    if (isSocialMedia && formData.wordCount > 500) {
+      // Default to medium length for social media
+      setFormData(prev => ({ ...prev, wordCount: 150 }));
+    } else if (isCommunity && (formData.wordCount > 1500 || formData.wordCount < 150)) {
+      // Default to standard length for community
+      setFormData(prev => ({ ...prev, wordCount: 400 }));
+    } else if (!isSocialMedia && !isCommunity && formData.wordCount < 800) {
+      // Reset to standard length for articles/webpages
+      setFormData(prev => ({ ...prev, wordCount: 1500 }));
+    }
+  }, [formData.articleType]);
 
   const handleGenerate = async () => {
     if (!selectedDomain) {
@@ -724,19 +829,31 @@ export const GenerateContentDialog = ({
   const renderStepContent = () => {
     switch (step) {
       case 1:
-        const currentTab = articleTypes.some(t => t.id === formData.articleType) ? 'articles' : 'webpages';
+        const currentTab = articleTypes.some(t => t.id === formData.articleType) ? 'articles'
+          : webPageTypes.some(t => t.id === formData.articleType) ? 'webpages'
+          : socialMediaTypes.some(t => t.id === formData.articleType) ? 'social'
+          : communityPostTypes.some(t => t.id === formData.articleType) ? 'community'
+          : 'articles';
 
         return (
           <div className="space-y-4">
             <Tabs defaultValue={currentTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-4">
+              <TabsList className="grid w-full grid-cols-4 mb-4">
                 <TabsTrigger value="articles" className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
-                  Article Types
+                  Articles
                 </TabsTrigger>
                 <TabsTrigger value="webpages" className="flex items-center gap-2">
                   <LayoutGrid className="h-4 w-4" />
-                  Web Page Content
+                  Web Pages
+                </TabsTrigger>
+                <TabsTrigger value="social" className="flex items-center gap-2">
+                  <Share2 className="h-4 w-4" />
+                  Social Media
+                </TabsTrigger>
+                <TabsTrigger value="community" className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Community
                 </TabsTrigger>
               </TabsList>
 
@@ -807,13 +924,83 @@ export const GenerateContentDialog = ({
                   })}
                 </div>
               </TabsContent>
+
+              <TabsContent value="social" className="mt-0">
+                <p className="text-sm text-muted-foreground mb-4">
+                  Social media posts, threads, and platform-specific content
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {socialMediaTypes.map((type) => {
+                    const Icon = type.icon;
+                    const isSelected = formData.articleType === type.id;
+
+                    return (
+                      <Card
+                        key={type.id}
+                        className={`p-3 cursor-pointer transition-all hover:shadow-md ${
+                          isSelected ? 'ring-2 ring-primary' : ''
+                        }`}
+                        onClick={() => setFormData({ ...formData, articleType: type.id })}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center flex-shrink-0">
+                            <Icon className="h-5 w-5 text-white" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-sm mb-0.5">{type.title}</h4>
+                            <p className="text-xs text-muted-foreground line-clamp-2">
+                              {type.description}
+                            </p>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="community" className="mt-0">
+                <p className="text-sm text-muted-foreground mb-4">
+                  Community forums, Q&A platforms, and discussion content
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {communityPostTypes.map((type) => {
+                    const Icon = type.icon;
+                    const isSelected = formData.articleType === type.id;
+
+                    return (
+                      <Card
+                        key={type.id}
+                        className={`p-3 cursor-pointer transition-all hover:shadow-md ${
+                          isSelected ? 'ring-2 ring-primary' : ''
+                        }`}
+                        onClick={() => setFormData({ ...formData, articleType: type.id })}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-pink-500 to-rose-600 flex items-center justify-center flex-shrink-0">
+                            <Icon className="h-5 w-5 text-white" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-sm mb-0.5">{type.title}</h4>
+                            <p className="text-xs text-muted-foreground line-clamp-2">
+                              {type.description}
+                            </p>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </TabsContent>
             </Tabs>
           </div>
         );
 
       case 2:
         const isWebPage = webPageTypes.some(t => t.id === formData.articleType);
-        const selectedType = [...articleTypes, ...webPageTypes].find(t => t.id === formData.articleType);
+        const isSocialMedia = socialMediaTypes.some(t => t.id === formData.articleType);
+        const isCommunity = communityPostTypes.some(t => t.id === formData.articleType);
+        const selectedType = [...articleTypes, ...webPageTypes, ...socialMediaTypes, ...communityPostTypes].find(t => t.id === formData.articleType);
 
         return (
           <div className="space-y-6">
@@ -826,19 +1013,24 @@ export const GenerateContentDialog = ({
 
             <div className="space-y-4">
               <div>
-                <Label>{isWebPage ? 'Page Title' : 'Article Title'}</Label>
+                <Label>
+                  {isWebPage ? 'Page Title' : isSocialMedia ? 'Post Topic/Hook' : isCommunity ? 'Post/Answer Title' : 'Article Title'}
+                </Label>
                 <Input
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder={isWebPage
-                    ? "Transform Your Business with Our Solutions"
-                    : "Best Plant-Based Protein Powders for Athletes"}
+                  placeholder={
+                    isWebPage ? "Transform Your Business with Our Solutions"
+                    : isSocialMedia ? "5 game-changing tips for startup founders..."
+                    : isCommunity ? "How to optimize React performance in large apps"
+                    : "Best Plant-Based Protein Powders for Athletes"
+                  }
                 />
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <Label>Target Keywords (comma-separated)</Label>
+                  <Label>{isSocialMedia ? 'Hashtags/Keywords' : isCommunity ? 'Topics/Tags' : 'Target Keywords'} (comma-separated)</Label>
                   <Button
                     type="button"
                     variant="outline"
@@ -863,13 +1055,18 @@ export const GenerateContentDialog = ({
                 <Textarea
                   value={formData.keywords}
                   onChange={(e) => setFormData({ ...formData, keywords: e.target.value })}
-                  placeholder={isWebPage
-                    ? "business solutions, enterprise software, digital transformation"
-                    : "plant protein, vegan protein powder, athlete supplements"}
+                  placeholder={
+                    isWebPage ? "business solutions, enterprise software, digital transformation"
+                    : isSocialMedia ? "#startups, #entrepreneurship, #growthhacking, founder tips"
+                    : isCommunity ? "react, performance, optimization, web development"
+                    : "plant protein, vegan protein powder, athlete supplements"
+                  }
                   rows={3}
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  These keywords will be naturally integrated into your content
+                  {isSocialMedia ? 'Hashtags and keywords to include in your post'
+                   : isCommunity ? 'Topics and tags relevant to the community'
+                   : 'These keywords will be naturally integrated into your content'}
                 </p>
               </div>
 
@@ -1047,6 +1244,9 @@ export const GenerateContentDialog = ({
         );
 
       case 4:
+        const isSocialMediaStep4 = socialMediaTypes.some(t => t.id === formData.articleType);
+        const isCommunityStep4 = communityPostTypes.some(t => t.id === formData.articleType);
+
         return (
           <div className="space-y-6">
             <div className="pb-4 border-b border-border">
@@ -1123,7 +1323,7 @@ export const GenerateContentDialog = ({
                 </div>
 
                 <div>
-                  <Label>Word Count</Label>
+                  <Label>{isSocialMediaStep4 ? 'Character/Word Count' : 'Word Count'}</Label>
                   <Select
                     value={formData.wordCount.toString()}
                     onValueChange={(v) => setFormData({ ...formData, wordCount: parseInt(v) })}
@@ -1132,10 +1332,28 @@ export const GenerateContentDialog = ({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="800">800-1,000 words</SelectItem>
-                      <SelectItem value="1500">1,000-2,000 words</SelectItem>
-                      <SelectItem value="2500">2,000-3,000 words</SelectItem>
-                      <SelectItem value="3500">3,000+ words</SelectItem>
+                      {isSocialMediaStep4 ? (
+                        <>
+                          <SelectItem value="50">Short (50-100 words)</SelectItem>
+                          <SelectItem value="150">Medium (150-250 words)</SelectItem>
+                          <SelectItem value="300">Long (300-500 words)</SelectItem>
+                          <SelectItem value="500">Thread (500+ words)</SelectItem>
+                        </>
+                      ) : isCommunityStep4 ? (
+                        <>
+                          <SelectItem value="150">Brief (150-300 words)</SelectItem>
+                          <SelectItem value="400">Standard (400-600 words)</SelectItem>
+                          <SelectItem value="800">Detailed (800-1,200 words)</SelectItem>
+                          <SelectItem value="1500">Comprehensive (1,500+ words)</SelectItem>
+                        </>
+                      ) : (
+                        <>
+                          <SelectItem value="800">800-1,000 words</SelectItem>
+                          <SelectItem value="1500">1,000-2,000 words</SelectItem>
+                          <SelectItem value="2500">2,000-3,000 words</SelectItem>
+                          <SelectItem value="3500">3,000+ words</SelectItem>
+                        </>
+                      )}
                     </SelectContent>
                 </Select>
                 </div>
