@@ -8,6 +8,8 @@ class GeneratedContentSerializer(serializers.ModelSerializer):
     Serializer for GeneratedContent model
     """
     domain_name = serializers.CharField(source='domain.name', read_only=True)
+    total_comments = serializers.IntegerField(read_only=True, default=0)
+    pending_comments = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = GeneratedContent
@@ -19,11 +21,13 @@ class GeneratedContentSerializer(serializers.ModelSerializer):
             'status', 'scheduled_date', 'published_date', 'priority',
             'model_used', 'generation_time_seconds', 'prompt_tokens', 'completion_tokens',
             'ai_detection_score', 'human_detection_score', 'ai_detection_label', 'ai_detection_checked_at',
+            'total_comments', 'pending_comments',
             'created_at', 'modified_at'
         ]
         read_only_fields = [
             'id', 'actual_word_count', 'model_used',
             'generation_time_seconds', 'prompt_tokens', 'completion_tokens',
+            'total_comments', 'pending_comments',
             'created_at', 'modified_at'
         ]
 

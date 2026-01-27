@@ -20,7 +20,26 @@ import {
   Settings,
   List,
   Trash2,
-  Loader2
+  Loader2,
+  Book,
+  GitCompare,
+  Wrench,
+  Rocket,
+  Briefcase,
+  Package,
+  LayoutGrid,
+  BookOpen,
+  Twitter,
+  Linkedin,
+  Facebook,
+  Instagram,
+  ListOrdered,
+  MessageCircle,
+  HelpCircle,
+  MessagesSquare,
+  Mail,
+  MessageSquare,
+  type LucideIcon
 } from "lucide-react";
 import {
   AlertDialog,
@@ -39,7 +58,7 @@ import { useDomainStore } from "@/stores/domainStore";
 interface ContentItem {
   id: string;
   title: string;
-  type: "blog" | "guide" | "comparison" | "listicle" | "technical";
+  type: string;
   status: "scheduled" | "draft" | "generated" | "published";
   priority: "high" | "medium" | "low";
   scheduledDate: Date;
@@ -47,7 +66,36 @@ interface ContentItem {
   opportunitySource: string;
   estimatedImpact: number;
   wordCount: number;
+  totalComments: number;
+  pendingComments: number;
 }
+
+const contentTypeIconMap: Record<string, { icon: LucideIcon; gradient: string }> = {
+  // Articles
+  blog:             { icon: FileText,       gradient: "from-blue-500 to-indigo-600" },
+  guide:            { icon: Book,           gradient: "from-blue-500 to-indigo-600" },
+  comparison:       { icon: GitCompare,     gradient: "from-blue-500 to-indigo-600" },
+  listicle:         { icon: List,           gradient: "from-blue-500 to-indigo-600" },
+  technical:        { icon: Wrench,         gradient: "from-blue-500 to-indigo-600" },
+  // Web Pages
+  landing_page:     { icon: Rocket,         gradient: "from-violet-500 to-purple-600" },
+  services_page:    { icon: Briefcase,      gradient: "from-violet-500 to-purple-600" },
+  product_page:     { icon: Package,        gradient: "from-violet-500 to-purple-600" },
+  features_page:    { icon: LayoutGrid,     gradient: "from-violet-500 to-purple-600" },
+  resource_page:    { icon: BookOpen,       gradient: "from-violet-500 to-purple-600" },
+  // Social Media
+  twitter_post:     { icon: Twitter,        gradient: "from-orange-500 to-amber-600" },
+  linkedin_post:    { icon: Linkedin,       gradient: "from-orange-500 to-amber-600" },
+  facebook_post:    { icon: Facebook,       gradient: "from-orange-500 to-amber-600" },
+  instagram_caption:{ icon: Instagram,      gradient: "from-orange-500 to-amber-600" },
+  social_thread:    { icon: ListOrdered,    gradient: "from-orange-500 to-amber-600" },
+  // Community
+  reddit_post:      { icon: MessageCircle,  gradient: "from-pink-500 to-rose-600" },
+  quora_answer:     { icon: HelpCircle,     gradient: "from-pink-500 to-rose-600" },
+  forum_post:       { icon: MessagesSquare, gradient: "from-pink-500 to-rose-600" },
+  product_hunt:     { icon: Rocket,         gradient: "from-pink-500 to-rose-600" },
+  newsletter_snippet:{ icon: Mail,          gradient: "from-pink-500 to-rose-600" },
+};
 
 const ContentCalendar = () => {
   const { toast } = useToast();
@@ -83,7 +131,9 @@ const ContentCalendar = () => {
             targetKeywords: item.keywords ? item.keywords.split(",").map((k: string) => k.trim()) : [],
             opportunitySource: item.source_type === "content_gap" ? "Content Gap" : item.source_type === "topic" ? "Topic" : "Manual",
             estimatedImpact: 75,
-            wordCount: item.actual_word_count || item.word_count || 0
+            wordCount: item.actual_word_count || item.word_count || 0,
+            totalComments: item.total_comments || 0,
+            pendingComments: item.pending_comments || 0
           }));
           setContentItems(formattedContent);
         }
@@ -197,14 +247,18 @@ const ContentCalendar = () => {
     }
   };
 
-  const getContentIcon = (type: string) => {
-    switch (type) {
-      case "guide": return "📖";
-      case "comparison": return "⚖️";
-      case "listicle": return "📋";
-      case "technical": return "🔧";
-      default: return "📝";
+  const getContentTypeInfo = (type: string) => {
+    return contentTypeIconMap[type] || { icon: FileText, gradient: "from-blue-500 to-indigo-600" };
+  };
+
+  const getReviewStatus = (item: ContentItem) => {
+    if (item.totalComments === 0) {
+      return { label: "No Reviews", className: "bg-muted text-muted-foreground border-border" };
     }
+    if (item.pendingComments > 0) {
+      return { label: "In Review", className: "bg-warning/10 text-warning border-warning/20" };
+    }
+    return { label: "Reviewed", className: "bg-success/10 text-success border-success/20" };
   };
 
   const itemsForSelectedDate = contentItems.filter(
@@ -336,6 +390,14 @@ const ContentCalendar = () => {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-3">
+                        {(() => {
+                          const { icon: TypeIcon, gradient } = getContentTypeInfo(item.type);
+                          return (
+                            <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${gradient} flex items-center justify-center flex-shrink-0`}>
+                              <TypeIcon className="h-5 w-5 text-white" />
+                            </div>
+                          );
+                        })()}
                         <div>
                           <h3 className="text-lg font-semibold">{item.title}</h3>
                           <p className="text-sm text-muted-foreground">
@@ -385,24 +447,40 @@ const ContentCalendar = () => {
                       </div>
                     </div>
 
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEditContent(item)}
-                      >
-                        <Edit className="h-4 w-4 mr-2" />
-                        Edit
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDeleteClick(item)}
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Delete
-                      </Button>
+                    <div className="flex flex-col items-end gap-3">
+                      {(() => {
+                        const reviewStatus = getReviewStatus(item);
+                        return (
+                          <Badge variant="outline" className={`${reviewStatus.className} gap-1.5`}>
+                            <MessageSquare className="h-3 w-3" />
+                            {reviewStatus.label}
+                            {item.totalComments > 0 && (
+                              <span className="font-normal opacity-75">
+                                ({item.pendingComments}/{item.totalComments})
+                              </span>
+                            )}
+                          </Badge>
+                        );
+                      })()}
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEditContent(item)}
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDeleteClick(item)}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </Card>

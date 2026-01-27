@@ -20,6 +20,7 @@ from .serializers import (
 from .claude_content_generator import ClaudeContentGenerator
 from domains.models import Domain
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone as django_timezone
 from datetime import datetime
 
@@ -420,6 +421,12 @@ def get_generated_contents(request):
 
         if source_type:
             queryset = queryset.filter(source_type=source_type)
+
+        # Annotate with comment counts
+        queryset = queryset.annotate(
+            total_comments=Count('comments'),
+            pending_comments=Count('comments', filter=Q(comments__status='pending')),
+        )
 
         # Order by created_at descending
         queryset = queryset.order_by('-created_at')
