@@ -99,7 +99,7 @@ export const ProjectAccessManager = ({
         try {
           const accessResponse = await apiClient.getDomainAccess(domain.id);
           const userAccessItem = accessResponse.access_list.find(
-            access => access.user.id === userId
+            (access: any) => access.user === userId || access.user?.id === userId
           );
           if (userAccessItem) {
             accessMap[domain.id] = userAccessItem;
