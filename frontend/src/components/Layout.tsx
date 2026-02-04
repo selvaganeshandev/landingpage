@@ -6,6 +6,7 @@ import { OnboardingModal } from "./OnboardingModal";
 import { Outlet, useLocation } from "react-router-dom";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useDomainStore } from "@/stores/domainStore";
+import { useAuth } from "@/contexts/AuthContext";
 import { isDomainProcessing, isCompetitorProcessing, isMisinformationProcessing } from "@/utils/processingStatus";
 
 export const Layout = () => {
@@ -14,6 +15,7 @@ export const Layout = () => {
   const location = useLocation();
   const { isOpen: sidebarOpen } = useSidebar();
   const { domains, selectedDomain, isDomainSwitching, isLoading: domainsLoading, loadDomains, setSelectedDomain } = useDomainStore();
+  const { user } = useAuth();
 
   // Show onboarding when domains are loaded but empty
   useEffect(() => {
@@ -111,7 +113,7 @@ export const Layout = () => {
 
   // Show onboarding modal if no domains
   if (showOnboarding) {
-    return <OnboardingModal onComplete={handleOnboardingComplete} />;
+    return <OnboardingModal onComplete={handleOnboardingComplete} user={user} />;
   }
 
   return (

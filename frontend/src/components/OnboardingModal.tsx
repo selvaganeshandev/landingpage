@@ -53,9 +53,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
+import { User } from "@/types/auth";
 
 interface OnboardingModalProps {
   onComplete: (domain: any) => void;
+  user?: User | null;
 }
 
 // Industry options
@@ -263,14 +265,27 @@ const progressMessages = [
   "Preparing your brand monitoring dashboard",
 ];
 
-export function OnboardingModal({ onComplete }: OnboardingModalProps) {
+export function OnboardingModal({ onComplete, user }: OnboardingModalProps) {
   const { toast } = useToast();
 
-  // Total steps in the wizard
-  const totalSteps = 4;
+  // Check if user already has an organization (invited user)
+  // If so, skip organization setup steps (1 & 2) and go directly to domain setup (step 3)
+  const hasExistingOrganization = Boolean(user?.organisation && user?.organisation_name);
 
-  // Wizard state
-  const [wizardStep, setWizardStep] = useState(1);
+  // Total steps in the wizard - 4 for new users, 2 for invited users (skip org steps)
+  const totalSteps = hasExistingOrganization ? 2 : 4;
+
+  // Map displayed step to actual wizard step
+  // For invited users: displayed step 1 = wizard step 3, displayed step 2 = wizard step 4
+  const getActualStep = (displayedStep: number) => {
+    if (hasExistingOrganization) {
+      return displayedStep + 2; // 1->3, 2->4
+    }
+    return displayedStep;
+  };
+
+  // Wizard state - start at step 3 for invited users
+  const [wizardStep, setWizardStep] = useState(hasExistingOrganization ? 3 : 1);
   const [isLoading, setIsLoading] = useState(false);
 
   // Step 1: Organization Info
@@ -395,7 +410,8 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
   };
 
   const handleBack = () => {
-    if (wizardStep > 1) {
+    const minStep = hasExistingOrganization ? 3 : 1;
+    if (wizardStep > minStep) {
       setWizardStep(wizardStep - 1);
     }
   };
@@ -1133,6 +1149,14 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
     }
   };
 
+  // Get displayed step number for invited users (1-2) vs regular users (1-4)
+  const getDisplayedStep = () => {
+    if (hasExistingOrganization) {
+      return wizardStep - 2; // 3->1, 4->2
+    }
+    return wizardStep;
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden">
       {/* Purple gradient background */}
@@ -1192,7 +1216,7 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
                 <Badge variant="secondary" className="text-purple-600 bg-purple-100">
                   Onboarding
                 </Badge>
-                <Badge variant="outline">Step {wizardStep} of {totalSteps}</Badge>
+                <Badge variant="outline">Step {getDisplayedStep()} of {totalSteps}</Badge>
               </div>
               <h1 className="text-2xl font-bold text-gray-900 mt-3">{getStepTitle()}</h1>
               <p className="text-gray-500 mt-1">{getStepDescription()}</p>
@@ -1205,23 +1229,27 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
             <div className="p-6 border-t border-gray-100">
               {/* Progress dots */}
               <div className="flex justify-center gap-2 mb-4">
-                {Array.from({ length: totalSteps }).map((_, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      "h-2 rounded-full transition-all",
-                      i + 1 === wizardStep
-                        ? "bg-purple-600 w-8"
-                        : i + 1 < wizardStep
-                        ? "bg-purple-600 w-2"
-                        : "bg-gray-200 w-2"
-                    )}
-                  />
-                ))}
+                {Array.from({ length: totalSteps }).map((_, i) => {
+                  const displayedStep = getDisplayedStep();
+                  return (
+                    <div
+                      key={i}
+                      className={cn(
+                        "h-2 rounded-full transition-all",
+                        i + 1 === displayedStep
+                          ? "bg-purple-600 w-8"
+                          : i + 1 < displayedStep
+                          ? "bg-purple-600 w-2"
+                          : "bg-gray-200 w-2"
+                      )}
+                    />
+                  );
+                })}
               </div>
 
               <div className="flex items-center gap-3">
-                {wizardStep > 1 && (
+                {/* Show Back button only if not at the first step (considering invited users start at step 3) */}
+                {((hasExistingOrganization && wizardStep > 3) || (!hasExistingOrganization && wizardStep > 1)) && (
                   <Button variant="outline" onClick={handleBack}>
                     <ChevronLeft className="h-4 w-4 mr-2" />
                     Back
