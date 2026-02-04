@@ -269,14 +269,20 @@ export function OnboardingModal({ onComplete, user }: OnboardingModalProps) {
   const { toast } = useToast();
 
   // Check if user already has an organization (invited user)
-  // If so, skip organization setup steps (1 & 2) and go directly to domain setup (step 3)
   const hasExistingOrganization = Boolean(user?.organisation && user?.organisation_name);
 
-  // Total steps in the wizard - 4 for new users, 2 for invited users (skip org steps)
+  // Check if user is an admin (can create domains)
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+
+  // Invited regular users (non-admins) with no domains should see a "waiting" message
+  // They can't create domains, so they need to wait for admin to set things up
+  const isInvitedUserWithoutAccess = hasExistingOrganization && !isAdmin;
+
+  // Total steps in the wizard - 4 for new users, 2 for invited admins (skip org steps)
   const totalSteps = hasExistingOrganization ? 2 : 4;
 
   // Map displayed step to actual wizard step
-  // For invited users: displayed step 1 = wizard step 3, displayed step 2 = wizard step 4
+  // For invited admins: displayed step 1 = wizard step 3, displayed step 2 = wizard step 4
   const getActualStep = (displayedStep: number) => {
     if (hasExistingOrganization) {
       return displayedStep + 2; // 1->3, 2->4
@@ -284,7 +290,7 @@ export function OnboardingModal({ onComplete, user }: OnboardingModalProps) {
     return displayedStep;
   };
 
-  // Wizard state - start at step 3 for invited users
+  // Wizard state - start at step 3 for invited admins
   const [wizardStep, setWizardStep] = useState(hasExistingOrganization ? 3 : 1);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -1156,6 +1162,46 @@ export function OnboardingModal({ onComplete, user }: OnboardingModalProps) {
     }
     return wizardStep;
   };
+
+  // Show waiting message for invited regular users who can't create domains
+  if (isInvitedUserWithoutAccess) {
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden">
+        {/* Purple gradient background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-purple-600 via-purple-500 to-indigo-600" />
+
+        {/* Content card */}
+        <div className="relative w-full max-w-lg mx-4 bg-white rounded-3xl shadow-2xl overflow-hidden p-8">
+          <div className="flex flex-col items-center text-center space-y-6">
+            <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center">
+              <Users className="w-8 h-8 text-purple-600" />
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-gray-900">
+                Welcome to {user?.organisation_name}!
+              </h2>
+              <p className="text-gray-600">
+                Your account has been set up successfully. Please wait for your administrator to grant you access to domains.
+              </p>
+            </div>
+
+            <div className="bg-purple-50 border border-purple-100 rounded-lg p-4 w-full">
+              <p className="text-sm text-purple-800">
+                <strong>What happens next?</strong>
+                <br />
+                Your organization administrator will add domains and grant you access. You'll be able to view dashboards, mentions, and insights once access is granted.
+              </p>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              If you believe this is an error, please contact your organization administrator.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden">

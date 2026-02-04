@@ -9,6 +9,7 @@ from llm_monitor.email_utils import send_mail
 from django.utils import timezone
 from django.conf import settings
 from .models import Account, Organisation, TeamInvitation, UserPermission, PasswordResetToken
+from domains.models import Domain, DomainAccess
 from .serializers import (
     AccountSerializer, AccountUpdateSerializer,
     TeamInvitationSerializer, TeamInvitationCreateSerializer,
@@ -226,6 +227,16 @@ def accept_invitation(request, invitation_id):
         default_permissions = [('dashboard', 'read'), ('mentions', 'read'), ('prompts', 'read')]
         for module, permission_level in default_permissions:
             UserPermission.objects.create(user=user, module=module, permission_level=permission_level, granted_by=invitation.invited_by)
+
+        # Grant access to all existing domains in the organization
+        org_domains = Domain.objects.filter(organisation=invitation.organisation)
+        for domain in org_domains:
+            DomainAccess.objects.get_or_create(
+                user=user,
+                domain=domain,
+                defaults={'granted_by': invitation.invited_by}
+            )
+
         return Response({'message': 'Invitation accepted successfully', 'user': AccountSerializer(user).data}, status=status.HTTP_201_CREATED)
     except Exception as e:
         return Response({'error': f'Failed to accept invitation: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
