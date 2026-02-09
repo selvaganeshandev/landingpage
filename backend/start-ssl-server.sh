@@ -71,6 +71,7 @@ if "$VENV_PYTHON" -c "import gunicorn" 2> /dev/null; then
         --bind 0.0.0.0:$PORT \
         --workers 4 \
         --threads 2 \
+        --timeout 300 \
         --keyfile "$KEY_FILE" \
         --certfile "$CERT_FILE" \
         --access-logfile - \

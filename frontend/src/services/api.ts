@@ -9,6 +9,7 @@ const ENGINE_URL = import.meta.env.VITE_ENGINE_URL || 'http://localhost:8001';
 interface RequestOptions extends RequestInit {
   skipAuth?: boolean;
   useEngine?: boolean;
+  timeout?: number;
 }
 
 /**
@@ -86,7 +87,7 @@ async function apiRequest<T>(
   endpoint: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { skipAuth, useEngine, ...fetchOptions } = options;
+  const { skipAuth, useEngine, timeout, ...fetchOptions } = options;
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -104,10 +105,26 @@ async function apiRequest<T>(
   // Use engine URL if specified, otherwise use backend URL
   const baseURL = useEngine ? ENGINE_URL : API_BASE_URL;
 
-  let response = await fetch(`${baseURL}${endpoint}`, {
-    ...fetchOptions,
-    headers,
-  });
+  // Set up abort controller for timeout
+  const controller = new AbortController();
+  const timeoutMs = timeout || 120000; // Default 2 minutes
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseURL}${endpoint}`, {
+      ...fetchOptions,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
+    }
+    throw err;
+  }
+  clearTimeout(timeoutId);
 
   // Handle unauthorized (token expired) - try to refresh token first
   if (response.status === 401 && !skipAuth) {
@@ -1224,6 +1241,7 @@ export const apiClient = {
   generateContent: (data: any) => apiRequest('/content/generate/', {
     method: 'POST',
     body: JSON.stringify(data),
+    timeout: 300000, // 5 minutes - content generation takes longer
   }),
 
   generateOutline: (data: any) => apiRequest('/content/generate-outline/', {
@@ -1234,6 +1252,7 @@ export const apiClient = {
   generateContentFromOutline: (data: any) => apiRequest('/content/generate-from-outline/', {
     method: 'POST',
     body: JSON.stringify(data),
+    timeout: 300000, // 5 minutes - content generation takes longer
   }),
 
   rewriteContent: (data: { original_text: string; prompt: string; domain_id?: number }) => apiRequest('/content/rewrite/', {
