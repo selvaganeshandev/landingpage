@@ -3,16 +3,20 @@ import { Sidebar } from "./Sidebar";
 import { PageLoader } from "./PageLoader";
 import { ProcessingStateCard } from "./ProcessingStateCard";
 import { OnboardingModal } from "./OnboardingModal";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useDomainStore } from "@/stores/domainStore";
 import { useAuth } from "@/contexts/AuthContext";
 import { isDomainProcessing, isCompetitorProcessing, isMisinformationProcessing } from "@/utils/processingStatus";
+import { Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const Layout = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const { isOpen: sidebarOpen } = useSidebar();
   const { domains, selectedDomain, isDomainSwitching, isLoading: domainsLoading, loadDomains, setSelectedDomain } = useDomainStore();
   const { user } = useAuth();
@@ -127,6 +131,23 @@ export const Layout = () => {
           <Outlet />
         )}
       </main>
+
+      {/* Floating New Chat Button */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              onClick={() => navigate('/chat')}
+              className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg hover:shadow-xl transition-shadow z-50 p-0 flex items-center justify-center"
+            >
+              <Sparkles style={{ width: '28px', height: '28px' }} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">
+            <p>New Chat</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   );
 };
