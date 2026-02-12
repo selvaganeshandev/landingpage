@@ -207,6 +207,13 @@ def get_gsc_keywords(request):
                 'message': 'Google Search Console is not connected for this domain'
             })
 
+        # Check if a GSC property/site has been selected
+        if not gsc_integration.provider_id or gsc_integration.provider_id in ('', 'pending_selection'):
+            return Response({
+                'connected': False,
+                'message': 'Google Search Console is connected but no site has been selected. Please select a site in Domain Settings → Integrations.'
+            })
+
         # Get latest GSC insight with top queries
         gsc_insight = GSCTrafficInsight.objects.filter(
             domain_id=domain_id,
