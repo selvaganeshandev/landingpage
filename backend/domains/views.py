@@ -42,7 +42,7 @@ def get_google_genai_client():
         raise Exception("Google GenAI API key not configured")
     try:
         import google.generativeai as genai
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=api_key, transport="rest")
         return genai
     except Exception as e:
         raise Exception(f"Failed to initialize Google GenAI client: {e}")
@@ -542,7 +542,7 @@ def fetch_brand_niches(request):
 
     try:
         genai = get_google_genai_client()
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel('gemini-2.0-flash')
 
         prompt = f"""Analyze the brand "{brand_name}" (website: {domain_name}) and suggest relevant industry niches or categories.
 
@@ -618,7 +618,7 @@ def generate_semantic_keywords(request):
 
     try:
         genai = get_google_genai_client()
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel('gemini-2.0-flash')
 
         # Build niche description
         niche_text = ", ".join(niches) if niches else "general business"
@@ -1275,7 +1275,7 @@ def automated_domain_onboard(request):
         if not niches or len(niches) == 0:
             try:
                 genai = get_google_genai_client()
-                model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                model = genai.GenerativeModel('gemini-2.0-flash')
 
                 prompt = f"""Analyze the brand "{brand_name}" (website: {domain_name}) and suggest relevant industry niches or categories.
 
@@ -1307,7 +1307,7 @@ Provide the response as a valid JSON array only, no additional text."""
         generated_keywords = []
         try:
             genai = get_google_genai_client()
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            model = genai.GenerativeModel('gemini-2.0-flash')
 
             niche_text = ", ".join(niches) if niches else "general business"
             max_keywords = 50
