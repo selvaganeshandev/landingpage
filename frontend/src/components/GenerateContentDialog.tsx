@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDomainStore } from "@/stores/domainStore";
 import apiClient from "@/services/api";
@@ -112,6 +112,7 @@ export const GenerateContentDialog = ({
   const [isGeneratingOutline, setIsGeneratingOutline] = useState(false);
   const [outlineGenerated, setOutlineGenerated] = useState(false);
   const [editingSection, setEditingSection] = useState<string | null>(null);
+  const formInitializedRef = useRef(false);
   
   const [formData, setFormData] = useState({
     articleType: existingContent?.type || "blog",
@@ -229,13 +230,18 @@ export const GenerateContentDialog = ({
       setOutlineGenerated(false);
       setIsGeneratingOutline(false);
       setEditingSection(null);
+      // Allow form re-initialization on next open
+      formInitializedRef.current = false;
     }
   }, [open]);
 
-  // Update form data when existingContent changes (on dialog open)
-  // Also load domain content guidelines if available
+  // Initialize form data once when dialog opens
+  // Uses a ref flag to prevent re-initialization when selectedDomain
+  // object reference changes (e.g., from background store updates)
   useEffect(() => {
-    if (open && !showSuccess) {
+    if (open && !showSuccess && !formInitializedRef.current) {
+      formInitializedRef.current = true;
+
       // Map domain guidelines to form fields (editable text)
       const audienceOptions = ["general", "beginners", "professionals", "experts"];
       const mappedAudience = mapDomainValueToOption(

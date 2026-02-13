@@ -23,11 +23,30 @@ class GeneratedContent(models.Model):
     ]
 
     ARTICLE_TYPE_CHOICES = [
+        # Article Types
         ('blog', 'Blog Post'),
         ('guide', 'How-to Guide'),
         ('comparison', 'Comparison Article'),
         ('listicle', 'Listicle'),
         ('technical', 'Technical Article'),
+        # Web Page Content Types
+        ('landing_page', 'Landing Page'),
+        ('services_page', 'Services Page'),
+        ('product_page', 'Product Page'),
+        ('features_page', 'Features Page'),
+        ('resource_page', 'Resource/Guide Page'),
+        # Social Media Types
+        ('twitter_post', 'Twitter/X Post'),
+        ('linkedin_post', 'LinkedIn Post'),
+        ('facebook_post', 'Facebook Post'),
+        ('instagram_caption', 'Instagram Caption'),
+        ('social_thread', 'Thread/Carousel'),
+        # Community Post Types
+        ('reddit_post', 'Reddit Post'),
+        ('quora_answer', 'Quora Answer'),
+        ('forum_post', 'Forum Post'),
+        ('product_hunt', 'Product Hunt Launch'),
+        ('newsletter_snippet', 'Newsletter Snippet'),
     ]
 
     # Core fields
@@ -64,34 +83,29 @@ class GeneratedContent(models.Model):
 
     # Generation parameters (for editing/regeneration)
     article_type = models.CharField(
-        max_length=20,
+        max_length=30,
         choices=ARTICLE_TYPE_CHOICES,
         default='blog',
         help_text="Type of article"
     )
     keywords = models.TextField(help_text="Target keywords (comma-separated)")
-    tone = models.CharField(
-        max_length=50,
+    tone = models.TextField(
         default='professional',
         help_text="Tone of the content (professional, casual, friendly, authoritative)"
     )
-    style = models.CharField(
-        max_length=50,
+    style = models.TextField(
         default='informative',
         help_text="Writing style (informative, persuasive, storytelling, analytical)"
     )
-    goal = models.CharField(
-        max_length=50,
+    goal = models.TextField(
         default='educate',
         help_text="Content goal (educate, convert, engage, inform)"
     )
-    audience = models.CharField(
-        max_length=50,
+    audience = models.TextField(
         default='general',
         help_text="Target audience (general, beginners, professionals, experts)"
     )
-    depth = models.CharField(
-        max_length=50,
+    depth = models.TextField(
         default='comprehensive',
         help_text="Content depth (overview, detailed, comprehensive, extensive)"
     )
