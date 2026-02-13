@@ -754,6 +754,7 @@ export const GenerateContentDialog = ({
 
   // Pull keywords from GSC
   const handlePullFromGSC = async () => {
+    console.log("selectedDomain: ", selectedDomain)
     if (!selectedDomain) {
       toast({
         title: "Error",
@@ -767,7 +768,7 @@ export const GenerateContentDialog = ({
     setShowGSCModal(true);
 
     try {
-      const response = await apiClient.getGSCKeywords(selectedDomain.id);
+      const response = await apiClient.getGSCKeywords(selectedDomain.id, formData.title || undefined);
 
       if (!response.connected) {
         setShowGSCModal(false);

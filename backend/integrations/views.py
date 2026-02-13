@@ -179,12 +179,79 @@ def start_traffic_processing(request):
     }, status=status.HTTP_410_GONE)
 
 
+def _extract_main_keyword(article_title):
+    """Use Gemini to extract the main search keyword from an article title."""
+    from domains.views import get_google_genai_client
+
+    genai = get_google_genai_client()
+    model = genai.GenerativeModel('gemini-2.0-flash')
+
+    prompt = (
+        f'Extract the single most important search keyword or short phrase '
+        f'(2-4 words) from this article title. Return ONLY the keyword, nothing else.\n\n'
+        f'Article title: "{article_title}"'
+    )
+
+    response = model.generate_content(prompt)
+    return response.text.strip().strip('"').strip("'").lower()
+
+
+def _fetch_gsc_keywords_by_query(integration, keyword):
+    """Fetch related keywords from GSC Search Analytics API filtered by keyword."""
+    from .google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+    from datetime import date, timedelta
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return []
+
+    service = build('searchconsole', 'v1', credentials=credentials)
+    site_url = integration.provider_id
+
+    end_date = date.today() - timedelta(days=3)  # GSC data has ~3 day lag
+    start_date = end_date - timedelta(days=30)
+
+    request_body = {
+        'startDate': start_date.isoformat(),
+        'endDate': end_date.isoformat(),
+        'dimensions': ['query'],
+        'dimensionFilterGroups': [{
+            'filters': [{
+                'dimension': 'query',
+                'operator': 'contains',
+                'expression': keyword
+            }]
+        }],
+        'rowLimit': 50,
+    }
+
+    response = service.searchanalytics().query(
+        siteUrl=site_url, body=request_body
+    ).execute()
+
+    keywords = []
+    for row in response.get('rows', []):
+        keys = row.get('keys', [])
+        if keys:
+            keywords.append({
+                'keyword': keys[0],
+                'clicks': row.get('clicks', 0),
+                'impressions': row.get('impressions', 0),
+                'ctr': round(row.get('ctr', 0) * 100, 2),
+                'position': round(row.get('position', 0), 1),
+            })
+
+    return keywords
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_gsc_keywords(request):
     """
     Get GSC keywords (top queries) for a domain.
     GET /api/integrations/gsc-keywords/?domain_id=1
+    GET /api/integrations/gsc-keywords/?domain_id=1&article_title=Best+Protein+Powders
     """
     domain_id = request.query_params.get('domain_id')
     if not domain_id:
@@ -213,6 +280,21 @@ def get_gsc_keywords(request):
                 'connected': False,
                 'message': 'Google Search Console is connected but no site has been selected. Please select a site in Domain Settings → Integrations.'
             })
+
+        # If article_title provided, use Gemini + live GSC API for keyword-filtered results
+        article_title = request.query_params.get('article_title', '').strip()
+        if article_title:
+            try:
+                main_keyword = _extract_main_keyword(article_title)
+                keywords = _fetch_gsc_keywords_by_query(gsc_integration, main_keyword)
+                return Response({
+                    'connected': True,
+                    'keywords': keywords,
+                    'main_keyword': main_keyword,
+                    'total_keywords': len(keywords)
+                })
+            except Exception:
+                pass  # Fall through to cached data below
 
         # Get latest GSC insight with top queries
         gsc_insight = GSCTrafficInsight.objects.filter(
