@@ -1131,7 +1131,7 @@ export const apiClient = {
   getTrafficInsights: (domainId: number) =>
     apiRequest(`/integrations/traffic-insights/?domain_id=${domainId}`),
 
-  getGSCKeywords: (domainId: number) =>
+  getGSCKeywords: (domainId: number, articleTitle?: string) =>
     apiRequest<{
       connected: boolean;
       keywords?: Array<{
@@ -1142,8 +1142,9 @@ export const apiClient = {
         position: number;
       }>;
       message?: string;
+      main_keyword?: string;
       total_keywords?: number;
-    }>(`/integrations/gsc-keywords/?domain_id=${domainId}`),
+    }>(`/integrations/gsc-keywords/?domain_id=${domainId}${articleTitle ? `&article_title=${encodeURIComponent(articleTitle)}` : ''}`),
 
   getGAData: (domainId: number, startDate?: string, endDate?: string) => {
     const queryParams = new URLSearchParams({ domain_id: String(domainId) });

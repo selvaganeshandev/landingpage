@@ -44,7 +44,11 @@ class ContentGenerationRequestSerializer(serializers.Serializer):
             # Article Types
             'blog', 'guide', 'comparison', 'listicle', 'technical',
             # Web Page Content Types
-            'landing_page', 'services_page', 'product_page', 'features_page', 'resource_page'
+            'landing_page', 'services_page', 'product_page', 'features_page', 'resource_page',
+            # Social Media Types
+            'twitter_post', 'linkedin_post', 'facebook_post', 'instagram_caption', 'social_thread',
+            # Community Post Types
+            'reddit_post', 'quora_answer', 'forum_post', 'product_hunt', 'newsletter_snippet',
         ],
         default='blog'
     )
