@@ -10,8 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Search, Loader2, TrendingUp, MousePointer, Eye } from "lucide-react";
+import { Search, Loader2, MousePointer, Eye } from "lucide-react";
 
 interface GSCKeyword {
   keyword: string;
@@ -132,13 +131,13 @@ export function GSCKeywordsModal({
             </div>
 
             {/* Keywords List */}
-            <ScrollArea className="flex-1 min-h-[300px] max-h-[400px]">
+            <div className="flex-1 min-h-0 overflow-y-auto">
               {filteredKeywords.length === 0 ? (
                 <div className="flex items-center justify-center py-12 text-muted-foreground">
                   {searchQuery ? "No keywords match your search" : "No new keywords available"}
                 </div>
               ) : (
-                <div className="space-y-1 pr-4">
+                <div className="space-y-1 pr-1">
                   {filteredKeywords.map((kw) => (
                     <div
                       key={kw.keyword}
@@ -174,7 +173,7 @@ export function GSCKeywordsModal({
                   ))}
                 </div>
               )}
-            </ScrollArea>
+            </div>
 
             {/* Footer */}
             <DialogFooter className="pt-4 border-t">
