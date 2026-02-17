@@ -75,6 +75,110 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiClient } from "@/services/api";
 
+/**
+ * Builds an HTML <table> from an array of pipe-delimited markdown rows.
+ * Expects: rows[0] = header, rows[1] = separator (|---|---|), rows[2+] = body
+ */
+const buildHtmlTable = (rows: string[]): string => {
+  let html = '<table>';
+
+  // Header
+  const headerCells = rows[0].split('|').filter(c => c.trim() !== '');
+  html += '<thead><tr>';
+  headerCells.forEach(cell => { html += `<th>${cell.trim()}</th>`; });
+  html += '</tr></thead>';
+
+  // Body (skip separator at index 1)
+  if (rows.length > 2) {
+    html += '<tbody>';
+    for (let j = 2; j < rows.length; j++) {
+      const cells = rows[j].split('|').filter(c => c.trim() !== '');
+      html += '<tr>';
+      cells.forEach(cell => { html += `<td>${cell.trim()}</td>`; });
+      html += '</tr>';
+    }
+    html += '</tbody>';
+  }
+
+  html += '</table>';
+  return html;
+};
+
+/**
+ * Converts leftover markdown tables and images in HTML content to proper HTML elements.
+ *
+ * Problem: The AI backend sometimes returns content_html with markdown syntax:
+ *   - Tables as pipe-delimited text: "| Col1 | Col2 |" (each row in its own <p> tag)
+ *   - Images as markdown: "![alt](url)"
+ *
+ * This function detects and converts them to proper <table> and <img> HTML.
+ */
+const convertMarkdownInHtml = (html: string): string => {
+  let result = html;
+
+  // --- 1. Convert markdown images: ![alt](url) → <img> ---
+  result = result.replace(
+    /!\[([^\]]*)\]\(([^)]+)\)/g,
+    '<img src="$2" alt="$1" style="max-width:100%;height:auto;border-radius:0.5rem;margin:1rem 0;" />'
+  );
+
+  // --- 2. Convert markdown tables ---
+  // Case A: Each table row is in its own <p> tag (most common from AI output)
+  //   <p>| Step | Description |</p>
+  //   <p>|------|--------------|</p>
+  //   <p>| 1 | Do something |</p>
+  result = result.replace(
+    /(?:<p[^>]*>\s*\|[^<]*\|\s*<\/p>\s*){3,}/gi,
+    (match) => {
+      // Extract text content from each <p>
+      const pRegex = /<p[^>]*>\s*(.*?)\s*<\/p>/gi;
+      const lines: string[] = [];
+      let m;
+      while ((m = pRegex.exec(match)) !== null) {
+        const text = m[1].trim();
+        if (text.startsWith('|') && text.endsWith('|')) {
+          lines.push(text);
+        }
+      }
+      if (lines.length < 3) return match;
+      // Verify second line is a separator (|---|---|)
+      if (!/^\|[\s\-:|]+\|$/.test(lines[1])) return match;
+      return buildHtmlTable(lines);
+    }
+  );
+
+  // Case B: Table rows separated by <br> inside a single element
+  //   <p>| Step | Description |<br>|---|---|<br>| 1 | Do something |</p>
+  result = result.replace(
+    /(<p[^>]*>)?\s*((?:\|[^<\n]*\|\s*(?:<br\s*\/?>)\s*){2,}\|[^<\n]*\|)\s*(<\/p>)?/gi,
+    (fullMatch, _openP, tableBlock) => {
+      const lines = tableBlock
+        .split(/<br\s*\/?>/i)
+        .map((l: string) => l.trim())
+        .filter((l: string) => l.startsWith('|') && l.endsWith('|'));
+      if (lines.length < 3) return fullMatch;
+      if (!/^\|[\s\-:|]+\|$/.test(lines[1])) return fullMatch;
+      return buildHtmlTable(lines);
+    }
+  );
+
+  // Case C: Raw text with newlines (no <p> or <br> wrapping)
+  result = result.replace(
+    /((?:\|[^\n]*\|\s*\n\s*){2,}\|[^\n]*\|)/g,
+    (fullMatch) => {
+      const lines = fullMatch
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l.startsWith('|') && l.endsWith('|'));
+      if (lines.length < 3) return fullMatch;
+      if (!/^\|[\s\-:|]+\|$/.test(lines[1])) return fullMatch;
+      return buildHtmlTable(lines);
+    }
+  );
+
+  return result;
+};
+
 const ContentEditor = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -305,6 +409,8 @@ const ContentEditor = () => {
           htmlContent = htmlContent.replace(/line-height:\s*[^;"}]+;?/gi, '');
           // Remove empty style attributes
           htmlContent = htmlContent.replace(/\s*style="\s*"/gi, '');
+          // Convert any leftover markdown tables and images to proper HTML
+          htmlContent = convertMarkdownInHtml(htmlContent);
           setContent(htmlContent);
 
           // Extract keywords and count occurrences
@@ -1984,6 +2090,12 @@ const ContentEditor = () => {
                 .content-editor th {
                   background: hsl(var(--muted));
                   font-weight: 600 !important;
+                }
+                .content-editor img {
+                  max-width: 100%;
+                  height: auto;
+                  border-radius: 0.5rem;
+                  margin: 1rem 0;
                 }
                 .content-editor:focus {
                   outline: none;
