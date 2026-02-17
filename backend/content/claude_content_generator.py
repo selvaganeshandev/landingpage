@@ -104,6 +104,7 @@ class ClaudeContentGenerator:
         # Domain content guidelines
         key_messages = params.get('key_messages', '')
         topics_to_avoid = params.get('topics_to_avoid', '')
+        additional_instructions = params.get('additional_instructions', '')
         brand_values = params.get('brand_values', '')
 
         # Format country and language for display
@@ -191,6 +192,12 @@ class ClaudeContentGenerator:
 """
             if topics_to_avoid:
                 user_prompt += f"""- Topics/Themes to AVOID: {topics_to_avoid}
+"""
+
+        if additional_instructions:
+            user_prompt += f"""
+**Additional Instructions:**
+{additional_instructions}
 """
 
         # Add references if provided
@@ -382,6 +389,7 @@ Return ONLY the regenerated HTML content for this specific section."""
         word_count = params.get('word_count', 1500)
         key_messages = params.get('key_messages', '')
         topics_to_avoid = params.get('topics_to_avoid', '')
+        additional_instructions = params.get('additional_instructions', '')
 
         # Format for display
         country_display = target_country.replace('_', ' ').title()
@@ -430,6 +438,11 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks, no extra text."""
         if topics_to_avoid:
             user_prompt += f"""
 **Topics to Avoid:** {topics_to_avoid}
+"""
+
+        if additional_instructions:
+            user_prompt += f"""
+**Additional Instructions:** {additional_instructions}
 """
 
         user_prompt += f"""
@@ -534,6 +547,7 @@ Return ONLY the JSON array, nothing else."""
         audience = params.get('audience', 'general')
         key_messages = params.get('key_messages', '')
         topics_to_avoid = params.get('topics_to_avoid', '')
+        additional_instructions = params.get('additional_instructions', '')
         brand_values = params.get('brand_values', '')
 
         language_display = target_language.replace('_', ' ').title()
@@ -575,6 +589,10 @@ Return ONLY the JSON array, nothing else."""
 
         if brand_values:
             user_prompt += f"""**Brand Values:** {brand_values}
+"""
+
+        if additional_instructions:
+            user_prompt += f"""**Additional Instructions:** {additional_instructions}
 """
 
         user_prompt += """

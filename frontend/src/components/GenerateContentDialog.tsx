@@ -53,6 +53,7 @@ import {
   ChevronUp,
   ListOrdered,
   Download,
+  Upload,
   Loader2,
   // Social Media icons
   Twitter,
@@ -67,6 +68,7 @@ import {
   Mail,
   Users
 } from "lucide-react";
+import mammoth from "mammoth";
 import { GSCKeywordsModal } from "./GSCKeywordsModal";
 
 interface GenerateContentDialogProps {
@@ -112,6 +114,7 @@ export const GenerateContentDialog = ({
   const [isGeneratingOutline, setIsGeneratingOutline] = useState(false);
   const [outlineGenerated, setOutlineGenerated] = useState(false);
   const [editingSection, setEditingSection] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const formInitializedRef = useRef(false);
   
   const [formData, setFormData] = useState({
@@ -121,6 +124,7 @@ export const GenerateContentDialog = ({
     targetCountry: "united_states",
     targetLanguage: "us_english",
     references: [] as Array<{ type: 'article' | 'video' | 'image' | 'text'; url: string; description: string }>,
+    additionalInstructions: "",
     tone: "",
     style: "",
     keyMessages: "",
@@ -259,6 +263,7 @@ export const GenerateContentDialog = ({
         targetCountry: "united_states",
         targetLanguage: "us_english",
         references: [],
+        additionalInstructions: "",
         tone: domainGuidelines?.toneOfVoice || "",
         style: domainGuidelines?.contentStyle || "",
         keyMessages: domainGuidelines?.keyMessages || "",
@@ -495,6 +500,7 @@ export const GenerateContentDialog = ({
         // Content guidelines from form (editable)
         key_messages: formData.keyMessages,
         topics_to_avoid: formData.topicsToAvoid,
+        additional_instructions: formData.additionalInstructions,
         brand_values: domainGuidelines?.brandValues || '',
       };
 
@@ -577,6 +583,7 @@ export const GenerateContentDialog = ({
         word_count: formData.wordCount,
         key_messages: formData.keyMessages,
         topics_to_avoid: formData.topicsToAvoid,
+        additional_instructions: formData.additionalInstructions,
       };
 
       console.log('Outline generation request:', outlineData);
@@ -661,6 +668,7 @@ export const GenerateContentDialog = ({
           : formData.scheduledDate,
         key_messages: formData.keyMessages,
         topics_to_avoid: formData.topicsToAvoid,
+        additional_instructions: formData.additionalInstructions,
         brand_values: domainGuidelines?.brandValues || '',
         outline: outline,
       };
@@ -768,6 +776,159 @@ export const GenerateContentDialog = ({
       key_points: ['Key point 1'],
       estimated_words: 150
     }]);
+  };
+
+  // Handle Word document upload → parse into outline sections
+  const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    const maxSize = 10 * 1024 * 1024; // 10MB limit
+
+    if (file.size > maxSize) {
+      toast({
+        title: "File Too Large",
+        description: `${file.name} exceeds the 10MB limit`,
+        variant: "destructive",
+      });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    try {
+      // Read file as ArrayBuffer for mammoth
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      const html = result.value;
+
+      // Parse the HTML to extract headings and content into outline sections
+      // Supports both:
+      //   1. Actual Word heading styles (h1/h2/h3 tags from mammoth)
+      //   2. Text prefixes like "H1: Title", "H2: Title", "H3: Title" in plain paragraphs
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const elements = Array.from(doc.body.children);
+
+      // Regex to detect text-based heading prefixes: "H1: Title", "H2: Title", "H3: Title"
+      const h2PrefixRegex = /^H[12]:\s*(.+)$/i;
+      const h3PrefixRegex = /^H[34]:\s*(.+)$/i;
+      // Regex to detect bullet points: "• text" or "- text" or "* text"
+      const bulletRegex = /^[•\-\*]\s*(.+)$/;
+
+      const parsedOutline: Array<{
+        id: string;
+        type: 'h2' | 'h3';
+        title: string;
+        key_points: string[];
+        estimated_words: number;
+      }> = [];
+
+      let currentSection: typeof parsedOutline[0] | null = null;
+
+      const startNewSection = (type: 'h2' | 'h3', title: string) => {
+        if (currentSection) parsedOutline.push(currentSection);
+        currentSection = {
+          id: `doc-${Date.now()}-${parsedOutline.length}`,
+          type,
+          title,
+          key_points: [],
+          estimated_words: 0,
+        };
+      };
+
+      const addKeyPoint = (text: string) => {
+        if (!currentSection) {
+          // Content before any heading → create a default Introduction section
+          startNewSection('h2', 'Introduction');
+        }
+        currentSection!.key_points.push(text);
+        currentSection!.estimated_words += text.split(/\s+/).length;
+      };
+
+      for (const el of elements) {
+        const tag = el.tagName.toLowerCase();
+        const text = el.textContent?.trim() || '';
+
+        // 1. Check actual HTML heading tags (from Word heading styles)
+        if (tag === 'h1' || tag === 'h2') {
+          startNewSection('h2', text || 'Untitled Section');
+          continue;
+        }
+        if (tag === 'h3' || tag === 'h4') {
+          startNewSection('h3', text || 'Untitled Subsection');
+          continue;
+        }
+
+        // 2. Check for text-based heading prefixes in paragraphs (e.g., "H2: What is SEO?")
+        if (tag === 'p' && text) {
+          const h2Match = text.match(h2PrefixRegex);
+          if (h2Match) {
+            startNewSection('h2', h2Match[1].trim());
+            continue;
+          }
+          const h3Match = text.match(h3PrefixRegex);
+          if (h3Match) {
+            startNewSection('h3', h3Match[1].trim());
+            continue;
+          }
+
+          // 3. Check for bullet points in paragraph text (• item or - item)
+          const bulletMatch = text.match(bulletRegex);
+          if (bulletMatch) {
+            addKeyPoint(bulletMatch[1].trim());
+            continue;
+          }
+
+          // 4. Regular paragraph → key point
+          addKeyPoint(text);
+          continue;
+        }
+
+        // 5. Handle list elements
+        if (tag === 'ul' || tag === 'ol') {
+          const items = Array.from(el.querySelectorAll('li'));
+          items.forEach(li => {
+            const liText = li.textContent?.trim();
+            if (liText) addKeyPoint(liText);
+          });
+          continue;
+        }
+
+        // 6. Any other element with text
+        if (text) addKeyPoint(text);
+      }
+
+      // Push the last section
+      if (currentSection) parsedOutline.push(currentSection);
+
+      if (parsedOutline.length === 0) {
+        toast({
+          title: "No Structure Found",
+          description: "The document doesn't contain any headings. Please use a document with H1/H2/H3 headings.",
+          variant: "destructive",
+        });
+      } else {
+        setOutline(parsedOutline);
+        setOutlineGenerated(true);
+
+        toast({
+          title: "Document Parsed",
+          description: `Extracted ${parsedOutline.length} sections from ${file.name}`,
+        });
+      }
+    } catch {
+      toast({
+        title: "Upload Failed",
+        description: "Could not parse the Word document. Please ensure it's a valid .docx file.",
+        variant: "destructive",
+      });
+    }
+
+    // Reset input so the same file can be re-uploaded
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   // Pull keywords from GSC
@@ -1305,6 +1466,17 @@ export const GenerateContentDialog = ({
               </p>
             )}
 
+            {/* Additional Instructions - separated from other settings */}
+            <div className="pb-5 mb-5 border-b border-border">
+              <Label>Additional Instructions for Content Generation</Label>
+              <Textarea
+                value={formData.additionalInstructions}
+                onChange={(e) => setFormData({ ...formData, additionalInstructions: e.target.value })}
+                placeholder="Any specific instructions for the AI to follow when generating content..."
+                rows={3}
+              />
+            </div>
+
             <div className="space-y-4">
               {/* Tone of Voice */}
               <div>
@@ -1619,36 +1791,21 @@ export const GenerateContentDialog = ({
                   </Button>
                 </div>
 
-                {/* Regenerate Outline Option */}
-                <div className="flex items-center justify-between pt-4 border-t">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setOutline([]);
-                      setOutlineGenerated(false);
-                    }}
-                  >
-                    Start Over
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleGenerateOutline}
-                    disabled={isGeneratingOutline}
-                  >
-                    {isGeneratingOutline ? (
-                      <>
-                        <Sparkles className="h-4 w-4 mr-2 animate-spin" />
-                        Regenerating...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-4 w-4 mr-2" />
-                        Regenerate Outline
-                      </>
-                    )}
-                  </Button>
+                {/* Upload Document to replace outline */}
+                <div className="pt-4 border-t">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">
+                      Upload a Word document to replace the outline
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      Upload Document
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -1823,6 +1980,14 @@ export const GenerateContentDialog = ({
                   Manual Outline
                 </Button>
                 <Button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isGeneratingOutline}
+                  variant="outline"
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Document
+                </Button>
+                <Button
                   onClick={handleGenerateOutline}
                   disabled={isGeneratingOutline}
                   className="gradient-primary"
@@ -1835,6 +2000,15 @@ export const GenerateContentDialog = ({
           </div>
         )}
       </DialogContent>
+
+      {/* Hidden file input for Word document upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        accept=".doc,.docx"
+        onChange={handleDocumentUpload}
+      />
 
       {/* GSC Keywords Selection Modal */}
       <GSCKeywordsModal

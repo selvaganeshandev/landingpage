@@ -76,6 +76,7 @@ class ContentGenerationRequestSerializer(serializers.Serializer):
     # Domain content guidelines (optional context for AI)
     key_messages = serializers.CharField(required=False, allow_blank=True, default='')
     topics_to_avoid = serializers.CharField(required=False, allow_blank=True, default='')
+    additional_instructions = serializers.CharField(required=False, allow_blank=True, default='')
     brand_values = serializers.CharField(required=False, allow_blank=True, default='')
 
     def validate_domain_id(self, value):

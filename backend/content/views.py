@@ -98,6 +98,7 @@ def generate_content(request):
             # Domain content guidelines
             'key_messages': validated_data.get('key_messages', ''),
             'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
+            'additional_instructions': validated_data.get('additional_instructions', ''),
             'brand_values': validated_data.get('brand_values', ''),
         }
 
@@ -202,6 +203,7 @@ def generate_outline(request):
             'word_count': validated_data.get('word_count', 1500),
             'key_messages': validated_data.get('key_messages', ''),
             'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
+            'additional_instructions': validated_data.get('additional_instructions', ''),
         }
 
         # Generate outline
@@ -283,6 +285,7 @@ def generate_content_from_outline(request):
             'word_count': validated_data.get('word_count', 1500),
             'key_messages': validated_data.get('key_messages', ''),
             'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
+            'additional_instructions': validated_data.get('additional_instructions', ''),
             'brand_values': validated_data.get('brand_values', ''),
         }
 
