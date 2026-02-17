@@ -120,7 +120,7 @@ export const GenerateContentDialog = ({
     keywords: existingContent?.targetKeywords?.join(", ") || "",
     targetCountry: "united_states",
     targetLanguage: "us_english",
-    references: [] as Array<{ type: 'article' | 'video' | 'image'; url: string; description: string }>,
+    references: [] as Array<{ type: 'article' | 'video' | 'image' | 'text'; url: string; description: string }>,
     tone: "",
     style: "",
     keyMessages: "",
@@ -478,7 +478,7 @@ export const GenerateContentDialog = ({
         article_type: formData.articleType,
         target_country: formData.targetCountry,
         target_language: formData.targetLanguage,
-        references: formData.references.filter(ref => ref.url.trim() !== ''),
+        references: formData.references.filter(ref => ref.type === 'text' ? ref.description.trim() !== '' : ref.url.trim() !== ''),
         tone: formData.tone,
         style: formData.style,
         goal: 'educate', // Default goal
@@ -535,6 +535,18 @@ export const GenerateContentDialog = ({
         variant: "destructive",
       });
     }
+  };
+
+  // Create manual outline handler
+  const handleCreateManualOutline = () => {
+    setOutline([{
+      id: `manual-${Date.now()}`,
+      type: 'h2',
+      title: 'New Section',
+      key_points: ['Key point 1'],
+      estimated_words: 150,
+    }]);
+    setOutlineGenerated(true);
   };
 
   // Generate outline handler
@@ -633,7 +645,7 @@ export const GenerateContentDialog = ({
         article_type: formData.articleType,
         target_country: formData.targetCountry,
         target_language: formData.targetLanguage,
-        references: formData.references.filter(ref => ref.url.trim() !== ''),
+        references: formData.references.filter(ref => ref.type === 'text' ? ref.description.trim() !== '' : ref.url.trim() !== ''),
         tone: formData.tone,
         style: formData.style,
         goal: 'educate',
@@ -1127,7 +1139,7 @@ export const GenerateContentDialog = ({
         );
 
       case 3:
-        const addReference = (type: 'article' | 'video' | 'image') => {
+        const addReference = (type: 'article' | 'video' | 'image' | 'text') => {
           setFormData({
             ...formData,
             references: [...formData.references, { type, url: '', description: '' }]
@@ -1152,7 +1164,7 @@ export const GenerateContentDialog = ({
             <div className="pb-4 border-b border-border">
               <h3 className="text-lg font-semibold mb-1">References</h3>
               <p className="text-sm text-muted-foreground">
-                Add articles, videos, or images as reference material for content generation (optional)
+                Add articles, videos, images, or text as reference material for content generation (optional)
               </p>
             </div>
 
@@ -1188,6 +1200,16 @@ export const GenerateContentDialog = ({
                 <Image className="h-4 w-4" />
                 Add Image URL
               </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => addReference('text')}
+                className="flex items-center gap-2"
+              >
+                <FileText className="h-4 w-4" />
+                Add Text
+              </Button>
             </div>
 
             {/* References List */}
@@ -1196,7 +1218,7 @@ export const GenerateContentDialog = ({
                 <div className="text-center py-8 border border-dashed rounded-lg">
                   <Link2 className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
                   <p className="text-sm text-muted-foreground">
-                    No references added yet. Add URLs to articles, videos, or images that should inform your content.
+                    No references added yet. Add URLs to articles, videos, images, or paste text that should inform your content.
                   </p>
                 </div>
               ) : (
@@ -1205,11 +1227,13 @@ export const GenerateContentDialog = ({
                     <div className="flex items-start gap-3">
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
                         ref.type === 'article' ? 'bg-blue-500/10' :
-                        ref.type === 'video' ? 'bg-red-500/10' : 'bg-green-500/10'
+                        ref.type === 'video' ? 'bg-red-500/10' :
+                        ref.type === 'text' ? 'bg-purple-500/10' : 'bg-green-500/10'
                       }`}>
                         {ref.type === 'article' && <Globe className="h-5 w-5 text-blue-500" />}
                         {ref.type === 'video' && <Video className="h-5 w-5 text-red-500" />}
                         {ref.type === 'image' && <Image className="h-5 w-5 text-green-500" />}
+                        {ref.type === 'text' && <FileText className="h-5 w-5 text-purple-500" />}
                       </div>
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center justify-between">
@@ -1224,16 +1248,27 @@ export const GenerateContentDialog = ({
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
-                        <Input
-                          placeholder={`Enter ${ref.type} URL...`}
-                          value={ref.url}
-                          onChange={(e) => updateReference(index, 'url', e.target.value)}
-                        />
-                        <Input
-                          placeholder="Brief description (optional)"
-                          value={ref.description}
-                          onChange={(e) => updateReference(index, 'description', e.target.value)}
-                        />
+                        {ref.type === 'text' ? (
+                          <Textarea
+                            placeholder="Paste or type your reference text here..."
+                            value={ref.description}
+                            onChange={(e) => updateReference(index, 'description', e.target.value)}
+                            rows={4}
+                          />
+                        ) : (
+                          <>
+                            <Input
+                              placeholder={`Enter ${ref.type} URL...`}
+                              value={ref.url}
+                              onChange={(e) => updateReference(index, 'url', e.target.value)}
+                            />
+                            <Input
+                              placeholder="Brief description (optional)"
+                              value={ref.description}
+                              onChange={(e) => updateReference(index, 'description', e.target.value)}
+                            />
+                          </>
+                        )}
                       </div>
                     </div>
                   </Card>
@@ -1701,7 +1736,7 @@ export const GenerateContentDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" onInteractOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle className="text-2xl">Content Generation Wizard</DialogTitle>
         </DialogHeader>
@@ -1778,14 +1813,24 @@ export const GenerateContentDialog = ({
                 {isGenerating ? "Generating..." : "Generate Content"}
               </Button>
             ) : (
-              <Button
-                onClick={handleGenerateOutline}
-                disabled={isGeneratingOutline}
-                className="gradient-primary"
-              >
-                <ListOrdered className="h-4 w-4 mr-2" />
-                {isGeneratingOutline ? "Generating..." : "Generate Outline"}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleCreateManualOutline}
+                  disabled={isGeneratingOutline}
+                  variant="outline"
+                >
+                  <Edit3 className="h-4 w-4 mr-2" />
+                  Manual Outline
+                </Button>
+                <Button
+                  onClick={handleGenerateOutline}
+                  disabled={isGeneratingOutline}
+                  className="gradient-primary"
+                >
+                  <ListOrdered className="h-4 w-4 mr-2" />
+                  {isGeneratingOutline ? "Generating..." : "Generate Outline"}
+                </Button>
+              </div>
             )}
           </div>
         )}
