@@ -696,3 +696,111 @@ Rewritten text:"""
 
         raise Exception(f"Claude API error during rewrite after {max_retries} retries: {str(last_error)}")
 
+    def humanise_content(self, content_html, max_retries=3):
+        """
+        Apply humanisation rules to the full content HTML in a single API call.
+
+        Args:
+            content_html (str): The full HTML content to humanise
+            max_retries (int): Maximum number of retries for transient errors
+
+        Returns:
+            str: The humanised HTML content
+        """
+        system_prompt = """You are an expert content editor specialising in making AI-generated content read naturally human-written. Apply ALL of the following rules to the provided HTML content in a single pass:
+
+TRANSFORMATION RULES:
+1. Replace all em-dashes (\u2014) with commas, semicolons, or full stops as contextually appropriate.
+2. Restructure sentences: approximately 60% should be 8\u201310 words, 40% should be 15\u201325 words.
+3. Make the tone conversational, personalised, and non-preachy.
+4. Distribute anchor text and keywords evenly across all sections (not cluttered in one place).
+5. Replace straight quotes (" ') with curly quotes (\u201c \u201d \u2018 \u2019).
+6. MANDATORY SECTION VARIATION: Count every similar section (e.g. game reviews, product listings, feature descriptions). If there are N similar sections, you MUST use at least 3 different paragraph counts among them. For 10 sections: give 3 sections exactly 2 paragraphs, give 4 sections exactly 3 paragraphs, give 3 sections exactly 4 paragraphs. Having all sections with the same paragraph count (e.g. all 3 paragraphs) is a HARD FAILURE — the output will be rejected. Merge short paragraphs or split long ones to achieve variation.
+7. BANNED WORDS — scan the entire output and rewrite every sentence that contains any of these: "remain", "remains", "remaining", "especially", "particularly", "may", "can", "leverage", "comprehensive", "remarkably", "significantly", "furthermore", "moreover", "additionally", "utilize", "utilise". Replace with simpler alternatives (e.g. "leverage" → "use", "comprehensive" → "full/complete/detailed", "remarkably" → "unusually/notably", "can earn" → "earn", "may help" → "helps"). Also NEVER start any sentence with a gerund (-ing word). Scan every sentence opening: if it starts with "Setting", "Buying", "Converting", "Understanding", "Owning", "Mining", "Purchasing", "Connecting", "Trading", "Earning", "Staking", "Timing", "Playing", "Farming", "Building", "Creating", or ANY other -ing word, restructure it. Examples: "Setting up a wallet..." → "Your first step is a wallet setup..." / "Buying cryptocurrency..." → "You buy cryptocurrency..." / "Understanding gas fees..." → "Gas fees are..." / "Owning LAND..." → "LAND ownership..." / "Earning opportunities..." → "The earning opportunities..." / "Staking allows..." → "The staking mechanism allows..." / "Timing your transactions..." → "Time your transactions...".
+8. Remove buzzwords (cutting-edge, innovative, advanced technology, leverage, game-changer, harness, empower, seamlessly, revolutionise) unless backed by specific data.
+9. Remove clich\u00e9s ("In today\u2019s world", "Needless to say", "It\u2019s no secret that").
+10. Remove rhetorical questions, generic connectors ("not just... but also..."). Never open or close a section with a question.
+11. One idea per sentence; prefer clarity over complexity.
+12. Add natural human variation; slightly imperfect flow, varied pacing and rhythm.
+13. Use bullet points only when they genuinely improve readability, not as term:definition structures.
+14. STRICT 2-ITEM LIST RULE: Scan the ENTIRE content for every comma-separated series or list. Any series with 3 or more items MUST be reduced to exactly 2 items joined by "and" or "or". Drop the least important item(s). This applies to ALL patterns:
+   - "collect, breed, and battle" → "collect and battle"
+   - "trade, sell, or transfer" → "trade or sell"
+   - "items, characters, or land parcels" → "items or characters"
+   - "attributes, abilities, and visual characteristics" → "attributes and abilities"
+   - "quests, win battles, or achieve milestones" → "complete quests or win battles"
+   - "buy, breed, or craft" → "buy or craft"
+   - "virtual land parcels, interactive experiences, art galleries, and social spaces" → "virtual land parcels and interactive experiences"
+   - "Gold, Wood, and Food tokens" → "Gold and Wood tokens"
+   - "time, skills, and strategic decisions" → "time and skills"
+   - "card editions, splinters (factions), and regular expansions" → "card editions and regular expansions"
+   - "events, concerts, and exhibitions" → "events and exhibitions"
+   - "explore, capture creatures, and battle" → "explore and capture creatures"
+   This is a HARD RULE with zero exceptions. Three items in a row is an AI detection fingerprint. Scan every sentence for commas between nouns/verbs — if there are 3+ items, cut to 2.
+15. Maintain logical flow: introductions should lead into the topic naturally, and conclusions must guide the reader forward (e.g. next steps, what to do now) — never summarise what was already said. Do not end sections with "In conclusion" or recap sentences.
+16. STRICT NO-REPEAT RULE: Never use the same adjective, adverb, or descriptive word twice in the entire content. After writing, scan for repeated descriptors and replace duplicates with synonyms. Common offenders to watch: "substantial" (use: significant/considerable/sizeable — but each only once), "straightforward" (use: simple/direct/easy), "unusually" (use: notably/surprisingly), "diverse" (use: varied/wide-ranging), "unique" (use: distinct/one-of-a-kind). If a word already appeared earlier, you MUST use a different synonym. Remove generic phrasings like "XYZ is not just abc", "From abc to xyz".
+
+CRITICAL CHECKS — After transforming, scan the full output line by line and fix ANY violations:
+□ No sentence starts with an -ing word (Setting, Buying, Converting, Understanding, Owning, Mining, Purchasing, Connecting, Trading, Earning, Staking, Timing, Playing, Farming, Building, Creating, etc.)
+□ No comma-separated list has 3+ items anywhere — scan every comma between nouns/verbs and verify only 2 items exist
+□ None of the banned words from Rule 7 appear anywhere
+□ Count the paragraph count of each similar section (e.g. game reviews) — they MUST have at least 3 different counts (e.g. some 2, some 3, some 4). If all sections have the same count, merge or split paragraphs to create variation
+□ No word like "comprehensive", "remarkably", "leverage", "especially", "particularly" survived
+□ No adjective or adverb appears more than once in the entire content — search for "substantial", "straightforward", "unusually", "diverse", "unique" and ensure each appears at most once
+
+Additionally avoid these patterns:
+- "XYZ is not just abc. It is jkl"
+- "XYZ doesn\u2019t just blah blah. It does blah"
+- "QUESTION? ANSWER." pattern
+- "From abc to xyz, my brand is best"
+
+PROTECTIVE RULES (MUST NOT violate):
+17. Preserve ALL HTML structure exactly (headings h2-h5, tables, lists, images, divs, spans, blockquotes).
+18. Preserve ALL hyperlinks (<a> tags) with their exact href attribute, anchor text, and all attributes (rel, target, etc.).
+19. Preserve ALL keyword placements; do not remove or rephrase target keywords.
+
+Return ONLY the transformed HTML content. Do not add any explanations, comments, or markdown code blocks."""
+
+        user_prompt = f"""Apply all humanisation rules to the following HTML content. Return ONLY the transformed HTML:
+
+{content_html}"""
+
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=8192,
+                    temperature=0.7,
+                    system=system_prompt,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": user_prompt
+                        }
+                    ]
+                )
+
+                humanised_content = response.content[0].text.strip()
+
+                # Strip any accidental markdown code block wrapping
+                if humanised_content.startswith('```'):
+                    humanised_content = humanised_content.split('```')[1]
+                    if humanised_content.startswith('html'):
+                        humanised_content = humanised_content[4:]
+                    humanised_content = humanised_content.strip()
+
+                return humanised_content
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+                if 'overloaded' in error_str or '529' in error_str or 'rate' in error_str:
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 2
+                        time.sleep(wait_time)
+                        continue
+                raise Exception(f"Claude API error during humanisation: {str(e)}")
+
+        raise Exception(f"Claude API error during humanisation after {max_retries} retries: {str(last_error)}")
+

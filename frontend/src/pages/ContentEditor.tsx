@@ -47,7 +47,9 @@ import {
   XCircle,
   Clock,
   Users,
-  Play
+  Play,
+  Wand2,
+  Undo2
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -305,6 +307,13 @@ const ContentEditor = () => {
     resolved_at: string | null;
   } | null>(null);
 
+  // Humanise state
+  const [humaniseStatus, setHumaniseStatus] = useState<'idle' | 'processing' | 'completed' | 'failed'>('idle');
+  const [humaniseError, setHumaniseError] = useState<string | null>(null);
+  const humanisePollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const preHumaniseContentRef = useRef<string | null>(null);
+  const isHumaniseUpdateRef = useRef(false);
+
   // Count keyword occurrences in text
   const countKeywordOccurrences = (text: string, keyword: string): number => {
     const regex = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
@@ -463,6 +472,18 @@ const ContentEditor = () => {
               checked_at: contentRecord.ai_detection_checked_at
             });
           }
+
+          // Restore humanise status
+          if (contentRecord.humanise_status === 'processing') {
+            setHumaniseStatus('processing');
+            startHumanisePolling(parseInt(id));
+          } else if (contentRecord.humanise_status === 'completed' && contentRecord.pre_humanise_content) {
+            setHumaniseStatus('completed');
+            preHumaniseContentRef.current = contentRecord.pre_humanise_content;
+          } else if (contentRecord.humanise_status === 'failed') {
+            setHumaniseStatus('failed');
+            setHumaniseError(contentRecord.humanise_error || 'Humanisation failed');
+          }
         }
       } catch (error) {
         console.error("Error loading content:", error);
@@ -478,6 +499,15 @@ const ContentEditor = () => {
 
     loadContent();
   }, [id, toast]);
+
+  // Cleanup humanise polling on unmount
+  useEffect(() => {
+    return () => {
+      if (humanisePollingRef.current) {
+        clearInterval(humanisePollingRef.current);
+      }
+    };
+  }, []);
 
   // Load comments
   useEffect(() => {
@@ -961,6 +991,12 @@ const ContentEditor = () => {
       if (!selectedKeyword) {
         originalContentRef.current = html;
       }
+
+      // Reset humanise status when user manually edits content (not programmatic)
+      if (!isHumaniseUpdateRef.current && humaniseStatus === 'completed') {
+        setHumaniseStatus('idle');
+        preHumaniseContentRef.current = null;
+      }
     }
   };
 
@@ -1143,6 +1179,178 @@ const ContentEditor = () => {
       selectedTextRef.current = "";
       selectedRangeRef.current = null;
       setHasSelection(false);
+    }
+  };
+
+  // ============= HUMANISE HANDLERS =============
+
+  const startHumanisePolling = (contentId: number) => {
+    if (humanisePollingRef.current) {
+      clearInterval(humanisePollingRef.current);
+    }
+
+    humanisePollingRef.current = setInterval(async () => {
+      try {
+        const response: any = await apiClient.getHumaniseStatus(contentId);
+
+        if (response.status === 'success') {
+          const data = response.data;
+
+          if (data.humanise_status === 'completed') {
+            if (humanisePollingRef.current) {
+              clearInterval(humanisePollingRef.current);
+              humanisePollingRef.current = null;
+            }
+
+            if (data.content_html && editorRef.current) {
+              let htmlContent = data.content_html;
+              htmlContent = htmlContent.replace(/<h1[^>]*>.*?<\/h1>/gi, '').trim();
+              htmlContent = htmlContent.replace(/line-height:\s*[^;"}]+;?/gi, '');
+              htmlContent = htmlContent.replace(/\s*style="\s*"/gi, '');
+              htmlContent = convertMarkdownInHtml(htmlContent);
+
+              isHumaniseUpdateRef.current = true;
+              editorRef.current.innerHTML = htmlContent;
+              setContent(htmlContent);
+              handleContentChange();
+              // Delay ref reset so async onInput events from innerHTML change
+              // are still guarded and don't reset humanise status
+              setTimeout(() => { isHumaniseUpdateRef.current = false; }, 300);
+            }
+
+            setHumaniseStatus('completed');
+
+            toast({
+              title: "Humanisation complete",
+              description: "Content has been humanised. Click Undo to revert.",
+            });
+
+          } else if (data.humanise_status === 'failed') {
+            if (humanisePollingRef.current) {
+              clearInterval(humanisePollingRef.current);
+              humanisePollingRef.current = null;
+            }
+
+            setHumaniseStatus('failed');
+            setHumaniseError(data.humanise_error || 'Humanisation failed');
+
+            toast({
+              title: "Humanisation failed",
+              description: data.humanise_error || "An error occurred during humanisation.",
+              variant: "destructive"
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Error polling humanise status:", error);
+      }
+    }, 3000);
+  };
+
+  const handleHumanise = async () => {
+    if (!id) return;
+
+    const currentContent = editorRef.current?.innerHTML || content;
+    if (!currentContent || currentContent.length < 50) {
+      toast({
+        title: "Not enough content",
+        description: "Please add more content before humanising.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Save content to backend first
+    try {
+      await apiClient.updateGeneratedContent(parseInt(id), {
+        title,
+        content_html: currentContent
+      });
+    } catch (error) {
+      console.error("Error saving content before humanise:", error);
+      toast({
+        title: "Error",
+        description: "Failed to save content before humanisation",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    preHumaniseContentRef.current = currentContent;
+
+    try {
+      setHumaniseStatus('processing');
+      setHumaniseError(null);
+
+      const response: any = await apiClient.humaniseContent(parseInt(id));
+
+      if (response.status === 'success') {
+        startHumanisePolling(parseInt(id));
+      } else {
+        setHumaniseStatus('failed');
+        setHumaniseError(response.message || 'Failed to start humanisation');
+        toast({
+          title: "Error",
+          description: response.message || "Failed to start humanisation",
+          variant: "destructive"
+        });
+      }
+    } catch (error: any) {
+      console.error("Humanise error:", error);
+      setHumaniseStatus('failed');
+      setHumaniseError(error.message || 'Failed to start humanisation');
+      toast({
+        title: "Error",
+        description: error.message || "Failed to start humanisation",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleHumaniseUndo = async () => {
+    if (!id) return;
+
+    try {
+      const response: any = await apiClient.humaniseUndo(parseInt(id));
+
+      if (response.status === 'success' && response.data?.content_html) {
+        let htmlContent = response.data.content_html;
+        htmlContent = htmlContent.replace(/<h1[^>]*>.*?<\/h1>/gi, '').trim();
+        htmlContent = htmlContent.replace(/line-height:\s*[^;"}]+;?/gi, '');
+        htmlContent = htmlContent.replace(/\s*style="\s*"/gi, '');
+        htmlContent = convertMarkdownInHtml(htmlContent);
+
+        if (editorRef.current) {
+          isHumaniseUpdateRef.current = true;
+          editorRef.current.innerHTML = htmlContent;
+          setContent(htmlContent);
+          handleContentChange();
+          // Delay ref reset so async onInput events from innerHTML change
+          // are still guarded and don't reset humanise status
+          setTimeout(() => { isHumaniseUpdateRef.current = false; }, 300);
+        }
+
+        setHumaniseStatus('idle');
+        preHumaniseContentRef.current = null;
+
+        toast({
+          title: "Reverted",
+          description: "Content has been reverted to the pre-humanisation version.",
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: response.message || "Failed to undo humanisation",
+          variant: "destructive"
+        });
+      }
+    } catch (error: any) {
+      console.error("Humanise undo error:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to undo humanisation",
+        variant: "destructive"
+      });
     }
   };
 
@@ -2272,6 +2480,47 @@ const ContentEditor = () => {
                 </p>
               </div>
             </div>
+
+            {/* Humanise */}
+            <div className="flex items-center gap-2 mt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 h-8 text-xs"
+                onClick={handleHumanise}
+                disabled={humaniseStatus === 'processing' || humaniseStatus === 'completed'}
+              >
+                {humaniseStatus === 'processing' ? (
+                  <>
+                    <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                    Humanising...
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="h-3 w-3 mr-1.5" />
+                    Humanise
+                  </>
+                )}
+              </Button>
+
+              {humaniseStatus === 'completed' && preHumaniseContentRef.current && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={handleHumaniseUndo}
+                  title="Undo humanisation"
+                >
+                  <Undo2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+
+            {humaniseStatus === 'failed' && humaniseError && (
+              <p className="text-xs text-destructive mt-1">
+                {humaniseError}
+              </p>
+            )}
 
             <Separator />
 

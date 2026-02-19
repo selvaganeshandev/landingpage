@@ -14,6 +14,11 @@ urlpatterns = [
     path('<int:content_id>/update/', views.update_generated_content, name='update_generated_content'),
     path('<int:content_id>/delete/', views.delete_generated_content, name='delete_generated_content'),
 
+    # Humanise endpoints
+    path('<int:content_id>/humanise/', views.humanise_content, name='humanise_content'),
+    path('<int:content_id>/humanise-status/', views.humanise_status, name='humanise_status'),
+    path('<int:content_id>/humanise-undo/', views.humanise_undo, name='humanise_undo'),
+
     # Publishing endpoints
     path('publish/', views.publish_content, name='publish_content'),
 

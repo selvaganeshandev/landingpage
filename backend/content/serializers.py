@@ -21,12 +21,16 @@ class GeneratedContentSerializer(serializers.ModelSerializer):
             'status', 'scheduled_date', 'published_date', 'priority',
             'model_used', 'generation_time_seconds', 'prompt_tokens', 'completion_tokens',
             'ai_detection_score', 'human_detection_score', 'ai_detection_label', 'ai_detection_checked_at',
+            'humanise_status', 'pre_humanise_content', 'humanise_started_at',
+            'humanise_completed_at', 'humanise_error',
             'total_comments', 'pending_comments',
             'created_at', 'modified_at'
         ]
         read_only_fields = [
             'id', 'actual_word_count', 'model_used',
             'generation_time_seconds', 'prompt_tokens', 'completion_tokens',
+            'humanise_status', 'pre_humanise_content',
+            'humanise_started_at', 'humanise_completed_at', 'humanise_error',
             'total_comments', 'pending_comments',
             'created_at', 'modified_at'
         ]
