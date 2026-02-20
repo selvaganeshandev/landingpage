@@ -49,7 +49,8 @@ import {
   Users,
   Play,
   Wand2,
-  Undo2
+  Undo2,
+  CircleDashed
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -181,6 +182,28 @@ const convertMarkdownInHtml = (html: string): string => {
   return result;
 };
 
+// Humanise checklist rules displayed in the progress dialog
+const HUMANISE_RULES = [
+  "Remove em-dashes and en-dashes",
+  "Apply sentence length variation",
+  "Make tone conversational",
+  "Distribute keywords evenly",
+  "Apply curly quotes",
+  "Vary section paragraph counts",
+  "Remove banned words",
+  "Remove buzzwords",
+  "Remove clichés",
+  "Remove rhetorical questions",
+  "Enforce one idea per sentence",
+  "Add natural human variation",
+  "Optimise bullet point usage",
+  "Enforce 2-item list rule",
+  "Add forward-guiding endings",
+  "Deduplicate descriptors",
+  "Preserve HTML structure",
+  "Preserve hyperlinks and keywords",
+];
+
 const ContentEditor = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -310,7 +333,10 @@ const ContentEditor = () => {
   // Humanise state
   const [humaniseStatus, setHumaniseStatus] = useState<'idle' | 'processing' | 'completed' | 'failed'>('idle');
   const [humaniseError, setHumaniseError] = useState<string | null>(null);
+  const [humaniseChecklistOpen, setHumaniseChecklistOpen] = useState(false);
+  const [humaniseChecklistProgress, setHumaniseChecklistProgress] = useState(0);
   const humanisePollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const humaniseChecklistTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const preHumaniseContentRef = useRef<string | null>(null);
   const isHumaniseUpdateRef = useRef(false);
 
@@ -423,10 +449,11 @@ const ContentEditor = () => {
           setContent(htmlContent);
 
           // Extract keywords and count occurrences
+          // Use the cleaned htmlContent (same as what editor displays) for consistent scoring
           let keywordStats: typeof keywords = [];
           if (contentRecord.keywords) {
             const keywordList = contentRecord.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
-            const contentText = contentRecord.content_html?.replace(/<[^>]*>/g, ' ').toLowerCase() || '';
+            const contentText = htmlContent.replace(/<[^>]*>/g, ' ').toLowerCase();
 
             keywordStats = keywordList.map((keyword: string) => {
               const count = countKeywordOccurrences(contentText, keyword);
@@ -448,7 +475,8 @@ const ContentEditor = () => {
           }
 
           // Calculate initial metrics and content score with keywords
-          updateMetrics(contentRecord.content_html || "", keywordStats);
+          // Use cleaned htmlContent to match what handleContentChange() computes
+          updateMetrics(htmlContent, keywordStats);
 
           // Fetch internal links for the domain and find opportunities
           const domainId = contentRecord.domain_id || contentRecord.domain;
@@ -476,6 +504,14 @@ const ContentEditor = () => {
           // Restore humanise status
           if (contentRecord.humanise_status === 'processing') {
             setHumaniseStatus('processing');
+            // Estimate checklist progress based on elapsed time since humanise started
+            let resumeFrom = 0;
+            if (contentRecord.humanise_started_at) {
+              const elapsed = (Date.now() - new Date(contentRecord.humanise_started_at).getTime()) / 1000;
+              // ~4 seconds per rule tick, cap at totalRules - 2 so it doesn't look done
+              resumeFrom = Math.min(Math.floor(elapsed / 4), HUMANISE_RULES.length - 2);
+            }
+            startChecklistTimer(resumeFrom);
             startHumanisePolling(parseInt(id));
           } else if (contentRecord.humanise_status === 'completed' && contentRecord.pre_humanise_content) {
             setHumaniseStatus('completed');
@@ -500,11 +536,14 @@ const ContentEditor = () => {
     loadContent();
   }, [id, toast]);
 
-  // Cleanup humanise polling on unmount
+  // Cleanup humanise polling and checklist timer on unmount
   useEffect(() => {
     return () => {
       if (humanisePollingRef.current) {
         clearInterval(humanisePollingRef.current);
+      }
+      if (humaniseChecklistTimerRef.current) {
+        clearInterval(humaniseChecklistTimerRef.current);
       }
     };
   }, []);
@@ -1184,6 +1223,35 @@ const ContentEditor = () => {
 
   // ============= HUMANISE HANDLERS =============
 
+  const startChecklistTimer = (startFrom: number = 0) => {
+    // Clear any existing timer
+    if (humaniseChecklistTimerRef.current) {
+      clearInterval(humaniseChecklistTimerRef.current);
+    }
+
+    setHumaniseChecklistProgress(startFrom);
+    setHumaniseChecklistOpen(true);
+
+    // Cosmetic timer: check off ~1 rule every 4 seconds, stop at totalRules - 1
+    // (the last rule gets checked when polling detects completion)
+    const totalRules = HUMANISE_RULES.length;
+    let current = startFrom;
+
+    humaniseChecklistTimerRef.current = setInterval(() => {
+      current += 1;
+      if (current >= totalRules - 1) {
+        // Stop at second-to-last — final tick happens on completion
+        setHumaniseChecklistProgress(totalRules - 1);
+        if (humaniseChecklistTimerRef.current) {
+          clearInterval(humaniseChecklistTimerRef.current);
+          humaniseChecklistTimerRef.current = null;
+        }
+      } else {
+        setHumaniseChecklistProgress(current);
+      }
+    }, 4000);
+  };
+
   const startHumanisePolling = (contentId: number) => {
     if (humanisePollingRef.current) {
       clearInterval(humanisePollingRef.current);
@@ -1216,9 +1284,28 @@ const ContentEditor = () => {
               // Delay ref reset so async onInput events from innerHTML change
               // are still guarded and don't reset humanise status
               setTimeout(() => { isHumaniseUpdateRef.current = false; }, 300);
+
+              // Save cleaned content to backend so page refresh loads the same
+              // content the editor displays (ensures consistent score on reload)
+              if (id) {
+                apiClient.updateGeneratedContent(parseInt(id), {
+                  content_html: htmlContent
+                }).catch(err => console.error("Error saving humanised content:", err));
+              }
             }
 
             setHumaniseStatus('completed');
+
+            // Complete the checklist: set progress to max, stop timer
+            if (humaniseChecklistTimerRef.current) {
+              clearInterval(humaniseChecklistTimerRef.current);
+              humaniseChecklistTimerRef.current = null;
+            }
+            setHumaniseChecklistProgress(HUMANISE_RULES.length);
+            // Auto-close checklist dialog after 1.5s so user sees "complete" state
+            setTimeout(() => {
+              setHumaniseChecklistOpen(false);
+            }, 1500);
 
             toast({
               title: "Humanisation complete",
@@ -1233,6 +1320,13 @@ const ContentEditor = () => {
 
             setHumaniseStatus('failed');
             setHumaniseError(data.humanise_error || 'Humanisation failed');
+
+            // Close checklist dialog and stop timer on failure
+            if (humaniseChecklistTimerRef.current) {
+              clearInterval(humaniseChecklistTimerRef.current);
+              humaniseChecklistTimerRef.current = null;
+            }
+            setHumaniseChecklistOpen(false);
 
             toast({
               title: "Humanisation failed",
@@ -1285,10 +1379,12 @@ const ContentEditor = () => {
       const response: any = await apiClient.humaniseContent(parseInt(id));
 
       if (response.status === 'success') {
+        startChecklistTimer(0);
         startHumanisePolling(parseInt(id));
       } else {
         setHumaniseStatus('failed');
         setHumaniseError(response.message || 'Failed to start humanisation');
+        setHumaniseChecklistOpen(false);
         toast({
           title: "Error",
           description: response.message || "Failed to start humanisation",
@@ -1299,6 +1395,11 @@ const ContentEditor = () => {
       console.error("Humanise error:", error);
       setHumaniseStatus('failed');
       setHumaniseError(error.message || 'Failed to start humanisation');
+      setHumaniseChecklistOpen(false);
+      if (humaniseChecklistTimerRef.current) {
+        clearInterval(humaniseChecklistTimerRef.current);
+        humaniseChecklistTimerRef.current = null;
+      }
       toast({
         title: "Error",
         description: error.message || "Failed to start humanisation",
@@ -3445,6 +3546,81 @@ const ContentEditor = () => {
               Close
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Humanise Checklist Progress Dialog */}
+      <Dialog
+        open={humaniseChecklistOpen}
+        onOpenChange={(open) => {
+          // Only allow closing when humanisation is not actively processing
+          if (!open && humaniseStatus !== 'processing') {
+            setHumaniseChecklistOpen(false);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[480px]" onPointerDownOutside={(e) => {
+          // Prevent closing by clicking outside while processing
+          if (humaniseStatus === 'processing') e.preventDefault();
+        }} onEscapeKeyDown={(e) => {
+          // Prevent closing with Escape while processing
+          if (humaniseStatus === 'processing') e.preventDefault();
+        }}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Wand2 className="h-5 w-5" />
+              Humanising Content
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5 max-h-[400px] overflow-y-auto py-2">
+            {HUMANISE_RULES.map((rule, index) => {
+              const isCompleted = index < humaniseChecklistProgress;
+              const isActive = index === humaniseChecklistProgress && humaniseStatus === 'processing';
+              const isDone = humaniseChecklistProgress >= HUMANISE_RULES.length;
+
+              return (
+                <div
+                  key={index}
+                  className={`flex items-center gap-2.5 px-3 py-1.5 rounded-md transition-colors ${
+                    isCompleted ? 'bg-green-50 dark:bg-green-950/30' :
+                    isActive ? 'bg-blue-50 dark:bg-blue-950/30' :
+                    ''
+                  }`}
+                >
+                  {isCompleted || isDone ? (
+                    <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
+                  ) : isActive ? (
+                    <Loader2 className="h-4 w-4 text-blue-500 animate-spin flex-shrink-0" />
+                  ) : (
+                    <CircleDashed className="h-4 w-4 text-muted-foreground/40 flex-shrink-0" />
+                  )}
+                  <span className={`text-sm ${
+                    isCompleted || isDone ? 'text-green-700 dark:text-green-400' :
+                    isActive ? 'text-blue-700 dark:text-blue-400 font-medium' :
+                    'text-muted-foreground/60'
+                  }`}>
+                    {rule}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {humaniseChecklistProgress >= HUMANISE_RULES.length && (
+            <div className="flex items-center gap-2 pt-2 border-t">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              <span className="text-sm font-medium text-green-700 dark:text-green-400">
+                Humanisation complete!
+              </span>
+            </div>
+          )}
+          {humaniseStatus === 'processing' && (
+            <div className="flex items-center gap-2 pt-2 border-t">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">
+                This may take a minute. Please wait...
+              </span>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

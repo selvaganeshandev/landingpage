@@ -395,8 +395,10 @@ def rewrite_content(request):
 
 def _run_humanise_in_background(content_id):
     """
-    Background thread function that runs the Claude humanise API call
-    and updates the database with the result.
+    Background thread function that runs a three-pass humanisation process:
+    Pass 1: Full humanisation with all 19 rules (Claude API)
+    Pass 2: Focused refinement fixing persistent issues (Claude API)
+    Pass 3: Programmatic descriptor deduplication (Python, deterministic)
 
     Django DB connections are per-thread. We must close the connection
     when the thread finishes to prevent connection leaks.
@@ -405,9 +407,22 @@ def _run_humanise_in_background(content_id):
         content_obj = GeneratedContent.objects.get(id=content_id)
         generator = ClaudeContentGenerator()
 
+        # Pass 1: Full humanisation (all 19 rules)
+        logger.info(f"Humanisation Pass 1 started for content {content_id}")
         humanised_html = generator.humanise_content(content_obj.pre_humanise_content)
+        logger.info(f"Humanisation Pass 1 completed for content {content_id}")
 
-        content_obj.content_html = humanised_html
+        # Pass 2: Focused refinement (fixes structural issues)
+        logger.info(f"Humanisation Pass 2 (refinement) started for content {content_id}")
+        refined_html = generator.refine_humanised_content(humanised_html)
+        logger.info(f"Humanisation Pass 2 (refinement) completed for content {content_id}")
+
+        # Pass 3: Programmatic post-processing (deterministic fixes)
+        logger.info(f"Humanisation Pass 3 (post-processing) started for content {content_id}")
+        final_html = generator.post_process_content(refined_html)
+        logger.info(f"Humanisation Pass 3 (post-processing) completed for content {content_id}")
+
+        content_obj.content_html = final_html
         content_obj.humanise_status = 'completed'
         content_obj.humanise_completed_at = timezone.now()
         content_obj.humanise_error = None
@@ -416,7 +431,7 @@ def _run_humanise_in_background(content_id):
             'humanise_completed_at', 'humanise_error', 'modified_at'
         ])
 
-        logger.info(f"Humanisation completed for content {content_id}")
+        logger.info(f"Humanisation (all 3 passes) completed for content {content_id}")
 
     except Exception as e:
         logger.error(f"Humanisation failed for content {content_id}: {str(e)}", exc_info=True)
@@ -514,7 +529,7 @@ def humanise_status(request, content_id):
 
     Returns the current status. When status is 'completed', also returns
     the humanised content_html so the frontend can update the editor.
-    Auto-detects stale processing (>5 min timeout) and marks as failed.
+    Auto-detects stale processing (>10 min timeout) and marks as failed.
     """
     try:
         content = get_object_or_404(
@@ -526,7 +541,7 @@ def humanise_status(request, content_id):
         # Timeout detection for stale processing
         if content.humanise_status == 'processing' and content.humanise_started_at:
             elapsed = (timezone.now() - content.humanise_started_at).total_seconds()
-            if elapsed > 300:  # 5 minutes timeout
+            if elapsed > 600:  # 10 minutes timeout (2-pass humanisation)
                 content.humanise_status = 'failed'
                 content.humanise_error = 'Humanisation timed out. Please try again.'
                 content.humanise_completed_at = timezone.now()

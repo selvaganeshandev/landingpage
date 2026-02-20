@@ -4,6 +4,7 @@ This module handles content generation using the Claude API
 """
 
 import os
+import re
 import time
 from anthropic import Anthropic
 from django.conf import settings
@@ -710,17 +711,21 @@ Rewritten text:"""
         system_prompt = """You are an expert content editor specialising in making AI-generated content read naturally human-written. Apply ALL of the following rules to the provided HTML content in a single pass:
 
 TRANSFORMATION RULES:
-1. Replace all em-dashes (\u2014) with commas, semicolons, or full stops as contextually appropriate.
-2. Restructure sentences: approximately 60% should be 8\u201310 words, 40% should be 15\u201325 words.
+1. Replace ALL em-dashes (—) and en-dashes (–) with commas, semicolons, or full stops. Search the entire output for any dash character (— or –) and replace it. For example: "a few minutes—perfect for gaming" → "a few minutes. Perfect for gaming".
+2. STRICT SENTENCE LENGTH PATTERN: Follow this alternating rhythm throughout the ENTIRE content — short, short, short, long, short, short, long, short, short, short, long. Where "short" = exactly 8–10 words and "long" = exactly 15–25 words. This creates a roughly 70/30 ratio. FORBIDDEN: sentences of 11–14 words (the "gap zone") and sentences under 7 words or over 25 words. If you write a sentence of 11–14 words, you MUST rewrite it: either cut words to reach 8–10, or add detail to reach 15–25. Count the words in every sentence you write.
 3. Make the tone conversational, personalised, and non-preachy.
 4. Distribute anchor text and keywords evenly across all sections (not cluttered in one place).
 5. Replace straight quotes (" ') with curly quotes (\u201c \u201d \u2018 \u2019).
-6. MANDATORY SECTION VARIATION: Count every similar section (e.g. game reviews, product listings, feature descriptions). If there are N similar sections, you MUST use at least 3 different paragraph counts among them. For 10 sections: give 3 sections exactly 2 paragraphs, give 4 sections exactly 3 paragraphs, give 3 sections exactly 4 paragraphs. Having all sections with the same paragraph count (e.g. all 3 paragraphs) is a HARD FAILURE — the output will be rejected. Merge short paragraphs or split long ones to achieve variation.
+6. MANDATORY SECTION VARIATION — THIS IS THE MOST IMPORTANT STRUCTURAL RULE: If the content has similar subsections (e.g. 10 game reviews), you MUST assign paragraph counts BEFORE writing using this exact formula:
+   - Sections 1, 5, 9: give exactly 2 paragraphs
+   - Sections 2, 4, 7, 10: give exactly 3 paragraphs
+   - Sections 3, 6, 8: give exactly 4 paragraphs
+   This means for 10 game sections: 3 sections with 2 paragraphs, 4 sections with 3 paragraphs, 3 sections with 4 paragraphs. Do NOT give all sections the same number of paragraphs. If every section has 3 paragraphs, the output is REJECTED. To create a 2-paragraph section, merge the middle paragraph into the first or last. To create a 4-paragraph section, split one long paragraph into two shorter ones.
 7. BANNED WORDS — scan the entire output and rewrite every sentence that contains any of these: "remain", "remains", "remaining", "especially", "particularly", "may", "can", "leverage", "comprehensive", "remarkably", "significantly", "furthermore", "moreover", "additionally", "utilize", "utilise". Replace with simpler alternatives (e.g. "leverage" → "use", "comprehensive" → "full/complete/detailed", "remarkably" → "unusually/notably", "can earn" → "earn", "may help" → "helps"). Also NEVER start any sentence with a gerund (-ing word). Scan every sentence opening: if it starts with "Setting", "Buying", "Converting", "Understanding", "Owning", "Mining", "Purchasing", "Connecting", "Trading", "Earning", "Staking", "Timing", "Playing", "Farming", "Building", "Creating", or ANY other -ing word, restructure it. Examples: "Setting up a wallet..." → "Your first step is a wallet setup..." / "Buying cryptocurrency..." → "You buy cryptocurrency..." / "Understanding gas fees..." → "Gas fees are..." / "Owning LAND..." → "LAND ownership..." / "Earning opportunities..." → "The earning opportunities..." / "Staking allows..." → "The staking mechanism allows..." / "Timing your transactions..." → "Time your transactions...".
 8. Remove buzzwords (cutting-edge, innovative, advanced technology, leverage, game-changer, harness, empower, seamlessly, revolutionise) unless backed by specific data.
 9. Remove clich\u00e9s ("In today\u2019s world", "Needless to say", "It\u2019s no secret that").
 10. Remove rhetorical questions, generic connectors ("not just... but also..."). Never open or close a section with a question.
-11. One idea per sentence; prefer clarity over complexity.
+11. STRICT: One idea per sentence. NEVER use semicolons (;) anywhere in the content — replace every semicolon with a full stop and start a new sentence. Never combine two separate actions with "and" (e.g. "Download the app and create a password" → "Download the app. Create a password."). Never use colons (:) to introduce a list within a sentence — restructure as separate sentences instead.
 12. Add natural human variation; slightly imperfect flow, varied pacing and rhythm.
 13. Use bullet points only when they genuinely improve readability, not as term:definition structures.
 14. STRICT 2-ITEM LIST RULE: Scan the ENTIRE content for every comma-separated series or list. Any series with 3 or more items MUST be reduced to exactly 2 items joined by "and" or "or". Drop the least important item(s). This applies to ALL patterns:
@@ -736,17 +741,61 @@ TRANSFORMATION RULES:
    - "card editions, splinters (factions), and regular expansions" → "card editions and regular expansions"
    - "events, concerts, and exhibitions" → "events and exhibitions"
    - "explore, capture creatures, and battle" → "explore and capture creatures"
-   This is a HARD RULE with zero exceptions. Three items in a row is an AI detection fingerprint. Scan every sentence for commas between nouns/verbs — if there are 3+ items, cut to 2.
-15. Maintain logical flow: introductions should lead into the topic naturally, and conclusions must guide the reader forward (e.g. next steps, what to do now) — never summarise what was already said. Do not end sections with "In conclusion" or recap sentences.
-16. STRICT NO-REPEAT RULE: Never use the same adjective, adverb, or descriptive word twice in the entire content. After writing, scan for repeated descriptors and replace duplicates with synonyms. Common offenders to watch: "substantial" (use: significant/considerable/sizeable — but each only once), "straightforward" (use: simple/direct/easy), "unusually" (use: notably/surprisingly), "diverse" (use: varied/wide-ranging), "unique" (use: distinct/one-of-a-kind). If a word already appeared earlier, you MUST use a different synonym. Remove generic phrasings like "XYZ is not just abc", "From abc to xyz".
+   - "creating a wallet, downloading the app, and connecting" → "creating a wallet and downloading the app"
+   - "stake TLM...use it...or exchange it" → pick only 2 of the 3 actions
+   - "tournament victories, selling Illuvials, and trading resources" → "tournament victories and selling Illuvials"
+   - "stake tokens, participate in farming, or play games" → "stake tokens or play games"
+   This is a HARD RULE with zero exceptions. Three items in a row is an AI detection fingerprint. This also applies to sequential sentences that list 3+ options ("You do X. You do Y. You do Z." — reduce to 2). Scan every sentence for commas between nouns/verbs — if there are 3+ items, cut to 2.
+15. MANDATORY FORWARD-GUIDING ENDINGS: Every section and subsection MUST end with a forward-looking statement that tells the reader what to do next, what to explore, or what comes next in their journey. Examples of good endings: "Start by exploring the free areas before deciding to invest." / "Head to the official website to create your first deck." / "Try the free mining tools first, then upgrade once you understand the mechanics." BAD endings (flat facts): "The mobile-first design ensures smooth performance." / "The platform's governance model gives you a voice." These are just statements — they do not guide the reader forward. Rewrite every section ending to include an action or next step.
+16. STRICT NO-REPEAT RULE: No descriptive word (adjective/adverb) should appear more than ONCE in the entire content. After transforming, scan the full output and replace every duplicate descriptor with a synonym. Use each synonym only once too. Here are the top offenders with their one-time-use alternatives:
+   - "multiple" (use ONE of: several, numerous, many, a handful of, a few, assorted — each only once)
+   - "various" (use ONE of: a range of, mixed, assorted, different, varied — each only once)
+   - "distinct" (use ONE of: unique, individual, one-of-a-kind, specific, particular — each only once)
+   - "accessible" (use ONE of: approachable, open to, within reach, easy to enter, beginner-friendly — each only once)
+   - "strategic" (use ONE of: tactical, calculated, planned, methodical — each only once)
+   - "valuable" (use ONE of: prized, sought-after, worthwhile, lucrative — each only once)
+   - "competitive" (use ONE of: intense, contested, head-to-head, fierce — each only once)
+   - "powerful" (use ONE of: formidable, potent, robust, mighty — each only once)
+   - "hefty" (use ONE of: sizeable, steep, large, considerable — each only once)
+   - "ideal" (use ONE of: perfect, well-suited, fitting, apt — each only once)
+   - "rare" (use ONE of: scarce, uncommon, hard-to-find, elusive — each only once)
+   - "regular" (use ONE of: frequent, recurring, periodic, routine — each only once)
+   - "transparent" (use ONE of: open, clear, visible, verifiable — each only once)
+   - "genuine" (use ONE of: authentic, actual, verifiable, proven — each only once)
+   - "immersive" (use ONE of: engaging, absorbing, captivating, vivid — each only once)
+   - "different" (use ONE of: varied, assorted, distinct, separate, diverse — each only once)
+   - "several" (use ONE of: a handful of, a few, numerous, many, some — each only once)
+   - "official" (use ONE of: authorised, verified, authentic, legitimate — each only once)
+   - "traditional" (use ONE of: conventional, classic, standard, established — each only once)
+   - "popular" (use ONE of: well-known, widely used, favoured, common — each only once)
+   - "simple" (use ONE of: elementary, basic, foundational, entry-level — each only once)
+   - "dedicated" (use ONE of: committed, focused, loyal, devoted — each only once)
+   - "considerable" (use ONE of: sizeable, notable, meaningful, significant — each only once)
+   - "frequent" (use ONE of: recurring, periodic, routine, regular — each only once)
+   - "one-of-a-kind" (use ONE of: unique, singular, individual, distinct — each only once. NEVER use "one-of-a-kind" more than once)
+   - "approachable" (use ONE of: beginner-friendly, welcoming, easy to enter, open to newcomers — each only once)
+   - "sizeable" (use ONE of: large, hefty, steep, substantial — each only once)
+   - "limited" (use ONE of: restricted, capped, constrained, modest — each only once)
+   - "initial" (use ONE of: starting, upfront, opening — each only once)
+   - "competitive" (use ONE of: intense, fierce, contested, head-to-head — each only once)
+   - "basic" (use ONE of: elementary, foundational, entry-level, introductory — each only once)
+   NOTE: Technical domain terms are exempt from this rule (e.g. "virtual" for virtual worlds, "digital" for digital assets, "mobile" for mobile devices, "free" for free-to-play, "in-game", "blockchain", "NFT"). These are domain vocabulary and not descriptive repetition.
+   NEVER CHANGE these words in these fixed phrases: "strong password", "real money", "real estate", "real-world", "real value", "mobile-first", "true ownership", "open rewards", "open world". These words have fixed meanings and are NOT descriptors.
+   Remove generic phrasings like "XYZ is not just abc", "From abc to xyz".
 
-CRITICAL CHECKS — After transforming, scan the full output line by line and fix ANY violations:
+CRITICAL CHECKS — After transforming, scan the full output line by line and fix ANY violations before returning:
+□ Search for em-dashes (—) and en-dashes (–) — replace every one with a comma, semicolon, or full stop
 □ No sentence starts with an -ing word (Setting, Buying, Converting, Understanding, Owning, Mining, Purchasing, Connecting, Trading, Earning, Staking, Timing, Playing, Farming, Building, Creating, etc.)
-□ No comma-separated list has 3+ items anywhere — scan every comma between nouns/verbs and verify only 2 items exist
+□ No comma-separated list has 3+ items anywhere — scan every comma between nouns/verbs and verify only 2 items exist. Also check sequential sentences listing 3+ options
 □ None of the banned words from Rule 7 appear anywhere
 □ Count the paragraph count of each similar section (e.g. game reviews) — they MUST have at least 3 different counts (e.g. some 2, some 3, some 4). If all sections have the same count, merge or split paragraphs to create variation
 □ No word like "comprehensive", "remarkably", "leverage", "especially", "particularly" survived
-□ No adjective or adverb appears more than once in the entire content — search for "substantial", "straightforward", "unusually", "diverse", "unique" and ensure each appears at most once
+□ No descriptive word appears more than once — search for these high-risk repeats: "multiple", "various", "distinct", "accessible", "strategic", "valuable", "competitive", "powerful", "hefty", "ideal", "rare", "regular", "transparent", "genuine", "immersive", "different", "several", "official", "traditional", "popular", "simple", "dedicated", "considerable", "frequent", "substantial", "straightforward", "unusually", "diverse", "unique". If ANY appears twice, replace the duplicate with a synonym from Rule 16
+□ Every section/subsection ends with a forward-guiding statement (action, next step, what to try) — not a flat fact. Check the last sentence of EVERY section
+□ Count words in a sample of 20 sentences — at least 60% must be 8–10 words, no more than 10% in the 11–14 gap zone. Rewrite any gap-zone sentences
+□ Search for ALL semicolons (;) in the output — replace every one with a full stop. No semicolons allowed anywhere
+□ No descriptive phrase appears verbatim twice (e.g. "limited earning potential", "one-of-a-kind NFT", "powerful teams"). If found, rewrite one instance
+□ Count paragraph counts for all similar sections — verify at least 3 different counts exist (e.g. 2, 3, 4). If all are the same, restructure immediately
 
 Additionally avoid these patterns:
 - "XYZ is not just abc. It is jkl"
@@ -795,12 +844,461 @@ Return ONLY the transformed HTML content. Do not add any explanations, comments,
             except Exception as e:
                 last_error = e
                 error_str = str(e).lower()
-                if 'overloaded' in error_str or '529' in error_str or 'rate' in error_str:
-                    if attempt < max_retries - 1:
-                        wait_time = (attempt + 1) * 2
-                        time.sleep(wait_time)
-                        continue
+                is_transient = (
+                    'overloaded' in error_str or '529' in error_str
+                    or 'rate' in error_str or 'connection' in error_str
+                    or 'timeout' in error_str or 'name resolution' in error_str
+                )
+                if is_transient and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 3  # 3, 6, 9 seconds
+                    time.sleep(wait_time)
+                    continue
                 raise Exception(f"Claude API error during humanisation: {str(e)}")
 
         raise Exception(f"Claude API error during humanisation after {max_retries} retries: {str(last_error)}")
+
+    def refine_humanised_content(self, content_html, max_retries=3):
+        """
+        Pass 2: Focused refinement that fixes the 5 rules that consistently
+        fail in the first humanisation pass.
+
+        This method uses a short, laser-focused prompt with lower temperature
+        to precisely fix: descriptor repeats, section paragraph variation,
+        sentence length gaps, -ing sentence starts, and compound actions.
+
+        Args:
+            content_html (str): The humanised HTML from Pass 1
+            max_retries (int): Maximum number of retries for transient errors
+
+        Returns:
+            str: The refined HTML content
+        """
+        system_prompt = """You are a precise content proofreader. The content has already been humanised. Your ONLY job is to fix these specific issues. Make minimal, surgical changes.
+
+=== FIX 1: DESCRIPTOR REPEATS (MOST IMPORTANT) ===
+PROCESS: Before returning, you MUST do a full-text search for EVERY word in this list. If ANY word appears more than once, replace the 2nd/3rd/4th occurrence with a DIFFERENT synonym each time.
+
+CRITICAL RULE: Once you use a synonym as a replacement, that synonym is "spent" and CANNOT be used again anywhere. Keep a mental tally.
+
+Example of WRONG approach: replacing "different planets", "different heroes", "different preferences" → "separate planets", "separate heroes", "separate preferences" (WRONG — you used "separate" three times!)
+
+Example of CORRECT approach: "different planets" stays as "different", "different heroes" → "separate heroes", "different preferences" → "diverse preferences" (each word used exactly once)
+
+MANDATORY SCAN LIST — check every one:
+• "different" / "separate" / "assorted" / "varied" / "diverse" / "distinct" / "mixed" — if ANY of these appears 2+, replace extras
+• "genuine" / "authentic" / "actual" / "verifiable" — if ANY appears 2+, replace extras
+• "powerful" / "formidable" / "potent" / "robust" — if ANY appears 2+, replace extras
+• "fitting" / "ideal" / "perfect" / "well-suited" / "suitable" / "apt" — if ANY appears 2+, replace extras
+• "modest" / "limited" / "restricted" / "capped" / "constrained" — if ANY appears 2+, replace extras
+• "substantial" / "sizeable" / "hefty" / "considerable" / "notable" — if ANY appears 2+, replace extras
+• "specific" / "particular" / "precise" / "exact" / "defined" — if ANY appears 2+, replace extras
+• "well-known" / "popular" / "favoured" / "established" / "recognised" — if ANY appears 2+, replace extras
+• "frequent" / "recurring" / "periodic" / "routine" / "regular" — if ANY appears 2+, replace extras
+• "unique" / "singular" / "one-of-a-kind" / "uncommon" / "individual" — if ANY appears 2+, replace extras
+• "dedicated" / "committed" / "devoted" / "loyal" — if ANY appears 2+, replace extras
+• "elementary" / "basic" / "foundational" / "entry-level" / "introductory" — if ANY appears 2+, replace extras
+• "approachable" / "accessible" / "beginner-friendly" / "welcoming" / "inviting" — if ANY appears 2+, replace extras
+
+Also scan for repeated DESCRIPTIVE PHRASES: "earning potential", "entry cost", "earning opportunities", etc. If any phrase appears 3+ times, rewrite some instances differently (e.g. "income prospects", "startup cost", "income avenues").
+
+NEVER CHANGE these words/phrases (they have fixed meanings, not descriptors):
+- "strong password" (security term), "real money" / "real estate" / "real-world" / "real value" (fixed phrases)
+- "mobile-first" (tech term), "true ownership" (fixed phrase), "open rewards" / "open world" (fixed meanings)
+- "first" when used as an adverb ("try X first", "explore first"), "simple mining" (specific mechanic)
+
+EXEMPT: domain terms "virtual", "digital", "mobile", "free", "in-game", "blockchain", "NFT", "play to earn", "crypto", "gaming".
+
+=== FIX 2: SECTION PARAGRAPH VARIATION (STRUCTURAL) ===
+Count the paragraphs in each similar subsection (e.g. game reviews under a common parent heading). If they all have the same paragraph count, you MUST restructure.
+
+REQUIRED FORMULA for 10 similar sections:
+• Sections 1, 5, 9 → MERGE to exactly 2 paragraphs (combine the 2nd and 3rd paragraph into one)
+• Sections 2, 4, 7, 10 → keep at exactly 3 paragraphs (no change if already 3)
+• Sections 3, 6, 8 → SPLIT to exactly 4 paragraphs (find the longest paragraph and split it into two)
+
+HOW TO MERGE (3→2 paragraphs): Take paragraphs 2 and 3, join their text into one paragraph. Keep paragraph 1 separate.
+HOW TO SPLIT (3→4 paragraphs): Find the paragraph with the most sentences. Split it after the 2nd or 3rd sentence to create a new paragraph break.
+
+This is a STRUCTURAL change. You MUST actually add or remove <p> tags / paragraph breaks to achieve the target counts. Do NOT skip this.
+
+=== FIX 3: SENTENCE LENGTH ===
+Scan for sentences of 11-14 words ("gap zone"). These are FORBIDDEN.
+- If 11-14 words: CUT words to reach 8-10, OR add detail to reach 15-25.
+- Also fix sentences under 7 words (merge with adjacent sentence) and over 25 words (split into two).
+
+=== FIX 4: -ING SENTENCE STARTS ===
+If any sentence starts with an -ing word (Earning, Setting, Buying, Mining, Trading, etc.), add "The" or restructure:
+- "Earning opportunities..." → "The earning opportunities..."
+
+=== FIX 5: FLAT SECTION ENDINGS ===
+Check the LAST sentence of every section/subsection. If it states a fact without guiding the reader forward, rewrite it to include an action:
+- BAD: "This makes it fitting for busy Indians." → GOOD: "Try the quick matches during your lunch break to test the earning potential."
+- BAD: "The mobile-first design ensures smooth performance." → GOOD: "Download the app to experience the mobile-optimised gameplay yourself."
+
+=== PROTECTIVE RULES ===
+- Preserve ALL HTML structure (headings, tables, lists, images, divs, spans, blockquotes).
+- Preserve ALL hyperlinks (<a> tags) with exact href, anchor text, and attributes.
+- Preserve ALL keyword placements. Do not remove target keywords.
+- Do NOT change meaning or tone. Only fix the issues above.
+
+Return ONLY the fixed HTML. No explanations, no markdown code blocks."""
+
+        user_prompt = f"""Review and fix ONLY the 5 specific issues described above in this HTML content. Make minimal changes. Return ONLY the fixed HTML:
+
+{content_html}"""
+
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=8192,
+                    temperature=0.1,
+                    system=system_prompt,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": user_prompt
+                        }
+                    ]
+                )
+
+                refined_content = response.content[0].text.strip()
+
+                # Strip any accidental markdown code block wrapping
+                if refined_content.startswith('```'):
+                    refined_content = refined_content.split('```')[1]
+                    if refined_content.startswith('html'):
+                        refined_content = refined_content[4:]
+                    refined_content = refined_content.strip()
+
+                return refined_content
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+                is_transient = (
+                    'overloaded' in error_str or '529' in error_str
+                    or 'rate' in error_str or 'connection' in error_str
+                    or 'timeout' in error_str or 'name resolution' in error_str
+                )
+                if is_transient and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 3  # 3, 6, 9 seconds
+                    time.sleep(wait_time)
+                    continue
+                raise Exception(f"Claude API error during refinement: {str(e)}")
+
+        raise Exception(f"Claude API error during refinement after {max_retries} retries: {str(last_error)}")
+
+    # ===== Synonym groups for descriptor deduplication =====
+    # Each group contains ONLY words that are safe to interchange as descriptors.
+    # Generic words (first, strong, real, small, open, big, right, true) are EXCLUDED
+    # because they have non-descriptor meanings in fixed phrases.
+    # No word appears in more than one group.
+    SYNONYM_GROUPS = [
+        ["different", "separate", "varied", "diverse", "distinct", "assorted",
+         "mixed", "wide-ranging", "contrasting", "numerous"],
+        ["genuine", "authentic", "actual", "verifiable", "proven"],
+        ["powerful", "formidable", "potent", "robust", "mighty", "dominant"],
+        ["fitting", "ideal", "perfect", "well-suited", "suitable", "apt"],
+        ["modest", "limited", "restricted", "capped", "constrained", "moderate"],
+        ["substantial", "sizeable", "hefty", "considerable", "notable", "meaningful"],
+        ["specific", "precise", "particular", "exact", "defined", "targeted"],
+        ["well-known", "popular", "favoured", "widely-used", "established", "recognised"],
+        ["frequent", "recurring", "periodic", "routine", "regular", "ongoing", "repeated"],
+        ["unique", "singular", "one-of-a-kind", "uncommon", "individual", "exclusive"],
+        ["dedicated", "committed", "devoted", "loyal", "passionate"],
+        ["elementary", "basic", "foundational", "entry-level", "introductory"],
+        ["approachable", "accessible", "beginner-friendly", "welcoming", "inviting"],
+        ["opening", "starting", "initial", "upfront"],
+        ["large", "significant", "major", "steep", "extensive"],
+        ["rare", "scarce", "elusive", "hard-to-find", "prized", "sought-after"],
+        ["immersive", "engaging", "absorbing", "captivating", "vivid", "gripping"],
+        ["competitive", "intense", "contested", "head-to-head", "fierce", "cutthroat"],
+        ["strategic", "tactical", "calculated", "planned", "methodical"],
+        ["valuable", "worthwhile", "lucrative", "rewarding", "profitable"],
+        ["transparent", "clear", "visible", "traceable", "auditable"],
+    ]
+
+    # Protected phrases where a group word has a non-descriptor meaning.
+    # The dedup will skip any match that is part of one of these phrases.
+    PROTECTED_PHRASES = [
+        # "strong" removed from groups entirely, but protect common collocations
+        "strong password", "strong passwords",
+        # "real" removed from groups entirely, but protect fixed phrases
+        "real money", "real estate", "real-world", "real world", "real value",
+        # "first" removed from groups entirely, but protect compound terms
+        "mobile-first", "first step", "first account",
+        # "open" removed from groups entirely, but protect fixed meanings
+        "open rewards", "open world", "open-world", "open source", "open gaming",
+        # "true" removed from groups entirely
+        "true ownership",
+        # "simple" removed from groups to avoid "simple mining" → wrong replacement
+        "simple mining",
+        # "small" removed from groups entirely
+        "small amount",
+        # "focused" removed from groups to avoid "focused prompt" → wrong replacement
+        "focused prompt",
+    ]
+
+    def post_process_content(self, html_content):
+        """
+        Programmatic post-processing (Pass 3) that deterministically fixes
+        issues the AI model inconsistently handles:
+        1. Removes all em-dashes and en-dashes (Rule 1)
+        2. Removes all semicolons (Rule 11)
+        3. Restores protected phrases corrupted by AI (e.g. "formidable password" → "strong password")
+        4. Deduplicates repeated descriptors (Rule 16)
+
+        Args:
+            html_content (str): The HTML content to post-process
+
+        Returns:
+            str: Content with deterministic fixes applied
+        """
+        # --- Step 1: Remove em-dashes and en-dashes ---
+        # Replace "word—word" with "word. Word" (new sentence)
+        # Handle cases like "ecosystem—you" → "ecosystem. You"
+        html_content = re.sub(
+            r'(\w)—(\w)',
+            lambda m: m.group(1) + '. ' + m.group(2).upper(),
+            html_content
+        )
+        html_content = re.sub(
+            r'(\w)–(\w)',
+            lambda m: m.group(1) + '. ' + m.group(2).upper(),
+            html_content
+        )
+        # Handle spaced dashes: "word — word" or "word – word"
+        html_content = re.sub(
+            r'\s*—\s*',
+            '. ',
+            html_content
+        )
+        html_content = re.sub(
+            r'\s*–\s*',
+            '. ',
+            html_content
+        )
+
+        # --- Step 2: Remove semicolons ---
+        # Replace "; word" with ". Word" (new sentence)
+        html_content = re.sub(
+            r';\s*(\w)',
+            lambda m: '. ' + m.group(1).upper(),
+            html_content
+        )
+
+        # --- Step 3: Restore protected phrases corrupted by AI ---
+        html_content = self._restore_protected_phrases(html_content)
+
+        # --- Step 4: Deduplicate descriptors ---
+        html_content = self._deduplicate_descriptors(html_content)
+
+        return html_content
+
+    def _restore_protected_phrases(self, html_content):
+        """
+        Restore protected phrases that the AI model incorrectly modified.
+        The AI sometimes replaces adjectives in fixed phrases despite being told
+        not to. This deterministically catches and reverses those replacements.
+        E.g. "formidable password" → "strong password",
+             "mobile-earliest" → "mobile-first",
+             "verifiable money" → "real money".
+        """
+        # Map of corrupted phrase → correct phrase
+        # Covers all protected words removed from synonym groups:
+        # strong, real, first, true, open, simple, small, focused
+        corrupted_to_correct = {
+            # "strong password(s)" — AI replaces "strong" with powerful-group synonyms
+            'formidable password': 'strong password',
+            'robust password': 'strong password',
+            'potent password': 'strong password',
+            'mighty password': 'strong password',
+            'dominant password': 'strong password',
+            'formidable passwords': 'strong passwords',
+            'robust passwords': 'strong passwords',
+            'potent passwords': 'strong passwords',
+            'mighty passwords': 'strong passwords',
+            'dominant passwords': 'strong passwords',
+            # "real money" — AI replaces "real" with genuine-group synonyms
+            'verifiable money': 'real money',
+            'authentic money': 'real money',
+            'actual money': 'real money',
+            'proven money': 'real money',
+            'genuine money': 'real money',
+            # "real estate"
+            'verifiable estate': 'real estate',
+            'authentic estate': 'real estate',
+            'actual estate': 'real estate',
+            'proven estate': 'real estate',
+            'genuine estate': 'real estate',
+            # "real value"
+            'verifiable value': 'real value',
+            'authentic value': 'real value',
+            'actual value': 'real value',
+            'proven value': 'real value',
+            # "real-world" / "real world"
+            'verifiable-world': 'real-world',
+            'authentic-world': 'real-world',
+            'actual-world': 'real-world',
+            'proven-world': 'real-world',
+            'genuine-world': 'real-world',
+            'verifiable world': 'real world',
+            'authentic world': 'real world',
+            'actual world': 'real world',
+            'proven world': 'real world',
+            # "mobile-first" — AI replaces "first" with opening-group synonyms
+            'mobile-earliest': 'mobile-first',
+            'mobile-starting': 'mobile-first',
+            'mobile-initial': 'mobile-first',
+            'mobile-opening': 'mobile-first',
+            'mobile-upfront': 'mobile-first',
+            'mobile-beginning': 'mobile-first',
+            # "true ownership" — AI replaces "true" with genuine-group synonyms
+            'authentic ownership': 'true ownership',
+            'genuine ownership': 'true ownership',
+            'actual ownership': 'true ownership',
+            'verifiable ownership': 'true ownership',
+            'proven ownership': 'true ownership',
+            'verified ownership': 'true ownership',
+            # "open rewards/world/source/gaming" — AI replaces "open"
+            'accessible rewards': 'open rewards',
+            'approachable rewards': 'open rewards',
+            'unrestricted rewards': 'open rewards',
+            'accessible gaming': 'open gaming',
+            'approachable gaming': 'open gaming',
+            'unrestricted gaming': 'open gaming',
+            # "simple mining" — AI replaces "simple"
+            'elementary mining': 'simple mining',
+            'foundational mining': 'simple mining',
+            'introductory mining': 'simple mining',
+            'entry-level mining': 'simple mining',
+            'basic mining': 'simple mining',
+            # "small amount" — AI replaces "small"
+            'modest amount': 'small amount',
+            'restricted amount': 'small amount',
+            'constrained amount': 'small amount',
+            'limited amount': 'small amount',
+            'minimal amount': 'small amount',
+            # "focused prompt" — AI replaces "focused"
+            'dedicated prompt': 'focused prompt',
+            'committed prompt': 'focused prompt',
+            'devoted prompt': 'focused prompt',
+            # "first step" — AI replaces "first"
+            'initial step': 'first step',
+            'opening step': 'first step',
+            'starting step': 'first step',
+            # "first account" — AI replaces "first"
+            'initial account': 'first account',
+            'opening account': 'first account',
+            'starting account': 'first account',
+            # Awkward collocations the AI produces
+            'prized prizes': 'exclusive prizes',
+            'prized rewards': 'exclusive rewards',
+        }
+
+        for corrupted, correct in corrupted_to_correct.items():
+            # Case-insensitive search, case-preserving replacement
+            pattern = re.compile(re.escape(corrupted), re.IGNORECASE)
+            html_content = pattern.sub(
+                lambda m, c=correct: (
+                    c[0].upper() + c[1:] if m.group(0)[0].isupper() else c
+                ),
+                html_content
+            )
+
+        return html_content
+
+    def _deduplicate_descriptors(self, html_content):
+        """
+        Scans for repeated descriptors and replaces duplicates with unused
+        synonyms from the same semantic group, while protecting fixed phrases.
+        """
+
+        for group in self.SYNONYM_GROUPS:
+            # Collect all occurrences of any word from this group
+            all_occurrences = []
+
+            for word in group:
+                escaped = re.escape(word)
+                # Word boundary match, case insensitive
+                # Use \b for simple words, custom boundaries for hyphenated
+                if '-' in word:
+                    pattern = re.compile(
+                        r'(?<![a-zA-Z])' + escaped + r'(?![a-zA-Z])',
+                        re.IGNORECASE
+                    )
+                else:
+                    pattern = re.compile(
+                        r'\b' + escaped + r'\b',
+                        re.IGNORECASE
+                    )
+
+                for match in pattern.finditer(html_content):
+                    # Skip if inside an HTML tag (between < and >)
+                    pre_text = html_content[:match.start()]
+                    last_open = pre_text.rfind('<')
+                    last_close = pre_text.rfind('>')
+                    if last_open > last_close:
+                        continue  # Inside an HTML tag, skip
+
+                    # Skip if this match is part of a protected phrase
+                    match_start = match.start()
+                    match_end = match.end()
+                    is_protected = False
+                    for phrase in self.PROTECTED_PHRASES:
+                        # Check a window around the match for the protected phrase
+                        window_start = max(0, match_start - 30)
+                        window_end = min(len(html_content), match_end + 30)
+                        window = html_content[window_start:window_end].lower()
+                        if phrase.lower() in window:
+                            is_protected = True
+                            break
+                    if is_protected:
+                        continue
+
+                    all_occurrences.append({
+                        'start': match_start,
+                        'end': match_end,
+                        'original': match.group(),
+                        'word_lower': word.lower(),
+                    })
+
+            # Sort by position in text
+            all_occurrences.sort(key=lambda x: x['start'])
+
+            if len(all_occurrences) <= 1:
+                continue
+
+            # Keep the first occurrence, replace subsequent ones
+            used_words = {all_occurrences[0]['word_lower']}
+            replacements = []
+
+            for occ in all_occurrences[1:]:
+                if occ['word_lower'] not in used_words:
+                    # This word hasn't been used yet, keep it
+                    used_words.add(occ['word_lower'])
+                    continue
+
+                # This word (or a synonym) already used — find an unused synonym
+                available = [w for w in group if w.lower() not in used_words]
+                if not available:
+                    continue  # All synonyms exhausted, skip
+
+                replacement = available[0]
+                used_words.add(replacement.lower())
+
+                # Match the capitalisation of the original
+                original = occ['original']
+                if original[0].isupper():
+                    replacement = replacement[0].upper() + replacement[1:]
+
+                replacements.append((occ['start'], occ['end'], replacement))
+
+            # Apply replacements in reverse order to preserve string positions
+            for start, end, repl in reversed(replacements):
+                html_content = html_content[:start] + repl + html_content[end:]
+
+        return html_content
 
