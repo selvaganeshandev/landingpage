@@ -9,6 +9,7 @@ from decouple import config
 import logging
 import requests
 import re
+import threading
 
 from .models import GeneratedContent, CMSProvider, ScheduledPublication, ContentComment
 from .serializers import (
@@ -19,7 +20,7 @@ from .serializers import (
 )
 from .claude_content_generator import ClaudeContentGenerator
 from domains.models import Domain
-from django.db import transaction
+from django.db import transaction, connection
 from django.db.models import Count, Q
 from django.utils import timezone as django_timezone
 from datetime import datetime
@@ -98,6 +99,7 @@ def generate_content(request):
             # Domain content guidelines
             'key_messages': validated_data.get('key_messages', ''),
             'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
+            'additional_instructions': validated_data.get('additional_instructions', ''),
             'brand_values': validated_data.get('brand_values', ''),
         }
 
@@ -202,6 +204,7 @@ def generate_outline(request):
             'word_count': validated_data.get('word_count', 1500),
             'key_messages': validated_data.get('key_messages', ''),
             'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
+            'additional_instructions': validated_data.get('additional_instructions', ''),
         }
 
         # Generate outline
@@ -283,6 +286,7 @@ def generate_content_from_outline(request):
             'word_count': validated_data.get('word_count', 1500),
             'key_messages': validated_data.get('key_messages', ''),
             'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
+            'additional_instructions': validated_data.get('additional_instructions', ''),
             'brand_values': validated_data.get('brand_values', ''),
         }
 
@@ -384,6 +388,258 @@ def rewrite_content(request):
         return Response({
             'status': 'error',
             'message': f'Error rewriting content: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============= Humanise Feature =============
+
+def _run_humanise_in_background(content_id):
+    """
+    Background thread function that runs a three-pass humanisation process:
+    Pass 1: Full humanisation with all 19 rules (Claude API)
+    Pass 2: Focused refinement fixing persistent issues (Claude API)
+    Pass 3: Programmatic descriptor deduplication (Python, deterministic)
+
+    Django DB connections are per-thread. We must close the connection
+    when the thread finishes to prevent connection leaks.
+    """
+    try:
+        content_obj = GeneratedContent.objects.get(id=content_id)
+        generator = ClaudeContentGenerator()
+
+        # Pass 1: Full humanisation (all 19 rules)
+        logger.info(f"Humanisation Pass 1 started for content {content_id}")
+        humanised_html = generator.humanise_content(content_obj.pre_humanise_content)
+        logger.info(f"Humanisation Pass 1 completed for content {content_id}")
+
+        # Pass 2: Focused refinement (fixes structural issues)
+        logger.info(f"Humanisation Pass 2 (refinement) started for content {content_id}")
+        refined_html = generator.refine_humanised_content(humanised_html)
+        logger.info(f"Humanisation Pass 2 (refinement) completed for content {content_id}")
+
+        # Pass 3: Programmatic post-processing (deterministic fixes)
+        logger.info(f"Humanisation Pass 3 (post-processing) started for content {content_id}")
+        final_html = generator.post_process_content(refined_html)
+        logger.info(f"Humanisation Pass 3 (post-processing) completed for content {content_id}")
+
+        content_obj.content_html = final_html
+        content_obj.humanise_status = 'completed'
+        content_obj.humanise_completed_at = timezone.now()
+        content_obj.humanise_error = None
+        content_obj.save(update_fields=[
+            'content_html', 'humanise_status',
+            'humanise_completed_at', 'humanise_error', 'modified_at'
+        ])
+
+        logger.info(f"Humanisation (all 3 passes) completed for content {content_id}")
+
+    except Exception as e:
+        logger.error(f"Humanisation failed for content {content_id}: {str(e)}", exc_info=True)
+        try:
+            content_obj = GeneratedContent.objects.get(id=content_id)
+            content_obj.humanise_status = 'failed'
+            content_obj.humanise_error = str(e)[:2000]
+            content_obj.humanise_completed_at = timezone.now()
+            content_obj.save(update_fields=[
+                'humanise_status', 'humanise_error',
+                'humanise_completed_at', 'modified_at'
+            ])
+        except Exception as save_err:
+            logger.error(f"Failed to save humanisation error state: {str(save_err)}")
+    finally:
+        connection.close()
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def humanise_content(request, content_id):
+    """
+    Start the humanisation process for a specific content.
+
+    Saves pre_humanise_content for undo, sets status to 'processing',
+    and kicks off a background thread to run the Claude API call.
+    Returns immediately with status='processing'.
+    """
+    try:
+        content = get_object_or_404(
+            GeneratedContent,
+            id=content_id,
+            domain__organisation=request.user.organisation
+        )
+
+        if content.humanise_status == 'processing':
+            return Response({
+                'status': 'error',
+                'message': 'Humanisation is already in progress'
+            }, status=status.HTTP_409_CONFLICT)
+
+        if not content.content_html or len(content.content_html.strip()) < 50:
+            return Response({
+                'status': 'error',
+                'message': 'Content is too short to humanise'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        content.pre_humanise_content = content.content_html
+        content.humanise_status = 'processing'
+        content.humanise_started_at = timezone.now()
+        content.humanise_completed_at = None
+        content.humanise_error = None
+        content.save(update_fields=[
+            'pre_humanise_content', 'humanise_status',
+            'humanise_started_at', 'humanise_completed_at',
+            'humanise_error', 'modified_at'
+        ])
+
+        thread = threading.Thread(
+            target=_run_humanise_in_background,
+            args=(content.id,),
+            daemon=True
+        )
+        thread.start()
+
+        logger.info(f"Humanisation started for content {content_id}")
+
+        return Response({
+            'status': 'success',
+            'message': 'Humanisation started',
+            'data': {
+                'humanise_status': 'processing',
+                'humanise_started_at': content.humanise_started_at.isoformat()
+            }
+        }, status=status.HTTP_202_ACCEPTED)
+
+    except Http404:
+        return Response({
+            'status': 'error',
+            'message': 'Content not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error starting humanisation: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error starting humanisation: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def humanise_status(request, content_id):
+    """
+    Check the status of the humanisation process.
+
+    Returns the current status. When status is 'completed', also returns
+    the humanised content_html so the frontend can update the editor.
+    Auto-detects stale processing (>10 min timeout) and marks as failed.
+    """
+    try:
+        content = get_object_or_404(
+            GeneratedContent,
+            id=content_id,
+            domain__organisation=request.user.organisation
+        )
+
+        # Timeout detection for stale processing
+        if content.humanise_status == 'processing' and content.humanise_started_at:
+            elapsed = (timezone.now() - content.humanise_started_at).total_seconds()
+            if elapsed > 600:  # 10 minutes timeout (2-pass humanisation)
+                content.humanise_status = 'failed'
+                content.humanise_error = 'Humanisation timed out. Please try again.'
+                content.humanise_completed_at = timezone.now()
+                content.save(update_fields=[
+                    'humanise_status', 'humanise_error',
+                    'humanise_completed_at', 'modified_at'
+                ])
+
+        response_data = {
+            'status': 'success',
+            'data': {
+                'humanise_status': content.humanise_status,
+                'humanise_started_at': content.humanise_started_at.isoformat() if content.humanise_started_at else None,
+                'humanise_completed_at': content.humanise_completed_at.isoformat() if content.humanise_completed_at else None,
+                'humanise_error': content.humanise_error,
+            }
+        }
+
+        if content.humanise_status == 'completed':
+            response_data['data']['content_html'] = content.content_html
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+    except Http404:
+        return Response({
+            'status': 'error',
+            'message': 'Content not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error checking humanise status: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error checking humanise status: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def humanise_undo(request, content_id):
+    """
+    Revert the content to its pre-humanisation state.
+
+    Restores content_html from pre_humanise_content,
+    resets humanise_status to 'idle', and clears pre_humanise_content.
+    """
+    try:
+        content = get_object_or_404(
+            GeneratedContent,
+            id=content_id,
+            domain__organisation=request.user.organisation
+        )
+
+        if not content.pre_humanise_content:
+            return Response({
+                'status': 'error',
+                'message': 'No pre-humanisation content available to restore'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if content.humanise_status == 'processing':
+            return Response({
+                'status': 'error',
+                'message': 'Cannot undo while humanisation is in progress'
+            }, status=status.HTTP_409_CONFLICT)
+
+        restored_html = content.pre_humanise_content
+        content.content_html = restored_html
+        content.humanise_status = 'idle'
+        content.pre_humanise_content = None
+        content.humanise_started_at = None
+        content.humanise_completed_at = None
+        content.humanise_error = None
+        content.save(update_fields=[
+            'content_html', 'humanise_status', 'pre_humanise_content',
+            'humanise_started_at', 'humanise_completed_at',
+            'humanise_error', 'modified_at'
+        ])
+
+        logger.info(f"Humanisation undone for content {content_id}")
+
+        return Response({
+            'status': 'success',
+            'message': 'Content reverted to pre-humanisation state',
+            'data': {
+                'content_html': restored_html,
+                'humanise_status': 'idle'
+            }
+        }, status=status.HTTP_200_OK)
+
+    except Http404:
+        return Response({
+            'status': 'error',
+            'message': 'Content not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error undoing humanisation: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error undoing humanisation: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -507,6 +763,10 @@ def update_generated_content(request, content_id):
             domain__organisation=request.user.organisation
         )
 
+        # Capture state before save for humanise auto-reset
+        old_content_html = content.content_html
+        old_humanise_status = content.humanise_status
+
         # Partial update for PATCH, full update for PUT
         partial = request.method == 'PATCH'
         serializer = GeneratedContentSerializer(content, data=request.data, partial=partial)
@@ -519,6 +779,23 @@ def update_generated_content(request, content_id):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         serializer.save()
+
+        # If content was edited after humanisation, reset humanise state
+        # so stale undo data doesn't persist across page reloads
+        new_content_html = request.data.get('content_html')
+        if (new_content_html is not None
+                and old_humanise_status == 'completed'
+                and new_content_html != old_content_html):
+            content.humanise_status = 'idle'
+            content.pre_humanise_content = None
+            content.humanise_started_at = None
+            content.humanise_completed_at = None
+            content.humanise_error = None
+            content.save(update_fields=[
+                'humanise_status', 'pre_humanise_content',
+                'humanise_started_at', 'humanise_completed_at',
+                'humanise_error', 'modified_at'
+            ])
 
         return Response({
             'status': 'success',

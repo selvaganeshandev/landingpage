@@ -1289,6 +1289,17 @@ export const apiClient = {
     body: JSON.stringify({ text, content_id: contentId }),
   }),
 
+  // Humanise content
+  humaniseContent: (contentId: number) => apiRequest(`/content/${contentId}/humanise/`, {
+    method: 'POST',
+  }),
+
+  getHumaniseStatus: (contentId: number) => apiRequest(`/content/${contentId}/humanise-status/`),
+
+  humaniseUndo: (contentId: number) => apiRequest(`/content/${contentId}/humanise-undo/`, {
+    method: 'POST',
+  }),
+
   // ===== CMS Provider Management =====
   getCMSProviders: (params?: { domain_id?: number }) => {
     const queryParams = params?.domain_id ? `?domain_id=${params.domain_id}` : '';

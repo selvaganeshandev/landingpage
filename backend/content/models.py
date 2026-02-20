@@ -193,6 +193,41 @@ class GeneratedContent(models.Model):
         help_text="Last time AI detection was run"
     )
 
+    # Humanise feature fields
+    HUMANISE_STATUS_CHOICES = [
+        ('idle', 'Idle'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
+
+    humanise_status = models.CharField(
+        max_length=20,
+        choices=HUMANISE_STATUS_CHOICES,
+        default='idle',
+        help_text="Status of the humanisation process"
+    )
+    pre_humanise_content = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Original HTML content before humanisation (for undo)"
+    )
+    humanise_started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the humanisation process started"
+    )
+    humanise_completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the humanisation process completed"
+    )
+    humanise_error = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Error message if humanisation failed"
+    )
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
