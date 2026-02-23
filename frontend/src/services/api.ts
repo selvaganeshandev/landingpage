@@ -450,7 +450,7 @@ export const apiClient = {
     }),
 
   getDomainHealthCheck: (domainId: number) =>
-    apiRequest(`/domains/${domainId}/health-check/`),
+    apiRequest(`/domains/${domainId}/health-check/`, { timeout: 300000 }),  // 5 minutes - health check calls multiple external APIs
 
   getDomainHealthCheckHistory: (domainId: number, limit?: number) => {
     const queryParams = limit ? `?limit=${limit}` : '';

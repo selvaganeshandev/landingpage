@@ -801,7 +801,7 @@ def _fetch_html_content(url, scrapingdog_api_key=None):
                 'url': url,
                 'dynamic': 'false'
             }
-            scrapingdog_response = req.get(scrapingdog_url, params=params, timeout=30)
+            scrapingdog_response = req.get(scrapingdog_url, params=params, timeout=15)
             if scrapingdog_response.status_code == 200:
                 html_content = scrapingdog_response.text
                 logger.info(f"Successfully fetched {url} using ScrapingDog")
@@ -813,7 +813,7 @@ def _fetch_html_content(url, scrapingdog_api_key=None):
     if not html_content:
         response = req.get(url, headers={
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }, timeout=30)
+        }, timeout=15)
         html_content = response.text
         logger.info(f"Successfully fetched {url} using direct request")
 
@@ -1008,133 +1008,102 @@ def _run_website_technical_checks(url, html_content, mobile_psi, desktop_psi):
         'importance': 'medium',
     })
 
+    # --- Checks 8-11: Fetch all URLs in parallel to avoid sequential delays ---
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _quick_get(path, timeout=3):
+        """Quick HTTP GET helper, returns (path, response) or (path, None)."""
+        try:
+            resp = req.get(urljoin(url, path), timeout=timeout, allow_redirects=True,
+                           headers={'User-Agent': USER_AGENT})
+            return (path, resp)
+        except Exception:
+            return (path, None)
+
+    # Fire all URL checks in parallel
+    url_checks_to_make = [
+        '/llms.txt', '/robots.txt',
+        '/sitemap.xml', '/sitemap_index.xml', '/sitemap.xml.gz', '/sitemap.txt',
+        '/sitemap', '/html-sitemap', '/sitemap.html', '/site-map',
+    ]
+
+    url_results = {}
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {pool.submit(_quick_get, p, 3): p for p in url_checks_to_make}
+        for future in as_completed(futures):
+            path, resp = future.result()
+            url_results[path] = resp
+
     # 8. LLM Txt (3 pts)
-    try:
-        llms_url = urljoin(url, '/llms.txt')
-        llms_response = req.get(llms_url, timeout=5)
-        llms_exists = llms_response.status_code == 200
-        checks.append({
-            'name': 'LLM Txt',
-            'category': 'website_technical',
-            'status': 'pass' if llms_exists else 'warning',
-            'score': 3 if llms_exists else 0,
-            'max_score': 3,
-            'message': 'llms.txt found - provides AI crawler guidance' if llms_exists else 'llms.txt not found (recommended for AI optimization)',
-            'importance': 'medium',
-        })
-    except Exception:
-        checks.append({
-            'name': 'LLM Txt',
-            'category': 'website_technical',
-            'status': 'warning',
-            'score': 0,
-            'max_score': 3,
-            'message': 'Unable to check llms.txt',
-            'importance': 'medium',
-        })
+    llms_resp = url_results.get('/llms.txt')
+    llms_exists = llms_resp is not None and llms_resp.status_code == 200
+    checks.append({
+        'name': 'LLM Txt',
+        'category': 'website_technical',
+        'status': 'pass' if llms_exists else 'warning',
+        'score': 3 if llms_exists else 0,
+        'max_score': 3,
+        'message': 'llms.txt found - provides AI crawler guidance' if llms_exists else 'llms.txt not found (recommended for AI optimization)',
+        'importance': 'medium',
+    })
 
     # 9. Robots.txt (4 pts)
-    try:
-        robots_url = urljoin(url, '/robots.txt')
-        robots_response = req.get(robots_url, timeout=5)
-        robots_exists = robots_response.status_code == 200
-        checks.append({
-            'name': 'Robots.txt',
-            'category': 'website_technical',
-            'status': 'pass' if robots_exists else 'warning',
-            'score': 4 if robots_exists else 0,
-            'max_score': 4,
-            'message': 'robots.txt found' if robots_exists else 'robots.txt not found (optional but recommended)',
-            'importance': 'medium',
-        })
-    except Exception:
-        checks.append({
-            'name': 'Robots.txt',
-            'category': 'website_technical',
-            'status': 'warning',
-            'score': 0,
-            'max_score': 4,
-            'message': 'Unable to check robots.txt',
-            'importance': 'medium',
-        })
+    robots_resp = url_results.get('/robots.txt')
+    robots_exists = robots_resp is not None and robots_resp.status_code == 200
+    robots_text = robots_resp.text if robots_exists else ''
+    checks.append({
+        'name': 'Robots.txt',
+        'category': 'website_technical',
+        'status': 'pass' if robots_exists else 'warning',
+        'score': 4 if robots_exists else 0,
+        'max_score': 4,
+        'message': 'robots.txt found' if robots_exists else 'robots.txt not found (optional but recommended)',
+        'importance': 'medium',
+    })
 
-    # 10. XML Sitemap (5 pts)
-    try:
-        sitemap_found = False
-        sitemap_location = None
-        sitemap_paths = [
-            '/sitemap.xml', '/sitemap_index.xml', '/sitemap.xml.gz',
-            '/sitemap_index.xml.gz', '/sitemap.txt', '/sitemap/',
-            '/sitemaps/sitemap.xml',
-        ]
+    # 10. XML Sitemap (5 pts) — check robots.txt directives first, then parallel results
+    sitemap_found = False
+    sitemap_location = None
+    if robots_exists:
+        for line in robots_text.split('\n'):
+            line = line.strip()
+            if line.lower().startswith('sitemap:'):
+                sitemap_from_robots = line.split(':', 1)[1].strip()
+                if sitemap_from_robots:
+                    sitemap_found = True
+                    sitemap_location = f"robots.txt ({sitemap_from_robots})"
+                    break
 
-        # Check robots.txt for Sitemap directives first
-        try:
-            robots_url = urljoin(url, '/robots.txt')
-            robots_resp = req.get(robots_url, timeout=5)
-            if robots_resp.status_code == 200:
-                for line in robots_resp.text.split('\n'):
-                    line = line.strip()
-                    if line.lower().startswith('sitemap:'):
-                        sitemap_from_robots = line.split(':', 1)[1].strip()
-                        if sitemap_from_robots:
-                            sitemap_found = True
-                            sitemap_location = f"robots.txt ({sitemap_from_robots})"
-                            break
-        except Exception:
-            pass
+    if not sitemap_found:
+        for path in ['/sitemap.xml', '/sitemap_index.xml', '/sitemap.xml.gz', '/sitemap.txt']:
+            resp = url_results.get(path)
+            if resp is not None and resp.status_code == 200:
+                content = resp.text[:500].lower()
+                if '<?xml' in content or '<urlset' in content or '<sitemapindex' in content or 'http' in content:
+                    sitemap_found = True
+                    sitemap_location = path
+                    break
 
-        if not sitemap_found:
-            headers = {'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'}
-            for path in sitemap_paths:
-                try:
-                    sitemap_url = urljoin(url, path)
-                    sitemap_response = req.get(sitemap_url, timeout=5, allow_redirects=True, headers=headers)
-                    if sitemap_response.status_code == 200:
-                        content = sitemap_response.text[:500].lower()
-                        if ('<?xml' in content or '<urlset' in content or
-                                '<sitemapindex' in content or 'http' in content):
-                            sitemap_found = True
-                            sitemap_location = path
-                            break
-                except Exception:
-                    continue
+    checks.append({
+        'name': 'XML Sitemap',
+        'category': 'website_technical',
+        'status': 'pass' if sitemap_found else 'fail',
+        'score': 5 if sitemap_found else 0,
+        'max_score': 5,
+        'message': f'Sitemap found at {sitemap_location}' if sitemap_found else 'No XML sitemap found',
+        'importance': 'high',
+    })
 
-        checks.append({
-            'name': 'XML Sitemap',
-            'category': 'website_technical',
-            'status': 'pass' if sitemap_found else 'fail',
-            'score': 5 if sitemap_found else 0,
-            'max_score': 5,
-            'message': f'Sitemap found at {sitemap_location}' if sitemap_found else 'No XML sitemap found',
-            'importance': 'high',
-        })
-    except Exception as e:
-        checks.append({
-            'name': 'XML Sitemap',
-            'category': 'website_technical',
-            'status': 'fail',
-            'score': 0,
-            'max_score': 5,
-            'message': f'Unable to check sitemap: {str(e)}',
-            'importance': 'high',
-        })
-
-    # 11. HTML Sitemap (5 pts)
+    # 11. HTML Sitemap (5 pts) — use parallel results
     html_sitemap_found = False
     html_sitemap_location = None
     for path in ['/sitemap', '/html-sitemap', '/sitemap.html', '/site-map']:
-        try:
-            resp = req.get(urljoin(url, path), timeout=5, allow_redirects=True,
-                           headers={'User-Agent': USER_AGENT})
-            if resp.status_code == 200 and '<html' in resp.text[:1000].lower():
-                # Verify it's an HTML page (not XML sitemap)
-                if '<?xml' not in resp.text[:500].lower() and '<urlset' not in resp.text[:500].lower():
-                    html_sitemap_found = True
-                    html_sitemap_location = path
-                    break
-        except Exception:
-            continue
+        resp = url_results.get(path)
+        if resp is not None and resp.status_code == 200 and '<html' in resp.text[:1000].lower():
+            if '<?xml' not in resp.text[:500].lower() and '<urlset' not in resp.text[:500].lower():
+                html_sitemap_found = True
+                html_sitemap_location = path
+                break
 
     checks.append({
         'name': 'HTML Sitemap',
@@ -1159,26 +1128,67 @@ def _run_on_page_content_checks(url, html_content, scrapingdog_api_key=None):
     from urllib.parse import urljoin, urlparse
     import re
 
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     checks = []
     USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
+    def _quick_get(target_url, timeout=3):
+        """Quick HTTP GET, returns response or None."""
+        try:
+            return req.get(target_url, timeout=timeout, allow_redirects=True,
+                           headers={'User-Agent': USER_AGENT})
+        except Exception:
+            return None
+
+    # --- Parallel Phase: Fire all HTTP checks at once ---
+    blog_paths = ['/blog', '/blog/', '/news', '/news/', '/articles', '/articles/',
+                  '/insights', '/insights/', '/resources', '/resources/']
+
+    # Collect all URLs to check in parallel
+    parallel_tasks = {}
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        # Indexed pages via ScrapingDog
+        if scrapingdog_api_key:
+            parsed = urlparse(url)
+            domain_name = parsed.netloc
+            search_url = f"https://www.google.com/search?q=site:{domain_name}"
+            parallel_tasks['indexed'] = pool.submit(
+                lambda: req.get("https://api.scrapingdog.com/scrape",
+                                params={'api_key': scrapingdog_api_key, 'url': search_url, 'dynamic': 'false'},
+                                timeout=10)
+            )
+
+        # Blog path checks
+        for path in blog_paths:
+            parallel_tasks[f'blog:{path}'] = pool.submit(_quick_get, urljoin(url, path), 3)
+
+        # Inner page links from HTML (for content check) — extract links first
+        inner_links = re.findall(
+            r'href=["\'](/(?:products?|category|categories|shop|services?|collections?)/[^"\'#?]+)["\']',
+            html_content, re.IGNORECASE
+        )
+        sample_links = list(set(inner_links))[:3]
+        for link in sample_links:
+            parallel_tasks[f'inner:{link}'] = pool.submit(_quick_get, urljoin(url, link), 5)
+
+        # Wait for all results
+        results = {}
+        for key, future in parallel_tasks.items():
+            try:
+                results[key] = future.result(timeout=15)
+            except Exception:
+                results[key] = None
+
     # 1. Total No. of Indexed Pages (5 pts)
     indexed_count = None
-    try:
-        parsed = urlparse(url)
-        domain_name = parsed.netloc
-        search_url = f"https://www.google.com/search?q=site:{domain_name}"
-        if scrapingdog_api_key:
-            params = {'api_key': scrapingdog_api_key, 'url': search_url, 'dynamic': 'false'}
-            resp = req.get("https://api.scrapingdog.com/scrape", params=params, timeout=15)
-            if resp.status_code == 200:
-                result_match = re.search(r'About\s+([\d,]+)\s+results', resp.text)
-                if not result_match:
-                    result_match = re.search(r'([\d,]+)\s+results', resp.text)
-                if result_match:
-                    indexed_count = int(result_match.group(1).replace(',', ''))
-    except Exception as e:
-        logger.warning(f"Error checking indexed pages: {e}")
+    indexed_resp = results.get('indexed')
+    if indexed_resp is not None and indexed_resp.status_code == 200:
+        result_match = re.search(r'About\s+([\d,]+)\s+results', indexed_resp.text)
+        if not result_match:
+            result_match = re.search(r'([\d,]+)\s+results', indexed_resp.text)
+        if result_match:
+            indexed_count = int(result_match.group(1).replace(',', ''))
 
     if indexed_count is not None:
         idx_score = 5 if indexed_count >= 50 else (3 if indexed_count >= 10 else 1)
@@ -1199,20 +1209,17 @@ def _run_on_page_content_checks(url, html_content, scrapingdog_api_key=None):
         'importance': 'medium',
     })
 
-    # 2. Blog Presence (7 pts)
+    # 2. Blog Presence (7 pts) — use parallel results
     blog_found = False
     blog_path = None
-    for path in ['/blog', '/blog/', '/news', '/news/', '/articles', '/articles/',
-                 '/insights', '/insights/', '/resources', '/resources/']:
-        try:
-            resp = req.get(urljoin(url, path), timeout=5, allow_redirects=True,
-                           headers={'User-Agent': USER_AGENT})
-            if resp.status_code == 200 and len(resp.text) > 1000:
-                blog_found = True
-                blog_path = path
-                break
-        except Exception:
-            continue
+    blog_resp_text = ''
+    for path in blog_paths:
+        resp = results.get(f'blog:{path}')
+        if resp is not None and resp.status_code == 200 and len(resp.text) > 1000:
+            blog_found = True
+            blog_path = path
+            blog_resp_text = resp.text
+            break
 
     checks.append({
         'name': 'Blog Presence',
@@ -1224,36 +1231,29 @@ def _run_on_page_content_checks(url, html_content, scrapingdog_api_key=None):
         'importance': 'high',
     })
 
-    # 3. Frequency of Blog on Main Domain (7 pts)
+    # 3. Frequency of Blog on Main Domain (7 pts) — reuse blog response from above
     blog_frequency_score = 0
     blog_freq_status = 'fail'
     blog_freq_msg = 'Could not determine blog posting frequency'
-    if blog_found:
-        try:
-            blog_resp = req.get(urljoin(url, blog_path), timeout=10,
-                                headers={'User-Agent': USER_AGENT})
-            if blog_resp.status_code == 200:
-                # Look for date patterns in HTML
-                date_patterns = re.findall(
-                    r'(\d{4}-\d{2}-\d{2})|(\w+\s+\d{1,2},?\s*\d{4})',
-                    blog_resp.text
-                )
-                if date_patterns:
-                    recent_count = len(date_patterns)
-                    if recent_count >= 8:
-                        blog_frequency_score = 7
-                        blog_freq_status = 'pass'
-                        blog_freq_msg = f'Active blog with ~{recent_count} recent posts detected'
-                    elif recent_count >= 3:
-                        blog_frequency_score = 4
-                        blog_freq_status = 'warning'
-                        blog_freq_msg = f'Blog moderately active with ~{recent_count} recent posts'
-                    else:
-                        blog_frequency_score = 2
-                        blog_freq_status = 'warning'
-                        blog_freq_msg = f'Blog appears infrequently updated ({recent_count} posts found)'
-        except Exception:
-            pass
+    if blog_found and blog_resp_text:
+        date_patterns = re.findall(
+            r'(\d{4}-\d{2}-\d{2})|(\w+\s+\d{1,2},?\s*\d{4})',
+            blog_resp_text
+        )
+        if date_patterns:
+            recent_count = len(date_patterns)
+            if recent_count >= 8:
+                blog_frequency_score = 7
+                blog_freq_status = 'pass'
+                blog_freq_msg = f'Active blog with ~{recent_count} recent posts detected'
+            elif recent_count >= 3:
+                blog_frequency_score = 4
+                blog_freq_status = 'warning'
+                blog_freq_msg = f'Blog moderately active with ~{recent_count} recent posts'
+            else:
+                blog_frequency_score = 2
+                blog_freq_status = 'warning'
+                blog_freq_msg = f'Blog appears infrequently updated ({recent_count} posts found)'
     elif not blog_found:
         blog_freq_msg = 'No blog found to check frequency'
 
@@ -1305,44 +1305,32 @@ def _run_on_page_content_checks(url, html_content, scrapingdog_api_key=None):
         'importance': 'high',
     })
 
-    # 5. Content on Category/Product Page (7 pts)
+    # 5. Content on Category/Product Page (7 pts) — use parallel results
     content_score = 0
     content_status = 'warning'
     content_msg = 'No product/category pages detected in navigation'
-    try:
-        inner_links = re.findall(
-            r'href=["\'](/(?:products?|category|categories|shop|services?|collections?)/[^"\'#?]+)["\']',
-            html_content, re.IGNORECASE
-        )
-        if inner_links:
-            sample_links = list(set(inner_links))[:3]
-            word_counts = []
-            for link in sample_links:
-                try:
-                    page_url = urljoin(url, link)
-                    page_resp = req.get(page_url, timeout=10, headers={'User-Agent': USER_AGENT})
-                    if page_resp.status_code == 200:
-                        text = re.sub(r'<[^>]+>', ' ', page_resp.text)
-                        text = re.sub(r'\s+', ' ', text).strip()
-                        word_counts.append(len(text.split()))
-                except Exception:
-                    continue
-            if word_counts:
-                avg_words = sum(word_counts) / len(word_counts)
-                if avg_words >= 300:
-                    content_score = 7
-                    content_status = 'pass'
-                    content_msg = f'Good content depth on inner pages (avg ~{int(avg_words)} words across {len(word_counts)} sampled pages)'
-                elif avg_words >= 100:
-                    content_score = 4
-                    content_status = 'warning'
-                    content_msg = f'Moderate content on inner pages (avg ~{int(avg_words)} words). Consider adding more descriptive content.'
-                else:
-                    content_score = 1
-                    content_status = 'fail'
-                    content_msg = f'Thin content on inner pages (avg ~{int(avg_words)} words). Add more descriptive content.'
-    except Exception:
-        pass
+    if sample_links:
+        word_counts = []
+        for link in sample_links:
+            resp = results.get(f'inner:{link}')
+            if resp is not None and resp.status_code == 200:
+                text = re.sub(r'<[^>]+>', ' ', resp.text)
+                text = re.sub(r'\s+', ' ', text).strip()
+                word_counts.append(len(text.split()))
+        if word_counts:
+            avg_words = sum(word_counts) / len(word_counts)
+            if avg_words >= 300:
+                content_score = 7
+                content_status = 'pass'
+                content_msg = f'Good content depth on inner pages (avg ~{int(avg_words)} words across {len(word_counts)} sampled pages)'
+            elif avg_words >= 100:
+                content_score = 4
+                content_status = 'warning'
+                content_msg = f'Moderate content on inner pages (avg ~{int(avg_words)} words). Consider adding more descriptive content.'
+            else:
+                content_score = 1
+                content_status = 'fail'
+                content_msg = f'Thin content on inner pages (avg ~{int(avg_words)} words). Add more descriptive content.'
 
     checks.append({
         'name': 'Content on Category/Product Page',
