@@ -1593,21 +1593,36 @@ def _run_website_authority_checks(url, brand_name, scrapingdog_api_key=None):
     - Google Search via ScrapingDog: Brand mentions, citations
     - CAT A/B/C: Categorized by DA ranges (A: DA>=70, B: DA 40-69, C: DA<40)
     """
-    import time
+    from concurrent.futures import ThreadPoolExecutor
 
     checks = []
 
-    # Fetch Moz data (with small delay between calls to respect rate limits)
-    moz_metrics = _fetch_moz_url_metrics(url)
-    time.sleep(1)
-    moz_links = _fetch_moz_links(url, limit=50)
-    time.sleep(1)
-    moz_anchors = _fetch_moz_anchor_text(url, limit=50)
+    # Fetch Moz data + brand mentions in parallel
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_metrics = executor.submit(_fetch_moz_url_metrics, url)
+        future_links = executor.submit(_fetch_moz_links, url, 50)
+        future_anchors = executor.submit(_fetch_moz_anchor_text, url, 50)
+        future_brand = executor.submit(_search_brand_mentions, brand_name, url, scrapingdog_api_key)
 
-    # Fetch brand mentions via Google search
-    mentions_count, citations_count = _search_brand_mentions(
-        brand_name, url, scrapingdog_api_key
-    )
+        try:
+            moz_metrics = future_metrics.result(timeout=45)
+        except Exception:
+            moz_metrics = None
+
+        try:
+            moz_links = future_links.result(timeout=45)
+        except Exception:
+            moz_links = None
+
+        try:
+            moz_anchors = future_anchors.result(timeout=45)
+        except Exception:
+            moz_anchors = None
+
+        try:
+            mentions_count, citations_count = future_brand.result(timeout=45)
+        except Exception:
+            mentions_count, citations_count = 0, 0
 
     moz_available = moz_metrics is not None
 
@@ -1927,6 +1942,7 @@ def domain_health_check(request, domain_id):
     Uses Google PageSpeed Insights API for performance metrics and ScrapingDog for web scraping.
     """
     import requests as req
+    from concurrent.futures import ThreadPoolExecutor
 
     try:
         domain = get_object_or_404(Domain, id=domain_id)
@@ -1938,24 +1954,51 @@ def domain_health_check(request, domain_id):
 
         scrapingdog_api_key = getattr(settings, "SCRAPINGDOG_API_KEY", None)
 
-        # Step 1: Fetch HTML content
-        try:
-            html_content, load_time = _fetch_html_content(url, scrapingdog_api_key)
-        except req.RequestException as e:
-            logger.error(f"Error fetching domain {url}: {str(e)}")
-            return Response({
-                'success': False,
-                'error': f'Unable to access website: {str(e)}'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Phase 1: Fetch HTML + PageSpeed data in parallel
+        html_content = ''
+        load_time = 0
+        mobile_psi = None
+        desktop_psi = None
 
-        # Step 2: Fetch PageSpeed data (mobile + desktop)
-        mobile_psi = _fetch_pagespeed_data(url, strategy='mobile')
-        desktop_psi = _fetch_pagespeed_data(url, strategy='desktop')
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_html = executor.submit(_fetch_html_content, url, scrapingdog_api_key)
+            future_mobile = executor.submit(_fetch_pagespeed_data, url, 'mobile')
+            future_desktop = executor.submit(_fetch_pagespeed_data, url, 'desktop')
 
-        # Step 3: Run category checks
-        technical_checks = _run_website_technical_checks(url, html_content, mobile_psi, desktop_psi)
-        content_checks = _run_on_page_content_checks(url, html_content, scrapingdog_api_key)
-        authority_checks = _run_website_authority_checks(url, domain.name, scrapingdog_api_key)
+            try:
+                html_content, load_time = future_html.result(timeout=60)
+            except Exception as e:
+                logger.error(f"Error fetching domain {url}: {str(e)}")
+                return Response({
+                    'success': False,
+                    'error': f'Unable to access website: {str(e)}'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            try:
+                mobile_psi = future_mobile.result(timeout=90)
+            except Exception:
+                logger.warning(f"PageSpeed mobile timed out for {url}")
+
+            try:
+                desktop_psi = future_desktop.result(timeout=90)
+            except Exception:
+                logger.warning(f"PageSpeed desktop timed out for {url}")
+
+        # Phase 2: Run all 3 category checks in parallel
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_technical = executor.submit(
+                _run_website_technical_checks, url, html_content, mobile_psi, desktop_psi
+            )
+            future_content = executor.submit(
+                _run_on_page_content_checks, url, html_content, scrapingdog_api_key
+            )
+            future_authority = executor.submit(
+                _run_website_authority_checks, url, domain.name, scrapingdog_api_key
+            )
+
+            technical_checks = future_technical.result(timeout=120)
+            content_checks = future_content.result(timeout=120)
+            authority_checks = future_authority.result(timeout=120)
 
         # Step 4: Build categories with summaries
         def _build_category(name, key, checks_list):
