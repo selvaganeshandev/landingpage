@@ -245,6 +245,13 @@ GOOGLE_GEMINI_API_KEY = config('GOOGLE_GEMINI_API_KEY', default=None)
 # ScrapingDog API Configuration (for web crawling)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
 
+# Google PageSpeed Insights API Configuration (for Core Web Vitals & Performance)
+GOOGLE_PAGESPEED_API_KEY = config('GOOGLE_PAGESPEED_API_KEY', default=None)
+
+# Moz API Configuration (for Website Authority - free tier: 2,500 rows/month)
+MOZ_ACCESS_ID = config('MOZ_ACCESS_ID', default=None)
+MOZ_SECRET_KEY = config('MOZ_SECRET_KEY', default=None)
+
 # Google OAuth Configuration
 GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='1080254283876-0o3ur4sr7ii1kh4ugaij4c7n1ptibn4j.apps.googleusercontent.com')
 GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='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')

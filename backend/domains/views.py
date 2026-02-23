@@ -729,18 +729,1204 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _fetch_pagespeed_data(url, strategy='mobile'):
+    """
+    Call Google PageSpeed Insights API.
+    Returns dict with score, CWV metrics, speed_index, or None on failure.
+    """
+    import requests as req
+    api_key = getattr(settings, 'GOOGLE_PAGESPEED_API_KEY', None)
+    if not api_key:
+        logger.warning("GOOGLE_PAGESPEED_API_KEY not configured")
+        return None
+
+    psi_url = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed'
+    params = {
+        'url': url,
+        'strategy': strategy,
+        'key': api_key,
+        'category': 'performance'
+    }
+    try:
+        resp = req.get(psi_url, params=params, timeout=60)
+        if resp.status_code == 200:
+            data = resp.json()
+            lighthouse = data.get('lighthouseResult', {})
+            audits = lighthouse.get('audits', {})
+            categories = lighthouse.get('categories', {})
+
+            performance_score = categories.get('performance', {}).get('score', 0)
+            performance_score_100 = int(performance_score * 100) if performance_score else 0
+
+            lcp = audits.get('largest-contentful-paint', {}).get('numericValue', 0) / 1000
+            fid = audits.get('max-potential-fid', {}).get('numericValue', 0)
+            cls_val = audits.get('cumulative-layout-shift', {}).get('numericValue', 0)
+            speed_index = audits.get('speed-index', {}).get('numericValue', 0) / 1000
+            fcp = audits.get('first-contentful-paint', {}).get('numericValue', 0) / 1000
+            tbt = audits.get('total-blocking-time', {}).get('numericValue', 0)
+
+            return {
+                'score': performance_score_100,
+                'lcp': round(lcp, 2),
+                'fid': round(fid, 0),
+                'cls': round(cls_val, 3),
+                'speed_index': round(speed_index, 2),
+                'fcp': round(fcp, 2),
+                'tbt': round(tbt, 0),
+            }
+        else:
+            logger.warning(f"PageSpeed API returned status {resp.status_code} for {strategy}: {resp.text[:200]}")
+            return None
+    except Exception as e:
+        logger.warning(f"PageSpeed API error ({strategy}): {e}")
+        return None
+
+
+def _fetch_html_content(url, scrapingdog_api_key=None):
+    """
+    Fetch HTML via ScrapingDog with direct-request fallback.
+    Returns (html_content, load_time) tuple. Raises on complete failure.
+    """
+    import requests as req
+    import time
+
+    start_time = time.time()
+    html_content = None
+
+    if scrapingdog_api_key:
+        try:
+            scrapingdog_url = "https://api.scrapingdog.com/scrape"
+            params = {
+                'api_key': scrapingdog_api_key,
+                'url': url,
+                'dynamic': 'false'
+            }
+            scrapingdog_response = req.get(scrapingdog_url, params=params, timeout=30)
+            if scrapingdog_response.status_code == 200:
+                html_content = scrapingdog_response.text
+                logger.info(f"Successfully fetched {url} using ScrapingDog")
+            else:
+                logger.warning(f"ScrapingDog returned status {scrapingdog_response.status_code}. Falling back to direct request.")
+        except Exception as sd_error:
+            logger.warning(f"ScrapingDog error: {str(sd_error)}. Falling back to direct request.")
+
+    if not html_content:
+        response = req.get(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }, timeout=30)
+        html_content = response.text
+        logger.info(f"Successfully fetched {url} using direct request")
+
+    load_time = time.time() - start_time
+    return html_content, load_time
+
+
+def _run_website_technical_checks(url, html_content, mobile_psi, desktop_psi):
+    """
+    Run all 11 Website Technical checks.
+    Returns list of check dicts with category='website_technical'.
+    Total max: 60 points.
+    """
+    import requests as req
+    from urllib.parse import urljoin
+    import re
+
+    checks = []
+    USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
+    # 1. Mobile Speed Index (5 pts)
+    if mobile_psi:
+        si = mobile_psi['speed_index']
+        si_score = 5 if si < 3.4 else (3 if si < 5.8 else 0)
+        si_status = 'pass' if si < 3.4 else ('warning' if si < 5.8 else 'fail')
+        checks.append({
+            'name': 'Mobile Speed Index',
+            'category': 'website_technical',
+            'status': si_status,
+            'score': si_score,
+            'max_score': 5,
+            'message': f'Mobile Speed Index: {si}s' + (' (Good)' if si < 3.4 else ' (Needs Improvement)' if si < 5.8 else ' (Poor)'),
+            'importance': 'high',
+        })
+    else:
+        checks.append({
+            'name': 'Mobile Speed Index',
+            'category': 'website_technical',
+            'status': 'warning',
+            'score': 0,
+            'max_score': 5,
+            'message': 'Could not fetch PageSpeed data. Ensure GOOGLE_PAGESPEED_API_KEY is configured.',
+            'importance': 'high',
+        })
+
+    # 2. Core Web Vital Assessment (Mobile) (8 pts)
+    if mobile_psi:
+        lcp_ok = mobile_psi['lcp'] <= 2.5
+        fid_ok = mobile_psi['fid'] <= 100
+        cls_ok = mobile_psi['cls'] <= 0.1
+        cwv_passed = sum([lcp_ok, fid_ok, cls_ok])
+        cwv_score = int(8 * (cwv_passed / 3))
+        cwv_status = 'pass' if cwv_passed == 3 else ('warning' if cwv_passed >= 2 else 'fail')
+        msg_parts = [
+            f"LCP: {mobile_psi['lcp']}s ({'Good' if lcp_ok else 'Poor'})",
+            f"FID: {int(mobile_psi['fid'])}ms ({'Good' if fid_ok else 'Poor'})",
+            f"CLS: {mobile_psi['cls']} ({'Good' if cls_ok else 'Poor'})",
+        ]
+        checks.append({
+            'name': 'Core Web Vital Assessment (Mobile)',
+            'category': 'website_technical',
+            'status': cwv_status,
+            'score': cwv_score,
+            'max_score': 8,
+            'message': ' | '.join(msg_parts),
+            'importance': 'high',
+        })
+    else:
+        checks.append({
+            'name': 'Core Web Vital Assessment (Mobile)',
+            'category': 'website_technical',
+            'status': 'warning',
+            'score': 0,
+            'max_score': 8,
+            'message': 'Could not fetch PageSpeed data for mobile CWV assessment.',
+            'importance': 'high',
+        })
+
+    # 3. Core Web Vital Assessment (Desktop) (7 pts)
+    if desktop_psi:
+        lcp_ok = desktop_psi['lcp'] <= 2.5
+        fid_ok = desktop_psi['fid'] <= 100
+        cls_ok = desktop_psi['cls'] <= 0.1
+        cwv_passed = sum([lcp_ok, fid_ok, cls_ok])
+        cwv_score = int(7 * (cwv_passed / 3))
+        cwv_status = 'pass' if cwv_passed == 3 else ('warning' if cwv_passed >= 2 else 'fail')
+        msg_parts = [
+            f"LCP: {desktop_psi['lcp']}s ({'Good' if lcp_ok else 'Poor'})",
+            f"FID: {int(desktop_psi['fid'])}ms ({'Good' if fid_ok else 'Poor'})",
+            f"CLS: {desktop_psi['cls']} ({'Good' if cls_ok else 'Poor'})",
+        ]
+        checks.append({
+            'name': 'Core Web Vital Assessment (Desktop)',
+            'category': 'website_technical',
+            'status': cwv_status,
+            'score': cwv_score,
+            'max_score': 7,
+            'message': ' | '.join(msg_parts),
+            'importance': 'high',
+        })
+    else:
+        checks.append({
+            'name': 'Core Web Vital Assessment (Desktop)',
+            'category': 'website_technical',
+            'status': 'warning',
+            'score': 0,
+            'max_score': 7,
+            'message': 'Could not fetch PageSpeed data for desktop CWV assessment.',
+            'importance': 'high',
+        })
+
+    # 4. Mobile Score (Out of 100) (5 pts)
+    if mobile_psi:
+        ms = mobile_psi['score']
+        ms_score = 5 if ms >= 90 else (3 if ms >= 50 else 0)
+        ms_status = 'pass' if ms >= 90 else ('warning' if ms >= 50 else 'fail')
+        checks.append({
+            'name': 'Mobile Score (Out of 100)',
+            'category': 'website_technical',
+            'status': ms_status,
+            'score': ms_score,
+            'max_score': 5,
+            'message': f'Mobile Performance Score: {ms}/100',
+            'importance': 'high',
+        })
+    else:
+        checks.append({
+            'name': 'Mobile Score (Out of 100)',
+            'category': 'website_technical',
+            'status': 'warning',
+            'score': 0,
+            'max_score': 5,
+            'message': 'Could not fetch mobile performance score.',
+            'importance': 'high',
+        })
+
+    # 5. Desktop Score (Out of 100) (5 pts)
+    if desktop_psi:
+        ds = desktop_psi['score']
+        ds_score = 5 if ds >= 90 else (3 if ds >= 50 else 0)
+        ds_status = 'pass' if ds >= 90 else ('warning' if ds >= 50 else 'fail')
+        checks.append({
+            'name': 'Desktop Score (Out of 100)',
+            'category': 'website_technical',
+            'status': ds_status,
+            'score': ds_score,
+            'max_score': 5,
+            'message': f'Desktop Performance Score: {ds}/100',
+            'importance': 'high',
+        })
+    else:
+        checks.append({
+            'name': 'Desktop Score (Out of 100)',
+            'category': 'website_technical',
+            'status': 'warning',
+            'score': 0,
+            'max_score': 5,
+            'message': 'Could not fetch desktop performance score.',
+            'importance': 'high',
+        })
+
+    # 6. Schema Tag (8 pts)
+    schema_scripts = re.findall(r'<script\s+type=["\']application/ld\+json["\'][^>]*>.*?</script>', html_content, re.IGNORECASE | re.DOTALL)
+    checks.append({
+        'name': 'Schema Tag',
+        'category': 'website_technical',
+        'status': 'pass' if len(schema_scripts) > 0 else 'fail',
+        'score': 8 if len(schema_scripts) > 0 else 0,
+        'max_score': 8,
+        'message': f'Found {len(schema_scripts)} structured data (Schema.org) blocks' if schema_scripts else 'No structured data (Schema.org) found',
+        'importance': 'high',
+    })
+
+    # 7. Canonical Tags (5 pts)
+    canonical_match = re.search(
+        r'<link\s+[^>]*rel=["\']canonical["\'][^>]*href=["\']([^"\']+)["\']',
+        html_content, re.IGNORECASE
+    )
+    if not canonical_match:
+        canonical_match = re.search(
+            r'<link\s+[^>]*href=["\']([^"\']+)["\'][^>]*rel=["\']canonical["\']',
+            html_content, re.IGNORECASE
+        )
+    canonical_url = canonical_match.group(1) if canonical_match else None
+    checks.append({
+        'name': 'Canonical Tags',
+        'category': 'website_technical',
+        'status': 'pass' if canonical_url else 'fail',
+        'score': 5 if canonical_url else 0,
+        'max_score': 5,
+        'message': f'Canonical tag found: {canonical_url}' if canonical_url else 'No canonical tag found',
+        'importance': 'medium',
+    })
+
+    # 8. LLM Txt (3 pts)
+    try:
+        llms_url = urljoin(url, '/llms.txt')
+        llms_response = req.get(llms_url, timeout=5)
+        llms_exists = llms_response.status_code == 200
+        checks.append({
+            'name': 'LLM Txt',
+            'category': 'website_technical',
+            'status': 'pass' if llms_exists else 'warning',
+            'score': 3 if llms_exists else 0,
+            'max_score': 3,
+            'message': 'llms.txt found - provides AI crawler guidance' if llms_exists else 'llms.txt not found (recommended for AI optimization)',
+            'importance': 'medium',
+        })
+    except Exception:
+        checks.append({
+            'name': 'LLM Txt',
+            'category': 'website_technical',
+            'status': 'warning',
+            'score': 0,
+            'max_score': 3,
+            'message': 'Unable to check llms.txt',
+            'importance': 'medium',
+        })
+
+    # 9. Robots.txt (4 pts)
+    try:
+        robots_url = urljoin(url, '/robots.txt')
+        robots_response = req.get(robots_url, timeout=5)
+        robots_exists = robots_response.status_code == 200
+        checks.append({
+            'name': 'Robots.txt',
+            'category': 'website_technical',
+            'status': 'pass' if robots_exists else 'warning',
+            'score': 4 if robots_exists else 0,
+            'max_score': 4,
+            'message': 'robots.txt found' if robots_exists else 'robots.txt not found (optional but recommended)',
+            'importance': 'medium',
+        })
+    except Exception:
+        checks.append({
+            'name': 'Robots.txt',
+            'category': 'website_technical',
+            'status': 'warning',
+            'score': 0,
+            'max_score': 4,
+            'message': 'Unable to check robots.txt',
+            'importance': 'medium',
+        })
+
+    # 10. XML Sitemap (5 pts)
+    try:
+        sitemap_found = False
+        sitemap_location = None
+        sitemap_paths = [
+            '/sitemap.xml', '/sitemap_index.xml', '/sitemap.xml.gz',
+            '/sitemap_index.xml.gz', '/sitemap.txt', '/sitemap/',
+            '/sitemaps/sitemap.xml',
+        ]
+
+        # Check robots.txt for Sitemap directives first
+        try:
+            robots_url = urljoin(url, '/robots.txt')
+            robots_resp = req.get(robots_url, timeout=5)
+            if robots_resp.status_code == 200:
+                for line in robots_resp.text.split('\n'):
+                    line = line.strip()
+                    if line.lower().startswith('sitemap:'):
+                        sitemap_from_robots = line.split(':', 1)[1].strip()
+                        if sitemap_from_robots:
+                            sitemap_found = True
+                            sitemap_location = f"robots.txt ({sitemap_from_robots})"
+                            break
+        except Exception:
+            pass
+
+        if not sitemap_found:
+            headers = {'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'}
+            for path in sitemap_paths:
+                try:
+                    sitemap_url = urljoin(url, path)
+                    sitemap_response = req.get(sitemap_url, timeout=5, allow_redirects=True, headers=headers)
+                    if sitemap_response.status_code == 200:
+                        content = sitemap_response.text[:500].lower()
+                        if ('<?xml' in content or '<urlset' in content or
+                                '<sitemapindex' in content or 'http' in content):
+                            sitemap_found = True
+                            sitemap_location = path
+                            break
+                except Exception:
+                    continue
+
+        checks.append({
+            'name': 'XML Sitemap',
+            'category': 'website_technical',
+            'status': 'pass' if sitemap_found else 'fail',
+            'score': 5 if sitemap_found else 0,
+            'max_score': 5,
+            'message': f'Sitemap found at {sitemap_location}' if sitemap_found else 'No XML sitemap found',
+            'importance': 'high',
+        })
+    except Exception as e:
+        checks.append({
+            'name': 'XML Sitemap',
+            'category': 'website_technical',
+            'status': 'fail',
+            'score': 0,
+            'max_score': 5,
+            'message': f'Unable to check sitemap: {str(e)}',
+            'importance': 'high',
+        })
+
+    # 11. HTML Sitemap (5 pts)
+    html_sitemap_found = False
+    html_sitemap_location = None
+    for path in ['/sitemap', '/html-sitemap', '/sitemap.html', '/site-map']:
+        try:
+            resp = req.get(urljoin(url, path), timeout=5, allow_redirects=True,
+                           headers={'User-Agent': USER_AGENT})
+            if resp.status_code == 200 and '<html' in resp.text[:1000].lower():
+                # Verify it's an HTML page (not XML sitemap)
+                if '<?xml' not in resp.text[:500].lower() and '<urlset' not in resp.text[:500].lower():
+                    html_sitemap_found = True
+                    html_sitemap_location = path
+                    break
+        except Exception:
+            continue
+
+    checks.append({
+        'name': 'HTML Sitemap',
+        'category': 'website_technical',
+        'status': 'pass' if html_sitemap_found else 'warning',
+        'score': 5 if html_sitemap_found else 0,
+        'max_score': 5,
+        'message': f'HTML sitemap found at {html_sitemap_location}' if html_sitemap_found else 'No HTML sitemap found (optional but recommended)',
+        'importance': 'medium',
+    })
+
+    return checks
+
+
+def _run_on_page_content_checks(url, html_content, scrapingdog_api_key=None):
+    """
+    Run all 6 On Page & Content checks.
+    Returns list of check dicts with category='on_page_content'.
+    Total max: 40 points.
+    """
+    import requests as req
+    from urllib.parse import urljoin, urlparse
+    import re
+
+    checks = []
+    USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
+    # 1. Total No. of Indexed Pages (5 pts)
+    indexed_count = None
+    try:
+        parsed = urlparse(url)
+        domain_name = parsed.netloc
+        search_url = f"https://www.google.com/search?q=site:{domain_name}"
+        if scrapingdog_api_key:
+            params = {'api_key': scrapingdog_api_key, 'url': search_url, 'dynamic': 'false'}
+            resp = req.get("https://api.scrapingdog.com/scrape", params=params, timeout=15)
+            if resp.status_code == 200:
+                result_match = re.search(r'About\s+([\d,]+)\s+results', resp.text)
+                if not result_match:
+                    result_match = re.search(r'([\d,]+)\s+results', resp.text)
+                if result_match:
+                    indexed_count = int(result_match.group(1).replace(',', ''))
+    except Exception as e:
+        logger.warning(f"Error checking indexed pages: {e}")
+
+    if indexed_count is not None:
+        idx_score = 5 if indexed_count >= 50 else (3 if indexed_count >= 10 else 1)
+        idx_status = 'pass' if indexed_count >= 50 else ('warning' if indexed_count >= 10 else 'fail')
+        idx_msg = f'Approximately {indexed_count:,} pages indexed by Google'
+    else:
+        idx_score = 0
+        idx_status = 'warning'
+        idx_msg = 'Could not determine indexed page count. Check Google Search Console for accurate data.'
+
+    checks.append({
+        'name': 'Total No. of Indexed Pages',
+        'category': 'on_page_content',
+        'status': idx_status,
+        'score': idx_score,
+        'max_score': 5,
+        'message': idx_msg,
+        'importance': 'medium',
+    })
+
+    # 2. Blog Presence (7 pts)
+    blog_found = False
+    blog_path = None
+    for path in ['/blog', '/blog/', '/news', '/news/', '/articles', '/articles/',
+                 '/insights', '/insights/', '/resources', '/resources/']:
+        try:
+            resp = req.get(urljoin(url, path), timeout=5, allow_redirects=True,
+                           headers={'User-Agent': USER_AGENT})
+            if resp.status_code == 200 and len(resp.text) > 1000:
+                blog_found = True
+                blog_path = path
+                break
+        except Exception:
+            continue
+
+    checks.append({
+        'name': 'Blog Presence',
+        'category': 'on_page_content',
+        'status': 'pass' if blog_found else 'fail',
+        'score': 7 if blog_found else 0,
+        'max_score': 7,
+        'message': f'Blog found at {blog_path}' if blog_found else 'No blog section found on the domain',
+        'importance': 'high',
+    })
+
+    # 3. Frequency of Blog on Main Domain (7 pts)
+    blog_frequency_score = 0
+    blog_freq_status = 'fail'
+    blog_freq_msg = 'Could not determine blog posting frequency'
+    if blog_found:
+        try:
+            blog_resp = req.get(urljoin(url, blog_path), timeout=10,
+                                headers={'User-Agent': USER_AGENT})
+            if blog_resp.status_code == 200:
+                # Look for date patterns in HTML
+                date_patterns = re.findall(
+                    r'(\d{4}-\d{2}-\d{2})|(\w+\s+\d{1,2},?\s*\d{4})',
+                    blog_resp.text
+                )
+                if date_patterns:
+                    recent_count = len(date_patterns)
+                    if recent_count >= 8:
+                        blog_frequency_score = 7
+                        blog_freq_status = 'pass'
+                        blog_freq_msg = f'Active blog with ~{recent_count} recent posts detected'
+                    elif recent_count >= 3:
+                        blog_frequency_score = 4
+                        blog_freq_status = 'warning'
+                        blog_freq_msg = f'Blog moderately active with ~{recent_count} recent posts'
+                    else:
+                        blog_frequency_score = 2
+                        blog_freq_status = 'warning'
+                        blog_freq_msg = f'Blog appears infrequently updated ({recent_count} posts found)'
+        except Exception:
+            pass
+    elif not blog_found:
+        blog_freq_msg = 'No blog found to check frequency'
+
+    checks.append({
+        'name': 'Frequency of Blog on Main Domain',
+        'category': 'on_page_content',
+        'status': blog_freq_status,
+        'score': blog_frequency_score,
+        'max_score': 7,
+        'message': blog_freq_msg,
+        'importance': 'medium',
+    })
+
+    # 4. Meta Tag Optimization (Title, Description, H1) (8 pts)
+    title_match = re.search(r'<title[^>]*>(.*?)</title>', html_content, re.IGNORECASE | re.DOTALL)
+    title_text = title_match.group(1).strip() if title_match else None
+    has_title = bool(title_text and len(title_text) > 0)
+
+    meta_desc_match = re.search(r'<meta\s+name=["\']description["\']\s+content=["\'](.*?)["\']', html_content, re.IGNORECASE)
+    if not meta_desc_match:
+        meta_desc_match = re.search(r'<meta\s+content=["\'](.*?)["\']\s+name=["\']description["\']', html_content, re.IGNORECASE)
+    meta_desc = meta_desc_match.group(1) if meta_desc_match else None
+    has_desc = bool(meta_desc and len(meta_desc) > 0)
+
+    h1_tags = re.findall(r'<h1[^>]*>(.*?)</h1>', html_content, re.IGNORECASE | re.DOTALL)
+    has_h1 = len(h1_tags) >= 1
+
+    # 3 pts title, 3 pts desc, 2 pts H1
+    meta_score = (3 if has_title else 0) + (3 if has_desc else 0) + (2 if has_h1 else 0)
+    meta_status = 'pass' if meta_score >= 7 else ('warning' if meta_score >= 4 else 'fail')
+    msg_parts = []
+    if has_title:
+        msg_parts.append(f"Title: present ({len(title_text)} chars)")
+    else:
+        msg_parts.append("Title: MISSING")
+    if has_desc:
+        msg_parts.append(f"Description: present ({len(meta_desc)} chars)")
+    else:
+        msg_parts.append("Description: MISSING")
+    msg_parts.append(f"H1 tags: {len(h1_tags)}" + (" (optimal)" if len(h1_tags) == 1 else ""))
+
+    checks.append({
+        'name': 'Meta Tag Optimization (Title, Description, H1)',
+        'category': 'on_page_content',
+        'status': meta_status,
+        'score': meta_score,
+        'max_score': 8,
+        'message': ' | '.join(msg_parts),
+        'importance': 'high',
+    })
+
+    # 5. Content on Category/Product Page (7 pts)
+    content_score = 0
+    content_status = 'warning'
+    content_msg = 'No product/category pages detected in navigation'
+    try:
+        inner_links = re.findall(
+            r'href=["\'](/(?:products?|category|categories|shop|services?|collections?)/[^"\'#?]+)["\']',
+            html_content, re.IGNORECASE
+        )
+        if inner_links:
+            sample_links = list(set(inner_links))[:3]
+            word_counts = []
+            for link in sample_links:
+                try:
+                    page_url = urljoin(url, link)
+                    page_resp = req.get(page_url, timeout=10, headers={'User-Agent': USER_AGENT})
+                    if page_resp.status_code == 200:
+                        text = re.sub(r'<[^>]+>', ' ', page_resp.text)
+                        text = re.sub(r'\s+', ' ', text).strip()
+                        word_counts.append(len(text.split()))
+                except Exception:
+                    continue
+            if word_counts:
+                avg_words = sum(word_counts) / len(word_counts)
+                if avg_words >= 300:
+                    content_score = 7
+                    content_status = 'pass'
+                    content_msg = f'Good content depth on inner pages (avg ~{int(avg_words)} words across {len(word_counts)} sampled pages)'
+                elif avg_words >= 100:
+                    content_score = 4
+                    content_status = 'warning'
+                    content_msg = f'Moderate content on inner pages (avg ~{int(avg_words)} words). Consider adding more descriptive content.'
+                else:
+                    content_score = 1
+                    content_status = 'fail'
+                    content_msg = f'Thin content on inner pages (avg ~{int(avg_words)} words). Add more descriptive content.'
+    except Exception:
+        pass
+
+    checks.append({
+        'name': 'Content on Category/Product Page',
+        'category': 'on_page_content',
+        'status': content_status,
+        'score': content_score,
+        'max_score': 7,
+        'message': content_msg,
+        'importance': 'medium',
+    })
+
+    # 6. FAQ on Category/Product Page (6 pts)
+    faq_found = False
+    faq_source = None
+
+    # Check for FAQ schema in homepage
+    faq_schema = re.search(r'"@type"\s*:\s*"FAQPage"', html_content, re.IGNORECASE)
+    if faq_schema:
+        faq_found = True
+        faq_source = 'FAQPage schema detected on homepage'
+
+    # Check for FAQ HTML sections
+    if not faq_found:
+        faq_section = re.search(
+            r'(?:id|class)\s*=\s*["\'][^"\']*faq[^"\']*["\']',
+            html_content, re.IGNORECASE
+        )
+        if faq_section:
+            faq_found = True
+            faq_source = 'FAQ section detected in HTML'
+
+    # Check for accordion/FAQ patterns
+    if not faq_found:
+        faq_pattern = re.search(
+            r'(?:id|class)\s*=\s*["\'][^"\']*(?:accordion|frequently-asked|questions)[^"\']*["\']',
+            html_content, re.IGNORECASE
+        )
+        if faq_pattern:
+            faq_found = True
+            faq_source = 'FAQ/Accordion section detected in HTML'
+
+    checks.append({
+        'name': 'FAQ on Category/Product Page',
+        'category': 'on_page_content',
+        'status': 'pass' if faq_found else 'fail',
+        'score': 6 if faq_found else 0,
+        'max_score': 6,
+        'message': faq_source if faq_found else 'No FAQ section or FAQPage schema found',
+        'importance': 'medium',
+    })
+
+    return checks
+
+
+def _fetch_moz_url_metrics(url):
+    """
+    Fetch URL metrics from Moz Free API (DA, PA, spam score, linking root domains, external links).
+    Free tier: 2,500 rows/month, 1 request per 10 seconds.
+    """
+    import requests as req
+    import base64
+
+    access_id = getattr(settings, 'MOZ_ACCESS_ID', None)
+    secret_key = getattr(settings, 'MOZ_SECRET_KEY', None)
+    if not access_id or not secret_key:
+        logger.warning("MOZ_ACCESS_ID or MOZ_SECRET_KEY not configured")
+        return None
+
+    try:
+        auth_string = f"{access_id}:{secret_key}"
+        auth_bytes = base64.b64encode(auth_string.encode('utf-8')).decode('utf-8')
+
+        response = req.post(
+            'https://lsapi.seomoz.com/v2/url_metrics',
+            headers={
+                'Authorization': f'Basic {auth_bytes}',
+                'Content-Type': 'application/json',
+            },
+            json={
+                'targets': [url],
+            },
+            timeout=30,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'results' in data and len(data['results']) > 0:
+                result = data['results'][0]
+                return {
+                    'domain_authority': result.get('domain_authority', 0),
+                    'page_authority': result.get('page_authority', 0),
+                    'spam_score': result.get('spam_score', 0),
+                    'linking_root_domains': result.get('root_domains_to_root_domain', 0),
+                    'external_links': result.get('external_pages_to_root_domain', 0),
+                }
+        else:
+            logger.warning(f"Moz URL metrics API returned {response.status_code}: {response.text[:200]}")
+            return None
+    except Exception as e:
+        logger.warning(f"Moz URL metrics API error: {e}")
+        return None
+
+
+def _fetch_moz_links(url, limit=50):
+    """
+    Fetch individual backlinks from Moz Free API.
+    Returns list of links with source URL, source DA, anchor text.
+    """
+    import requests as req
+    import base64
+    from urllib.parse import urlparse
+
+    access_id = getattr(settings, 'MOZ_ACCESS_ID', None)
+    secret_key = getattr(settings, 'MOZ_SECRET_KEY', None)
+    if not access_id or not secret_key:
+        return None
+
+    try:
+        auth_string = f"{access_id}:{secret_key}"
+        auth_bytes = base64.b64encode(auth_string.encode('utf-8')).decode('utf-8')
+
+        parsed = urlparse(url)
+        target = parsed.netloc
+
+        response = req.post(
+            'https://lsapi.seomoz.com/v2/links',
+            headers={
+                'Authorization': f'Basic {auth_bytes}',
+                'Content-Type': 'application/json',
+            },
+            json={
+                'target': target,
+                'target_type': 'root_domain',
+                'limit': limit,
+            },
+            timeout=30,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('results', [])
+        else:
+            logger.warning(f"Moz Links API returned {response.status_code}: {response.text[:200]}")
+            return None
+    except Exception as e:
+        logger.warning(f"Moz Links API error: {e}")
+        return None
+
+
+def _fetch_moz_anchor_text(url, limit=50):
+    """
+    Fetch anchor text data from Moz Free API.
+    Returns list of anchor text entries.
+    """
+    import requests as req
+    import base64
+    from urllib.parse import urlparse
+
+    access_id = getattr(settings, 'MOZ_ACCESS_ID', None)
+    secret_key = getattr(settings, 'MOZ_SECRET_KEY', None)
+    if not access_id or not secret_key:
+        return None
+
+    try:
+        auth_string = f"{access_id}:{secret_key}"
+        auth_bytes = base64.b64encode(auth_string.encode('utf-8')).decode('utf-8')
+
+        parsed = urlparse(url)
+        target = parsed.netloc
+
+        response = req.post(
+            'https://lsapi.seomoz.com/v2/anchor_text',
+            headers={
+                'Authorization': f'Basic {auth_bytes}',
+                'Content-Type': 'application/json',
+            },
+            json={
+                'target': target,
+                'target_type': 'root_domain',
+                'limit': limit,
+            },
+            timeout=30,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('results', [])
+        else:
+            logger.warning(f"Moz Anchor Text API returned {response.status_code}: {response.text[:200]}")
+            return None
+    except Exception as e:
+        logger.warning(f"Moz Anchor Text API error: {e}")
+        return None
+
+
+def _search_brand_mentions(brand_name, domain, scrapingdog_api_key=None):
+    """
+    Search Google for brand mentions using ScrapingDog.
+    Returns (mentions_count, citations_count) tuple.
+    """
+    import requests as req
+    import re
+    from urllib.parse import urlparse
+
+    mentions_count = 0
+    citations_count = 0
+    parsed = urlparse(domain)
+    domain_name = parsed.netloc or domain
+
+    if not scrapingdog_api_key:
+        return mentions_count, citations_count
+
+    try:
+        # Brand mentions: search for brand name excluding own domain
+        search_url = f'https://www.google.com/search?q="{brand_name}" -site:{domain_name}'
+        params = {'api_key': scrapingdog_api_key, 'url': search_url, 'dynamic': 'false'}
+        resp = req.get("https://api.scrapingdog.com/scrape", params=params, timeout=15)
+        if resp.status_code == 200:
+            result_match = re.search(r'About\s+([\d,]+)\s+results', resp.text)
+            if not result_match:
+                result_match = re.search(r'([\d,]+)\s+results', resp.text)
+            if result_match:
+                mentions_count = int(result_match.group(1).replace(',', ''))
+    except Exception as e:
+        logger.warning(f"Brand mentions search error: {e}")
+
+    try:
+        # Citations: search for domain mentions (NAP citations)
+        search_url = f'https://www.google.com/search?q="{domain_name}" -site:{domain_name}'
+        params = {'api_key': scrapingdog_api_key, 'url': search_url, 'dynamic': 'false'}
+        resp = req.get("https://api.scrapingdog.com/scrape", params=params, timeout=15)
+        if resp.status_code == 200:
+            result_match = re.search(r'About\s+([\d,]+)\s+results', resp.text)
+            if not result_match:
+                result_match = re.search(r'([\d,]+)\s+results', resp.text)
+            if result_match:
+                citations_count = int(result_match.group(1).replace(',', ''))
+    except Exception as e:
+        logger.warning(f"Citations search error: {e}")
+
+    return mentions_count, citations_count
+
+
+def _run_website_authority_checks(url, brand_name, scrapingdog_api_key=None):
+    """
+    Run all 17 Website Authority checks using Moz Free API + Google search.
+    Returns list of check dicts with category='website_authority'.
+
+    Data sources:
+    - Moz Free API: DA, PA, referring domains, backlinks, anchor text
+    - Google Search via ScrapingDog: Brand mentions, citations
+    - CAT A/B/C: Categorized by DA ranges (A: DA>=70, B: DA 40-69, C: DA<40)
+    """
+    import time
+
+    checks = []
+
+    # Fetch Moz data (with small delay between calls to respect rate limits)
+    moz_metrics = _fetch_moz_url_metrics(url)
+    time.sleep(1)
+    moz_links = _fetch_moz_links(url, limit=50)
+    time.sleep(1)
+    moz_anchors = _fetch_moz_anchor_text(url, limit=50)
+
+    # Fetch brand mentions via Google search
+    mentions_count, citations_count = _search_brand_mentions(
+        brand_name, url, scrapingdog_api_key
+    )
+
+    moz_available = moz_metrics is not None
+
+    # 1. Domain Rating (DA) — informational, no scoring
+    da = moz_metrics.get('domain_authority', 0) if moz_available else 0
+    checks.append({
+        'name': 'Domain Rating',
+        'category': 'website_authority',
+        'status': 'pass' if da >= 30 else ('warning' if da >= 10 else 'fail') if moz_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'Domain Authority: {da}/100' if moz_available else 'Moz API not configured. Set MOZ_ACCESS_ID and MOZ_SECRET_KEY.',
+        'importance': 'high',
+    })
+
+    # 2. URL Rating (PA) — informational
+    pa = moz_metrics.get('page_authority', 0) if moz_available else 0
+    checks.append({
+        'name': 'URL Rating',
+        'category': 'website_authority',
+        'status': 'pass' if pa >= 30 else ('warning' if pa >= 10 else 'fail') if moz_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'Page Authority: {pa}/100' if moz_available else 'Moz API not configured.',
+        'importance': 'high',
+    })
+
+    # 3. No. of Referring Domain — informational
+    ref_domains = moz_metrics.get('linking_root_domains', 0) if moz_available else 0
+    checks.append({
+        'name': 'No. of Referring Domain',
+        'category': 'website_authority',
+        'status': 'pass' if ref_domains >= 50 else ('warning' if ref_domains >= 10 else 'fail') if moz_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{ref_domains:,} referring domains' if moz_available else 'Moz API not configured.',
+        'importance': 'high',
+    })
+
+    # Analyze links for CAT A/B/C and .gov/.edu breakdown
+    cat_a_domains = set()
+    cat_b_domains = set()
+    cat_c_domains = set()
+    cat_a_links = 0
+    cat_b_links = 0
+    cat_c_links = 0
+    gov_links = 0
+    edu_links = 0
+    links_available = moz_links is not None and len(moz_links) > 0
+
+    if links_available:
+        for link in moz_links:
+            source_da = link.get('source_domain_authority', 0) or 0
+            source_url = link.get('source_page', '') or ''
+            source_domain = link.get('source_root_domain', '') or ''
+
+            # CAT classification by DA: A >= 70, B 40-69, C < 40
+            if source_da >= 70:
+                cat_a_domains.add(source_domain)
+                cat_a_links += 1
+            elif source_da >= 40:
+                cat_b_domains.add(source_domain)
+                cat_b_links += 1
+            else:
+                cat_c_domains.add(source_domain)
+                cat_c_links += 1
+
+            # .gov / .edu detection
+            domain_lower = source_domain.lower()
+            if domain_lower.endswith('.gov') or '.gov.' in domain_lower:
+                gov_links += 1
+            if domain_lower.endswith('.edu') or '.edu.' in domain_lower:
+                edu_links += 1
+
+    # 4. CAT A Referring Domain (DA >= 70) — informational
+    checks.append({
+        'name': 'CAT A Referring Domain',
+        'category': 'website_authority',
+        'status': 'pass' if len(cat_a_domains) > 0 else 'warning' if links_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{len(cat_a_domains)} high-authority referring domains (DA >= 70)' if links_available else 'No link data available.',
+        'importance': 'medium',
+    })
+
+    # 5. CAT B Referring Domain (DA 40-69) — informational
+    checks.append({
+        'name': 'CAT B Referring Domain',
+        'category': 'website_authority',
+        'status': 'pass' if len(cat_b_domains) > 0 else 'warning' if links_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{len(cat_b_domains)} medium-authority referring domains (DA 40-69)' if links_available else 'No link data available.',
+        'importance': 'medium',
+    })
+
+    # 6. CAT C Referring Domain (DA < 40) — informational
+    checks.append({
+        'name': 'CAT C Referring Domain',
+        'category': 'website_authority',
+        'status': 'pass' if len(cat_c_domains) > 0 else 'warning' if links_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{len(cat_c_domains)} low-authority referring domains (DA < 40)' if links_available else 'No link data available.',
+        'importance': 'medium',
+    })
+
+    # 7. Total Backlinks — informational
+    total_backlinks = moz_metrics.get('external_links', 0) if moz_available else 0
+    checks.append({
+        'name': 'Total Backlinks',
+        'category': 'website_authority',
+        'status': 'pass' if total_backlinks >= 100 else ('warning' if total_backlinks >= 10 else 'fail') if moz_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{total_backlinks:,} total backlinks' if moz_available else 'Moz API not configured.',
+        'importance': 'high',
+    })
+
+    # 8. CAT A Backlinks (from DA >= 70 sources) — informational
+    checks.append({
+        'name': 'CAT A Backlinks',
+        'category': 'website_authority',
+        'status': 'pass' if cat_a_links > 0 else 'warning' if links_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{cat_a_links} backlinks from high-authority sources (DA >= 70)' if links_available else 'No link data available.',
+        'importance': 'medium',
+    })
+
+    # 9. CAT B Backlinks (from DA 40-69 sources) — informational
+    checks.append({
+        'name': 'CAT B Backlinks',
+        'category': 'website_authority',
+        'status': 'pass' if cat_b_links > 0 else 'warning' if links_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{cat_b_links} backlinks from medium-authority sources (DA 40-69)' if links_available else 'No link data available.',
+        'importance': 'medium',
+    })
+
+    # 10. CAT C Backlinks (from DA < 40 sources) — informational
+    checks.append({
+        'name': 'CAT C Backlinks',
+        'category': 'website_authority',
+        'status': 'pass' if cat_c_links > 0 else 'warning' if links_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{cat_c_links} backlinks from low-authority sources (DA < 40)' if links_available else 'No link data available.',
+        'importance': 'medium',
+    })
+
+    # 11. Total .gov Backlinks — informational
+    checks.append({
+        'name': 'Total .gov Backlinks',
+        'category': 'website_authority',
+        'status': 'pass' if gov_links > 0 else 'warning' if links_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{gov_links} backlinks from .gov domains' if links_available else 'No link data available.',
+        'importance': 'medium',
+    })
+
+    # 12. Total .edu Backlinks — informational
+    checks.append({
+        'name': 'Total .edu Backlinks',
+        'category': 'website_authority',
+        'status': 'pass' if edu_links > 0 else 'warning' if links_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{edu_links} backlinks from .edu domains' if links_available else 'No link data available.',
+        'importance': 'medium',
+    })
+
+    # 13. Brand Mentions — informational
+    checks.append({
+        'name': 'Brand Mentions',
+        'category': 'website_authority',
+        'status': 'pass' if mentions_count >= 100 else ('warning' if mentions_count > 0 else 'fail'),
+        'score': 0,
+        'max_score': 0,
+        'message': f'~{mentions_count:,} brand mentions found on the web' if mentions_count > 0 else 'No brand mentions detected or unable to search.',
+        'importance': 'medium',
+    })
+
+    # 14. Citations — informational
+    checks.append({
+        'name': 'Citations',
+        'category': 'website_authority',
+        'status': 'pass' if citations_count >= 100 else ('warning' if citations_count > 0 else 'fail'),
+        'score': 0,
+        'max_score': 0,
+        'message': f'~{citations_count:,} domain citations found on the web' if citations_count > 0 else 'No citations detected or unable to search.',
+        'importance': 'medium',
+    })
+
+    # Analyze anchor text
+    anchors_available = moz_anchors is not None and len(moz_anchors) > 0
+    total_anchors = 0
+    branded_anchors = 0
+    non_branded_anchors = 0
+
+    if anchors_available:
+        brand_lower = brand_name.lower() if brand_name else ''
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        domain_parts = parsed.netloc.lower().replace('www.', '').split('.')
+        domain_keyword = domain_parts[0] if domain_parts else ''
+
+        for anchor in moz_anchors:
+            anchor_text = (anchor.get('anchor_text', '') or '').strip().lower()
+            if not anchor_text:
+                continue
+            total_anchors += 1
+            # Check if anchor text contains brand name or domain name
+            if (brand_lower and brand_lower in anchor_text) or (domain_keyword and domain_keyword in anchor_text):
+                branded_anchors += 1
+            else:
+                non_branded_anchors += 1
+
+    # 15. Total Anchor Text — informational
+    checks.append({
+        'name': 'Total Anchor Text',
+        'category': 'website_authority',
+        'status': 'pass' if total_anchors >= 10 else ('warning' if total_anchors > 0 else 'fail') if anchors_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{total_anchors} unique anchor texts found' if anchors_available else 'Anchor text data not available. Configure Moz API.',
+        'importance': 'medium',
+    })
+
+    # 16. Branded Anchor Text — informational
+    checks.append({
+        'name': 'Branded Anchor Text',
+        'category': 'website_authority',
+        'status': 'pass' if branded_anchors > 0 else 'warning' if anchors_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{branded_anchors} branded anchor texts (containing "{brand_name}")' if anchors_available else 'Anchor text data not available.',
+        'importance': 'medium',
+    })
+
+    # 17. Non Branded Anchor Text — informational
+    checks.append({
+        'name': 'Non Branded Anchor Text',
+        'category': 'website_authority',
+        'status': 'pass' if non_branded_anchors > 0 else 'warning' if anchors_available else 'warning',
+        'score': 0,
+        'max_score': 0,
+        'message': f'{non_branded_anchors} non-branded anchor texts' if anchors_available else 'Anchor text data not available.',
+        'importance': 'medium',
+    })
+
+    return checks
+
+
+def _reconstruct_categories_from_checks(checks_list):
+    """Rebuild categories from flat check list using the 'category' field."""
+    category_names = {
+        'website_technical': 'Website Technical',
+        'on_page_content': 'On Page & Content',
+        'website_authority': 'Website Authority',
+    }
+    category_order = ['website_technical', 'on_page_content', 'website_authority']
+
+    cat_map = {}
+    for c in checks_list:
+        cat_key = c.get('category', 'website_technical')
+        if cat_key not in cat_map:
+            cat_map[cat_key] = []
+        cat_map[cat_key].append(c)
+
+    categories = []
+    for key in category_order:
+        if key in cat_map:
+            cat_checks = cat_map[key]
+            categories.append({
+                'name': category_names.get(key, key),
+                'key': key,
+                'checks': cat_checks,
+                'summary': {
+                    'total': len(cat_checks),
+                    'passed': len([c for c in cat_checks if c['status'] == 'pass']),
+                    'warnings': len([c for c in cat_checks if c['status'] == 'warning']),
+                    'failed': len([c for c in cat_checks if c['status'] == 'fail']),
+                },
+                'score': sum(c['score'] for c in cat_checks),
+                'max_score': sum(c['max_score'] for c in cat_checks),
+            })
+
+    # Handle any uncategorized checks (from old records without category field)
+    uncategorized = [c for c in checks_list if c.get('category') not in category_order and 'category' not in c]
+    if uncategorized:
+        categories.insert(0, {
+            'name': 'Website Technical',
+            'key': 'website_technical',
+            'checks': uncategorized,
+            'summary': {
+                'total': len(uncategorized),
+                'passed': len([c for c in uncategorized if c['status'] == 'pass']),
+                'warnings': len([c for c in uncategorized if c['status'] == 'warning']),
+                'failed': len([c for c in uncategorized if c['status'] == 'fail']),
+            },
+            'score': sum(c['score'] for c in uncategorized),
+            'max_score': sum(c['max_score'] for c in uncategorized),
+        })
+
+    return categories
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def domain_health_check(request, domain_id):
     """
-    Perform comprehensive health checks on a domain to assess AI-friendliness
-    Uses ScrapingDog API for reliable web scraping
-    Checks: HTTPS, robots.txt, sitemap, meta tags, schema markup, content structure
+    Perform comprehensive health checks on a domain.
+    Checks are organized into categories: Website Technical, On Page & Content, Website Authority.
+    Uses Google PageSpeed Insights API for performance metrics and ScrapingDog for web scraping.
     """
-    import requests
-    from urllib.parse import urljoin, urlparse
-    import time
-    import re
+    import requests as req
 
     try:
         domain = get_object_or_404(Domain, id=domain_id)
@@ -750,334 +1936,73 @@ def domain_health_check(request, domain_id):
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
 
-        health_score = 0
-        max_score = 100
-        checks = []
-
-        # 1. HTTPS Check (10 points)
-        https_check = {
-            'name': 'HTTPS/SSL Certificate',
-            'status': 'pass' if url.startswith('https://') else 'fail',
-            'score': 10 if url.startswith('https://') else 0,
-            'max_score': 10,
-            'message': 'Website uses HTTPS' if url.startswith('https://') else 'Website should use HTTPS for security',
-            'importance': 'high'
-        }
-        checks.append(https_check)
-        health_score += https_check['score']
-
-        # Get ScrapingDog API key from settings (optional, will fallback to direct request)
         scrapingdog_api_key = getattr(settings, "SCRAPINGDOG_API_KEY", None)
 
-        # Fetch the homepage using ScrapingDog (with fallback to direct request)
+        # Step 1: Fetch HTML content
         try:
-            start_time = time.time()
-            html_content = None
-
-            # Try ScrapingDog first if API key is available
-            if scrapingdog_api_key:
-                try:
-                    scrapingdog_url = "https://api.scrapingdog.com/scrape"
-                    params = {
-                        'api_key': scrapingdog_api_key,
-                        'url': url,
-                        'dynamic': 'false'
-                    }
-
-                    scrapingdog_response = requests.get(scrapingdog_url, params=params, timeout=30)
-
-                    if scrapingdog_response.status_code == 200:
-                        html_content = scrapingdog_response.text
-                        logger.info(f"Successfully fetched {url} using ScrapingDog")
-                    elif scrapingdog_response.status_code == 403:
-                        logger.warning(f"ScrapingDog API returned 403 - API key might be invalid or quota exceeded. Falling back to direct request.")
-                    else:
-                        logger.warning(f"ScrapingDog returned status {scrapingdog_response.status_code}. Falling back to direct request.")
-                except Exception as sd_error:
-                    logger.warning(f"ScrapingDog error: {str(sd_error)}. Falling back to direct request.")
-
-            # Fallback to direct request if ScrapingDog failed or not configured
-            if not html_content:
-                response = requests.get(url, headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                }, timeout=30)
-                html_content = response.text
-                logger.info(f"Successfully fetched {url} using direct request")
-
-            load_time = time.time() - start_time
-
-            # 2. Page Load Speed (10 points)
-            speed_score = 10 if load_time < 3 else (5 if load_time < 6 else 0)
-            speed_check = {
-                'name': 'Page Load Speed',
-                'status': 'pass' if load_time < 3 else ('warning' if load_time < 6 else 'fail'),
-                'score': speed_score,
-                'max_score': 10,
-                'message': f'Page loads in {load_time:.2f}s' + (' (Excellent)' if load_time < 3 else ' (Needs improvement)'),
-                'importance': 'medium'
-            }
-            checks.append(speed_check)
-            health_score += speed_score
-
-            # Parse HTML using regex for basic checks (no BeautifulSoup needed)
-
-            # 3. Meta Title (10 points)
-            title_match = re.search(r'<title[^>]*>(.*?)</title>', html_content, re.IGNORECASE | re.DOTALL)
-            title_text = title_match.group(1).strip() if title_match else None
-            title_check = {
-                'name': 'Meta Title Tag',
-                'status': 'pass' if title_text and len(title_text) > 0 else 'fail',
-                'score': 10 if (title_text and len(title_text) > 0) else 0,
-                'max_score': 10,
-                'message': f'Title: "{title_text[:60]}..."' if title_text else 'Missing title tag',
-                'importance': 'high'
-            }
-            checks.append(title_check)
-            health_score += title_check['score']
-
-            # 4. Meta Description (10 points)
-            meta_desc_match = re.search(r'<meta\s+name=["\']description["\']\s+content=["\'](.*?)["\']', html_content, re.IGNORECASE)
-            if not meta_desc_match:
-                meta_desc_match = re.search(r'<meta\s+content=["\'](.*?)["\']\s+name=["\']description["\']', html_content, re.IGNORECASE)
-            meta_desc = meta_desc_match.group(1) if meta_desc_match else None
-            desc_check = {
-                'name': 'Meta Description',
-                'status': 'pass' if meta_desc else 'fail',
-                'score': 10 if meta_desc else 0,
-                'max_score': 10,
-                'message': 'Meta description present' if meta_desc else 'Missing meta description',
-                'importance': 'high'
-            }
-            checks.append(desc_check)
-            health_score += desc_check['score']
-
-            # 5. Schema.org Structured Data (15 points)
-            schema_scripts = re.findall(r'<script\s+type=["\']application/ld\+json["\'][^>]*>.*?</script>', html_content, re.IGNORECASE | re.DOTALL)
-            schema_check = {
-                'name': 'Structured Data (Schema.org)',
-                'status': 'pass' if len(schema_scripts) > 0 else 'fail',
-                'score': 15 if len(schema_scripts) > 0 else 0,
-                'max_score': 15,
-                'message': f'Found {len(schema_scripts)} structured data blocks' if schema_scripts else 'No structured data found',
-                'importance': 'high'
-            }
-            checks.append(schema_check)
-            health_score += schema_check['score']
-
-            # 6. Heading Structure (10 points)
-            h1_tags = re.findall(r'<h1[^>]*>.*?</h1>', html_content, re.IGNORECASE | re.DOTALL)
-            headings_check = {
-                'name': 'Proper Heading Structure',
-                'status': 'pass' if len(h1_tags) == 1 else ('warning' if len(h1_tags) > 1 else 'fail'),
-                'score': 10 if len(h1_tags) == 1 else (5 if len(h1_tags) > 1 else 0),
-                'max_score': 10,
-                'message': f'Found {len(h1_tags)} H1 tag(s)' + (' (Perfect)' if len(h1_tags) == 1 else ' (Should have exactly one)'),
-                'importance': 'medium'
-            }
-            checks.append(headings_check)
-            health_score += headings_check['score']
-
-            # 7. Images with Alt Text (10 points)
-            images = re.findall(r'<img[^>]*>', html_content, re.IGNORECASE)
-            images_with_alt = [img for img in images if re.search(r'alt=["\'][^"\']*["\']', img)]
-            alt_ratio = len(images_with_alt) / len(images) if images else 0
-            alt_score = int(10 * alt_ratio)
-            alt_check = {
-                'name': 'Images with Alt Text',
-                'status': 'pass' if alt_ratio >= 0.8 else ('warning' if alt_ratio >= 0.5 else 'fail'),
-                'score': alt_score,
-                'max_score': 10,
-                'message': f'{len(images_with_alt)}/{len(images)} images have alt text ({int(alt_ratio*100)}%)' if images else 'No images found',
-                'importance': 'medium'
-            }
-            checks.append(alt_check)
-            health_score += alt_score
-
-            # 8. Mobile-Friendly Viewport (5 points)
-            viewport = re.search(r'<meta\s+name=["\']viewport["\']', html_content, re.IGNORECASE)
-            mobile_check = {
-                'name': 'Mobile-Friendly (Viewport)',
-                'status': 'pass' if viewport else 'fail',
-                'score': 5 if viewport else 0,
-                'max_score': 5,
-                'message': 'Viewport meta tag present' if viewport else 'Missing viewport meta tag',
-                'importance': 'high'
-            }
-            checks.append(mobile_check)
-            health_score += mobile_check['score']
-
-        except requests.RequestException as e:
+            html_content, load_time = _fetch_html_content(url, scrapingdog_api_key)
+        except req.RequestException as e:
             logger.error(f"Error fetching domain {url}: {str(e)}")
-            checks.append({
-                'name': 'Website Accessibility',
-                'status': 'fail',
-                'score': 0,
-                'max_score': 75,
-                'message': f'Unable to access website: {str(e)}',
-                'importance': 'critical'
-            })
+            return Response({
+                'success': False,
+                'error': f'Unable to access website: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # 9. robots.txt Check (5 points)
-        try:
-            robots_url = urljoin(url, '/robots.txt')
-            robots_response = requests.get(robots_url, timeout=5)
-            robots_exists = robots_response.status_code == 200
-            robots_check = {
-                'name': 'robots.txt',
-                'status': 'pass' if robots_exists else 'warning',
-                'score': 5 if robots_exists else 0,
-                'max_score': 5,
-                'message': 'robots.txt found' if robots_exists else 'robots.txt not found (optional but recommended)',
-                'importance': 'medium'
+        # Step 2: Fetch PageSpeed data (mobile + desktop)
+        mobile_psi = _fetch_pagespeed_data(url, strategy='mobile')
+        desktop_psi = _fetch_pagespeed_data(url, strategy='desktop')
+
+        # Step 3: Run category checks
+        technical_checks = _run_website_technical_checks(url, html_content, mobile_psi, desktop_psi)
+        content_checks = _run_on_page_content_checks(url, html_content, scrapingdog_api_key)
+        authority_checks = _run_website_authority_checks(url, domain.name, scrapingdog_api_key)
+
+        # Step 4: Build categories with summaries
+        def _build_category(name, key, checks_list):
+            return {
+                'name': name,
+                'key': key,
+                'checks': checks_list,
+                'summary': {
+                    'total': len(checks_list),
+                    'passed': len([c for c in checks_list if c['status'] == 'pass']),
+                    'warnings': len([c for c in checks_list if c['status'] == 'warning']),
+                    'failed': len([c for c in checks_list if c['status'] == 'fail']),
+                },
+                'score': sum(c['score'] for c in checks_list),
+                'max_score': sum(c['max_score'] for c in checks_list),
             }
-            checks.append(robots_check)
-            health_score += robots_check['score']
-        except:
-            checks.append({
-                'name': 'robots.txt',
-                'status': 'warning',
-                'score': 0,
-                'max_score': 5,
-                'message': 'Unable to check robots.txt',
-                'importance': 'medium'
-            })
 
-        # 10. llms.txt Check (5 points) - AI/LLM crawler instructions
-        try:
-            llms_url = urljoin(url, '/llms.txt')
-            llms_response = requests.get(llms_url, timeout=5)
-            llms_exists = llms_response.status_code == 200
-            llms_check = {
-                'name': 'llms.txt',
-                'status': 'pass' if llms_exists else 'warning',
-                'score': 5 if llms_exists else 0,
-                'max_score': 5,
-                'message': 'llms.txt found - provides AI crawler guidance' if llms_exists else 'llms.txt not found (recommended for AI optimization)',
-                'importance': 'medium'
-            }
-            checks.append(llms_check)
-            health_score += llms_check['score']
-        except:
-            checks.append({
-                'name': 'llms.txt',
-                'status': 'warning',
-                'score': 0,
-                'max_score': 5,
-                'message': 'Unable to check llms.txt',
-                'importance': 'medium'
-            })
+        categories = [
+            _build_category('Website Technical', 'website_technical', technical_checks),
+            _build_category('On Page & Content', 'on_page_content', content_checks),
+            _build_category('Website Authority', 'website_authority', authority_checks),
+        ]
 
-        # 11. Sitemap Check (10 points) - Check multiple sitemap formats
-        try:
-            sitemap_found = False
-            sitemap_location = None
+        # Step 5: Calculate totals (authority checks have score=0/max_score=0, informational only)
+        all_checks = technical_checks + content_checks + authority_checks
+        health_score = sum(c['score'] for c in all_checks)
+        max_score = sum(c['max_score'] for c in all_checks)
+        health_percentage = int((health_score / max_score) * 100) if max_score > 0 else 0
 
-            # List of common sitemap paths to check
-            sitemap_paths = [
-                '/sitemap.xml',
-                '/sitemap_index.xml',
-                '/sitemap.xml.gz',
-                '/sitemap_index.xml.gz',
-                '/sitemap.txt',
-                '/sitemap/',
-                '/sitemaps/sitemap.xml',
-            ]
-
-            # First, check robots.txt for Sitemap directives
-            # If sitemap is declared in robots.txt, trust it (even if URL verification fails due to WAF/CDN)
-            try:
-                robots_url = urljoin(url, '/robots.txt')
-                robots_resp = requests.get(robots_url, timeout=5)
-                if robots_resp.status_code == 200:
-                    # Parse robots.txt for Sitemap: lines
-                    for line in robots_resp.text.split('\n'):
-                        line = line.strip()
-                        if line.lower().startswith('sitemap:'):
-                            sitemap_from_robots = line.split(':', 1)[1].strip()
-                            if sitemap_from_robots:
-                                # Trust robots.txt declaration - sitemap is officially declared
-                                sitemap_found = True
-                                sitemap_location = f"robots.txt ({sitemap_from_robots})"
-                                break
-            except:
-                pass
-
-            # If not found in robots.txt, check common sitemap paths
-            if not sitemap_found:
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
-                }
-                for path in sitemap_paths:
-                    try:
-                        sitemap_url = urljoin(url, path)
-                        sitemap_response = requests.get(sitemap_url, timeout=5, allow_redirects=True, headers=headers)
-                        if sitemap_response.status_code == 200:
-                            # Verify it's actually a sitemap (check content)
-                            content = sitemap_response.text[:500].lower()
-                            if ('<?xml' in content or '<urlset' in content or
-                                '<sitemapindex' in content or 'http' in content):
-                                sitemap_found = True
-                                sitemap_location = path
-                                break
-                    except:
-                        continue
-
-            if sitemap_found:
-                sitemap_check = {
-                    'name': 'XML Sitemap',
-                    'status': 'pass',
-                    'score': 10,
-                    'max_score': 10,
-                    'message': f'Sitemap found at {sitemap_location}',
-                    'importance': 'high'
-                }
-            else:
-                sitemap_check = {
-                    'name': 'XML Sitemap',
-                    'status': 'fail',
-                    'score': 0,
-                    'max_score': 10,
-                    'message': 'No sitemap found (checked sitemap.xml, sitemap_index.xml, robots.txt)',
-                    'importance': 'high'
-                }
-            checks.append(sitemap_check)
-            health_score += sitemap_check['score']
-        except Exception as e:
-            checks.append({
-                'name': 'XML Sitemap',
-                'status': 'fail',
-                'score': 0,
-                'max_score': 10,
-                'message': f'Unable to check sitemap: {str(e)}',
-                'importance': 'high'
-            })
-
-        # Calculate percentage
-        health_percentage = int((health_score / max_score) * 100)
-
-        # Determine health grade
+        # Grade thresholds
         if health_percentage >= 80:
-            grade = 'Excellent'
-            grade_color = 'green'
+            grade, grade_color = 'Excellent', 'green'
         elif health_percentage >= 60:
-            grade = 'Good'
-            grade_color = 'blue'
+            grade, grade_color = 'Good', 'blue'
         elif health_percentage >= 40:
-            grade = 'Fair'
-            grade_color = 'yellow'
+            grade, grade_color = 'Fair', 'yellow'
         else:
-            grade = 'Poor'
-            grade_color = 'red'
+            grade, grade_color = 'Poor', 'red'
 
-        # Calculate summary
         summary = {
-            'total_checks': len(checks),
-            'passed': len([c for c in checks if c['status'] == 'pass']),
-            'warnings': len([c for c in checks if c['status'] == 'warning']),
-            'failed': len([c for c in checks if c['status'] == 'fail'])
+            'total_checks': len(all_checks),
+            'passed': len([c for c in all_checks if c['status'] == 'pass']),
+            'warnings': len([c for c in all_checks if c['status'] == 'warning']),
+            'failed': len([c for c in all_checks if c['status'] == 'fail']),
         }
 
-        # Save health check results to database
+        # Step 6: Save to DB
         from .models import DomainHealthCheck
         health_check = DomainHealthCheck.objects.create(
             domain=domain,
@@ -1086,7 +2011,7 @@ def domain_health_check(request, domain_id):
             percentage=health_percentage,
             grade=grade,
             grade_color=grade_color,
-            checks=checks,
+            checks=all_checks,
             total_checks=summary['total_checks'],
             passed_checks=summary['passed'],
             warning_checks=summary['warnings'],
@@ -1094,6 +2019,7 @@ def domain_health_check(request, domain_id):
             checked_by=request.user
         )
 
+        # Step 7: Return response with both flat and categorized data
         return Response({
             'success': True,
             'id': health_check.id,
@@ -1107,7 +2033,8 @@ def domain_health_check(request, domain_id):
             'percentage': health_percentage,
             'grade': grade,
             'grade_color': grade_color,
-            'checks': checks,
+            'checks': all_checks,
+            'categories': categories,
             'summary': summary,
             'created_at': health_check.created_at.isoformat()
         })
@@ -1157,6 +2084,7 @@ def domain_health_check_history(request, domain_id):
                 'grade': check.grade,
                 'grade_color': check.grade_color,
                 'checks': check.checks,
+                'categories': _reconstruct_categories_from_checks(check.checks),
                 'summary': {
                     'total_checks': check.total_checks,
                     'passed': check.passed_checks,
