@@ -1983,31 +1983,56 @@ export default function DomainSettings() {
                       healthData.categories.map((category: any) => (
                         <Card key={category.key} className="border border-border overflow-hidden">
                           {/* Category Header */}
-                          <div className="px-6 py-4 flex items-center justify-between border-b bg-gradient-to-r from-primary/5 to-background">
+                          <div className={`px-6 py-4 flex items-center justify-between border-b ${
+                            category.status === 'coming_soon'
+                              ? 'bg-muted/50'
+                              : 'bg-gradient-to-r from-primary/5 to-background'
+                          }`}>
                             <div className="flex items-center gap-3">
                               <h4 className="font-semibold text-base">{category.name}</h4>
+                              {category.status === 'coming_soon' && (
+                                <Badge variant="outline" className="text-xs border-muted-foreground/30 text-muted-foreground">
+                                  Coming Soon
+                                </Badge>
+                              )}
                             </div>
-                            <div className="flex items-center gap-4 text-xs">
-                              <span className="flex items-center gap-1">
-                                <div className="w-2 h-2 rounded-full bg-green-500" />
-                                {category.summary.passed} passed
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <div className="w-2 h-2 rounded-full bg-yellow-500" />
-                                {category.summary.warnings} warnings
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <div className="w-2 h-2 rounded-full bg-red-500" />
-                                {category.summary.failed} failed
-                              </span>
-                              <span className="font-mono font-semibold text-sm ml-2">
-                                {category.score}/{category.max_score}
-                              </span>
-                            </div>
+                            {category.status !== 'coming_soon' && (
+                              <div className="flex items-center gap-4 text-xs">
+                                <span className="flex items-center gap-1">
+                                  <div className="w-2 h-2 rounded-full bg-green-500" />
+                                  {category.summary.passed} passed
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <div className="w-2 h-2 rounded-full bg-yellow-500" />
+                                  {category.summary.warnings} warnings
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <div className="w-2 h-2 rounded-full bg-red-500" />
+                                  {category.summary.failed} failed
+                                </span>
+                                <span className="font-mono font-semibold text-sm ml-2">
+                                  {category.score}/{category.max_score}
+                                </span>
+                              </div>
+                            )}
                           </div>
 
                           {/* Category Content */}
-                          <Table>
+                          {category.status === 'coming_soon' ? (
+                            <div className="p-6 text-center">
+                              <p className="text-sm text-muted-foreground mb-4">
+                                {category.placeholder_message || 'These checks will be enabled once the required API is configured.'}
+                              </p>
+                              <div className="flex flex-wrap gap-2 justify-center">
+                                {category.checks.map((check: any, idx: number) => (
+                                  <Badge key={idx} variant="outline" className="text-xs text-muted-foreground">
+                                    {check.name}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <Table>
                               <TableHeader>
                                 <TableRow>
                                   <TableHead className="w-12">Status</TableHead>
@@ -2052,6 +2077,7 @@ export default function DomainSettings() {
                                 ))}
                               </TableBody>
                             </Table>
+                          )}
                         </Card>
                       ))
                     ) : (
