@@ -258,6 +258,7 @@ export default function DomainSettings() {
           grade: latest.grade,
           grade_color: latest.grade_color,
           checks: latest.checks,
+          categories: latest.categories,
           summary: latest.summary,
           created_at: latest.created_at
         });
@@ -1969,51 +1970,119 @@ export default function DomainSettings() {
                     </div>
                   </div>
 
-                  {/* Health Checks */}
-                  <div className="space-y-4 mt-8">
+                  {/* Health Checks by Category */}
+                  <div className="space-y-6 mt-8">
                     <div className="flex items-center justify-between">
                       <h3 className="text-lg font-semibold">Detailed Health Checks</h3>
-                      <span className="text-sm text-muted-foreground">{healthData.checks?.length} total checks</span>
+                      <span className="text-sm text-muted-foreground">
+                        {healthData.summary?.total_checks || healthData.checks?.length} total checks
+                      </span>
                     </div>
-                    <div className="space-y-2">
-                      {healthData.checks && healthData.checks.map((check: any, index: number) => (
-                        <Card
-                          key={index}
-                          className={`p-4 transition-all hover:shadow-md ${
-                            check.status === 'pass' ? 'border-green-200/60 bg-gradient-to-r from-green-50/50 to-background dark:from-green-900/5 dark:to-background' :
-                            check.status === 'warning' ? 'border-yellow-200/60 bg-gradient-to-r from-yellow-50/50 to-background dark:from-yellow-900/5 dark:to-background' :
-                            'border-red-200/60 bg-gradient-to-r from-red-50/50 to-background dark:from-red-900/5 dark:to-background'
-                          }`}
-                        >
-                          <div className="flex items-start gap-4">
-                            <div className={`flex-shrink-0 p-2 rounded-lg ${
-                              check.status === 'pass' ? 'bg-green-100 dark:bg-green-900/30' :
-                              check.status === 'warning' ? 'bg-yellow-100 dark:bg-yellow-900/30' :
-                              'bg-red-100 dark:bg-red-900/30'
-                            }`}>
-                              {check.status === 'pass' ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : check.status === 'warning' ? (
-                                <AlertCircle className="h-5 w-5 text-yellow-600" />
-                              ) : (
-                                <XCircle className="h-5 w-5 text-red-600" />
-                              )}
+
+                    {healthData.categories ? (
+                      healthData.categories.map((category: any) => (
+                        <Card key={category.key} className="border border-border overflow-hidden">
+                          {/* Category Header */}
+                          <div className="px-6 py-4 flex items-center justify-between border-b bg-gradient-to-r from-primary/5 to-background">
+                            <div className="flex items-center gap-3">
+                              <h4 className="font-semibold text-base">{category.name}</h4>
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between gap-3 mb-2">
-                                <h4 className="font-semibold text-sm leading-tight">{check.name}</h4>
-                                <div className="flex items-center gap-2 flex-shrink-0">
-                                  <Badge
-                                    variant="outline"
-                                    className={`text-xs font-medium ${
-                                      check.importance === 'critical' ? 'border-red-500 text-red-700 bg-red-50 dark:bg-red-900/20' :
-                                      check.importance === 'high' ? 'border-orange-500 text-orange-700 bg-orange-50 dark:bg-orange-900/20' :
-                                      check.importance === 'medium' ? 'border-yellow-500 text-yellow-700 bg-yellow-50 dark:bg-yellow-900/20' :
-                                      'border-gray-400 text-gray-600 bg-gray-50 dark:bg-gray-900/20'
-                                    }`}
+                            <div className="flex items-center gap-4 text-xs">
+                              <span className="flex items-center gap-1">
+                                <div className="w-2 h-2 rounded-full bg-green-500" />
+                                {category.summary.passed} passed
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <div className="w-2 h-2 rounded-full bg-yellow-500" />
+                                {category.summary.warnings} warnings
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <div className="w-2 h-2 rounded-full bg-red-500" />
+                                {category.summary.failed} failed
+                              </span>
+                              <span className="font-mono font-semibold text-sm ml-2">
+                                {category.score}/{category.max_score}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Category Content */}
+                          <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead className="w-12">Status</TableHead>
+                                  <TableHead>Check</TableHead>
+                                  <TableHead className="hidden md:table-cell">Details</TableHead>
+                                  <TableHead className="w-24 text-right">Score</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {category.checks.map((check: any, index: number) => (
+                                  <TableRow
+                                    key={index}
+                                    className={
+                                      check.status === 'pass' ? 'bg-green-50/30 dark:bg-green-900/5' :
+                                      check.status === 'warning' ? 'bg-yellow-50/30 dark:bg-yellow-900/5' :
+                                      'bg-red-50/30 dark:bg-red-900/5'
+                                    }
                                   >
-                                    {check.importance}
-                                  </Badge>
+                                    <TableCell>
+                                      {check.status === 'pass' ? (
+                                        <CheckCircle2 className="h-5 w-5 text-green-600" />
+                                      ) : check.status === 'warning' ? (
+                                        <AlertCircle className="h-5 w-5 text-yellow-600" />
+                                      ) : (
+                                        <XCircle className="h-5 w-5 text-red-600" />
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="font-medium text-sm">{check.name}</TableCell>
+                                    <TableCell className="hidden md:table-cell text-sm text-muted-foreground max-w-md truncate">
+                                      {check.message}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      <span className={`text-xs font-mono font-semibold px-2 py-1 rounded ${
+                                        check.status === 'pass' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                                        check.status === 'warning' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                        'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                      }`}>
+                                        {check.score}/{check.max_score}
+                                      </span>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                        </Card>
+                      ))
+                    ) : (
+                      /* Fallback: render flat list for old data without categories */
+                      <div className="space-y-2">
+                        {healthData.checks && healthData.checks.map((check: any, index: number) => (
+                          <Card
+                            key={index}
+                            className={`p-4 transition-all hover:shadow-md ${
+                              check.status === 'pass' ? 'border-green-200/60 bg-gradient-to-r from-green-50/50 to-background dark:from-green-900/5 dark:to-background' :
+                              check.status === 'warning' ? 'border-yellow-200/60 bg-gradient-to-r from-yellow-50/50 to-background dark:from-yellow-900/5 dark:to-background' :
+                              'border-red-200/60 bg-gradient-to-r from-red-50/50 to-background dark:from-red-900/5 dark:to-background'
+                            }`}
+                          >
+                            <div className="flex items-start gap-4">
+                              <div className={`flex-shrink-0 p-2 rounded-lg ${
+                                check.status === 'pass' ? 'bg-green-100 dark:bg-green-900/30' :
+                                check.status === 'warning' ? 'bg-yellow-100 dark:bg-yellow-900/30' :
+                                'bg-red-100 dark:bg-red-900/30'
+                              }`}>
+                                {check.status === 'pass' ? (
+                                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                                ) : check.status === 'warning' ? (
+                                  <AlertCircle className="h-5 w-5 text-yellow-600" />
+                                ) : (
+                                  <XCircle className="h-5 w-5 text-red-600" />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-start justify-between gap-3 mb-2">
+                                  <h4 className="font-semibold text-sm leading-tight">{check.name}</h4>
                                   <span className={`text-xs font-mono font-semibold px-2 py-1 rounded ${
                                     check.status === 'pass' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
                                     check.status === 'warning' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
@@ -2022,15 +2091,15 @@ export default function DomainSettings() {
                                     {check.score}/{check.max_score}
                                   </span>
                                 </div>
+                                <p className="text-sm text-muted-foreground leading-relaxed">
+                                  {check.message}
+                                </p>
                               </div>
-                              <p className="text-sm text-muted-foreground leading-relaxed">
-                                {check.message}
-                              </p>
                             </div>
-                          </div>
-                        </Card>
-                      ))}
-                    </div>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Health Check History */}
