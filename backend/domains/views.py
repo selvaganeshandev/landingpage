@@ -748,7 +748,7 @@ def _fetch_pagespeed_data(url, strategy='mobile'):
         'category': 'performance'
     }
     try:
-        resp = req.get(psi_url, params=params, timeout=60)
+        resp = req.get(psi_url, params=params, timeout=25)
         if resp.status_code == 200:
             data = resp.json()
             lighthouse = data.get('lighthouseResult', {})
@@ -1412,7 +1412,7 @@ def _fetch_moz_url_metrics(url):
             json={
                 'targets': [url],
             },
-            timeout=30,
+            timeout=15,
         )
         if response.status_code == 200:
             data = response.json()
@@ -1465,7 +1465,7 @@ def _fetch_moz_links(url, limit=50):
                 'target_type': 'root_domain',
                 'limit': limit,
             },
-            timeout=30,
+            timeout=15,
         )
         if response.status_code == 200:
             data = response.json()
@@ -1510,7 +1510,7 @@ def _fetch_moz_anchor_text(url, limit=50):
                 'target_type': 'root_domain',
                 'limit': limit,
             },
-            timeout=30,
+            timeout=15,
         )
         if response.status_code == 200:
             data = response.json()
@@ -1544,7 +1544,7 @@ def _search_brand_mentions(brand_name, domain, scrapingdog_api_key=None):
         # Brand mentions: search for brand name excluding own domain
         search_url = f'https://www.google.com/search?q="{brand_name}" -site:{domain_name}'
         params = {'api_key': scrapingdog_api_key, 'url': search_url, 'dynamic': 'false'}
-        resp = req.get("https://api.scrapingdog.com/scrape", params=params, timeout=15)
+        resp = req.get("https://api.scrapingdog.com/scrape", params=params, timeout=10)
         if resp.status_code == 200:
             result_match = re.search(r'About\s+([\d,]+)\s+results', resp.text)
             if not result_match:
@@ -1558,7 +1558,7 @@ def _search_brand_mentions(brand_name, domain, scrapingdog_api_key=None):
         # Citations: search for domain mentions (NAP citations)
         search_url = f'https://www.google.com/search?q="{domain_name}" -site:{domain_name}'
         params = {'api_key': scrapingdog_api_key, 'url': search_url, 'dynamic': 'false'}
-        resp = req.get("https://api.scrapingdog.com/scrape", params=params, timeout=15)
+        resp = req.get("https://api.scrapingdog.com/scrape", params=params, timeout=10)
         if resp.status_code == 200:
             result_match = re.search(r'About\s+([\d,]+)\s+results', resp.text)
             if not result_match:
@@ -1593,22 +1593,22 @@ def _run_website_authority_checks(url, brand_name, scrapingdog_api_key=None):
         future_brand = executor.submit(_search_brand_mentions, brand_name, url, scrapingdog_api_key)
 
         try:
-            moz_metrics = future_metrics.result(timeout=45)
+            moz_metrics = future_metrics.result(timeout=20)
         except Exception:
             moz_metrics = None
 
         try:
-            moz_links = future_links.result(timeout=45)
+            moz_links = future_links.result(timeout=20)
         except Exception:
             moz_links = None
 
         try:
-            moz_anchors = future_anchors.result(timeout=45)
+            moz_anchors = future_anchors.result(timeout=20)
         except Exception:
             moz_anchors = None
 
         try:
-            mentions_count, citations_count = future_brand.result(timeout=45)
+            mentions_count, citations_count = future_brand.result(timeout=20)
         except Exception:
             mentions_count, citations_count = 0, 0
 
@@ -1942,51 +1942,56 @@ def domain_health_check(request, domain_id):
 
         scrapingdog_api_key = getattr(settings, "SCRAPINGDOG_API_KEY", None)
 
-        # Phase 1: Fetch HTML + PageSpeed data in parallel
-        html_content = ''
-        load_time = 0
-        mobile_psi = None
-        desktop_psi = None
+        # Run data fetching + checks in parallel
+        from concurrent.futures import ThreadPoolExecutor
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            # Independent data fetches
             future_html = executor.submit(_fetch_html_content, url, scrapingdog_api_key)
             future_mobile = executor.submit(_fetch_pagespeed_data, url, 'mobile')
             future_desktop = executor.submit(_fetch_pagespeed_data, url, 'desktop')
 
+            # Wait for HTML first (needed by technical + content checks)
+            html_content = ''
+            load_time = 0
             try:
-                html_content, load_time = future_html.result(timeout=60)
+                html_content, load_time = future_html.result(timeout=30)
             except Exception as e:
                 logger.error(f"Error fetching domain {url}: {str(e)}")
+                future_mobile.cancel()
+                future_desktop.cancel()
                 return Response({
                     'success': False,
                     'error': f'Unable to access website: {str(e)}'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+            # Wait for PageSpeed (with short timeout since they started in parallel with HTML)
+            mobile_psi = None
+            desktop_psi = None
             try:
-                mobile_psi = future_mobile.result(timeout=90)
+                mobile_psi = future_mobile.result(timeout=30)
             except Exception:
                 logger.warning(f"PageSpeed mobile timed out for {url}")
-
             try:
-                desktop_psi = future_desktop.result(timeout=90)
+                desktop_psi = future_desktop.result(timeout=30)
             except Exception:
                 logger.warning(f"PageSpeed desktop timed out for {url}")
 
-        # Phase 2: Run all 3 category checks in parallel
-        with ThreadPoolExecutor(max_workers=3) as executor:
+            # Run technical + content checks in parallel
             future_technical = executor.submit(
                 _run_website_technical_checks, url, html_content, mobile_psi, desktop_psi
             )
             future_content = executor.submit(
                 _run_on_page_content_checks, url, html_content, scrapingdog_api_key
             )
-            future_authority = executor.submit(
-                _run_website_authority_checks, url, domain.name, scrapingdog_api_key
-            )
 
-            technical_checks = future_technical.result(timeout=120)
-            content_checks = future_content.result(timeout=120)
-            authority_checks = future_authority.result(timeout=120)
+            technical_checks = future_technical.result(timeout=60)
+            content_checks = future_content.result(timeout=60)
+
+        # Website Authority — disabled until Moz API is purchased
+        # To enable: uncomment the line below and remove the placeholder
+        # authority_checks = _run_website_authority_checks(url, domain.name, scrapingdog_api_key)
+        authority_checks = []
 
         # Step 4: Build categories with summaries
         def _build_category(name, key, checks_list):
@@ -2007,11 +2012,30 @@ def domain_health_check(request, domain_id):
         categories = [
             _build_category('Website Technical', 'website_technical', technical_checks),
             _build_category('On Page & Content', 'on_page_content', content_checks),
-            _build_category('Website Authority', 'website_authority', authority_checks),
+            {
+                'name': 'Website Authority',
+                'key': 'website_authority',
+                'status': 'coming_soon',
+                'checks': [
+                    {'name': n, 'status': 'coming_soon', 'score': 0, 'max_score': 0}
+                    for n in [
+                        'Domain Rating', 'URL Rating', 'No. of Referring Domain',
+                        'CAT A Referring Domain', 'CAT B Referring Domain', 'CAT C Referring Domain',
+                        'Total Backlinks', 'CAT A Backlinks', 'CAT B Backlinks', 'CAT C Backlinks',
+                        'Total .gov Backlinks', 'Total .edu Backlinks',
+                        'Brand Mentions', 'Citations',
+                        'Total Anchor Text', 'Branded Anchor Text', 'Non Branded Anchor Text',
+                    ]
+                ],
+                'summary': {'total': 17, 'passed': 0, 'warnings': 0, 'failed': 0},
+                'score': 0,
+                'max_score': 0,
+                'placeholder_message': 'Website Authority checks require Moz API. These checks will be enabled once configured.',
+            },
         ]
 
-        # Step 5: Calculate totals (authority checks have score=0/max_score=0, informational only)
-        all_checks = technical_checks + content_checks + authority_checks
+        # Step 5: Calculate totals (only technical + content contribute to score)
+        all_checks = technical_checks + content_checks
         health_score = sum(c['score'] for c in all_checks)
         max_score = sum(c['max_score'] for c in all_checks)
         health_percentage = int((health_score / max_score) * 100) if max_score > 0 else 0
