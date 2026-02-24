@@ -481,3 +481,200 @@ class ContentComment(models.Model):
         return f"Comment by {self.author} on '{self.selected_text[:30]}...'"
 
 
+class BulkUploadBatch(models.Model):
+    """
+    Represents a single bulk upload session.
+    One user uploads one .xlsx file which becomes one batch.
+    The queue engine processes items sequentially in a background thread.
+    """
+    STATUS_CHOICES = [
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('completed_with_errors', 'Completed with Errors'),
+        ('failed', 'Failed'),
+    ]
+
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='bulk_upload_batches',
+        help_text="Domain this batch belongs to"
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='bulk_upload_batches',
+        help_text="User who uploaded the file"
+    )
+    file_name = models.CharField(
+        max_length=255,
+        help_text="Original uploaded file name"
+    )
+    status = models.CharField(
+        max_length=25,
+        choices=STATUS_CHOICES,
+        default='processing',
+        help_text="Overall batch status"
+    )
+    total_items = models.PositiveIntegerField(
+        default=0,
+        help_text="Total number of content items in batch"
+    )
+    processed_items = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of items processed so far (generated + failed)"
+    )
+    successful_items = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of items successfully generated"
+    )
+    failed_items = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of items that failed generation"
+    )
+    error_message = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Batch-level error message (e.g., parse failure)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the entire batch finished processing"
+    )
+
+    class Meta:
+        db_table = 'bulk_upload_batches'
+        verbose_name = 'Bulk Upload Batch'
+        verbose_name_plural = 'Bulk Upload Batches'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['domain', '-created_at']),
+            models.Index(fields=['status']),
+            models.Index(fields=['uploaded_by', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"Batch {self.id}: {self.file_name} ({self.status})"
+
+
+class BulkUploadItem(models.Model):
+    """
+    Individual content item parsed from an uploaded .xlsx row.
+    Tracks its generation lifecycle independently.
+    Links to GeneratedContent once successfully generated.
+
+    Status flow:
+    - processed → generating → generated (automatic, queue engine)
+    - generated → in_review → reviewed → approved (manual, user clicks)
+    - generating → generation_failed (automatic, on error) → retry re-queues
+    """
+    STATUS_CHOICES = [
+        ('processed', 'Processed'),
+        ('generating', 'Generating'),
+        ('generated', 'Generated'),
+        ('generation_failed', 'Generation Failed'),
+        ('in_review', 'In Review'),
+        ('reviewed', 'Reviewed'),
+        ('approved', 'Approved'),
+    ]
+
+    PRIORITY_CHOICES = [
+        ('high', 'High'),
+        ('medium', 'Medium'),
+        ('low', 'Low'),
+    ]
+
+    batch = models.ForeignKey(
+        BulkUploadBatch,
+        on_delete=models.CASCADE,
+        related_name='items',
+        help_text="Batch this item belongs to"
+    )
+    row_number = models.PositiveIntegerField(
+        help_text="Row number in the Excel file (for reference)"
+    )
+
+    # Original Excel values (for display)
+    content_category = models.CharField(
+        max_length=50,
+        help_text="Content category from Excel (Articles, Web Pages, Social Media, Community)"
+    )
+    content_type = models.CharField(
+        max_length=50,
+        help_text="Content type from Excel (Blog Post, Landing Page, etc.)"
+    )
+
+    # Mapped generation parameters
+    title = models.CharField(max_length=500, help_text="Title from Excel")
+    keywords = models.TextField(help_text="Keywords from Excel (comma-separated)")
+    article_type = models.CharField(
+        max_length=30,
+        choices=GeneratedContent.ARTICLE_TYPE_CHOICES,
+        default='blog',
+        help_text="Mapped article type code for ClaudeContentGenerator"
+    )
+    target_country = models.CharField(max_length=100, default='united_states')
+    target_language = models.CharField(max_length=100, default='us_english')
+    target_audience = models.CharField(max_length=50, default='general')
+    word_count = models.IntegerField(default=1500)
+    tone = models.TextField(default='professional')
+    style = models.TextField(default='informative')
+    key_messages = models.TextField(blank=True, default='')
+    topics_to_avoid = models.TextField(blank=True, default='')
+    additional_instructions = models.TextField(blank=True, default='')
+    reference_urls = models.TextField(blank=True, default='')
+    reference_descriptions = models.TextField(blank=True, default='')
+    priority = models.CharField(
+        max_length=10,
+        choices=PRIORITY_CHOICES,
+        default='medium'
+    )
+
+    # Status tracking
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='processed',
+        help_text="Item generation lifecycle status"
+    )
+    error_message = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Error message if generation failed"
+    )
+    retry_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of retry attempts"
+    )
+
+    # Link to generated content (set after successful generation)
+    generated_content = models.OneToOneField(
+        GeneratedContent,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bulk_upload_item',
+        help_text="The GeneratedContent record created from this item"
+    )
+
+    # Timestamps
+    generation_started_at = models.DateTimeField(null=True, blank=True)
+    generation_completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'bulk_upload_items'
+        verbose_name = 'Bulk Upload Item'
+        verbose_name_plural = 'Bulk Upload Items'
+        ordering = ['row_number']
+        indexes = [
+            models.Index(fields=['batch', 'status']),
+            models.Index(fields=['batch', 'row_number']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f"Item {self.row_number}: {self.title} ({self.status})"

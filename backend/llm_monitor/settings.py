@@ -212,12 +212,16 @@ SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
 SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=False, cast=bool)
 CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=False, cast=bool)
 
-# ==================== EMAIL CONFIGURATION (MAILGUN HTTP API) ====================
+# ==================== EMAIL CONFIGURATION (SMTP) ====================
 
-# Mailgun HTTP API Configuration
-MAILGUN_API_KEY = config('MAILGUN_API_KEY', default='')
-MAILGUN_DOMAIN = config('MAILGUN_DOMAIN', default='')
-MAILGUN_API_URL = config('MAILGUN_API_URL', default='https://api.mailgun.net/v3')
+# SMTP Backend
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.smtp.EmailBackend')
+EMAIL_HOST = config('EMAIL_HOST', default='smtp.mailgun.org')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
 
 # Sender Email
 DEFAULT_FROM_EMAIL = config(

@@ -39,6 +39,7 @@ import {
   MessagesSquare,
   Mail,
   MessageSquare,
+  Upload,
   type LucideIcon
 } from "lucide-react";
 import {
@@ -110,7 +111,6 @@ const ContentCalendar = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<ContentItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-
   // Fetch generated content from API
   useEffect(() => {
     const fetchContent = async () => {
@@ -285,13 +285,21 @@ const ContentCalendar = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={() => navigate('/automation')}
             className="border-border/50"
           >
             <Settings className="h-4 w-4 mr-2" />
             CMS Settings
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => navigate('/bulk-upload')}
+            className="border-border/50"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Bulk Upload
           </Button>
           <Button onClick={handleGenerateContent} className="gradient-primary shadow-md shadow-primary/20">
             <Sparkles className="h-4 w-4 mr-2" />
@@ -759,6 +767,7 @@ const ContentCalendar = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
     </div>
   );
 };

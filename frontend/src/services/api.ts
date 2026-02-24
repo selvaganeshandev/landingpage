@@ -1518,6 +1518,66 @@ export const apiClient = {
     apiRequest(`/content/${contentId}/comments/${commentId}/`, {
       method: 'DELETE',
     }),
+
+  // ===== Bulk Content Upload =====
+  downloadBulkUploadTemplate: async () => {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/content/bulk-upload/template/`, {
+      headers: {
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+    });
+    if (!response.ok) throw new Error('Failed to download template');
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'bulk_content_upload_template.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
+
+  uploadBulkContent: async (domainId: number, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('domain_id', String(domainId));
+
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/content/bulk-upload/`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw { response: data, status: response.status };
+    }
+    return data;
+  },
+
+  getBulkUploadBatches: (params?: { domain_id?: string }) => {
+    const queryParams = params?.domain_id ? `?domain_id=${params.domain_id}` : '';
+    return apiRequest(`/content/bulk-upload/batches/${queryParams}`);
+  },
+
+  getBulkUploadBatchDetail: (batchId: number) =>
+    apiRequest(`/content/bulk-upload/batches/${batchId}/`),
+
+  retryBulkUploadItem: (itemId: number) =>
+    apiRequest(`/content/bulk-upload/items/${itemId}/retry/`, {
+      method: 'POST',
+    }),
+
+  updateBulkUploadItemStatus: (itemId: number, newStatus: string) =>
+    apiRequest(`/content/bulk-upload/items/${itemId}/status/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: newStatus }),
+    }),
 };
 
 // Also export as 'api' for flexibility

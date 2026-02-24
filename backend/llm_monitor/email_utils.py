@@ -1,18 +1,20 @@
 """
-Mailgun HTTP API Email Utility
-Provides send_mail function compatible with Django's interface
+Email Utility
+Uses Django's built-in SMTP email backend (configured via EMAIL_HOST, EMAIL_PORT, etc. in .env)
 """
 import logging
-import requests
-from django.conf import settings
+from django.core.mail import send_mail as django_send_mail
 
 logger = logging.getLogger(__name__)
 
 
 def send_mail(subject, message, from_email=None, recipient_list=None, fail_silently=False, html_message=None):
     """
-    Send email via Mailgun HTTP API.
+    Send email via Django's SMTP backend.
     Compatible with Django's send_mail signature.
+
+    Uses EMAIL_HOST, EMAIL_PORT, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD,
+    EMAIL_USE_TLS, DEFAULT_FROM_EMAIL from settings (loaded from .env).
 
     Args:
         subject: Email subject
@@ -25,18 +27,6 @@ def send_mail(subject, message, from_email=None, recipient_list=None, fail_silen
     Returns:
         1 if successful, 0 if failed
     """
-    api_key = getattr(settings, 'MAILGUN_API_KEY', '')
-    domain = getattr(settings, 'MAILGUN_DOMAIN', '')
-    api_url = getattr(settings, 'MAILGUN_API_URL', 'https://api.mailgun.net/v3')
-    timeout = getattr(settings, 'EMAIL_TIMEOUT', 30)
-
-    if not api_key or not domain:
-        error_msg = "Mailgun API key or domain not configured"
-        logger.error(error_msg)
-        if fail_silently:
-            return 0
-        raise ValueError(error_msg)
-
     if not recipient_list:
         error_msg = "No recipients provided"
         logger.error(error_msg)
@@ -44,56 +34,27 @@ def send_mail(subject, message, from_email=None, recipient_list=None, fail_silen
             return 0
         raise ValueError(error_msg)
 
-    if from_email is None:
-        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', '')
-
     try:
-        url = f"{api_url}/{domain}/messages"
+        logger.info(f"Sending email via SMTP to {len(recipient_list)} recipients")
 
-        data = {
-            'from': from_email,
-            'to': recipient_list,
-            'subject': subject,
-            'text': message,
-        }
-
-        if html_message:
-            data['html'] = html_message
-
-        logger.info(f"Sending email via Mailgun API to {len(recipient_list)} recipients")
-
-        response = requests.post(
-            url,
-            auth=('api', api_key),
-            data=data,
-            timeout=timeout
+        result = django_send_mail(
+            subject=subject,
+            message=message,
+            from_email=from_email,
+            recipient_list=recipient_list,
+            fail_silently=fail_silently,
+            html_message=html_message,
         )
 
-        if response.status_code == 200:
+        if result:
             logger.info(f"Email sent successfully to {recipient_list}")
-            return 1
         else:
-            error_msg = response.json().get('message', response.text)
-            logger.error(f"Mailgun API error: {response.status_code} - {error_msg}")
-            if fail_silently:
-                return 0
-            raise Exception(f"Mailgun API error: {error_msg}")
+            logger.warning(f"Email send returned 0 for {recipient_list}")
 
-    except requests.exceptions.Timeout:
-        error_msg = "Mailgun API request timed out"
-        logger.error(error_msg)
-        if fail_silently:
-            return 0
-        raise Exception(error_msg)
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request error sending email: {e}")
-        if fail_silently:
-            return 0
-        raise
+        return result
 
     except Exception as e:
-        logger.error(f"Unexpected error sending email: {e}")
+        logger.error(f"Error sending email: {e}")
         if fail_silently:
             return 0
         raise

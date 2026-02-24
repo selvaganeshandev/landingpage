@@ -1,7 +1,8 @@
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from django.http import Http404
 from django.utils import timezone
@@ -11,12 +12,16 @@ import requests
 import re
 import threading
 
-from .models import GeneratedContent, CMSProvider, ScheduledPublication, ContentComment
+from .models import (
+    GeneratedContent, CMSProvider, ScheduledPublication, ContentComment,
+    BulkUploadBatch, BulkUploadItem
+)
 from .serializers import (
     GeneratedContentSerializer, ContentGenerationRequestSerializer,
     CMSProviderSerializer, CMSProviderCreateSerializer,
     ScheduledPublicationSerializer, PublishContentSerializer,
-    ContentCommentSerializer, CreateContentCommentSerializer
+    ContentCommentSerializer, CreateContentCommentSerializer,
+    BulkUploadBatchSerializer, BulkUploadBatchListSerializer, BulkUploadItemSerializer
 )
 from .claude_content_generator import ClaudeContentGenerator
 from domains.models import Domain
@@ -1792,3 +1797,1077 @@ def content_comment_detail(request, content_id, comment_id):
             'status': 'success',
             'message': 'Comment deleted'
         }, status=status.HTTP_204_NO_CONTENT)
+
+
+# =============================================================================
+# Bulk Content Upload — Value Maps, Views, and Queue Engine
+# =============================================================================
+
+# Maps (Content Category, Content Type) display names → article_type DB code
+BULK_CONTENT_TYPE_MAP = {
+    ('Articles', 'Blog Post'): 'blog',
+    ('Articles', 'How-to Guide'): 'guide',
+    ('Articles', 'Comparison Article'): 'comparison',
+    ('Articles', 'Listicle'): 'listicle',
+    ('Articles', 'Technical Article'): 'technical',
+    ('Web Pages', 'Landing Page'): 'landing_page',
+    ('Web Pages', 'Services Page'): 'services_page',
+    ('Web Pages', 'Product Page'): 'product_page',
+    ('Web Pages', 'Features Page'): 'features_page',
+    ('Web Pages', 'Resource/Guide Page'): 'resource_page',
+    ('Social Media', 'Twitter/X Post'): 'twitter_post',
+    ('Social Media', 'LinkedIn Post'): 'linkedin_post',
+    ('Social Media', 'Facebook Post'): 'facebook_post',
+    ('Social Media', 'Instagram Caption'): 'instagram_caption',
+    ('Social Media', 'Thread/Carousel'): 'social_thread',
+    ('Community', 'Reddit Post'): 'reddit_post',
+    ('Community', 'Quora Answer'): 'quora_answer',
+    ('Community', 'Forum Post'): 'forum_post',
+    ('Community', 'Product Hunt Launch'): 'product_hunt',
+    ('Community', 'Newsletter Snippet'): 'newsletter_snippet',
+}
+
+BULK_COUNTRY_MAP = {
+    'United States': 'united_states',
+    'United Kingdom': 'united_kingdom',
+    'Canada': 'canada',
+    'Australia': 'australia',
+    'Germany': 'germany',
+    'France': 'france',
+    'Spain': 'spain',
+    'Italy': 'italy',
+    'Netherlands': 'netherlands',
+    'Sweden': 'sweden',
+    'Norway': 'norway',
+    'Denmark': 'denmark',
+    'Finland': 'finland',
+    'Switzerland': 'switzerland',
+    'Austria': 'austria',
+    'Belgium': 'belgium',
+    'Ireland': 'ireland',
+    'Portugal': 'portugal',
+    'Poland': 'poland',
+    'India': 'india',
+    'Singapore': 'singapore',
+    'Japan': 'japan',
+    'South Korea': 'south_korea',
+    'China': 'china',
+    'Brazil': 'brazil',
+    'Mexico': 'mexico',
+    'Argentina': 'argentina',
+    'South Africa': 'south_africa',
+    'UAE': 'uae',
+    'Saudi Arabia': 'saudi_arabia',
+    'Global': 'global',
+}
+
+BULK_LANGUAGE_MAP = {
+    'US English': 'us_english',
+    'UK English': 'uk_english',
+    'Australian English': 'australian_english',
+    'Canadian English': 'canadian_english',
+    'Indian English': 'indian_english',
+    'Irish English': 'irish_english',
+    'South African English': 'south_african_english',
+    'New Zealand English': 'new_zealand_english',
+    'Singapore English': 'singapore_english',
+}
+
+BULK_AUDIENCE_MAP = {
+    'General': 'general',
+    'Beginners': 'beginners',
+    'Professionals': 'professionals',
+    'Experts': 'experts',
+}
+
+BULK_PRIORITY_MAP = {
+    'High': 'high',
+    'Medium': 'medium',
+    'Low': 'low',
+}
+
+# Valid manual status transitions for bulk upload items
+BULK_VALID_STATUS_TRANSITIONS = {
+    'generated': ['in_review'],
+    'in_review': ['reviewed'],
+    'reviewed': ['approved'],
+}
+
+# Excel template column order (0-indexed)
+BULK_EXCEL_COLUMNS = [
+    'Content Category',             # 0 (A)
+    'Content Type',                 # 1 (B)
+    'Title / Page Title / Topic',   # 2 (C)
+    'Keywords / Hashtags / Tags',   # 3 (D)
+    'Target Country',               # 4 (E)
+    'Target Language',              # 5 (F)
+    'Target Audience',              # 6 (G)
+    'Word Count',                   # 7 (H)
+    'Tone of Voice',                # 8 (I)
+    'Content Style',                # 9 (J)
+    'Key Messages',                 # 10 (K)
+    'Topics to Avoid',              # 11 (L)
+    'Additional Instructions',      # 12 (M)
+    'Reference URLs',               # 13 (N)
+    'Reference Descriptions',       # 14 (O)
+    'Priority',                     # 15 (P)
+]
+
+
+def _run_bulk_generation_queue(batch_id):
+    """
+    Background thread: processes all 'processed' items in a batch ONE BY ONE.
+    Each item failure is isolated — does not stop the queue.
+
+    Django DB connections are per-thread. We must close the connection
+    when the thread finishes to prevent connection leaks.
+    """
+    try:
+        batch = BulkUploadBatch.objects.get(id=batch_id)
+        items = BulkUploadItem.objects.filter(
+            batch=batch,
+            status='processed'
+        ).order_by('row_number')
+
+        generator = ClaudeContentGenerator()
+
+        for item in items:
+            try:
+                # Mark as generating
+                item.status = 'generating'
+                item.generation_started_at = timezone.now()
+                item.save(update_fields=['status', 'generation_started_at', 'modified_at'])
+
+                # Parse reference URLs into references list
+                references = []
+                if item.reference_urls:
+                    urls = [u.strip() for u in item.reference_urls.split('|') if u.strip()]
+                    descs = [d.strip() for d in item.reference_descriptions.split('|')] if item.reference_descriptions else []
+                    for i, url in enumerate(urls):
+                        references.append({
+                            'type': 'article',
+                            'url': url,
+                            'description': descs[i] if i < len(descs) else '',
+                        })
+
+                # Build generation params (same structure as generate_content view)
+                generation_params = {
+                    'title': item.title,
+                    'keywords': item.keywords,
+                    'article_type': item.article_type,
+                    'target_country': item.target_country,
+                    'target_language': item.target_language,
+                    'references': references,
+                    'tone': item.tone or 'professional',
+                    'style': item.style or 'informative',
+                    'goal': 'educate',
+                    'audience': item.target_audience or 'general',
+                    'depth': 'comprehensive',
+                    'word_count': item.word_count or 1500,
+                    'source_reference': '',
+                    'key_messages': item.key_messages or '',
+                    'topics_to_avoid': item.topics_to_avoid or '',
+                    'additional_instructions': item.additional_instructions or '',
+                    'brand_values': '',
+                }
+
+                # Generate content (same ClaudeContentGenerator call)
+                logger.info(f"Bulk item {item.id} (row {item.row_number}): generating '{item.title}'")
+                generation_result = generator.generate_content(generation_params)
+
+                # Create GeneratedContent record (same pattern as generate_content view)
+                generated_content = GeneratedContent.objects.create(
+                    domain=batch.domain,
+                    title=item.title,
+                    content_html=generation_result['content_html'],
+                    source_type='manual',
+                    source_id=batch.id,
+                    source_reference=f'Bulk Upload Batch #{batch.id}',
+                    article_type=item.article_type,
+                    keywords=item.keywords,
+                    tone=item.tone or 'professional',
+                    style=item.style or 'informative',
+                    goal='educate',
+                    audience=item.target_audience or 'general',
+                    depth='comprehensive',
+                    word_count=item.word_count or 1500,
+                    actual_word_count=generation_result['actual_word_count'],
+                    status='generated',
+                    priority=item.priority or 'medium',
+                    model_used=generation_result['model_used'],
+                    generation_time_seconds=generation_result['generation_time_seconds'],
+                    prompt_tokens=generation_result['prompt_tokens'],
+                    completion_tokens=generation_result['completion_tokens'],
+                )
+
+                # Update item
+                item.status = 'generated'
+                item.generated_content = generated_content
+                item.generation_completed_at = timezone.now()
+                item.error_message = None
+                item.save(update_fields=[
+                    'status', 'generated_content', 'generation_completed_at',
+                    'error_message', 'modified_at'
+                ])
+
+                # Update batch counters
+                batch.refresh_from_db()
+                batch.processed_items += 1
+                batch.successful_items += 1
+                batch.save(update_fields=['processed_items', 'successful_items'])
+
+                logger.info(
+                    f"Bulk item {item.id} (row {item.row_number}) generated successfully "
+                    f"-> GeneratedContent {generated_content.id}"
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"Bulk item {item.id} (row {item.row_number}) failed: {str(e)}",
+                    exc_info=True
+                )
+                item.status = 'generation_failed'
+                item.error_message = str(e)[:2000]
+                item.generation_completed_at = timezone.now()
+                item.save(update_fields=[
+                    'status', 'error_message', 'generation_completed_at', 'modified_at'
+                ])
+
+                batch.refresh_from_db()
+                batch.processed_items += 1
+                batch.failed_items += 1
+                batch.save(update_fields=['processed_items', 'failed_items'])
+
+        # All items processed — update batch status
+        batch.refresh_from_db()
+        batch.completed_at = timezone.now()
+        if batch.failed_items == 0:
+            batch.status = 'completed'
+        elif batch.successful_items == 0:
+            batch.status = 'failed'
+        else:
+            batch.status = 'completed_with_errors'
+        batch.save(update_fields=['status', 'completed_at'])
+
+        logger.info(
+            f"Bulk batch {batch_id} completed: "
+            f"{batch.successful_items} success, {batch.failed_items} failed"
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Bulk generation queue fatal error for batch {batch_id}: {str(e)}",
+            exc_info=True
+        )
+        try:
+            batch = BulkUploadBatch.objects.get(id=batch_id)
+            batch.status = 'failed'
+            batch.error_message = str(e)[:2000]
+            batch.completed_at = timezone.now()
+            batch.save(update_fields=['status', 'error_message', 'completed_at'])
+        except Exception:
+            pass
+    finally:
+        connection.close()
+
+
+def _run_single_item_generation(item_id):
+    """
+    Background thread for retrying a single failed item.
+    Same logic as the inner loop of _run_bulk_generation_queue.
+    """
+    try:
+        item = BulkUploadItem.objects.select_related('batch', 'batch__domain').get(id=item_id)
+        batch = item.batch
+
+        item.status = 'generating'
+        item.generation_started_at = timezone.now()
+        item.save(update_fields=['status', 'generation_started_at', 'modified_at'])
+
+        # Parse references
+        references = []
+        if item.reference_urls:
+            urls = [u.strip() for u in item.reference_urls.split('|') if u.strip()]
+            descs = [d.strip() for d in item.reference_descriptions.split('|')] if item.reference_descriptions else []
+            for i, url in enumerate(urls):
+                references.append({
+                    'type': 'article',
+                    'url': url,
+                    'description': descs[i] if i < len(descs) else '',
+                })
+
+        generation_params = {
+            'title': item.title,
+            'keywords': item.keywords,
+            'article_type': item.article_type,
+            'target_country': item.target_country,
+            'target_language': item.target_language,
+            'references': references,
+            'tone': item.tone or 'professional',
+            'style': item.style or 'informative',
+            'goal': 'educate',
+            'audience': item.target_audience or 'general',
+            'depth': 'comprehensive',
+            'word_count': item.word_count or 1500,
+            'source_reference': '',
+            'key_messages': item.key_messages or '',
+            'topics_to_avoid': item.topics_to_avoid or '',
+            'additional_instructions': item.additional_instructions or '',
+            'brand_values': '',
+        }
+
+        generator = ClaudeContentGenerator()
+        generation_result = generator.generate_content(generation_params)
+
+        generated_content = GeneratedContent.objects.create(
+            domain=batch.domain,
+            title=item.title,
+            content_html=generation_result['content_html'],
+            source_type='manual',
+            source_id=batch.id,
+            source_reference=f'Bulk Upload Batch #{batch.id}',
+            article_type=item.article_type,
+            keywords=item.keywords,
+            tone=item.tone or 'professional',
+            style=item.style or 'informative',
+            goal='educate',
+            audience=item.target_audience or 'general',
+            depth='comprehensive',
+            word_count=item.word_count or 1500,
+            actual_word_count=generation_result['actual_word_count'],
+            status='generated',
+            priority=item.priority or 'medium',
+            model_used=generation_result['model_used'],
+            generation_time_seconds=generation_result['generation_time_seconds'],
+            prompt_tokens=generation_result['prompt_tokens'],
+            completion_tokens=generation_result['completion_tokens'],
+        )
+
+        item.status = 'generated'
+        item.generated_content = generated_content
+        item.generation_completed_at = timezone.now()
+        item.error_message = None
+        item.save(update_fields=[
+            'status', 'generated_content', 'generation_completed_at',
+            'error_message', 'modified_at'
+        ])
+
+        # Update batch counters (was previously failed, now succeeded)
+        batch.refresh_from_db()
+        batch.successful_items += 1
+        batch.failed_items = max(0, batch.failed_items - 1)
+        if batch.failed_items == 0 and batch.status == 'completed_with_errors':
+            batch.status = 'completed'
+        batch.save(update_fields=['successful_items', 'failed_items', 'status'])
+
+        logger.info(f"Bulk item {item_id} retry succeeded -> GeneratedContent {generated_content.id}")
+
+    except Exception as e:
+        logger.error(f"Bulk item {item_id} retry failed: {str(e)}", exc_info=True)
+        try:
+            item = BulkUploadItem.objects.get(id=item_id)
+            item.status = 'generation_failed'
+            item.error_message = str(e)[:2000]
+            item.generation_completed_at = timezone.now()
+            item.save(update_fields=[
+                'status', 'error_message', 'generation_completed_at', 'modified_at'
+            ])
+        except Exception:
+            pass
+    finally:
+        connection.close()
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_bulk_upload_template(request):
+    """
+    Download the .xlsx template with dropdown-validated columns.
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.worksheet.datavalidation import DataValidation
+    from openpyxl.utils import get_column_letter
+    from openpyxl.workbook.defined_name import DefinedName
+    from io import BytesIO
+    from django.http import HttpResponse
+
+    wb = openpyxl.Workbook()
+
+    # ── Main sheet ────────────────────────────────────────────────────
+    ws = wb.active
+    ws.title = "Bulk Upload"
+
+    headers = BULK_EXCEL_COLUMNS
+    header_font = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
+    header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style="thin", color="D1D5DB"),
+        right=Side(style="thin", color="D1D5DB"),
+        top=Side(style="thin", color="D1D5DB"),
+        bottom=Side(style="thin", color="D1D5DB"),
+    )
+
+    col_widths = [20, 25, 45, 40, 20, 22, 18, 14, 20, 20, 35, 35, 40, 45, 45, 12]
+
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+        ws.column_dimensions[get_column_letter(col_idx)].width = col_widths[col_idx - 1]
+
+    ws.row_dimensions[1].height = 35
+    ws.freeze_panes = "A2"
+
+    # ── Lookup sheet (hidden) ─────────────────────────────────────────
+    ws_lookup = wb.create_sheet("_Lookup")
+    ws_lookup.sheet_state = "hidden"
+
+    content_categories = ['Articles', 'Web Pages', 'Social Media', 'Community']
+    content_types_by_cat = {
+        'Articles': ['Blog Post', 'How-to Guide', 'Comparison Article', 'Listicle', 'Technical Article'],
+        'Web Pages': ['Landing Page', 'Services Page', 'Product Page', 'Features Page', 'Resource/Guide Page'],
+        'Social Media': ['Twitter/X Post', 'LinkedIn Post', 'Facebook Post', 'Instagram Caption', 'Thread/Carousel'],
+        'Community': ['Reddit Post', 'Quora Answer', 'Forum Post', 'Product Hunt Launch', 'Newsletter Snippet'],
+    }
+    countries = list(BULK_COUNTRY_MAP.keys())
+    languages = list(BULK_LANGUAGE_MAP.keys())
+    audiences = list(BULK_AUDIENCE_MAP.keys())
+    priorities = list(BULK_PRIORITY_MAP.keys())
+    word_counts = ['50', '150', '300', '400', '500', '800', '1500', '2000', '2500', '3500']
+
+    # Col A: Content Categories
+    ws_lookup.cell(row=1, column=1, value="Content Category")
+    for i, cat in enumerate(content_categories, start=2):
+        ws_lookup.cell(row=i, column=1, value=cat)
+
+    # Col B-E: Content Types per category
+    for cat_idx, (category, types) in enumerate(content_types_by_cat.items()):
+        col = 2 + cat_idx
+        ws_lookup.cell(row=1, column=col, value=category)
+        for i, ctype in enumerate(types, start=2):
+            ws_lookup.cell(row=i, column=col, value=ctype)
+
+    # Col G: Countries
+    ws_lookup.cell(row=1, column=7, value="Country")
+    for i, c in enumerate(countries, start=2):
+        ws_lookup.cell(row=i, column=7, value=c)
+
+    # Col H: Languages
+    ws_lookup.cell(row=1, column=8, value="Language")
+    for i, l in enumerate(languages, start=2):
+        ws_lookup.cell(row=i, column=8, value=l)
+
+    # Col I: Audiences
+    ws_lookup.cell(row=1, column=9, value="Audience")
+    for i, a in enumerate(audiences, start=2):
+        ws_lookup.cell(row=i, column=9, value=a)
+
+    # Col J: Word Counts
+    ws_lookup.cell(row=1, column=10, value="Word Count")
+    for i, wc in enumerate(word_counts, start=2):
+        ws_lookup.cell(row=i, column=10, value=int(wc))
+
+    # Col K: Priorities
+    ws_lookup.cell(row=1, column=11, value="Priority")
+    for i, p in enumerate(priorities, start=2):
+        ws_lookup.cell(row=i, column=11, value=p)
+
+    # ── Named Ranges ──────────────────────────────────────────────────
+    wb.defined_names.add(DefinedName(
+        name="ContentCategories",
+        attr_text=f"'_Lookup'!$A$2:$A${1 + len(content_categories)}"
+    ))
+
+    cat_range_names = {
+        'Articles': 'Articles',
+        'Web Pages': 'Web_Pages',
+        'Social Media': 'Social_Media',
+        'Community': 'Community',
+    }
+    for cat_idx, (category, range_name) in enumerate(cat_range_names.items()):
+        col_letter = get_column_letter(2 + cat_idx)
+        types = content_types_by_cat[category]
+        wb.defined_names.add(DefinedName(
+            name=range_name,
+            attr_text=f"'_Lookup'!${col_letter}$2:${col_letter}${1 + len(types)}"
+        ))
+
+    wb.defined_names.add(DefinedName(name="Countries", attr_text=f"'_Lookup'!$G$2:$G${1 + len(countries)}"))
+    wb.defined_names.add(DefinedName(name="Languages", attr_text=f"'_Lookup'!$H$2:$H${1 + len(languages)}"))
+    wb.defined_names.add(DefinedName(name="Audiences", attr_text=f"'_Lookup'!$I$2:$I${1 + len(audiences)}"))
+    wb.defined_names.add(DefinedName(name="Priorities", attr_text=f"'_Lookup'!$K$2:$K${1 + len(priorities)}"))
+
+    # ── Data Validations ──────────────────────────────────────────────
+    max_rows = 502  # header + 500 data rows + 1
+
+    dv_category = DataValidation(type="list", formula1="ContentCategories", allow_blank=False,
+        showErrorMessage=True, errorTitle="Invalid", error="Select: Articles, Web Pages, Social Media, Community",
+        showInputMessage=True, promptTitle="Content Category", prompt="Select a content category")
+    dv_category.add(f"A2:A{max_rows}")
+    ws.add_data_validation(dv_category)
+
+    dv_type = DataValidation(type="list", formula1='=INDIRECT(SUBSTITUTE(A2," ","_"))', allow_blank=False,
+        showErrorMessage=True, errorTitle="Invalid", error="Select Content Category first, then pick Content Type",
+        showInputMessage=True, promptTitle="Content Type", prompt="Select Content Category first")
+    dv_type.add(f"B2:B{max_rows}")
+    ws.add_data_validation(dv_type)
+
+    dv_country = DataValidation(type="list", formula1="Countries", allow_blank=False,
+        showErrorMessage=True, errorTitle="Invalid", error="Select a valid country")
+    dv_country.add(f"E2:E{max_rows}")
+    ws.add_data_validation(dv_country)
+
+    dv_language = DataValidation(type="list", formula1="Languages", allow_blank=False,
+        showErrorMessage=True, errorTitle="Invalid", error="Select a valid language")
+    dv_language.add(f"F2:F{max_rows}")
+    ws.add_data_validation(dv_language)
+
+    dv_audience = DataValidation(type="list", formula1="Audiences", allow_blank=False,
+        showErrorMessage=True, errorTitle="Invalid", error="Select: General, Beginners, Professionals, Experts")
+    dv_audience.add(f"G2:G{max_rows}")
+    ws.add_data_validation(dv_audience)
+
+    wc_str = ",".join(word_counts)
+    dv_wordcount = DataValidation(type="list", formula1=f'"{wc_str}"', allow_blank=False,
+        showErrorMessage=True, errorTitle="Invalid", error=f"Valid word counts: {wc_str}")
+    dv_wordcount.add(f"H2:H{max_rows}")
+    ws.add_data_validation(dv_wordcount)
+
+    dv_priority = DataValidation(type="list", formula1="Priorities", allow_blank=False,
+        showErrorMessage=True, errorTitle="Invalid", error="Select: High, Medium, Low")
+    dv_priority.add(f"P2:P{max_rows}")
+    ws.add_data_validation(dv_priority)
+
+    # ── Cell comments on Title & Keywords headers ───────────────────
+    from openpyxl.comments import Comment
+
+    title_comment = Comment(
+        "This field changes based on Content Category:\n"
+        "• Articles → Article Title\n"
+        "• Web Pages → Page Title\n"
+        "• Social Media → Post Topic / Hook\n"
+        "• Community → Post / Answer Title",
+        "PromptMaxx"
+    )
+    title_comment.width = 280
+    title_comment.height = 120
+    ws.cell(row=1, column=3).comment = title_comment
+
+    keywords_comment = Comment(
+        "This field changes based on Content Category:\n"
+        "• Articles → Target Keywords\n"
+        "• Web Pages → Target Keywords\n"
+        "• Social Media → Hashtags / Keywords\n"
+        "• Community → Topics / Tags\n\n"
+        "Enter as comma-separated values.",
+        "PromptMaxx"
+    )
+    keywords_comment.width = 280
+    keywords_comment.height = 140
+    ws.cell(row=1, column=4).comment = keywords_comment
+
+    # ── Sample rows (one per category) ────────────────────────────
+    samples = [
+        ['Articles', 'Blog Post', '10 Best SEO Strategies for 2026',
+         'seo strategies, seo tips', 'United States', 'US English',
+         'Professionals', 2500, 'Professional', 'Informative',
+         'Focus on actionable SEO tactics', 'Black hat SEO techniques',
+         'Include real-world examples', '', '', 'High'],
+        ['Web Pages', 'Landing Page', 'Transform Your Business with Our Solutions',
+         'business solutions, enterprise software, digital transformation', 'United States', 'US English',
+         'General', 1500, 'Professional', 'Persuasive',
+         'Highlight key benefits', '', '', '', '', 'Medium'],
+        ['Social Media', 'Twitter/X Post', '5 game-changing tips for startup founders',
+         '#startups, #entrepreneurship, #growthhacking, founder tips', 'United States', 'US English',
+         'General', 50, 'Conversational', 'Engaging',
+         '', '', 'Keep it punchy', '', '', 'Medium'],
+        ['Community', 'Reddit Post', 'How to optimize React performance in large apps',
+         'react, performance, optimization, web development', 'United States', 'US English',
+         'Professionals', 800, 'Conversational', 'Informative',
+         '', '', 'Be authentic, avoid promotional tone', '', '', 'Low'],
+    ]
+    for row_offset, sample in enumerate(samples):
+        for col_idx, val in enumerate(sample, start=1):
+            ws.cell(row=2 + row_offset, column=col_idx, value=val).border = thin_border
+
+    # ── Instructions sheet ─────────────────────────────────────────
+    ws_instr = wb.create_sheet("Instructions", 0)
+    wb.active = wb["Bulk Upload"]
+
+    instr_title_font = Font(name="Calibri", bold=True, size=14, color="2563EB")
+    instr_heading_font = Font(name="Calibri", bold=True, size=11)
+    instr_body_font = Font(name="Calibri", size=10)
+    instr_example_font = Font(name="Calibri", size=10, italic=True, color="666666")
+
+    ws_instr.column_dimensions['A'].width = 5
+    ws_instr.column_dimensions['B'].width = 30
+    ws_instr.column_dimensions['C'].width = 60
+
+    row = 2
+    ws_instr.cell(row=row, column=2, value="Bulk Content Upload — Instructions").font = instr_title_font
+    row += 2
+
+    ws_instr.cell(row=row, column=2, value="Column Guide").font = instr_heading_font
+    row += 1
+
+    column_guide = [
+        ("Content Category", "Select from: Articles, Web Pages, Social Media, Community"),
+        ("Content Type", "Auto-filtered based on Category (e.g., Blog Post, Landing Page)"),
+        ("Title / Page Title / Topic", "See category-specific names below"),
+        ("Keywords / Hashtags / Tags", "See category-specific names below"),
+        ("Target Country", "Market to target (e.g., United States)"),
+        ("Target Language", "Language for the content (e.g., US English)"),
+        ("Target Audience", "General, Beginners, Professionals, or Experts"),
+        ("Word Count", "Target word count (50–3500)"),
+        ("Tone of Voice", "e.g., Professional, Conversational, Friendly"),
+        ("Content Style", "e.g., Informative, Persuasive, Engaging"),
+        ("Key Messages", "Core messages to include (optional)"),
+        ("Topics to Avoid", "Topics to exclude (optional)"),
+        ("Additional Instructions", "Extra guidance for AI (optional)"),
+        ("Reference URLs", "URLs for reference material (optional)"),
+        ("Reference Descriptions", "Descriptions of references (optional)"),
+        ("Priority", "High, Medium, or Low"),
+    ]
+
+    for col_name, desc in column_guide:
+        ws_instr.cell(row=row, column=2, value=col_name).font = Font(name="Calibri", bold=True, size=10)
+        ws_instr.cell(row=row, column=3, value=desc).font = instr_body_font
+        row += 1
+
+    row += 1
+    ws_instr.cell(row=row, column=2, value="Title & Keywords — Per Category").font = instr_heading_font
+    row += 1
+
+    category_labels = [
+        ("Category", "Title Column Means", "Keywords Column Means"),
+        ("Articles", "Article Title", "Target Keywords (comma-separated)"),
+        ("Web Pages", "Page Title", "Target Keywords (comma-separated)"),
+        ("Social Media", "Post Topic / Hook", "Hashtags / Keywords (comma-separated)"),
+        ("Community", "Post / Answer Title", "Topics / Tags (comma-separated)"),
+    ]
+
+    for i, (cat, title_label, kw_label) in enumerate(category_labels):
+        font = Font(name="Calibri", bold=True, size=10) if i == 0 else instr_body_font
+        ws_instr.cell(row=row, column=2, value=cat).font = font
+        ws_instr.cell(row=row, column=3, value=f"{title_label}  |  {kw_label}").font = font if i == 0 else instr_example_font
+        row += 1
+
+    row += 1
+    ws_instr.cell(row=row, column=2, value="Examples").font = instr_heading_font
+    row += 1
+
+    examples = [
+        ("Articles → Blog Post", 'Title: "10 Best SEO Strategies"  |  Keywords: "seo strategies, seo tips"'),
+        ("Web Pages → Landing Page", 'Title: "Transform Your Business"  |  Keywords: "business solutions, software"'),
+        ("Social Media → Twitter/X Post", 'Title: "5 tips for founders"  |  Keywords: "#startups, #growthhacking"'),
+        ("Community → Reddit Post", 'Title: "How to optimize React"  |  Keywords: "react, performance, optimization"'),
+    ]
+
+    for label, example in examples:
+        ws_instr.cell(row=row, column=2, value=label).font = Font(name="Calibri", bold=True, size=10)
+        ws_instr.cell(row=row, column=3, value=example).font = instr_example_font
+        row += 1
+
+    # ── Save & return ─────────────────────────────────────────────────
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    response['Content-Disposition'] = 'attachment; filename="bulk_content_upload_template.xlsx"'
+    return response
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def bulk_upload_content(request):
+    """
+    Upload .xlsx file for bulk content generation.
+    Parses, validates, creates batch + items, and immediately starts queue engine.
+
+    Form data:
+    - file: The .xlsx file
+    - domain_id: int
+    """
+    import openpyxl
+
+    try:
+        # Validate domain_id
+        domain_id = request.data.get('domain_id') or request.POST.get('domain_id')
+        if not domain_id:
+            return Response({
+                'status': 'error',
+                'message': 'domain_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            domain = Domain.objects.get(
+                id=int(domain_id),
+                organisation=request.user.organisation
+            )
+        except Domain.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': 'Domain not found or you do not have access'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Validate file
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({
+                'status': 'error',
+                'message': 'No file uploaded'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not uploaded_file.name.endswith('.xlsx'):
+            return Response({
+                'status': 'error',
+                'message': 'Only .xlsx files are supported'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if uploaded_file.size > 5 * 1024 * 1024:  # 5MB
+            return Response({
+                'status': 'error',
+                'message': 'File size must be under 5MB'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Parse Excel file
+        try:
+            wb = openpyxl.load_workbook(uploaded_file, read_only=True, data_only=True)
+            ws = wb.active
+        except Exception as e:
+            return Response({
+                'status': 'error',
+                'message': f'Failed to parse Excel file: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Parse rows
+        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        wb.close()
+
+        if not rows:
+            return Response({
+                'status': 'error',
+                'message': 'Excel file has no data rows'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate and build items
+        items_data = []
+        errors = []
+
+        for row_idx, row in enumerate(rows, start=2):
+            # Skip completely empty rows
+            if not row or all(cell is None or str(cell).strip() == '' for cell in row):
+                continue
+
+            # Pad row to expected length
+            row = list(row) + [None] * (16 - len(row)) if len(row) < 16 else list(row)
+
+            content_category = str(row[0] or '').strip()
+            content_type_name = str(row[1] or '').strip()
+            title = str(row[2] or '').strip()
+            keywords = str(row[3] or '').strip()
+            target_country = str(row[4] or '').strip()
+            target_language = str(row[5] or '').strip()
+            target_audience = str(row[6] or '').strip()
+            word_count_raw = row[7]
+            tone = str(row[8] or '').strip()
+            style = str(row[9] or '').strip()
+            key_messages = str(row[10] or '').strip()
+            topics_to_avoid = str(row[11] or '').strip()
+            additional_instructions = str(row[12] or '').strip()
+            reference_urls = str(row[13] or '').strip()
+            reference_descriptions = str(row[14] or '').strip()
+            priority_name = str(row[15] or '').strip()
+
+            row_errors = []
+
+            # Required fields
+            if not title:
+                row_errors.append('Title / Page Title / Topic is required')
+            if not keywords:
+                row_errors.append('Keywords are required')
+            if not content_category:
+                row_errors.append('Content Category is required')
+            if not content_type_name:
+                row_errors.append('Content Type is required')
+
+            # Map content type
+            article_type = BULK_CONTENT_TYPE_MAP.get((content_category, content_type_name))
+            if not article_type and content_category and content_type_name:
+                row_errors.append(
+                    f'Invalid Content Category/Type combination: "{content_category}" / "{content_type_name}"'
+                )
+
+            # Map country
+            country_code = BULK_COUNTRY_MAP.get(target_country, 'united_states')
+
+            # Map language
+            language_code = BULK_LANGUAGE_MAP.get(target_language, 'us_english')
+
+            # Map audience
+            audience_code = BULK_AUDIENCE_MAP.get(target_audience, 'general')
+
+            # Map priority
+            priority_code = BULK_PRIORITY_MAP.get(priority_name, 'medium')
+
+            # Parse word count
+            try:
+                word_count = int(word_count_raw) if word_count_raw else 1500
+            except (ValueError, TypeError):
+                word_count = 1500
+                row_errors.append(f'Invalid word count: {word_count_raw}')
+
+            if row_errors:
+                errors.append({'row': row_idx, 'errors': row_errors})
+            else:
+                items_data.append({
+                    'row_number': row_idx,
+                    'content_category': content_category,
+                    'content_type': content_type_name,
+                    'title': title,
+                    'keywords': keywords,
+                    'article_type': article_type,
+                    'target_country': country_code,
+                    'target_language': language_code,
+                    'target_audience': audience_code,
+                    'word_count': word_count,
+                    'tone': tone or 'professional',
+                    'style': style or 'informative',
+                    'key_messages': key_messages,
+                    'topics_to_avoid': topics_to_avoid,
+                    'additional_instructions': additional_instructions,
+                    'reference_urls': reference_urls,
+                    'reference_descriptions': reference_descriptions,
+                    'priority': priority_code,
+                })
+
+        if errors:
+            return Response({
+                'status': 'error',
+                'message': f'Validation failed for {len(errors)} row(s)',
+                'validation_errors': errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not items_data:
+            return Response({
+                'status': 'error',
+                'message': 'No valid data rows found'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Clean up previous completed batches for this domain
+        # (items are deleted automatically via CASCADE)
+        BulkUploadBatch.objects.filter(
+            domain=domain,
+            status__in=['completed', 'completed_with_errors', 'failed'],
+        ).delete()
+
+        # Create batch and items
+        with transaction.atomic():
+            batch = BulkUploadBatch.objects.create(
+                domain=domain,
+                uploaded_by=request.user,
+                file_name=uploaded_file.name,
+                status='processing',
+                total_items=len(items_data),
+            )
+
+            bulk_items = []
+            for item_data in items_data:
+                bulk_items.append(BulkUploadItem(
+                    batch=batch,
+                    **item_data,
+                    status='processed',
+                ))
+            BulkUploadItem.objects.bulk_create(bulk_items)
+
+        # Start queue engine immediately
+        thread = threading.Thread(
+            target=_run_bulk_generation_queue,
+            args=(batch.id,),
+            daemon=True
+        )
+        thread.start()
+
+        logger.info(
+            f"Bulk upload batch {batch.id} created with {len(items_data)} items, "
+            f"queue engine started"
+        )
+
+        # Return batch detail
+        serializer = BulkUploadBatchSerializer(batch)
+        return Response({
+            'status': 'success',
+            'message': f'Uploaded {len(items_data)} items. Generation started automatically.',
+            'data': serializer.data
+        }, status=status.HTTP_202_ACCEPTED)
+
+    except Exception as e:
+        logger.error(f"Bulk upload error: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Bulk upload failed: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_bulk_upload_batches(request):
+    """
+    List all bulk upload batches for the user's organisation.
+    Query params: domain_id (optional)
+    """
+    try:
+        batches = BulkUploadBatch.objects.filter(
+            domain__organisation=request.user.organisation
+        )
+
+        domain_id = request.query_params.get('domain_id')
+        if domain_id:
+            batches = batches.filter(domain_id=domain_id)
+
+        serializer = BulkUploadBatchListSerializer(batches, many=True)
+        return Response({
+            'status': 'success',
+            'data': serializer.data
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching bulk upload batches: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_bulk_upload_batch_detail(request, batch_id):
+    """
+    Get batch detail with all items and their statuses.
+    Used for polling by the frontend.
+    """
+    try:
+        batch = get_object_or_404(
+            BulkUploadBatch,
+            id=batch_id,
+            domain__organisation=request.user.organisation
+        )
+
+        serializer = BulkUploadBatchSerializer(batch)
+        return Response({
+            'status': 'success',
+            'data': serializer.data
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching batch detail: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def retry_bulk_upload_item(request, item_id):
+    """
+    Retry a failed item. Resets status to 'processed' and spawns a
+    single-item background generation thread.
+    """
+    try:
+        item = get_object_or_404(
+            BulkUploadItem,
+            id=item_id,
+            batch__domain__organisation=request.user.organisation
+        )
+
+        if item.status != 'generation_failed':
+            return Response({
+                'status': 'error',
+                'message': f'Can only retry items with status "generation_failed", current: "{item.status}"'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        item.status = 'processed'
+        item.error_message = None
+        item.retry_count += 1
+        item.save(update_fields=['status', 'error_message', 'retry_count', 'modified_at'])
+
+        # Spawn single-item generation thread
+        thread = threading.Thread(
+            target=_run_single_item_generation,
+            args=(item.id,),
+            daemon=True
+        )
+        thread.start()
+
+        serializer = BulkUploadItemSerializer(item)
+        return Response({
+            'status': 'success',
+            'message': 'Retry started',
+            'data': serializer.data
+        }, status=status.HTTP_202_ACCEPTED)
+
+    except Exception as e:
+        logger.error(f"Error retrying bulk item: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def update_bulk_upload_item_status(request, item_id):
+    """
+    Manually advance an item through the review workflow.
+    Body: { "status": "in_review" | "reviewed" | "approved" }
+    """
+    try:
+        item = get_object_or_404(
+            BulkUploadItem,
+            id=item_id,
+            batch__domain__organisation=request.user.organisation
+        )
+
+        new_status = request.data.get('status')
+        if not new_status:
+            return Response({
+                'status': 'error',
+                'message': 'status field is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        valid_next = BULK_VALID_STATUS_TRANSITIONS.get(item.status, [])
+        if new_status not in valid_next:
+            return Response({
+                'status': 'error',
+                'message': (
+                    f'Invalid status transition: "{item.status}" → "{new_status}". '
+                    f'Valid transitions from "{item.status}": {valid_next or "none"}'
+                )
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        item.status = new_status
+        item.save(update_fields=['status', 'modified_at'])
+
+        serializer = BulkUploadItemSerializer(item)
+        return Response({
+            'status': 'success',
+            'message': f'Status updated to {new_status}',
+            'data': serializer.data
+        })
+
+    except Exception as e:
+        logger.error(f"Error updating bulk item status: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

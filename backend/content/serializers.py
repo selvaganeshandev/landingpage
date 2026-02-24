@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from .models import GeneratedContent, CMSProvider, ScheduledPublication, ContentComment
+from .models import (
+    GeneratedContent, CMSProvider, ScheduledPublication, ContentComment,
+    BulkUploadBatch, BulkUploadItem
+)
 from domains.models import Domain
 
 
@@ -322,4 +325,77 @@ class CreateContentCommentSerializer(serializers.Serializer):
     comment = serializers.CharField(required=True)
     suggestion = serializers.CharField(required=False, allow_blank=True, default='')
 
+
+class BulkUploadItemSerializer(serializers.ModelSerializer):
+    """
+    Serializer for individual bulk upload items
+    """
+    generated_content_id = serializers.IntegerField(
+        source='generated_content.id', read_only=True, default=None
+    )
+
+    class Meta:
+        model = BulkUploadItem
+        fields = [
+            'id', 'row_number', 'content_category', 'content_type',
+            'title', 'keywords', 'article_type',
+            'target_country', 'target_language', 'target_audience',
+            'word_count', 'tone', 'style',
+            'key_messages', 'topics_to_avoid', 'additional_instructions',
+            'reference_urls', 'reference_descriptions',
+            'priority', 'status', 'error_message', 'retry_count',
+            'generated_content_id',
+            'generation_started_at', 'generation_completed_at',
+            'created_at', 'modified_at',
+        ]
+        read_only_fields = [
+            'id', 'row_number', 'generated_content_id',
+            'generation_started_at', 'generation_completed_at',
+            'created_at', 'modified_at',
+        ]
+
+
+class BulkUploadBatchSerializer(serializers.ModelSerializer):
+    """
+    Serializer for bulk upload batch detail (includes all items)
+    """
+    domain_name = serializers.CharField(source='domain.name', read_only=True)
+    uploaded_by_name = serializers.SerializerMethodField()
+    items = BulkUploadItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = BulkUploadBatch
+        fields = [
+            'id', 'domain', 'domain_name', 'uploaded_by', 'uploaded_by_name',
+            'file_name', 'status',
+            'total_items', 'processed_items', 'successful_items', 'failed_items',
+            'error_message',
+            'created_at', 'completed_at',
+            'items',
+        ]
+        read_only_fields = [
+            'id', 'uploaded_by', 'status',
+            'total_items', 'processed_items', 'successful_items', 'failed_items',
+            'created_at', 'completed_at',
+        ]
+
+    def get_uploaded_by_name(self, obj):
+        if obj.uploaded_by.first_name:
+            return f"{obj.uploaded_by.first_name} {obj.uploaded_by.last_name or ''}".strip()
+        return obj.uploaded_by.email
+
+
+class BulkUploadBatchListSerializer(serializers.ModelSerializer):
+    """
+    Lightweight serializer for batch list (without nested items)
+    """
+    domain_name = serializers.CharField(source='domain.name', read_only=True)
+
+    class Meta:
+        model = BulkUploadBatch
+        fields = [
+            'id', 'domain', 'domain_name', 'file_name', 'status',
+            'total_items', 'processed_items', 'successful_items', 'failed_items',
+            'created_at', 'completed_at',
+        ]
 
