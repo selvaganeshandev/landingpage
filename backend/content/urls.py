@@ -33,6 +33,14 @@ urlpatterns = [
     # Content Comment endpoints (Google Docs-style)
     path('<int:content_id>/comments/', views.content_comments, name='content_comments'),
     path('<int:content_id>/comments/<int:comment_id>/', views.content_comment_detail, name='content_comment_detail'),
+
+    # Bulk Upload endpoints
+    path('bulk-upload/template/', views.download_bulk_upload_template, name='bulk_upload_template'),
+    path('bulk-upload/', views.bulk_upload_content, name='bulk_upload_content'),
+    path('bulk-upload/batches/', views.get_bulk_upload_batches, name='bulk_upload_batches'),
+    path('bulk-upload/batches/<int:batch_id>/', views.get_bulk_upload_batch_detail, name='bulk_upload_batch_detail'),
+    path('bulk-upload/items/<int:item_id>/retry/', views.retry_bulk_upload_item, name='bulk_upload_item_retry'),
+    path('bulk-upload/items/<int:item_id>/status/', views.update_bulk_upload_item_status, name='bulk_upload_item_status'),
 ]
 
 

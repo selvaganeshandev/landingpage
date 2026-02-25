@@ -217,7 +217,6 @@ CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=False, cast=bool)
 # Mailgun HTTP API Configuration
 MAILGUN_API_KEY = config('MAILGUN_API_KEY', default='')
 MAILGUN_DOMAIN = config('MAILGUN_DOMAIN', default='')
-MAILGUN_API_URL = config('MAILGUN_API_URL', default='https://api.mailgun.net/v3')
 
 # Sender Email
 DEFAULT_FROM_EMAIL = config(
