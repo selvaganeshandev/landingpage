@@ -74,7 +74,6 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }>
   generated: { label: "Generated", color: "bg-emerald-500/10 text-emerald-600", icon: CheckCircle2 },
   generation_failed: { label: "Failed", color: "bg-red-500/10 text-red-600", icon: XCircle },
   in_review: { label: "In Review", color: "bg-amber-500/10 text-amber-600", icon: Eye },
-  reviewed: { label: "Reviewed", color: "bg-blue-500/10 text-blue-600", icon: CheckCircle2 },
   approved: { label: "Approved", color: "bg-emerald-500/10 text-emerald-700", icon: CheckCircle2 },
 };
 
@@ -615,29 +614,6 @@ const BulkContentUpload = () => {
                           </Button>
                         )}
                         {item.status === 'in_review' && (
-                          <>
-                            {item.generated_content_id && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 text-xs"
-                                onClick={() => handleViewContent(item.generated_content_id!)}
-                              >
-                                <Eye className="h-3 w-3" />
-                              </Button>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              onClick={() => handleStatusUpdate(item.id, 'reviewed')}
-                            >
-                              <CheckCircle2 className="h-3 w-3 mr-1" />
-                              Mark Reviewed
-                            </Button>
-                          </>
-                        )}
-                        {item.status === 'reviewed' && (
                           <>
                             {item.generated_content_id && (
                               <Button

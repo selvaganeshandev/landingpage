@@ -1889,8 +1889,7 @@ BULK_PRIORITY_MAP = {
 # Valid manual status transitions for bulk upload items
 BULK_VALID_STATUS_TRANSITIONS = {
     'generated': ['in_review'],
-    'in_review': ['reviewed'],
-    'reviewed': ['approved'],
+    'in_review': ['approved'],
 }
 
 # Excel template column order (0-indexed)
@@ -2370,30 +2369,6 @@ def download_bulk_upload_template(request):
     keywords_comment.height = 140
     ws.cell(row=1, column=4).comment = keywords_comment
 
-    # ── Sample rows (one per category) ────────────────────────────
-    samples = [
-        ['Articles', 'Blog Post', '10 Best SEO Strategies for 2026',
-         'seo strategies, seo tips', 'United States', 'US English',
-         'Professionals', 2500, 'Professional', 'Informative',
-         'Focus on actionable SEO tactics', 'Black hat SEO techniques',
-         'Include real-world examples', '', '', 'High'],
-        ['Web Pages', 'Landing Page', 'Transform Your Business with Our Solutions',
-         'business solutions, enterprise software, digital transformation', 'United States', 'US English',
-         'General', 1500, 'Professional', 'Persuasive',
-         'Highlight key benefits', '', '', '', '', 'Medium'],
-        ['Social Media', 'Twitter/X Post', '5 game-changing tips for startup founders',
-         '#startups, #entrepreneurship, #growthhacking, founder tips', 'United States', 'US English',
-         'General', 50, 'Conversational', 'Engaging',
-         '', '', 'Keep it punchy', '', '', 'Medium'],
-        ['Community', 'Reddit Post', 'How to optimize React performance in large apps',
-         'react, performance, optimization, web development', 'United States', 'US English',
-         'Professionals', 800, 'Conversational', 'Informative',
-         '', '', 'Be authentic, avoid promotional tone', '', '', 'Low'],
-    ]
-    for row_offset, sample in enumerate(samples):
-        for col_idx, val in enumerate(sample, start=1):
-            ws.cell(row=2 + row_offset, column=col_idx, value=val).border = thin_border
-
     # ── Instructions sheet ─────────────────────────────────────────
     ws_instr = wb.create_sheet("Instructions", 0)
     wb.active = wb["Bulk Upload"]
@@ -2857,6 +2832,38 @@ def update_bulk_upload_item_status(request, item_id):
 
         item.status = new_status
         item.save(update_fields=['status', 'modified_at'])
+
+        # Sync review status to the real GeneratedContent via ContentComment
+        if item.generated_content:
+            content = item.generated_content
+
+            if new_status == 'in_review':
+                # Create a pending review comment to trigger "In Review" in Content Planner
+                existing = ContentComment.objects.filter(
+                    content=content,
+                    author=request.user,
+                    comment='Bulk upload review — pending review',
+                    status='pending',
+                ).first()
+                if not existing:
+                    ContentComment.objects.create(
+                        content=content,
+                        author=request.user,
+                        selected_text=content.title,
+                        comment='Bulk upload review — pending review',
+                        status='pending',
+                    )
+
+            elif new_status == 'approved':
+                # Resolve all pending comments to trigger "Reviewed" in Content Planner
+                ContentComment.objects.filter(
+                    content=content,
+                    status='pending',
+                ).update(
+                    status='accepted',
+                    resolved_by=request.user,
+                    resolved_at=timezone.now(),
+                )
 
         serializer = BulkUploadItemSerializer(item)
         return Response({
