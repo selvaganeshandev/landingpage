@@ -2234,11 +2234,11 @@ const ContentEditor = () => {
                 size="sm"
                 onClick={handleOpenRewriteDialog}
                 disabled={!hasSelection}
-                title="Rewrite selected text with AI"
+                title="Optimize selected text with custom prompt"
                 className={`gap-1 ${hasSelection ? 'bg-primary text-primary-foreground' : 'opacity-50'}`}
               >
                 <RefreshCw className="h-4 w-4" />
-                Rewrite
+                Optimize with custom prompt
               </Button>
             </div>
           </div>

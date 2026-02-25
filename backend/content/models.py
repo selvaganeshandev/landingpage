@@ -64,6 +64,19 @@ class GeneratedContent(models.Model):
         help_text="Rich text editor JSON format (for TipTap/ProseMirror)"
     )
 
+    # SEO meta fields (auto-generated)
+    meta_title = models.CharField(
+        max_length=200,
+        blank=True,
+        default='',
+        help_text="SEO meta title (auto-generated, ~60 chars)"
+    )
+    meta_description = models.TextField(
+        blank=True,
+        default='',
+        help_text="SEO meta description (auto-generated, ~160 chars)"
+    )
+
     # Source tracking
     source_type = models.CharField(
         max_length=20,

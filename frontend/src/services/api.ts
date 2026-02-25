@@ -1520,22 +1520,25 @@ export const apiClient = {
     }),
 
   // ===== Bulk Content Upload =====
-  downloadBulkUploadTemplate: async () => {
+  downloadBulkUploadTemplate: async (domainId?: number) => {
     const token = getAuthToken();
-    const response = await fetch(`${API_BASE_URL}/content/bulk-upload/template/`, {
+    const url = domainId
+      ? `${API_BASE_URL}/content/bulk-upload/template/?domain_id=${domainId}`
+      : `${API_BASE_URL}/content/bulk-upload/template/`;
+    const response = await fetch(url, {
       headers: {
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
       },
     });
     if (!response.ok) throw new Error('Failed to download template');
     const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
+    const blobUrl = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
+    a.href = blobUrl;
     a.download = 'bulk_content_upload_template.xlsx';
     document.body.appendChild(a);
     a.click();
-    window.URL.revokeObjectURL(url);
+    window.URL.revokeObjectURL(blobUrl);
     document.body.removeChild(a);
   },
 

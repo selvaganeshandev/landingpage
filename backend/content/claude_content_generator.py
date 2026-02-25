@@ -84,6 +84,82 @@ class ClaudeContentGenerator:
         except Exception as e:
             raise Exception(f"Claude API error: {str(e)}")
 
+    def generate_meta_tags(self, title, content_html, keywords=''):
+        """
+        Generate SEO meta_title and meta_description from generated content.
+        Separate lightweight call that runs AFTER content generation.
+        Gracefully returns empty strings on any failure.
+
+        Args:
+            title (str): The article title
+            content_html (str): The generated HTML content
+            keywords (str): Target keywords (comma-separated)
+
+        Returns:
+            dict: { 'meta_title': str, 'meta_description': str }
+        """
+        import json
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Extract first ~500 words of plain text for context
+        plain_text = re.sub(r'<[^>]+>', ' ', content_html)
+        plain_text = re.sub(r'\s+', ' ', plain_text).strip()
+        words = plain_text.split()
+        content_excerpt = ' '.join(words[:500])
+
+        system_prompt = (
+            "You are an SEO specialist. Generate a meta title and meta description "
+            "for the given content.\n\n"
+            "Rules:\n"
+            "- meta_title: Max 60 characters. Include the primary keyword. "
+            "Make it compelling for search results.\n"
+            "- meta_description: Max 160 characters. Summarize the content value "
+            "proposition. Include a call-to-action or benefit.\n"
+            "- Return ONLY valid JSON, no markdown, no code blocks.\n\n"
+            'Return format: {"meta_title": "...", "meta_description": "..."}'
+        )
+
+        user_prompt = (
+            f"Generate SEO meta tags for this content:\n\n"
+            f"Title: {title}\n"
+            f"Keywords: {keywords}\n\n"
+            f"Content excerpt:\n{content_excerpt}\n\n"
+            f"Return ONLY the JSON object."
+        )
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=256,
+                temperature=0.3,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+
+            result_text = response.content[0].text.strip()
+
+            # Clean up potential markdown code blocks
+            if result_text.startswith('```'):
+                result_text = result_text.split('```')[1]
+                if result_text.startswith('json'):
+                    result_text = result_text[4:]
+                result_text = result_text.strip()
+
+            meta = json.loads(result_text)
+
+            return {
+                'meta_title': str(meta.get('meta_title', ''))[:200],
+                'meta_description': str(meta.get('meta_description', ''))[:500],
+            }
+
+        except Exception as e:
+            logger.warning(f"Meta tag generation failed (non-fatal): {str(e)}")
+            return {
+                'meta_title': '',
+                'meta_description': '',
+            }
+
     def _build_prompts(self, params):
         """
         Build the system and user prompts based on parameters
