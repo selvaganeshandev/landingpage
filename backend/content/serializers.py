@@ -18,6 +18,7 @@ class GeneratedContentSerializer(serializers.ModelSerializer):
         model = GeneratedContent
         fields = [
             'id', 'domain', 'domain_name', 'title', 'content_html', 'content_json',
+            'meta_title', 'meta_description',
             'source_type', 'source_id', 'source_reference',
             'article_type', 'keywords', 'tone', 'style', 'goal', 'audience', 'depth',
             'word_count', 'actual_word_count',

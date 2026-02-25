@@ -183,7 +183,7 @@ const BulkContentUpload = () => {
 
   const handleDownloadTemplate = async () => {
     try {
-      await apiClient.downloadBulkUploadTemplate();
+      await apiClient.downloadBulkUploadTemplate(selectedDomain?.id);
       toast({ title: "Template downloaded", description: "Fill in the template and upload it back." });
     } catch {
       toast({ title: "Download failed", variant: "destructive" });

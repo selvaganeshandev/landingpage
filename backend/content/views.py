@@ -112,11 +112,20 @@ def generate_content(request):
         logger.info(f"Generating content for domain {domain.id}: {validated_data['title']}")
         generation_result = generator.generate_content(generation_params)
 
+        # Generate SEO meta tags (separate lightweight call)
+        meta_result = generator.generate_meta_tags(
+            title=validated_data['title'],
+            content_html=generation_result['content_html'],
+            keywords=validated_data['keywords'],
+        )
+
         # Create GeneratedContent record
         generated_content = GeneratedContent.objects.create(
             domain=domain,
             title=validated_data['title'],
             content_html=generation_result['content_html'],
+            meta_title=meta_result['meta_title'],
+            meta_description=meta_result['meta_description'],
             source_type=validated_data.get('source_type', 'manual'),
             source_id=validated_data.get('source_id'),
             source_reference=validated_data.get('source_reference', ''),
@@ -299,11 +308,20 @@ def generate_content_from_outline(request):
         logger.info(f"Generating content from outline for domain {domain.id}: {validated_data['title']}")
         generation_result = generator.generate_content_from_outline(generation_params, outline)
 
+        # Generate SEO meta tags (separate lightweight call)
+        meta_result = generator.generate_meta_tags(
+            title=validated_data['title'],
+            content_html=generation_result['content_html'],
+            keywords=validated_data['keywords'],
+        )
+
         # Create GeneratedContent record
         generated_content = GeneratedContent.objects.create(
             domain=domain,
             title=validated_data['title'],
             content_html=generation_result['content_html'],
+            meta_title=meta_result['meta_title'],
+            meta_description=meta_result['meta_description'],
             source_type=validated_data.get('source_type', 'manual'),
             source_id=validated_data.get('source_id'),
             source_reference=validated_data.get('source_reference', ''),
@@ -1974,11 +1992,20 @@ def _run_bulk_generation_queue(batch_id):
                 logger.info(f"Bulk item {item.id} (row {item.row_number}): generating '{item.title}'")
                 generation_result = generator.generate_content(generation_params)
 
+                # Generate SEO meta tags (separate lightweight call)
+                meta_result = generator.generate_meta_tags(
+                    title=item.title,
+                    content_html=generation_result['content_html'],
+                    keywords=item.keywords,
+                )
+
                 # Create GeneratedContent record (same pattern as generate_content view)
                 generated_content = GeneratedContent.objects.create(
                     domain=batch.domain,
                     title=item.title,
                     content_html=generation_result['content_html'],
+                    meta_title=meta_result['meta_title'],
+                    meta_description=meta_result['meta_description'],
                     source_type='manual',
                     source_id=batch.id,
                     source_reference=f'Bulk Upload Batch #{batch.id}',
@@ -2118,6 +2145,13 @@ def _run_single_item_generation(item_id):
         generator = ClaudeContentGenerator()
         generation_result = generator.generate_content(generation_params)
 
+        # Generate SEO meta tags
+        meta_result = generator.generate_meta_tags(
+            title=item.title,
+            content_html=generation_result['content_html'],
+            keywords=item.keywords,
+        )
+
         generated_content = GeneratedContent.objects.create(
             domain=batch.domain,
             title=item.title,
@@ -2140,6 +2174,8 @@ def _run_single_item_generation(item_id):
             generation_time_seconds=generation_result['generation_time_seconds'],
             prompt_tokens=generation_result['prompt_tokens'],
             completion_tokens=generation_result['completion_tokens'],
+            meta_title=meta_result['meta_title'],
+            meta_description=meta_result['meta_description'],
         )
 
         item.status = 'generated'
@@ -2368,6 +2404,57 @@ def download_bulk_upload_template(request):
     keywords_comment.width = 280
     keywords_comment.height = 140
     ws.cell(row=1, column=4).comment = keywords_comment
+
+    # ── Pre-fill row 2 with domain defaults (if domain_id provided) ──
+    domain_id = request.query_params.get('domain_id')
+    if domain_id:
+        try:
+            domain = Domain.objects.get(id=domain_id)
+
+            # E: Target Country — match domain.country to dropdown values
+            domain_country = domain.country or ''
+            matched_country = ''
+            for display_name in countries:
+                if display_name.lower() == domain_country.lower():
+                    matched_country = display_name
+                    break
+            if not matched_country and countries:
+                matched_country = countries[0]  # fallback to first
+            if matched_country:
+                ws.cell(row=2, column=5, value=matched_country)
+
+            # F: Target Language — first value as default
+            if languages:
+                ws.cell(row=2, column=6, value=languages[0])
+
+            # G: Target Audience — first value as default
+            if audiences:
+                ws.cell(row=2, column=7, value=audiences[0])
+
+            # H: Word Count — default 1500
+            ws.cell(row=2, column=8, value=1500)
+
+            # I: Tone of Voice — from domain content guidelines
+            if domain.tone_of_voice:
+                ws.cell(row=2, column=9, value=domain.tone_of_voice)
+
+            # J: Content Style — from domain content guidelines
+            if domain.content_style:
+                ws.cell(row=2, column=10, value=domain.content_style)
+
+            # K: Key Messages — from domain content guidelines
+            if domain.key_messages:
+                ws.cell(row=2, column=11, value=domain.key_messages)
+
+            # L: Topics to Avoid — from domain content guidelines
+            if domain.topics_to_avoid:
+                ws.cell(row=2, column=12, value=domain.topics_to_avoid)
+
+            # P: Priority — default Medium
+            ws.cell(row=2, column=16, value='Medium')
+
+        except Domain.DoesNotExist:
+            pass  # domain not found, skip pre-fill
 
     # ── Instructions sheet ─────────────────────────────────────────
     ws_instr = wb.create_sheet("Instructions", 0)
