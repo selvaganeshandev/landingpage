@@ -50,7 +50,8 @@ import {
   Play,
   Wand2,
   Undo2,
-  CircleDashed
+  CircleDashed,
+  FileText
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -268,6 +269,12 @@ const ContentEditor = () => {
   const [selectedTextForDialog, setSelectedTextForDialog] = useState("");
   const selectedTextRef = useRef<string>("");
   const selectedRangeRef = useRef<Range | null>(null);
+
+  // Meta details dialog state
+  const [metaDetailsDialogOpen, setMetaDetailsDialogOpen] = useState(false);
+  const [editMetaTitle, setEditMetaTitle] = useState("");
+  const [editMetaDescription, setEditMetaDescription] = useState("");
+  const [isSavingMeta, setIsSavingMeta] = useState(false);
 
   // Link dialog state
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
@@ -1890,6 +1897,43 @@ const ContentEditor = () => {
     }
   };
 
+  // Save meta details (meta_title and meta_description)
+  const handleSaveMetaDetails = async () => {
+    if (!id) return;
+
+    try {
+      setIsSavingMeta(true);
+
+      await apiClient.updateGeneratedContent(parseInt(id), {
+        meta_title: editMetaTitle.trim(),
+        meta_description: editMetaDescription.trim(),
+      });
+
+      // Update local contentData to reflect the changes
+      setContentData((prev: any) => ({
+        ...prev,
+        meta_title: editMetaTitle.trim(),
+        meta_description: editMetaDescription.trim(),
+      }));
+
+      toast({
+        title: "Success",
+        description: "Meta details updated successfully",
+      });
+
+      setMetaDetailsDialogOpen(false);
+    } catch (error) {
+      console.error("Error saving meta details:", error);
+      toast({
+        title: "Error",
+        description: "Failed to save meta details",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSavingMeta(false);
+    }
+  };
+
   // Save as draft (so it can be published later)
   const handleSaveAsDraft = async () => {
     if (!id) return;
@@ -2239,6 +2283,22 @@ const ContentEditor = () => {
               >
                 <RefreshCw className="h-4 w-4" />
                 Optimize with custom prompt
+              </Button>
+              <Separator orientation="vertical" className="h-6 mx-1" />
+              {/* Meta Details */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setEditMetaTitle(contentData?.meta_title || "");
+                  setEditMetaDescription(contentData?.meta_description || "");
+                  setMetaDetailsDialogOpen(true);
+                }}
+                title="View and edit meta title & description"
+                className="gap-1"
+              >
+                <FileText className="h-4 w-4" />
+                Meta Details
               </Button>
             </div>
           </div>
@@ -3211,6 +3271,72 @@ const ContentEditor = () => {
                 <>
                   <RefreshCw className="h-4 w-4 mr-2" />
                   Rewrite
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Meta Details Dialog */}
+      <Dialog open={metaDetailsDialogOpen} onOpenChange={setMetaDetailsDialogOpen}>
+        <DialogContent className="sm:max-w-[550px]" onOpenAutoFocus={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Meta Details
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="metaTitle">Meta Title</Label>
+              <Input
+                id="metaTitle"
+                placeholder="Enter meta title (recommended ~60 characters)"
+                value={editMetaTitle}
+                onChange={(e) => setEditMetaTitle(e.target.value)}
+                maxLength={200}
+              />
+              <p className={`text-xs ${editMetaTitle.length > 60 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                {editMetaTitle.length}/60 characters (recommended)
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="metaDescription">Meta Description</Label>
+              <Textarea
+                id="metaDescription"
+                placeholder="Enter meta description (recommended ~160 characters)"
+                value={editMetaDescription}
+                onChange={(e) => setEditMetaDescription(e.target.value)}
+                rows={3}
+                maxLength={300}
+              />
+              <p className={`text-xs ${editMetaDescription.length > 160 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                {editMetaDescription.length}/160 characters (recommended)
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setMetaDetailsDialogOpen(false)}
+              disabled={isSavingMeta}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveMetaDetails}
+              disabled={isSavingMeta}
+            >
+              {isSavingMeta ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Meta Details
                 </>
               )}
             </Button>
