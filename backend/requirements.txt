@@ -1,27 +1,31 @@
+setuptools>=75.0.0
 Django==5.2
 djangorestframework==3.15.2
 psycopg[binary]==3.2.12
 python-decouple==3.8
 django-cors-headers==4.3.1
-djangorestframework-simplejwt==5.3.0
-python-dateutil==2.8.2
+djangorestframework-simplejwt==5.4.0
+python-dateutil==2.9.0.post0
 requests==2.31.0
 xhtml2pdf==0.2.17
 weasyprint==67.0
 gunicorn==21.2.0
 
 # Google API libraries for Analytics integration
-google-auth>=2.0.0
-google-auth-oauthlib>=1.0.0
-google-auth-httplib2>=0.2.0
-google-api-python-client>=2.100.0
-google-generativeai>=0.8.0
+google-auth==2.38.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0
+google-api-python-client==2.160.0
+google-generativeai==0.8.4
 
 # Misinformation module dependencies
-trafilatura>=2.0.0
-lxml_html_clean>=0.4.3
+trafilatura==2.0.0
+lxml_html_clean==0.4.3
 
 # Excel export dependencies
-openpyxl>=3.1.0
+openpyxl==3.1.5
 # Semantic keyword generation
-pandas>=2.0.0
+pandas==2.2.3
+
+# SEO Rankings module dependencies
+beautifulsoup4==4.12.3

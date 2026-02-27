@@ -1706,3 +1706,65 @@ def get_pending_insights(request):
             {'error': f'Failed to get pending insights: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+# ==================== SEO RANKING ENDPOINTS ====================
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def seo_process_keyword(request):
+    """
+    Trigger SEO rank processing for a single keyword.
+    Body: { seo_keyword_rank_id: int }
+    """
+    from .processing_tasks import process_seo_keyword_task
+
+    seo_kw_id = request.data.get('seo_keyword_rank_id')
+    if not seo_kw_id:
+        return Response(
+            {'error': 'seo_keyword_rank_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        process_seo_keyword_task.delay(int(seo_kw_id))
+        return Response({
+            'message': f'SEO keyword {seo_kw_id} queued for processing',
+            'seo_keyword_rank_id': seo_kw_id,
+        })
+    except Exception as e:
+        logger.error(f"[SEO] Error queuing keyword {seo_kw_id}: {e}")
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def seo_process_domain(request):
+    """
+    Trigger SEO rank processing for all keywords of a domain.
+    Body: { domain_id: int }
+    """
+    from .processing_tasks import process_seo_domain_task
+
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        process_seo_domain_task.delay(int(domain_id))
+        return Response({
+            'message': f'SEO domain {domain_id} queued for processing',
+            'domain_id': domain_id,
+        })
+    except Exception as e:
+        logger.error(f"[SEO] Error queuing domain {domain_id}: {e}")
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
