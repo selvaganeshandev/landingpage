@@ -305,8 +305,73 @@ def seo_domain_overview(request):
         domain_id=domain_id
     ).order_by('-score_meter').first()
 
+    # Compute SERP Features & Google Ads on-the-fly from keyword data
+    # (matches RankMax's ProjectOverviewSerializer approach — always fresh)
+    all_keywords = SeoKeywordRank.objects.filter(domain_id=domain_id)
+    rating_0_2 = 0
+    rating_2_4 = 0
+    rating_4_5 = 0
+    ads_you_above_below = 0
+    ads_you_above = 0
+    ads_you_below = 0
+    ads_others_above_below = 0
+    ads_others_above = 0
+    ads_others_below = 0
+
+    for kw in all_keywords:
+        # Rating buckets (matches RankMax isfloat_isdigit + R2/R4/R5)
+        rating = 0
+        if kw.total_rating and kw.total_rating != '-':
+            try:
+                rating = int(kw.total_rating) if kw.total_rating.isdigit() else float(kw.total_rating)
+            except (ValueError, TypeError):
+                rating = 0
+        if rating <= 2:
+            rating_0_2 += 1
+        elif rating <= 4:
+            rating_2_4 += 1
+        elif rating <= 5:
+            rating_4_5 += 1
+
+        # Google Ads (matches RankMax Ay/Ao logic)
+        snippets = kw.snippets_details or {}
+        if kw.ads and 'ads' in snippets:
+            ads_data = snippets['ads']
+            top_count = int(ads_data.get('top_count', 0) or 0)
+            bottom_count = int(ads_data.get('bottom_count', 0) or 0)
+            ads_status = ads_data.get('status', 'no')
+
+            if top_count > 0 and bottom_count > 0:
+                if ads_status == 'yes':
+                    ads_you_above_below += 1
+                else:
+                    ads_others_above_below += 1
+            elif top_count > 0:
+                if ads_status == 'yes':
+                    ads_you_above += 1
+                else:
+                    ads_others_above += 1
+            elif bottom_count > 0:
+                if ads_status == 'yes':
+                    ads_you_below += 1
+                else:
+                    ads_others_below += 1
+
+    today_data = SeoDomainDailyMetricsSerializer(latest).data if latest else None
+    # Override rating/ads fields with fresh computed values
+    if today_data:
+        today_data['rating_0_2'] = rating_0_2
+        today_data['rating_2_4'] = rating_2_4
+        today_data['rating_4_5'] = rating_4_5
+        today_data['ads_you_above_below'] = ads_you_above_below
+        today_data['ads_you_above'] = ads_you_above
+        today_data['ads_you_below'] = ads_you_below
+        today_data['ads_others_above_below'] = ads_others_above_below
+        today_data['ads_others_above'] = ads_others_above
+        today_data['ads_others_below'] = ads_others_below
+
     data = {
-        'today': SeoDomainDailyMetricsSerializer(latest).data if latest else None,
+        'today': today_data,
         'yesterday': SeoDomainDailyMetricsSerializer(yesterday).data if yesterday else None,
         'best': SeoDomainDailyMetricsSerializer(best).data if best else None,
         'comparison': [],
@@ -358,6 +423,56 @@ def seo_domain_overview(request):
 # ---------------------------------------------------------------------------
 # Engine Trigger
 # ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_refresh_status(request):
+    """
+    Check refresh progress for a domain.
+    Query params: domain_id (required)
+    Returns: total keywords, completed count, running count, progress %, and status.
+    Ported from RankMax /refreshstatus endpoint.
+    """
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Domain not found or access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    total = SeoKeywordRank.objects.filter(domain_id=domain_id).count()
+    if total == 0:
+        return Response({
+            'refreshing': False,
+            'total': 0,
+            'completed': 0,
+            'running': 0,
+            'progress': 0,
+            'status': 'idle',
+        })
+
+    done_count = SeoKeywordRank.objects.filter(
+        domain_id=domain_id,
+        auto_call_status__in=['done', 'fail'],
+    ).count()
+    running_count = SeoKeywordRank.objects.filter(
+        domain_id=domain_id,
+        auto_call_status__in=['avail', 'busy', 'load', 'read'],
+    ).count()
+
+    is_refreshing = running_count > 0
+    progress = int((done_count / total) * 100) if total > 0 else 0
+
+    return Response({
+        'refreshing': is_refreshing,
+        'total': total,
+        'completed': done_count,
+        'running': running_count,
+        'progress': progress,
+        'status': 'running' if is_refreshing else 'done',
+    })
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -452,3 +567,212 @@ def seo_trigger_ranking(request):
                 {'error': 'Engine service unavailable', 'detail': str(e)},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
+
+
+# ---------------------------------------------------------------------------
+# Bulk Delete (ported from RankMax /multidelete)
+# ---------------------------------------------------------------------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_bulk_delete(request):
+    """
+    Delete multiple SEO keywords and their related history.
+    Body: { ids: [1, 2, 3] }
+    """
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response({'error': 'Only admins can delete keywords'}, status=status.HTTP_403_FORBIDDEN)
+
+    ids = request.data.get('ids', [])
+    if not ids:
+        return Response({'error': 'ids list is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+
+    # Only delete keywords belonging to user's domains
+    keywords_to_delete = SeoKeywordRank.objects.filter(
+        pk__in=ids,
+        domain_id__in=allowed_ids,
+    )
+    count = keywords_to_delete.count()
+
+    if count == 0:
+        return Response({'error': 'No matching keywords found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Related history is cascade-deleted via FK
+    keywords_to_delete.delete()
+
+    return Response({
+        'status': 'true',
+        'message': f'{count} keyword(s) deleted successfully',
+        'deleted_count': count,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Tag Management (ported from RankMax /update_tags, /remove_tag)
+# ---------------------------------------------------------------------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_update_tags(request):
+    """
+    Bulk update tags for selected keywords.
+    Body: { ids: [1,2,3], tags: ["tag1","tag2"], mode: "merge"|"replace" }
+    mode=merge (default): adds tags to existing ones.
+    mode=replace: replaces all tags.
+    Max 20 tags per keyword.
+    """
+    ids = request.data.get('ids', [])
+    new_tags = request.data.get('tags', [])
+    mode = request.data.get('mode', 'merge')
+
+    if not ids:
+        return Response({'error': 'ids list is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Sanitise: lowercase, strip, deduplicate
+    new_tags = list(set(t.strip().lower() for t in new_tags if t.strip()))
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    keywords = SeoKeywordRank.objects.filter(pk__in=ids, domain_id__in=allowed_ids)
+
+    updated = 0
+    for kw in keywords:
+        if mode == 'replace':
+            kw.tags = new_tags[:20]
+        else:
+            merged = list(set((kw.tags or []) + new_tags))[:20]
+            kw.tags = merged
+        kw.save(update_fields=['tags'])
+        updated += 1
+
+    return Response({
+        'status': 'true',
+        'message': f'Tags updated for {updated} keyword(s)',
+        'updated_count': updated,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_remove_tag(request):
+    """
+    Remove a specific tag from all keywords in a domain.
+    Body: { domain_id: 50, tag: "tagname" }
+    """
+    domain_id = request.data.get('domain_id')
+    tag_name = request.data.get('tag', '').strip().lower()
+
+    if not domain_id or not tag_name:
+        return Response({'error': 'domain_id and tag are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Domain not found or access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    keywords = SeoKeywordRank.objects.filter(
+        domain_id=domain_id,
+        tags__contains=[tag_name],
+    )
+
+    updated = 0
+    for kw in keywords:
+        if tag_name in kw.tags:
+            kw.tags.remove(tag_name)
+            kw.save(update_fields=['tags'])
+            updated += 1
+
+    return Response({
+        'status': 'true',
+        'message': f'Tag "{tag_name}" removed from {updated} keyword(s)',
+        'updated_count': updated,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Favourite Toggle (ported from RankMax /favour)
+# ---------------------------------------------------------------------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_toggle_favourite(request):
+    """
+    Toggle favourite status for one or all keywords.
+    Body: { id: 123, value: 1 }      — single keyword
+    Body: { domain_id: 50, value: 1 } — all keywords in domain
+    value: 1 = favourite, 0 = unfavourite
+    """
+    kw_id = request.data.get('id')
+    domain_id = request.data.get('domain_id')
+    value = int(request.data.get('value', 0))
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+
+    if kw_id:
+        # Single keyword
+        try:
+            kw = SeoKeywordRank.objects.get(pk=kw_id, domain_id__in=allowed_ids)
+        except SeoKeywordRank.DoesNotExist:
+            return Response({'error': 'Keyword not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        kw.favour = value
+        kw.save(update_fields=['favour'])
+        msg = 'Keyword marked as favourite.' if value else 'Keyword removed from favourites.'
+
+    elif domain_id:
+        # All keywords in domain
+        if int(domain_id) not in allowed_ids:
+            return Response({'error': 'Domain not found or access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        SeoKeywordRank.objects.filter(domain_id=domain_id).update(favour=value)
+        msg = 'All keywords marked as favourite.' if value else 'All keywords removed from favourites.'
+
+    else:
+        return Response({'error': 'id or domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({'status': 'true', 'message': msg})
+
+
+# ---------------------------------------------------------------------------
+# Get Tags for Domain (for tag management UI)
+# ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_get_tags(request):
+    """
+    Get all unique tags used in a domain, plus common tags for selected keywords.
+    Query params: domain_id (required), ids (optional, comma-separated keyword IDs)
+    """
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Domain not found or access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    # All tags in domain
+    all_tags_lists = SeoKeywordRank.objects.filter(
+        domain_id=domain_id,
+    ).exclude(tags=[]).values_list('tags', flat=True)
+
+    all_tags = set()
+    for tag_list in all_tags_lists:
+        all_tags.update(t.lower() for t in tag_list)
+
+    # Common tags for selected keywords
+    ids_str = request.query_params.get('ids', '')
+    common_tags = []
+    if ids_str:
+        kw_ids = [int(i) for i in ids_str.split(',') if i.strip()]
+        if kw_ids:
+            selected_kws = SeoKeywordRank.objects.filter(pk__in=kw_ids, domain_id=domain_id)
+            tag_sets = [set(kw.tags or []) for kw in selected_kws]
+            if tag_sets:
+                common_tags = list(set.intersection(*tag_sets)) if tag_sets else []
+
+    return Response({
+        'all_tags': sorted(all_tags),
+        'common_tags': sorted(common_tags),
+    })

@@ -180,25 +180,40 @@ def calculate_domain_daily_metrics(domain_id):
     desktop_count = 0
     mobile_count = 0
 
+    # SERP Features — Ratings (ported from RankMax R2, R4, R5)
+    rating_0_2 = 0
+    rating_2_4 = 0
+    rating_4_5 = 0
+
+    # Google Search Ads (ported from RankMax Ay, Ao)
+    ads_you_above_below = 0
+    ads_you_above = 0
+    ads_you_below = 0
+    ads_others_above_below = 0
+    ads_others_above = 0
+    ads_others_below = 0
+
     for kw in all_keywords:
         rank = kw.rank_now
 
         # Score allocation
         score_per_day = score_allocation_calc(rank, score_per_day)
 
-        # Comparison buckets
-        if rank == 0:
-            not_ranked += 1
-        elif rank == 1:
-            top_1 += 1
-        elif rank <= 3:
-            top_3 += 1
-        elif rank <= 10:
-            top_10 += 1
-        elif rank <= 50:
-            top_50 += 1
-        elif rank <= 100:
-            top_100 += 1
+        # Comparison buckets (cumulative — matches RankMax logic)
+        # A keyword ranked #1 counts in Top 1, Top 3, Top 10, Top 50, AND Top 100
+        if rank and rank > 0:
+            if rank == 1:
+                top_1 += 1
+            if rank <= 3:
+                top_3 += 1
+            if rank <= 10:
+                top_10 += 1
+            if rank <= 50:
+                top_50 += 1
+            if rank <= 100:
+                top_100 += 1
+            if rank > 100:
+                not_ranked += 1
         else:
             not_ranked += 1
 
@@ -215,6 +230,44 @@ def calculate_domain_daily_metrics(domain_id):
             declined_count += 1
         else:
             no_change_count += 1
+
+        # SERP Features — Rating buckets (matches RankMax isfloat_isdigit + R2/R4/R5)
+        rating = 0
+        if kw.total_rating and kw.total_rating != '-':
+            try:
+                rating = float(kw.total_rating)
+            except (ValueError, TypeError):
+                rating = 0
+        if rating <= 2:
+            rating_0_2 += 1
+        elif rating <= 4:
+            rating_2_4 += 1
+        elif rating <= 5:
+            rating_4_5 += 1
+
+        # Google Search Ads (matches RankMax Ay/Ao logic)
+        snippets = kw.snippets_details or {}
+        if kw.ads and 'ads' in snippets:
+            ads_data = snippets['ads']
+            top_count = int(ads_data.get('top_count', 0) or 0)
+            bottom_count = int(ads_data.get('bottom_count', 0) or 0)
+            ads_status = ads_data.get('status', 'no')
+
+            if top_count > 0 and bottom_count > 0:
+                if ads_status == 'yes':
+                    ads_you_above_below += 1
+                else:
+                    ads_others_above_below += 1
+            elif top_count > 0:
+                if ads_status == 'yes':
+                    ads_you_above += 1
+                else:
+                    ads_others_above += 1
+            elif bottom_count > 0:
+                if ads_status == 'yes':
+                    ads_you_below += 1
+                else:
+                    ads_others_below += 1
 
     score = score_meter_calc(score_per_day, total_count)
     activity = activity_calc(improved_count, declined_count, total_count)
@@ -244,6 +297,15 @@ def calculate_domain_daily_metrics(domain_id):
             'not_ranked_count': not_ranked,
             'desktop_count': desktop_count,
             'mobile_count': mobile_count,
+            'rating_0_2': rating_0_2,
+            'rating_2_4': rating_2_4,
+            'rating_4_5': rating_4_5,
+            'ads_you_above_below': ads_you_above_below,
+            'ads_you_above': ads_you_above,
+            'ads_you_below': ads_you_below,
+            'ads_others_above_below': ads_others_above_below,
+            'ads_others_above': ads_others_above,
+            'ads_others_below': ads_others_below,
             'total_keywords': total_count,
         }
     )

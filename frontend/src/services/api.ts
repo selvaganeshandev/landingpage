@@ -1651,6 +1651,39 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  getSeoRefreshStatus: (domainId: string) =>
+    apiRequest(`/seo/refresh-status/?domain_id=${domainId}`),
+
+  bulkDeleteSeoKeywords: (ids: number[]) =>
+    apiRequest('/seo/keywords/bulk-delete/', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
+
+  updateSeoKeywordTags: (data: { ids: number[]; tags: string[]; mode?: 'merge' | 'replace' }) =>
+    apiRequest('/seo/keywords/update-tags/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  removeSeoKeywordTag: (data: { domain_id: number; tag: string }) =>
+    apiRequest('/seo/keywords/remove-tag/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getSeoKeywordTags: (domainId: string, ids?: number[]) => {
+    const params = new URLSearchParams({ domain_id: domainId });
+    if (ids && ids.length) params.append('ids', ids.join(','));
+    return apiRequest(`/seo/keywords/get-tags/?${params.toString()}`);
+  },
+
+  toggleSeoKeywordFavourite: (data: { id?: number; domain_id?: number; value: number }) =>
+    apiRequest('/seo/keywords/favourite/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // Also export as 'api' for flexibility

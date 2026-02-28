@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
+import { useSidebar } from "@/contexts/SidebarContext";
+import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +10,24 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Table,
   TableBody,
@@ -52,6 +72,9 @@ import {
   ChevronRight,
   BarChart3,
   ArrowRight,
+  X,
+  Plus,
+  SearchX,
 } from "lucide-react";
 
 // Types matching the backend SeoKeywordRankSerializer
@@ -96,6 +119,8 @@ interface SeoKeyword {
   auto_refresh_count: number;
   last_ranked_date: string | null;
   cannibalisation: any[];
+  tags: string[];
+  favour: number;
   created_at: string;
   modified_at: string;
 }
@@ -123,7 +148,8 @@ function mapKeywordForUI(kw: SeoKeyword) {
     change7d: kw.week_mark !== '-' ? { value: Math.abs(kw.week_val), direction: kw.week_mark } : null,
     change15d: kw.half_month_mark !== '-' ? { value: Math.abs(kw.half_month_val), direction: kw.half_month_mark } : null,
     serp: kw.featured_snippet || kw.knowledge_panel || kw.ads ? 'Yes' : null,
-    tags: [] as string[],
+    tags: kw.tags || [],
+    favour: kw.favour || 0,
     date: kw.last_ranked_date ? new Date(kw.last_ranked_date).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '-',
     timeAgo: kw.last_ranked_date ? getTimeAgo(new Date(kw.last_ranked_date)) : '',
     country: kw.isocode?.toUpperCase() || 'US',
@@ -162,14 +188,89 @@ const SeoRankings = () => {
   const [selectedKeywords, setSelectedKeywords] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshProgress, setRefreshProgress] = useState(0);
+  const [refreshCompleted, setRefreshCompleted] = useState(0);
+  const [refreshTotal, setRefreshTotal] = useState(0);
   const [seoKeywords, setSeoKeywords] = useState<ReturnType<typeof mapKeywordForUI>[]>([]);
   const [overview, setOverview] = useState<OverviewData | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeDomainRef = useRef<string>("");
+
+  // Tag dialog state
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [tagInput, setTagInput] = useState("");
+  const [pendingTags, setPendingTags] = useState<string[]>([]);
+  const [allDomainTags, setAllDomainTags] = useState<string[]>([]);
+  const [tagLoading, setTagLoading] = useState(false);
+
+  // Delete dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const { toast } = useToast();
 
   // Use the domain store (same source as the sidebar DomainSelector)
+  const { isOpen: sidebarOpen } = useSidebar();
   const { selectedDomain } = useDomainStore();
   const activeDomainId = selectedDomain ? String(selectedDomain.id) : "";
+  activeDomainRef.current = activeDomainId;
 
-  // Fetch SEO data when domain is available
+  // Stop polling helper
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
+  // Start polling refresh status via /seo/refresh-status/ endpoint
+  const startRefreshPolling = useCallback((domainId: string) => {
+    // Prevent duplicate polling
+    if (pollIntervalRef.current) return;
+    setRefreshing(true);
+
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const statusRes = await apiClient.getSeoRefreshStatus(domainId) as {
+          refreshing: boolean; total: number; completed: number; progress: number; status: string;
+        };
+
+        setRefreshTotal(statusRes.total);
+        setRefreshCompleted(statusRes.completed);
+        setRefreshProgress(statusRes.progress);
+
+        if (!statusRes.refreshing || statusRes.status === 'done') {
+          // Refresh complete — stop polling, fetch final data
+          stopPolling();
+          setRefreshProgress(100);
+
+          const [keywordsRes, overviewRes] = await Promise.all([
+            apiClient.getSeoKeywords({ domain_id: domainId }) as Promise<SeoKeyword[]>,
+            apiClient.getSeoDomainOverview(domainId) as Promise<OverviewData>,
+          ]);
+          setSeoKeywords((keywordsRes || []).map(mapKeywordForUI));
+          setOverview(overviewRes || null);
+
+          // Hide progress bar after brief delay
+          setTimeout(() => {
+            setRefreshing(false);
+            setRefreshProgress(0);
+            setRefreshCompleted(0);
+            setRefreshTotal(0);
+          }, 2000);
+        }
+      } catch {
+        // Keep polling on transient network errors
+      }
+    }, 5000);
+  }, [stopPolling]);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
+
+  // Fetch SEO data — also detects active refresh on page load/reload
   const fetchSeoData = useCallback(async () => {
     if (!activeDomainId) {
       setLoading(false);
@@ -183,12 +284,20 @@ const SeoRankings = () => {
       ]);
       setSeoKeywords((keywordsRes || []).map(mapKeywordForUI));
       setOverview(overviewRes || null);
+
+      // Detect if engine is still processing keywords (survives page reload)
+      const hasActiveRefresh = (keywordsRes || []).some(
+        (kw: SeoKeyword) => ['avail', 'busy', 'load', 'read'].includes(kw.auto_call_status)
+      );
+      if (hasActiveRefresh && !pollIntervalRef.current) {
+        startRefreshPolling(activeDomainId);
+      }
     } catch (err) {
       console.error("Failed to fetch SEO data:", err);
     } finally {
       setLoading(false);
     }
-  }, [activeDomainId]);
+  }, [activeDomainId, startRefreshPolling]);
 
   useEffect(() => {
     fetchSeoData();
@@ -197,40 +306,138 @@ const SeoRankings = () => {
   const handleRefresh = async () => {
     if (!activeDomainId || refreshing) return;
     setRefreshing(true);
+    setRefreshProgress(0);
+    setRefreshCompleted(0);
+    setRefreshTotal(0);
     try {
       await apiClient.triggerSeoRanking({ domain_id: Number(activeDomainId) });
-      // Poll for results every 5s (engine processes async via Celery)
-      let attempts = 0;
-      const maxAttempts = 24; // up to 2 minutes
-      const poll = setInterval(async () => {
-        attempts++;
-        try {
-          const [keywordsRes, overviewRes] = await Promise.all([
-            apiClient.getSeoKeywords({ domain_id: activeDomainId }) as Promise<SeoKeyword[]>,
-            apiClient.getSeoDomainOverview(activeDomainId) as Promise<OverviewData>,
-          ]);
-          setSeoKeywords((keywordsRes || []).map(mapKeywordForUI));
-          setOverview(overviewRes || null);
-
-          // Stop polling once we have overview data or all keywords are processed
-          const allDone = (keywordsRes || []).every(
-            (kw: SeoKeyword) => kw.auto_call_status === 'done' || kw.auto_call_status === 'fail'
-          );
-          if ((overviewRes?.today && allDone) || attempts >= maxAttempts) {
-            clearInterval(poll);
-            setRefreshing(false);
-          }
-        } catch {
-          // Keep polling on error
-          if (attempts >= maxAttempts) {
-            clearInterval(poll);
-            setRefreshing(false);
-          }
-        }
-      }, 5000);
+      startRefreshPolling(activeDomainId);
     } catch (err) {
       console.error("Failed to trigger ranking:", err);
       setRefreshing(false);
+    }
+  };
+
+  // ---------- Favourite Toggle ----------
+  const handleToggleFavourite = async (kwId: number, currentFavour: number) => {
+    const newValue = currentFavour ? 0 : 1;
+    try {
+      await apiClient.toggleSeoKeywordFavourite({ id: kwId, value: newValue });
+      setSeoKeywords(prev =>
+        prev.map(kw => kw.id === kwId ? { ...kw, favour: newValue } : kw)
+      );
+    } catch {
+      toast({ title: "Error", description: "Failed to update favourite status", variant: "destructive" });
+    }
+  };
+
+  // ---------- Delete ----------
+  const handleOpenDelete = () => {
+    if (selectedKeywords.length === 0) {
+      toast({ title: "No selection", description: "Select at least one keyword to delete" });
+      return;
+    }
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    setDeleteLoading(true);
+    try {
+      await apiClient.bulkDeleteSeoKeywords(selectedKeywords);
+      setSeoKeywords(prev => prev.filter(kw => !selectedKeywords.includes(kw.id)));
+      setSelectedKeywords([]);
+      setDeleteDialogOpen(false);
+      toast({ title: "Deleted", description: `${selectedKeywords.length} keyword(s) deleted successfully` });
+    } catch {
+      toast({ title: "Error", description: "Failed to delete keywords", variant: "destructive" });
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  // ---------- Tag Management ----------
+  const handleOpenTagDialog = async () => {
+    if (selectedKeywords.length === 0) {
+      toast({ title: "No selection", description: "Select at least one keyword to add tags" });
+      return;
+    }
+    setTagDialogOpen(true);
+    setPendingTags([]);
+    setTagInput("");
+    // Fetch existing tags for the domain
+    try {
+      const res = await apiClient.getSeoKeywordTags(activeDomainId, selectedKeywords) as {
+        all_tags: string[]; common_tags: string[];
+      };
+      setAllDomainTags(res.all_tags || []);
+      setPendingTags(res.common_tags || []);
+    } catch {
+      setAllDomainTags([]);
+    }
+  };
+
+  const handleAddTag = () => {
+    const tag = tagInput.trim().toLowerCase();
+    if (!tag) return;
+    if (!/^[a-zA-Z0-9\s-]+$/.test(tag)) {
+      toast({ title: "Invalid tag", description: "Tags can only contain letters, numbers, spaces and hyphens" });
+      return;
+    }
+    if (pendingTags.length >= 20) {
+      toast({ title: "Limit reached", description: "Maximum 20 tags per keyword" });
+      return;
+    }
+    if (!pendingTags.includes(tag)) {
+      setPendingTags(prev => [...prev, tag]);
+    }
+    setTagInput("");
+  };
+
+  const handleRemovePendingTag = (tag: string) => {
+    setPendingTags(prev => prev.filter(t => t !== tag));
+  };
+
+  const handleSaveTags = async () => {
+    setTagLoading(true);
+    try {
+      await apiClient.updateSeoKeywordTags({
+        ids: selectedKeywords,
+        tags: pendingTags,
+        mode: 'replace',
+      });
+      // Update local state
+      setSeoKeywords(prev =>
+        prev.map(kw =>
+          selectedKeywords.includes(kw.id) ? { ...kw, tags: pendingTags } : kw
+        )
+      );
+      setTagDialogOpen(false);
+      setSelectedKeywords([]);
+      toast({ title: "Tags updated", description: `Tags applied to ${selectedKeywords.length} keyword(s)` });
+    } catch {
+      toast({ title: "Error", description: "Failed to update tags", variant: "destructive" });
+    } finally {
+      setTagLoading(false);
+    }
+  };
+
+  // ---------- Inline Tag Add (from TAGS column "ADD" click) ----------
+  const handleInlineTagOpen = async (kwId: number) => {
+    setSelectedKeywords([kwId]);
+    setTagDialogOpen(true);
+    setPendingTags([]);
+    setTagInput("");
+    // Load tags for the single keyword
+    try {
+      const res = await apiClient.getSeoKeywordTags(activeDomainId, [kwId]) as {
+        all_tags: string[]; common_tags: string[];
+      };
+      setAllDomainTags(res.all_tags || []);
+      // For a single keyword, load its existing tags
+      const kw = seoKeywords.find(k => k.id === kwId);
+      setPendingTags(kw?.tags || []);
+    } catch {
+      setAllDomainTags([]);
     }
   };
 
@@ -574,7 +781,7 @@ const SeoRankings = () => {
                         ))}
                         <span className="text-xs text-muted-foreground ml-2">(0-2 stars)</span>
                       </div>
-                      <span className="text-lg font-bold font-inter">3</span>
+                      <span className="text-lg font-bold font-inter">{overview?.today?.rating_0_2 ?? 0}</span>
                     </div>
                     <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30 border border-border">
                       <div className="flex items-center gap-2">
@@ -586,7 +793,7 @@ const SeoRankings = () => {
                         ))}
                         <span className="text-xs text-muted-foreground ml-2">(2-4 stars)</span>
                       </div>
-                      <span className="text-lg font-bold font-inter">0</span>
+                      <span className="text-lg font-bold font-inter">{overview?.today?.rating_2_4 ?? 0}</span>
                     </div>
                     <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30 border border-border">
                       <div className="flex items-center gap-2">
@@ -595,14 +802,14 @@ const SeoRankings = () => {
                         ))}
                         <span className="text-xs text-muted-foreground ml-2">(4-5 stars)</span>
                       </div>
-                      <span className="text-lg font-bold font-inter">0</span>
+                      <span className="text-lg font-bold font-inter">{overview?.today?.rating_4_5 ?? 0}</span>
                     </div>
                   </div>
 
                   <div className="pt-2 border-t flex items-center justify-between">
                     <div className="flex items-center gap-2 text-sm">
                       <span className="text-muted-foreground">Total Features</span>
-                      <span className="font-semibold">3</span>
+                      <span className="font-semibold">{(overview?.today?.rating_0_2 ?? 0) + (overview?.today?.rating_2_4 ?? 0) + (overview?.today?.rating_4_5 ?? 0)}</span>
                     </div>
                   </div>
                 </div>
@@ -625,22 +832,22 @@ const SeoRankings = () => {
                     <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30 border border-border">
                       <span className="text-sm font-medium">Above & below the fold</span>
                       <div className="flex items-center gap-4">
-                        <span className="text-xs text-muted-foreground">You: <span className="text-lg font-bold font-inter text-foreground">0</span></span>
-                        <span className="text-xs text-muted-foreground">Others: <span className="text-lg font-bold font-inter text-foreground">0</span></span>
+                        <span className="text-xs text-muted-foreground">You: <span className="text-lg font-bold font-inter text-foreground">{overview?.today?.ads_you_above_below ?? 0}</span></span>
+                        <span className="text-xs text-muted-foreground">Others: <span className="text-lg font-bold font-inter text-foreground">{overview?.today?.ads_others_above_below ?? 0}</span></span>
                       </div>
                     </div>
                     <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30 border border-border">
                       <span className="text-sm font-medium">Above the fold</span>
                       <div className="flex items-center gap-4">
-                        <span className="text-xs text-muted-foreground">You: <span className="text-lg font-bold font-inter text-foreground">0</span></span>
-                        <span className="text-xs text-muted-foreground">Others: <span className="text-lg font-bold font-inter text-foreground">0</span></span>
+                        <span className="text-xs text-muted-foreground">You: <span className="text-lg font-bold font-inter text-foreground">{overview?.today?.ads_you_above ?? 0}</span></span>
+                        <span className="text-xs text-muted-foreground">Others: <span className="text-lg font-bold font-inter text-foreground">{overview?.today?.ads_others_above ?? 0}</span></span>
                       </div>
                     </div>
                     <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30 border border-border">
                       <span className="text-sm font-medium">Below the fold</span>
                       <div className="flex items-center gap-4">
-                        <span className="text-xs text-muted-foreground">You: <span className="text-lg font-bold font-inter text-foreground">0</span></span>
-                        <span className="text-xs text-muted-foreground">Others: <span className="text-lg font-bold font-inter text-foreground">0</span></span>
+                        <span className="text-xs text-muted-foreground">You: <span className="text-lg font-bold font-inter text-foreground">{overview?.today?.ads_you_below ?? 0}</span></span>
+                        <span className="text-xs text-muted-foreground">Others: <span className="text-lg font-bold font-inter text-foreground">{overview?.today?.ads_others_below ?? 0}</span></span>
                       </div>
                     </div>
                   </div>
@@ -648,7 +855,7 @@ const SeoRankings = () => {
                   <div className="pt-2 border-t flex items-center justify-between">
                     <div className="flex items-center gap-2 text-sm">
                       <span className="text-muted-foreground">Your Ads</span>
-                      <span className="font-semibold">0 placements</span>
+                      <span className="font-semibold">{(overview?.today?.ads_you_above_below ?? 0) + (overview?.today?.ads_you_above ?? 0) + (overview?.today?.ads_you_below ?? 0)} placements</span>
                     </div>
                   </div>
                 </div>
@@ -699,15 +906,36 @@ const SeoRankings = () => {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon">
-                <Tag className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="icon">
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="icon">
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" size="icon" onClick={handleOpenTagDialog}>
+                      <Tag className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{selectedKeywords.length > 0 ? "Manage tags for selected keywords" : "Select keywords to add tags"}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" size="icon" onClick={handleRefresh} disabled={refreshing || !activeDomainId}>
+                      <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Refresh rankings</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" size="icon" onClick={handleOpenDelete}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{selectedKeywords.length > 0 ? "Delete selected keywords" : "Select keywords to delete"}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
 
               {/* Column Selection Popover - List view only */}
               {viewMode === "list" && (
@@ -818,8 +1046,9 @@ const SeoRankings = () => {
                   <TableRow className="bg-muted/30 hover:bg-muted/30">
                     <TableHead className="w-10 py-2">
                       <Checkbox
-                        checked={selectedKeywords.length === filteredKeywords.length}
+                        checked={filteredKeywords.length > 0 && selectedKeywords.length === filteredKeywords.length}
                         onCheckedChange={toggleAllKeywords}
+                        disabled={filteredKeywords.length === 0}
                       />
                     </TableHead>
                     <TableHead className="w-20 text-xs font-semibold py-2">ACTIONS</TableHead>
@@ -859,6 +1088,23 @@ const SeoRankings = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
+                  {filteredKeywords.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={14} className="py-16 text-center">
+                        <div className="flex flex-col items-center gap-3">
+                          <SearchX className="h-12 w-12 text-muted-foreground/40" />
+                          <div>
+                            <p className="text-lg font-medium text-muted-foreground">No keywords found</p>
+                            <p className="text-sm text-muted-foreground/60 mt-1">
+                              {searchQuery
+                                ? `No keywords matching "${searchQuery}"`
+                                : 'Add keywords to start tracking your SEO rankings'}
+                            </p>
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
                   {filteredKeywords.map((keyword) => (
                     <TableRow key={keyword.id} className="hover:bg-muted/30">
                       <TableCell className="py-1.5">
@@ -875,9 +1121,21 @@ const SeoRankings = () => {
                           <Button variant="ghost" size="icon" className="h-6 w-6">
                             <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-6 w-6">
-                            <Star className="h-3.5 w-3.5 text-muted-foreground" />
-                          </Button>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => handleToggleFavourite(keyword.id, keyword.favour)}
+                                >
+                                  <Star className={`h-3.5 w-3.5 ${keyword.favour ? 'text-purple-500 fill-purple-500' : 'text-muted-foreground'}`} />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{keyword.favour ? 'Mark as unfavourite' : 'Mark as favourite'}</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </div>
                       </TableCell>
                       <TableCell className="py-1.5">
@@ -996,12 +1254,20 @@ const SeoRankings = () => {
                       {visibleColumns.tags && (
                         <TableCell className="text-center py-1.5 text-sm">
                           {keyword.tags.length > 0 ? (
-                            <span className="inline-flex items-center gap-1">
+                            <span
+                              className="inline-flex items-center gap-1 cursor-pointer hover:text-primary"
+                              onClick={() => handleInlineTagOpen(keyword.id)}
+                            >
                               {keyword.tags.length}
                               <Tag className="h-3 w-3 text-primary" />
                             </span>
                           ) : (
-                            <span className="text-xs text-primary font-medium cursor-pointer hover:underline">ADD</span>
+                            <span
+                              className="text-xs text-primary font-medium cursor-pointer hover:underline"
+                              onClick={() => handleInlineTagOpen(keyword.id)}
+                            >
+                              ADD
+                            </span>
                           )}
                         </TableCell>
                       )}
@@ -1027,6 +1293,21 @@ const SeoRankings = () => {
         ) : (
           /* Grid View - Keywords grouped by tags */
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {filteredKeywords.length === 0 && (
+              <Card className="lg:col-span-2 shadow-elegant border border-border backdrop-blur-sm bg-card/80 p-12">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <SearchX className="h-12 w-12 text-muted-foreground/40" />
+                  <div>
+                    <p className="text-lg font-medium text-muted-foreground">No keywords found</p>
+                    <p className="text-sm text-muted-foreground/60 mt-1">
+                      {searchQuery
+                        ? `No keywords matching "${searchQuery}"`
+                        : 'Add keywords to start tracking your SEO rankings'}
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            )}
             {Object.entries(getTagGroups()).map(([tagName, keywords]) => (
               <Card key={tagName} className="shadow-elegant border border-border backdrop-blur-sm bg-card/80 overflow-hidden">
                 {/* Grid Card Header */}
@@ -1129,6 +1410,159 @@ const SeoRankings = () => {
           </div>
         )}
       </div>
+
+      {/* Refresh Progress Bar — fixed bottom, like RankMax */}
+      {refreshing && (
+        <div
+          className="fixed bottom-0 right-0 z-50 bg-card border-t border-border shadow-lg px-6 py-3 transition-all duration-150"
+          style={{ left: sidebarOpen ? '256px' : '64px' }}
+        >
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                <span className="text-sm font-medium">Refreshing...</span>
+              </div>
+              <span className="text-sm font-bold text-primary">
+                {refreshCompleted}/{refreshTotal}
+              </span>
+            </div>
+            <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full"
+                style={{
+                  width: `${refreshProgress}%`,
+                  transition: 'width 0.7s ease-in-out',
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Keywords</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete {selectedKeywords.length} keyword(s) and all their ranking history. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={deleteLoading}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteLoading ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                  Deleting...
+                </>
+              ) : (
+                'Confirm Delete'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Tag Management Dialog */}
+      <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Manage Tags</DialogTitle>
+            <DialogDescription>
+              You have selected {selectedKeywords.length} keyword(s). Add or remove tags below.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Tag Input */}
+            <div className="flex gap-2">
+              <Input
+                placeholder="Type a tag and press Enter..."
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    handleAddTag();
+                  }
+                }}
+                className="flex-1"
+              />
+              <Button size="sm" onClick={handleAddTag} variant="outline">
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Current Tags */}
+            {pendingTags.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Selected Tags</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {pendingTags.map(tag => (
+                    <Badge key={tag} variant="secondary" className="gap-1 px-2 py-1">
+                      {tag}
+                      <X
+                        className="h-3 w-3 cursor-pointer hover:text-destructive"
+                        onClick={() => handleRemovePendingTag(tag)}
+                      />
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Available Tags from Domain */}
+            {allDomainTags.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Available Tags</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {allDomainTags
+                    .filter(tag => !pendingTags.includes(tag))
+                    .map(tag => (
+                      <Badge
+                        key={tag}
+                        variant="outline"
+                        className="cursor-pointer hover:bg-primary/10 hover:border-primary px-2 py-1"
+                        onClick={() => {
+                          if (pendingTags.length < 20) {
+                            setPendingTags(prev => [...prev, tag]);
+                          }
+                        }}
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        {tag}
+                      </Badge>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            <p className="text-xs text-muted-foreground">
+              {pendingTags.length}/20 tags. Press Enter or comma to add. Only letters, numbers, spaces and hyphens allowed.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTagDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveTags} disabled={tagLoading} className="gradient-primary">
+              {tagLoading ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                  Saving...
+                </>
+              ) : (
+                'Save Tags'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

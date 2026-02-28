@@ -112,6 +112,10 @@ class SeoKeywordRank(models.Model):
     # Cannibalisation
     cannibalisation = models.JSONField(default=list, blank=True)
 
+    # Tags & Favourite (ported from RankMax Keyword.tags / Keyword.favour)
+    tags = models.JSONField(default=list, blank=True, help_text="List of tag strings")
+    favour = models.IntegerField(default=0, help_text="0=unfavorite, 1=favorite")
+
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
 
@@ -246,6 +250,21 @@ class SeoDomainDailyMetrics(models.Model):
     # Device split
     desktop_count = models.IntegerField(default=0)
     mobile_count = models.IntegerField(default=0)
+
+    # SERP Features — Your Ratings (ported from RankMax R2, R4, R5)
+    rating_0_2 = models.IntegerField(default=0, help_text="Keywords with 0-2 star ratings")
+    rating_2_4 = models.IntegerField(default=0, help_text="Keywords with 2-4 star ratings")
+    rating_4_5 = models.IntegerField(default=0, help_text="Keywords with 4-5 star ratings")
+
+    # Google Search Ads — Your ads (ported from RankMax Ay)
+    ads_you_above_below = models.IntegerField(default=0, help_text="Your ads: above & below fold")
+    ads_you_above = models.IntegerField(default=0, help_text="Your ads: above fold only")
+    ads_you_below = models.IntegerField(default=0, help_text="Your ads: below fold only")
+
+    # Google Search Ads — Others' ads (ported from RankMax Ao)
+    ads_others_above_below = models.IntegerField(default=0, help_text="Others' ads: above & below fold")
+    ads_others_above = models.IntegerField(default=0, help_text="Others' ads: above fold only")
+    ads_others_below = models.IntegerField(default=0, help_text="Others' ads: below fold only")
 
     # Total keywords tracked on this date
     total_keywords = models.IntegerField(default=0)

@@ -18,6 +18,14 @@ urlpatterns = [
     path('metrics/', views.seo_domain_metrics, name='seo-domain-metrics'),
     path('overview/', views.seo_domain_overview, name='seo-domain-overview'),
 
-    # Engine trigger
+    # Bulk operations
+    path('keywords/bulk-delete/', views.seo_keyword_bulk_delete, name='seo-keyword-bulk-delete'),
+    path('keywords/update-tags/', views.seo_keyword_update_tags, name='seo-keyword-update-tags'),
+    path('keywords/remove-tag/', views.seo_keyword_remove_tag, name='seo-keyword-remove-tag'),
+    path('keywords/get-tags/', views.seo_keyword_get_tags, name='seo-keyword-get-tags'),
+    path('keywords/favourite/', views.seo_keyword_toggle_favourite, name='seo-keyword-toggle-favourite'),
+
+    # Engine trigger & refresh status
     path('trigger/', views.seo_trigger_ranking, name='seo-trigger-ranking'),
+    path('refresh-status/', views.seo_refresh_status, name='seo-refresh-status'),
 ]

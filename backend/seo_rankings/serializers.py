@@ -23,7 +23,7 @@ class SeoKeywordRankSerializer(serializers.ModelSerializer):
             'site_url', 'target_url', 'search_results', 'search_volume',
             'region', 'isocode', 'language_code', 'geo_target', 'geo_target_uule',
             'auto_call_status', 'auto_refresh_count', 'last_ranked_date',
-            'cannibalisation',
+            'cannibalisation', 'tags', 'favour',
             'created_at', 'modified_at',
         ]
         read_only_fields = [
@@ -89,7 +89,11 @@ class SeoDomainDailyMetricsSerializer(serializers.ModelSerializer):
             'improved_count', 'declined_count', 'no_change_count', 'activity_level',
             'top_1_count', 'top_3_count', 'top_10_count',
             'top_50_count', 'top_100_count', 'not_ranked_count',
-            'desktop_count', 'mobile_count', 'total_keywords',
+            'desktop_count', 'mobile_count',
+            'rating_0_2', 'rating_2_4', 'rating_4_5',
+            'ads_you_above_below', 'ads_you_above', 'ads_you_below',
+            'ads_others_above_below', 'ads_others_above', 'ads_others_below',
+            'total_keywords',
             'snapshot_date', 'created_at', 'modified_at',
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
