@@ -10,6 +10,7 @@ import {
   updateActiveDomain,
   clearAllActiveDomainStorage
 } from '@/utils/activeDomain';
+import { useDomainStore } from '@/stores/domainStore';
 
 // Auth Actions
 type AuthAction =
@@ -120,6 +121,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
         try {
           // Try to get user profile to validate token
           const profile = await apiClient.getProfile();
+
+          // Clear cached domains if they belong to a different organization
+          // This prevents stale domains showing after account switch
+          const domainStore = useDomainStore.getState();
+          const cachedDomains = domainStore.domains;
+          if (cachedDomains.length > 0 && profile.user?.organisation) {
+            const hasMismatch = cachedDomains.some(
+              (d: any) => d.organisation !== profile.user.organisation
+            );
+            if (hasMismatch) {
+              domainStore.clearDomainStore();
+              localStorage.removeItem('domain-store');
+            }
+          }
+
           dispatch({
             type: 'LOGIN_SUCCESS',
             payload: {
@@ -170,6 +186,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const login = async (credentials: LoginRequest): Promise<void> => {
     try {
       dispatch({ type: 'LOGIN_START' });
+
+      // Clear stale domain data from previous account/session immediately
+      // This prevents showing another account's domains after switching accounts
+      useDomainStore.getState().clearDomainStore();
+      localStorage.removeItem('domain-store');
+
       const response = await apiClient.login(credentials);
       dispatch({
         type: 'LOGIN_SUCCESS',

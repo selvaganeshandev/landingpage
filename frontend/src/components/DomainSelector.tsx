@@ -35,9 +35,20 @@ export const DomainSelector = () => {
   } = useDomainStore();
   const { user } = useAuth();
 
+  // Clear stale domains if they don't belong to current user's organization
+  useEffect(() => {
+    if (user && domains.length > 0) {
+      const hasMismatch = domains.some(d => d.organisation !== user.organisation);
+      if (hasMismatch) {
+        const { clearDomainStore } = useDomainStore.getState();
+        clearDomainStore();
+        localStorage.removeItem('domain-store');
+      }
+    }
+  }, [user, domains]);
+
   // Load domains on component mount
   useEffect(() => {
-    // Don't clear the store - preserve the selected domain to prevent flash
     loadDomains();
   }, [loadDomains]);
 
