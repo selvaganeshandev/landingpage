@@ -1684,6 +1684,19 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  exportSeoKeywordsPdf: async (domainId: number): Promise<Blob> => {
+    const token = getAuthToken();
+    const headers: HeadersInit = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${API_BASE_URL}/seo/keywords/pdf-export/`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ domain_id: domainId }),
+    });
+    if (!response.ok) throw new Error('PDF export failed');
+    return response.blob();
+  },
 };
 
 // Also export as 'api' for flexibility

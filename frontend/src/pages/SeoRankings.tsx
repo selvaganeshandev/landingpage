@@ -69,7 +69,6 @@ import {
   Info,
   Tag,
   ExternalLink,
-  ChevronRight,
   BarChart3,
   ArrowRight,
   X,
@@ -153,6 +152,7 @@ function mapKeywordForUI(kw: SeoKeyword) {
     date: kw.last_ranked_date ? new Date(kw.last_ranked_date).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '-',
     timeAgo: kw.last_ranked_date ? getTimeAgo(new Date(kw.last_ranked_date)) : '',
     country: kw.isocode?.toUpperCase() || 'US',
+    region: kw.region || '',
     platform: kw.platform,
     autoCallStatus: kw.auto_call_status,
   };
@@ -400,17 +400,36 @@ const SeoRankings = () => {
   const handleSaveTags = async () => {
     setTagLoading(true);
     try {
+      // when multiple keywords are selected we only want to *add* the tags,
+      // not wipe out each keyword's existing values.  the API supports two
+      // modes – ``merge`` adds to the current list, ``replace`` overwrites.
+      // keep the old behaviour for single‑item edits (inline tag editor) but
+      // default to merge for bulk operations.
+      const bulkMode: 'merge' | 'replace' =
+        selectedKeywords.length > 1 ? 'merge' : 'replace';
+
       await apiClient.updateSeoKeywordTags({
         ids: selectedKeywords,
         tags: pendingTags,
-        mode: 'replace',
+        mode: bulkMode,
       });
-      // Update local state
+
+      // Update local state according to the mode we used.  ``merge`` has to
+      // preserve whatever tags each keyword already had, ``replace`` simply
+      // mirrors the pending list.
       setSeoKeywords(prev =>
-        prev.map(kw =>
-          selectedKeywords.includes(kw.id) ? { ...kw, tags: pendingTags } : kw
-        )
+        prev.map(kw => {
+          if (!selectedKeywords.includes(kw.id)) return kw;
+          if (bulkMode === 'replace') {
+            return { ...kw, tags: pendingTags };
+          }
+          // merge: union of existing tags and pendingTags (deduped)
+          const existing = kw.tags || [];
+          const union = Array.from(new Set([...existing, ...pendingTags]));
+          return { ...kw, tags: union };
+        })
       );
+
       setTagDialogOpen(false);
       setSelectedKeywords([]);
       toast({ title: "Tags updated", description: `Tags applied to ${selectedKeywords.length} keyword(s)` });
@@ -436,6 +455,24 @@ const SeoRankings = () => {
       // For a single keyword, load its existing tags
       const kw = seoKeywords.find(k => k.id === kwId);
       setPendingTags(kw?.tags || []);
+    } catch {
+      setAllDomainTags([]);
+    }
+  };
+
+  // ---------- Group Tag Open (Grid View group card header) ----------
+  const handleGroupTagOpen = async (kwIds: number[]) => {
+    if (kwIds.length === 0) return;
+    setSelectedKeywords(kwIds);
+    setTagDialogOpen(true);
+    setPendingTags([]);
+    setTagInput("");
+    try {
+      const res = await apiClient.getSeoKeywordTags(activeDomainId, kwIds) as {
+        all_tags: string[]; common_tags: string[];
+      };
+      setAllDomainTags(res.all_tags || []);
+      setPendingTags(res.common_tags || []);
     } catch {
       setAllDomainTags([]);
     }
@@ -482,6 +519,97 @@ const SeoRankings = () => {
       setSelectedKeywords((prev) => prev.filter((id) => !groupKeywordIds.includes(id)));
     } else {
       setSelectedKeywords((prev) => [...new Set([...prev, ...groupKeywordIds])]);
+    }
+  };
+
+  // ---------- Export Helpers ----------
+  // Quote a value for CSV
+  const quoteCsv = (val: any) => {
+    if (val === null || val === undefined) return '';
+    const str = String(val);
+    // escape double quotes
+    return `"${str.replace(/"/g, '""')}"`;
+  };
+
+  const computeCompetition = (volume: number | null | undefined) => {
+    if (volume === null || volume === undefined) return '';
+    if (volume < 1000) return 'Low';
+    if (volume < 10000) return 'Med';
+    return 'High';
+  };
+
+  const generateKeywordCsv = () => {
+    const headers = [
+      '#',
+      'Keyword',
+      'Rank',
+      'Best rank',
+      '1d',
+      '7d',
+      'Volume',
+      'Comp',
+      'URL',
+      'Region',
+      'Date added',
+    ];
+
+    const rows = filteredKeywords.map((kw, idx) => {
+      const change1d = kw.change1d ? kw.change1d.value : '-';
+      const change7d = kw.change7d ? kw.change7d.value : '-';
+      return [
+        idx + 1,
+        kw.keyword,
+        kw.rankDisplay || kw.rank || '',
+        kw.best || '',
+        change1d,
+        change7d,
+        kw.volume ?? '',
+        computeCompetition(kw.volume),
+        kw.url || '',
+        kw.region || '',
+        kw.date || '',
+      ];
+    });
+
+    const allRows = [headers, ...rows];
+    return allRows
+      .map((r) => r.map(quoteCsv).join(','))
+      .join('\n');
+  };
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  };
+
+  const handleExportCsv = () => {
+    const csv = generateKeywordCsv();
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    downloadBlob(blob, `seo_keywords_${Date.now()}.csv`);
+  };
+
+  const handleExportTxt = () => {
+    const content = filteredKeywords.map((kw) => kw.keyword).join('\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
+    downloadBlob(blob, `seo_keywords_${Date.now()}.txt`);
+  };
+
+  const handleExportPdf = async () => {
+    if (!activeDomainId) {
+      toast({ title: "No domain", description: "Please select a domain first" });
+      return;
+    }
+    try {
+      const blob = await apiClient.exportSeoKeywordsPdf(Number(activeDomainId));
+      downloadBlob(blob, `seo_keywords_${Date.now()}.pdf`);
+    } catch {
+      toast({ title: "Export failed", description: "Could not generate PDF. Please try again.", variant: "destructive" });
     }
   };
 
@@ -892,13 +1020,13 @@ const SeoRankings = () => {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-56">
-                  <DropdownMenuItem className="cursor-pointer">
+                  <DropdownMenuItem className="cursor-pointer" onClick={handleExportCsv}>
                     Export Project In .CSV
                   </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer">
+                  <DropdownMenuItem className="cursor-pointer" onClick={handleExportPdf}>
                     Export Project In .PDF
                   </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer">
+                  <DropdownMenuItem className="cursor-pointer" onClick={handleExportTxt}>
                     Export Keywords In .TXT
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -1115,11 +1243,13 @@ const SeoRankings = () => {
                       </TableCell>
                       <TableCell className="py-1.5">
                         <div className="flex items-center gap-0">
-                          <Button variant="ghost" size="icon" className="h-6 w-6">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(keyword.keyword)}`, '_blank')}
+                          >
                             <span className="text-red-500 font-bold text-xs">G</span>
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-6 w-6">
-                            <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
                           </Button>
                           <TooltipProvider>
                             <Tooltip>
@@ -1143,7 +1273,7 @@ const SeoRankings = () => {
                           <img
                             src={`https://flagcdn.com/16x12/${keyword.country.toLowerCase()}.png`}
                             alt={keyword.country}
-                            className="w-4 h-3 object-cover rounded-sm shadow-sm flex-shrink-0"
+                            className="w-5 h-5 object-cover rounded-full shadow-sm flex-shrink-0"
                           />
                           <div className="min-w-0">
                             <p className="font-medium text-sm truncate">{keyword.keyword}</p>
@@ -1279,11 +1409,6 @@ const SeoRankings = () => {
                           </div>
                         </TableCell>
                       )}
-                      <TableCell className="py-1.5">
-                        <Button variant="ghost" size="icon" className="h-6 w-6">
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </Button>
-                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1321,6 +1446,21 @@ const SeoRankings = () => {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => handleGroupTagOpen(keywords.map(kw => kw.id))}
+                          >
+                            <Tag className="h-3.5 w-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Add tags to all keywords in this group</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                     <span className="text-xs text-muted-foreground">Rankmax score</span>
                     <div className="w-8 h-8 rounded-full border-2 border-primary flex items-center justify-center">
                       <span className="text-xs font-bold text-primary">0</span>
@@ -1356,17 +1496,19 @@ const SeoRankings = () => {
                           <TableCell className="py-1.5">
                             <div className="flex items-center gap-1.5">
                               <div className="flex items-center gap-0 flex-shrink-0">
-                                <Button variant="ghost" size="icon" className="h-5 w-5">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5"
+                                  onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(keyword.keyword)}`, '_blank')}
+                                >
                                   <span className="text-red-500 font-bold text-[10px]">G</span>
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-5 w-5">
-                                  <BarChart3 className="h-3 w-3 text-muted-foreground" />
                                 </Button>
                               </div>
                               <img
                                 src={`https://flagcdn.com/16x12/${keyword.country.toLowerCase()}.png`}
                                 alt={keyword.country}
-                                className="w-4 h-3 object-cover rounded-sm shadow-sm flex-shrink-0"
+                                className="w-5 h-5 object-cover rounded-full shadow-sm flex-shrink-0"
                               />
                               <div className="min-w-0">
                                 <p className="font-medium text-xs truncate">{keyword.keyword}</p>
@@ -1394,11 +1536,6 @@ const SeoRankings = () => {
                             ) : (
                               <span className="font-semibold text-xs">{keyword.rank}</span>
                             )}
-                          </TableCell>
-                          <TableCell className="py-1.5">
-                            <Button variant="ghost" size="icon" className="h-5 w-5 text-primary">
-                              <ChevronRight className="h-3.5 w-3.5" />
-                            </Button>
                           </TableCell>
                         </TableRow>
                       ))}

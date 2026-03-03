@@ -776,3 +776,108 @@ def seo_keyword_get_tags(request):
         'all_tags': sorted(all_tags),
         'common_tags': sorted(common_tags),
     })
+
+
+# ---------------------------------------------------------------------------
+# PDF Export (WeasyPrint — same approach as Rankmaxx /pdfexport)
+# ---------------------------------------------------------------------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_pdf_export(request):
+    """
+    Generate a PDF report for all keywords in a domain.
+    Body: { domain_id: number }
+    Returns: PDF binary (application/octet-stream)
+    """
+    from weasyprint import HTML
+    from django.template.loader import render_to_string
+    from django.http import HttpResponse
+    from urllib.parse import urlparse
+    from datetime import datetime
+    import base64
+    import os
+
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Domain not found or access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        domain = Domain.objects.get(pk=domain_id)
+    except Domain.DoesNotExist:
+        return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Fetch keywords sorted: ranked first (ascending), unranked at end
+    raw_keywords = list(
+        SeoKeywordRank.objects.filter(domain_id=domain_id)
+        .select_related('keyword')
+        .order_by('rank_now')
+    )
+    keywords_sorted = sorted(
+        raw_keywords,
+        key=lambda x: x.rank_now if x.rank_now > 0 else float('inf')
+    )
+
+    def get_domain_slug(url):
+        if not url:
+            return ''
+        try:
+            parsed = urlparse(url)
+            netloc = parsed.netloc.replace('www.', '')
+            path = parsed.path
+            if path in ('', '/'):
+                return netloc
+            return netloc + path
+        except Exception:
+            return url
+
+    def compute_competition(volume):
+        if volume is None:
+            return '(NA)'
+        if volume < 1000:
+            return 'Low'
+        if volume < 10000:
+            return 'Med'
+        return 'High'
+
+    kw_data = []
+    for kw in keywords_sorted:
+        kw_data.append({
+            'keyword': kw.keyword.keyword if kw.keyword else '',
+            'rank_now': kw.rank_now,
+            'top_rank': kw.top_rank or 0,
+            'day_val': abs(kw.day_val),
+            'day_mark': kw.day_mark,
+            'week_val': abs(kw.week_val),
+            'week_mark': kw.week_mark,
+            'search_volume': kw.search_volume,
+            'comp': compute_competition(kw.search_volume),
+            'site_url': kw.site_url or domain.url or '',
+            'domain_slug': get_domain_slug(kw.site_url or domain.url or ''),
+            'region': kw.region or '',
+            'created_date': kw.created_at.strftime('%b %d, %Y') if kw.created_at else '',
+        })
+
+    report_date = datetime.now().strftime('%B %d, %Y')
+
+    # Embed logo as base64 so WeasyPrint doesn't need the frontend running
+    logo_base64 = ''
+    logo_path = settings.BASE_DIR.parent / 'frontend' / 'public' / 'logo.png'
+    if os.path.exists(logo_path):
+        with open(logo_path, 'rb') as f:
+            logo_base64 = base64.b64encode(f.read()).decode('utf-8')
+
+    html_content = render_to_string('seo_rankings/seo_pdf_report.html', {
+        'keywords': kw_data,
+        'projectname': domain.name,
+        'domainurl': domain.url,
+        'reportdate': report_date,
+        'logo_base64': logo_base64,
+    })
+
+    pdf_bytes = HTML(string=html_content).write_pdf()
+    return HttpResponse(pdf_bytes, content_type='application/octet-stream')
