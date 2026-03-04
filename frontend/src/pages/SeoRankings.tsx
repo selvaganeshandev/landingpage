@@ -500,25 +500,33 @@ const SeoRankings = () => {
   const [columnPopoverOpen, setColumnPopoverOpen] = useState(false);
 
   const toggleKeywordSelection = (id: number) => {
+    const kw = seoKeywords.find((k) => k.id === id);
+    if (kw?.favour) return;
     setSelectedKeywords((prev) =>
       prev.includes(id) ? prev.filter((k) => k !== id) : [...prev, id]
     );
   };
 
   const toggleAllKeywords = () => {
-    if (selectedKeywords.length === filteredKeywords.length) {
+    const selectableIds = filteredKeywords.filter((k) => !k.favour).map((k) => k.id);
+    const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedKeywords.includes(id));
+    if (allSelected) {
       setSelectedKeywords([]);
     } else {
-      setSelectedKeywords(filteredKeywords.map((k) => k.id));
+      setSelectedKeywords(selectableIds);
     }
   };
 
   const toggleGroupKeywords = (groupKeywordIds: number[]) => {
-    const allSelected = groupKeywordIds.every((id) => selectedKeywords.includes(id));
+    const selectableIds = groupKeywordIds.filter((id) => {
+      const kw = seoKeywords.find((k) => k.id === id);
+      return !kw?.favour;
+    });
+    const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedKeywords.includes(id));
     if (allSelected) {
-      setSelectedKeywords((prev) => prev.filter((id) => !groupKeywordIds.includes(id)));
+      setSelectedKeywords((prev) => prev.filter((id) => !selectableIds.includes(id)));
     } else {
-      setSelectedKeywords((prev) => [...new Set([...prev, ...groupKeywordIds])]);
+      setSelectedKeywords((prev) => [...new Set([...prev, ...selectableIds])]);
     }
   };
 
@@ -1174,9 +1182,9 @@ const SeoRankings = () => {
                   <TableRow className="bg-muted/30 hover:bg-muted/30">
                     <TableHead className="w-10 py-2">
                       <Checkbox
-                        checked={filteredKeywords.length > 0 && selectedKeywords.length === filteredKeywords.length}
+                        checked={filteredKeywords.filter((k) => !k.favour).length > 0 && filteredKeywords.filter((k) => !k.favour).every((k) => selectedKeywords.includes(k.id))}
                         onCheckedChange={toggleAllKeywords}
-                        disabled={filteredKeywords.length === 0}
+                        disabled={filteredKeywords.filter((k) => !k.favour).length === 0}
                       />
                     </TableHead>
                     <TableHead className="w-20 text-xs font-semibold py-2">ACTIONS</TableHead>
@@ -1239,6 +1247,7 @@ const SeoRankings = () => {
                         <Checkbox
                           checked={selectedKeywords.includes(keyword.id)}
                           onCheckedChange={() => toggleKeywordSelection(keyword.id)}
+                          disabled={!!keyword.favour}
                         />
                       </TableCell>
                       <TableCell className="py-1.5">
@@ -1475,8 +1484,9 @@ const SeoRankings = () => {
                       <TableRow className="bg-muted/20 hover:bg-muted/20">
                         <TableHead className="w-8 py-1.5">
                           <Checkbox
-                            checked={keywords.every((kw) => selectedKeywords.includes(kw.id))}
+                            checked={keywords.filter((kw) => !kw.favour).length > 0 && keywords.filter((kw) => !kw.favour).every((kw) => selectedKeywords.includes(kw.id))}
                             onCheckedChange={() => toggleGroupKeywords(keywords.map((kw) => kw.id))}
+                            disabled={keywords.every((kw) => !!kw.favour)}
                           />
                         </TableHead>
                         <TableHead className="text-xs font-semibold py-1.5">KEYWORD</TableHead>
@@ -1491,6 +1501,7 @@ const SeoRankings = () => {
                             <Checkbox
                               checked={selectedKeywords.includes(keyword.id)}
                               onCheckedChange={() => toggleKeywordSelection(keyword.id)}
+                              disabled={!!keyword.favour}
                             />
                           </TableCell>
                           <TableCell className="py-1.5">
@@ -1537,6 +1548,16 @@ const SeoRankings = () => {
                               <span className="font-semibold text-xs">{keyword.rank}</span>
                             )}
                           </TableCell>
+                          <TableCell className="py-1.5 w-8">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5"
+                              onClick={() => handleToggleFavourite(keyword.id, keyword.favour)}
+                            >
+                              <Star className={`h-3 w-3 ${keyword.favour ? 'text-purple-500 fill-purple-500' : 'text-muted-foreground'}`} />
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1551,7 +1572,7 @@ const SeoRankings = () => {
       {/* Refresh Progress Bar — fixed bottom, like RankMax */}
       {refreshing && (
         <div
-          className="fixed bottom-0 right-0 z-50 bg-card border-t border-border shadow-lg px-6 py-3 transition-all duration-150"
+          className="fixed bottom-0 right-0 z-50 bg-card border-t border-border shadow-lg pl-6 pr-24 py-3 transition-all duration-150"
           style={{ left: sidebarOpen ? '256px' : '64px' }}
         >
           <div>

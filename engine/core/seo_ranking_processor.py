@@ -589,6 +589,15 @@ class SeoRankingProcessor:
                 'desktop_count': desktop,
                 'mobile_count': mobile,
                 'total_keywords': total,
+                'rating_0_2': 0,
+                'rating_2_4': 0,
+                'rating_4_5': 0,
+                'ads_you_above_below': 0,
+                'ads_you_above': 0,
+                'ads_you_below': 0,
+                'ads_others_above_below': 0,
+                'ads_others_above': 0,
+                'ads_others_below': 0,
             }
         )
 
