@@ -31,4 +31,12 @@ urlpatterns = [
 
     # PDF export (WeasyPrint — Rankmaxx-style report)
     path('keywords/pdf-export/', views.seo_pdf_export, name='seo-pdf-export'),
+
+    # Competitor Analysis
+    path('competitors/start/', views.seo_competitor_start, name='seo-competitor-start'),
+    path('competitors/status/', views.seo_competitor_status, name='seo-competitor-status'),
+    path('competitors/add/', views.seo_competitor_add, name='seo-competitor-add'),
+    path('competitors/<int:pk>/delete/', views.seo_competitor_delete, name='seo-competitor-delete'),
+    path('competitors/projects/', views.seo_competitor_projects, name='seo-competitor-projects'),
+    path('competitors/<int:pk>/keywords/', views.seo_competitor_keywords, name='seo-competitor-keywords'),
 ]

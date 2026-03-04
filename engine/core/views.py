@@ -1768,3 +1768,35 @@ def seo_process_domain(request):
             {'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+# ==================== SEO COMPETITOR ANALYSIS ====================
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def seo_analyze_competitors(request):
+    """
+    Trigger competitor analysis for a domain.
+    Body: { domain_id: int }
+    """
+    from .processing_tasks import analyze_seo_competitors_task
+
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        analyze_seo_competitors_task.delay(int(domain_id))
+        return Response({
+            'message': f'Competitor analysis for domain {domain_id} queued',
+            'domain_id': domain_id,
+        })
+    except Exception as e:
+        logger.error(f"[CompAnalysis] Error queuing domain {domain_id}: {e}")
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

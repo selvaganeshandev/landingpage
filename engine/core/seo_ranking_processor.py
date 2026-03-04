@@ -267,6 +267,8 @@ def parse_json_serp_response(json_data, target_url, exact_domain=False):
 
     result['cannibalisation'] = cannibalisation_urls
     result['competitors'] = competitors
+    # Store competitors inside snippets_details for later competitor analysis
+    result['snippets_details']['competitors'] = competitors
 
     return result
 

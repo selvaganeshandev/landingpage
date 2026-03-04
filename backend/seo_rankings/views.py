@@ -13,7 +13,10 @@ from django.db import transaction
 from django.conf import settings
 
 from domains.models import Domain
-from .models import SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory, SeoDomainDailyMetrics
+from .models import (
+    SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory, SeoDomainDailyMetrics,
+    SeoCompetitorAnalysis, SeoCompetitorProject, SeoCompetitorKeyword,
+)
 from .serializers import (
     SeoKeywordRankSerializer,
     SeoKeywordRankCreateSerializer,
@@ -881,3 +884,258 @@ def seo_pdf_export(request):
 
     pdf_bytes = HTML(string=html_content).write_pdf()
     return HttpResponse(pdf_bytes, content_type='application/octet-stream')
+
+
+# ---------------------------------------------------------------------------
+# SEO Competitor Analysis
+# ---------------------------------------------------------------------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_competitor_start(request):
+    """
+    Start competitor analysis for a domain.
+    Body: { domain_id: int }
+    Triggers engine task to aggregate competitor domains from stored SERP data.
+    """
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Domain not found or access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    # If already running, return current status
+    existing = SeoCompetitorAnalysis.objects.filter(domain_id=domain_id).first()
+    if existing and existing.status == 'SCHD':
+        return Response({'status': 'SCHD', 'id': existing.id})
+
+    # Create or reset analysis record
+    if existing:
+        existing.status = 'SCHD'
+        existing.total_keywords = 0
+        existing.unique_domains = 0
+        existing.total_domain_hits = 0
+        existing.analysis_json = {}
+        existing.save()
+        analysis = existing
+    else:
+        analysis = SeoCompetitorAnalysis.objects.create(domain_id=int(domain_id), status='SCHD')
+
+    # Trigger engine task
+    import requests as http_requests
+    engine_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001')
+    try:
+        http_requests.post(
+            f'{engine_url}/api/seo/analyze-competitors/',
+            json={'domain_id': int(domain_id)},
+            timeout=5,
+        )
+    except Exception as e:
+        logger.warning(f"Engine competitor analysis trigger failed: {e}")
+
+    return Response({'status': 'SCHD', 'id': analysis.id})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_competitor_status(request):
+    """
+    Get competitor analysis status for a domain.
+    Query params: domain_id (required)
+    Returns status + candidate list when COMP.
+    """
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Domain not found or access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    analysis = SeoCompetitorAnalysis.objects.filter(domain_id=domain_id).first()
+    if not analysis:
+        return Response({'status': 'INIT'})
+
+    data = {
+        'status': analysis.status,
+        'id': analysis.id,
+        'total_keywords': analysis.total_keywords,
+        'unique_domains': analysis.unique_domains,
+        'total_domain_hits': analysis.total_domain_hits,
+    }
+
+    if analysis.status == 'COMP':
+        domains = analysis.analysis_json.get('domains', {})
+        sorted_domains = sorted(domains.items(), key=lambda x: x[1], reverse=True)[:100]
+
+        projects = SeoCompetitorProject.objects.filter(domain_id=domain_id)
+        tracked_set = {p.competitor_domain for p in projects}
+
+        data['candidates'] = [
+            {'domain': d, 'count': c, 'tracked': d in tracked_set}
+            for d, c in sorted_domains
+        ]
+        data['tracked_count'] = len(tracked_set)
+
+    return Response(data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_competitor_add(request):
+    """
+    Add a competitor domain to track.
+    Body: { domain_id: int, competitor_domain: str }
+    Max 6 competitors per domain.
+    """
+    domain_id = request.data.get('domain_id')
+    competitor_domain = request.data.get('competitor_domain', '').strip().lower()
+    competitor_domain = competitor_domain.replace('www.', '')
+
+    if not domain_id or not competitor_domain:
+        return Response({'error': 'domain_id and competitor_domain required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Domain not found or access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    existing_count = SeoCompetitorProject.objects.filter(domain_id=domain_id).count()
+    if existing_count >= 6:
+        return Response({'error': 'Maximum 6 competitors allowed'}, status=status.HTTP_400_BAD_REQUEST)
+
+    project, created = SeoCompetitorProject.objects.get_or_create(
+        domain_id=int(domain_id),
+        competitor_domain=competitor_domain,
+    )
+
+    if created:
+        _build_competitor_keywords(int(domain_id), project)
+
+    return Response({
+        'id': project.id,
+        'competitor_domain': project.competitor_domain,
+        'created': created,
+    }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+def _build_competitor_keywords(domain_id, project):
+    """Build SeoCompetitorKeyword rows from stored snippets_details.competitors."""
+    competitor_domain = project.competitor_domain
+    keywords = SeoKeywordRank.objects.filter(domain_id=domain_id).select_related('keyword')
+
+    rows = []
+    for kw in keywords:
+        our_rank = kw.rank_now
+        our_url = kw.site_url or ''
+        their_rank = 0
+        their_url = ''
+
+        competitors = kw.snippets_details.get('competitors', {}) if kw.snippets_details else {}
+        for _rank_str, comp_data in competitors.items():
+            if isinstance(comp_data, dict):
+                comp_d = comp_data.get('domain', '')
+                if comp_d and (competitor_domain in comp_d or comp_d in competitor_domain):
+                    their_rank = comp_data.get('rank', 0)
+                    their_url = comp_data.get('url', '')
+                    break
+
+        keyword_text = kw.keyword.keyword if kw.keyword else ''
+        rows.append(SeoCompetitorKeyword(
+            domain_id=domain_id,
+            competitor=project,
+            seo_keyword_rank=kw,
+            keyword_text=keyword_text,
+            our_rank=our_rank,
+            their_rank=their_rank,
+            our_url=our_url,
+            their_url=their_url,
+        ))
+
+    SeoCompetitorKeyword.objects.filter(competitor=project).delete()
+    if rows:
+        SeoCompetitorKeyword.objects.bulk_create(rows, ignore_conflicts=True)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def seo_competitor_delete(request, pk):
+    """Remove a competitor project."""
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    try:
+        project = SeoCompetitorProject.objects.get(id=pk)
+    except SeoCompetitorProject.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if project.domain_id not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    project.delete()
+    return Response({'success': True})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_competitor_projects(request):
+    """
+    List competitor projects for a domain.
+    Query params: domain_id (required)
+    """
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    projects = SeoCompetitorProject.objects.filter(domain_id=domain_id)
+    data = []
+    for p in projects:
+        kw_count = p.keywords.count()
+        ranked_us = p.keywords.filter(our_rank__gt=0).count()
+        ranked_them = p.keywords.filter(their_rank__gt=0).count()
+        data.append({
+            'id': p.id,
+            'competitor_domain': p.competitor_domain,
+            'keyword_count': kw_count,
+            'ranked_us': ranked_us,
+            'ranked_them': ranked_them,
+            'created_at': p.created_at.isoformat(),
+        })
+
+    return Response({'projects': data})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_competitor_keywords(request, pk):
+    """
+    Get keyword rank comparison for a competitor project.
+    """
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    try:
+        project = SeoCompetitorProject.objects.get(id=pk)
+    except SeoCompetitorProject.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if project.domain_id not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    kws = SeoCompetitorKeyword.objects.filter(competitor=project).order_by('our_rank', 'keyword_text')
+    data = []
+    for kw in kws:
+        data.append({
+            'id': kw.id,
+            'keyword': kw.keyword_text,
+            'our_rank': kw.our_rank,
+            'their_rank': kw.their_rank,
+            'our_url': kw.our_url,
+            'their_url': kw.their_url,
+        })
+
+    return Response({
+        'competitor_domain': project.competitor_domain,
+        'keywords': data,
+    })

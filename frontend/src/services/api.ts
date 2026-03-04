@@ -1697,6 +1697,31 @@ export const apiClient = {
     if (!response.ok) throw new Error('PDF export failed');
     return response.blob();
   },
+
+  // ===== SEO Competitor Analysis =====
+  startSeoCompetitorAnalysis: (domainId: number) =>
+    apiRequest('/seo/competitors/start/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId }),
+    }),
+
+  getSeoCompetitorStatus: (domainId: number) =>
+    apiRequest(`/seo/competitors/status/?domain_id=${domainId}`),
+
+  addSeoCompetitor: (domainId: number, competitorDomain: string) =>
+    apiRequest('/seo/competitors/add/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId, competitor_domain: competitorDomain }),
+    }),
+
+  deleteSeoCompetitor: (projectId: number) =>
+    apiRequest(`/seo/competitors/${projectId}/delete/`, { method: 'DELETE' }),
+
+  getSeoCompetitorProjects: (domainId: number) =>
+    apiRequest(`/seo/competitors/projects/?domain_id=${domainId}`),
+
+  getSeoCompetitorKeywords: (projectId: number) =>
+    apiRequest(`/seo/competitors/${projectId}/keywords/`),
 };
 
 // Also export as 'api' for flexibility

@@ -171,3 +171,20 @@ class SeoDomainDailyMetrics(models.Model):
         app_label = 'shared_models'
         db_table = 'seo_domain_daily_metrics'
         managed = False
+
+
+class SeoCompetitorAnalysis(models.Model):
+    """Mirror of backend seo_rankings.SeoCompetitorAnalysis"""
+    domain_id = models.IntegerField()
+    status = models.CharField(max_length=5, default='INIT')
+    total_keywords = models.IntegerField(default=0)
+    unique_domains = models.IntegerField(default=0)
+    total_domain_hits = models.IntegerField(default=0)
+    analysis_json = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        db_table = 'seo_competitor_analysis'
+        managed = False

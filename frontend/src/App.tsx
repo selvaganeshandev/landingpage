@@ -33,6 +33,8 @@ import BulkContentUpload from "./pages/BulkContentUpload";
 import AutomationSettings from "./pages/AutomationSettings";
 import TrafficAttribution from "./pages/TrafficAttribution";
 import SeoRankings from "./pages/SeoRankings";
+import SeoCompetitors from "./pages/SeoCompetitors";
+import SeoReports from "./pages/SeoReports";
 import SignIn from "./pages/Auth";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -221,12 +223,12 @@ const App = () => (
               } />
               <Route path="/seo-competitors" element={
                 <ProtectedRoute requiredPermission={MODULES.SEO_COMPETITORS}>
-                  <PlaceholderPage title="SEO Competitors" description="Track competitor SEO rankings" />
+                  <SeoCompetitors />
                 </ProtectedRoute>
               } />
               <Route path="/seo-reports" element={
                 <ProtectedRoute requiredPermission={MODULES.SEO_RANKINGS}>
-                  <PlaceholderPage title="Organic Reports" description="SEO performance reports" />
+                  <SeoReports />
                 </ProtectedRoute>
               } />
 

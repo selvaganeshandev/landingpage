@@ -285,3 +285,92 @@ class SeoDomainDailyMetrics(models.Model):
 
     def __str__(self):
         return f"{self.domain.name} → Score {self.score_meter} on {self.snapshot_date}"
+
+
+class SeoCompetitorAnalysis(models.Model):
+    """
+    Tracks one competitor analysis run per domain.
+    Status machine: INIT → SCHD (analyzing) → COMP (candidates ready) → FAIL
+    """
+    STATUS_CHOICES = [
+        ('INIT', 'Not started'),
+        ('SCHD', 'Analyzing'),
+        ('COMP', 'Completed'),
+        ('FAIL', 'Failed'),
+    ]
+    domain = models.ForeignKey(
+        'domains.Domain',
+        on_delete=models.CASCADE,
+        related_name='comp_analyses',
+    )
+    status = models.CharField(max_length=5, choices=STATUS_CHOICES, default='INIT')
+    total_keywords = models.IntegerField(default=0)
+    unique_domains = models.IntegerField(default=0)
+    total_domain_hits = models.IntegerField(default=0)
+    analysis_json = models.JSONField(
+        default=dict, blank=True,
+        help_text="Aggregated data: {domains: {domain: count}, keys: {domain: [kw_ids]}}"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'seo_competitor_analysis'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.domain.name} competitor analysis — {self.status}"
+
+
+class SeoCompetitorProject(models.Model):
+    """A competitor domain actively tracked for a project (max 6 per domain)."""
+    domain = models.ForeignKey(
+        'domains.Domain',
+        on_delete=models.CASCADE,
+        related_name='comp_projects',
+    )
+    competitor_domain = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'seo_competitor_project'
+        unique_together = ['domain', 'competitor_domain']
+        ordering = ['competitor_domain']
+
+    def __str__(self):
+        return f"{self.domain.name} → {self.competitor_domain}"
+
+
+class SeoCompetitorKeyword(models.Model):
+    """Keyword rank comparison: our domain vs a tracked competitor."""
+    domain = models.ForeignKey(
+        'domains.Domain',
+        on_delete=models.CASCADE,
+        related_name='comp_kw_rows',
+    )
+    competitor = models.ForeignKey(
+        SeoCompetitorProject,
+        on_delete=models.CASCADE,
+        related_name='keywords',
+    )
+    seo_keyword_rank = models.ForeignKey(
+        'SeoKeywordRank',
+        on_delete=models.CASCADE,
+        related_name='comp_kw_rows',
+    )
+    keyword_text = models.TextField()
+    our_rank = models.IntegerField(default=0)
+    their_rank = models.IntegerField(default=0)
+    our_url = models.TextField(blank=True, default='')
+    their_url = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'seo_competitor_keyword'
+        unique_together = ['competitor', 'seo_keyword_rank']
+        ordering = ['our_rank', 'keyword_text']
+
+    def __str__(self):
+        return f"{self.keyword_text}: us={self.our_rank} vs {self.competitor.competitor_domain}={self.their_rank}"
