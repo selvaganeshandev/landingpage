@@ -224,4 +224,15 @@ def parse_json_serp_response(json_data, target_url, exact_domain=False):
             'ar': after,
         }
 
+        # Store rank-keyed competitors dict in snippets_details for competitor analysis
+        # Same format as engine/core/seo_ranking_processor.py produces
+        rank_keyed_competitors = {}
+        for d in domains:
+            rank_keyed_competitors[d['rn']] = {
+                'url': d['lk'],
+                'domain': d['dn'],
+                'rank': int(d['rn']),
+            }
+        result['snippets_details']['competitors'] = rank_keyed_competitors
+
     return result

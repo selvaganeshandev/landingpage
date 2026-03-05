@@ -890,14 +890,221 @@ def seo_pdf_export(request):
 # SEO Competitor Analysis
 # ---------------------------------------------------------------------------
 
+# Domains to exclude from competitor results
+_COMP_EXCLUDE = {
+    'google.com', 'google.co.uk', 'google.co.in', 'google.com.au',
+    'youtube.com', 'facebook.com', 'twitter.com', 'instagram.com',
+    'linkedin.com', 'pinterest.com', 'reddit.com', 'tiktok.com',
+    'wikipedia.org', 'amazon.com', 'ebay.com', 'bing.com', 'yahoo.com',
+    'quora.com', 'tumblr.com', 'wordpress.com', 'blogger.com',
+    'wix.com', 'squarespace.com', 'shopify.com',
+}
+
+
+def _run_competitor_analysis(domain_id: int):
+    """
+    Background thread: aggregate competitor domains from SERP data.
+    Data sources (tried in order per keyword):
+      1. snippets_details['competitors']  — rank-keyed dict set by parser_service / engine
+      2. SeoSerpFeatureHistory.comp_today — {tp:[…], bf:[…], ar:[…]} set by scraping_service
+      3. Fresh single-page ScrapingDog call (page 0 = top ~10 results)
+    Updates SeoCompetitorAnalysis to COMP or FAIL.
+    """
+    import requests as http_requests
+    from urllib.parse import urlparse
+    from django.db import connection
+
+    SCRAPINGDOG_URL = "https://api.scrapingdog.com/google"
+
+    def _extract_dom(url):
+        try:
+            p = urlparse(url if '://' in url else f'https://{url}')
+            return (p.netloc or p.path).lower().replace('www.', '').split('/')[0]
+        except Exception:
+            return ''
+
+    try:
+        # Get project domain for self-exclusion
+        domain_obj = Domain.objects.get(id=domain_id)
+        project_domain_clean = (domain_obj.url or '').lower()
+        project_domain_clean = (
+            project_domain_clean
+            .replace('https://', '').replace('http://', '')
+            .replace('www.', '').split('/')[0]
+        )
+
+        keywords = list(
+            SeoKeywordRank.objects.filter(domain_id=domain_id)
+            .select_related('keyword')
+        )
+        total_kw = len(keywords)
+        api_key = getattr(settings, 'SCRAPINGDOG_API_KEY', '') or ''
+
+        # Pre-load SeoSerpFeatureHistory comp_today for all keywords (single query)
+        serp_history_map = {}
+        serp_histories = SeoSerpFeatureHistory.objects.filter(
+            seo_keyword_rank_id__in=[kw.id for kw in keywords]
+        ).values_list('seo_keyword_rank_id', 'comp_today')
+        for kw_id, comp_today in serp_histories:
+            if comp_today and isinstance(comp_today, dict):
+                serp_history_map[kw_id] = comp_today
+
+        domain_counts = {}   # {competitor_domain: hit_count}
+        domain_kw_ids = {}   # {competitor_domain: [kw_ids]}
+        fresh_calls = 0
+
+        for kw in keywords:
+            # --- Source 1: snippets_details['competitors'] (rank-keyed dict) ---
+            competitors = {}
+            if kw.snippets_details and isinstance(kw.snippets_details, dict):
+                competitors = kw.snippets_details.get('competitors', {})
+
+            # --- Source 2: SeoSerpFeatureHistory.comp_today ---
+            # Two formats: rank-keyed dict (from engine) or {tp,bf,ar} segments (from backend)
+            if not competitors:
+                comp_today = serp_history_map.get(kw.id, {})
+                if comp_today:
+                    # Check if it's rank-keyed format: {'1': {url, domain, rank}, '2': ...}
+                    first_key = next(iter(comp_today), None)
+                    if first_key and first_key not in ('tp', 'bf', 'ar'):
+                        # Rank-keyed format from engine
+                        for rk, cd in comp_today.items():
+                            if isinstance(cd, dict) and cd.get('domain'):
+                                competitors[str(rk)] = {
+                                    'url': cd.get('url', ''),
+                                    'domain': cd.get('domain', ''),
+                                    'rank': cd.get('rank', 0),
+                                }
+                    else:
+                        # {tp:[{rn,dn,lk},...], bf:[...], ar:[...]} format from backend
+                        for segment_key in ('tp', 'bf', 'ar'):
+                            segment = comp_today.get(segment_key, [])
+                            if isinstance(segment, list):
+                                for item in segment:
+                                    if isinstance(item, dict):
+                                        rn = item.get('rn', '')
+                                        dn = item.get('dn', '')
+                                        lk = item.get('lk', '')
+                                        if rn and dn:
+                                            competitors[str(rn)] = {
+                                                'url': lk,
+                                                'domain': dn,
+                                                'rank': int(rn) if str(rn).isdigit() else 0,
+                                            }
+                    # Cache into snippets_details for future analyses
+                    if competitors:
+                        sd = kw.snippets_details if isinstance(kw.snippets_details, dict) else {}
+                        sd['competitors'] = competitors
+                        SeoKeywordRank.objects.filter(id=kw.id).update(snippets_details=sd)
+
+            # --- Source 3: Fresh ScrapingDog single-page call ---
+            if not competitors and api_key:
+                kw_text = kw.keyword.keyword if kw.keyword else ''
+                if kw_text:
+                    try:
+                        params = {
+                            'api_key': api_key,
+                            'query': kw_text,
+                            'country': kw.isocode or 'us',
+                            'language': kw.language_code or 'en',
+                            'domain': kw.region or 'google.com',
+                            'page': 0,
+                            'advance_search': 'false',
+                        }
+                        if kw.geo_target_uule:
+                            params['uule'] = kw.geo_target_uule
+
+                        resp = http_requests.get(
+                            SCRAPINGDOG_URL, params=params, timeout=(3.05, 15)
+                        )
+                        fresh_calls += 1
+
+                        if resp.status_code == 200:
+                            page_json = resp.json()
+                            if isinstance(page_json, dict):
+                                for item in page_json.get('organic_results', []):
+                                    if not isinstance(item, dict):
+                                        continue
+                                    item_url = item.get('link', '')
+                                    item_domain = _extract_dom(item_url)
+                                    item_rank = item.get('rank') or item.get('position', 0)
+                                    try:
+                                        item_rank = int(item_rank)
+                                    except (ValueError, TypeError):
+                                        item_rank = 0
+                                    if item_rank and item_domain:
+                                        competitors[str(item_rank)] = {
+                                            'url': item_url,
+                                            'domain': item_domain,
+                                            'rank': item_rank,
+                                        }
+
+                                # Cache back into DB
+                                if competitors:
+                                    sd = kw.snippets_details if isinstance(kw.snippets_details, dict) else {}
+                                    sd['competitors'] = competitors
+                                    SeoKeywordRank.objects.filter(id=kw.id).update(snippets_details=sd)
+
+                    except Exception as e:
+                        logger.warning(f"[CompAnalysis] SERP fetch error for '{kw_text}': {e}")
+
+            # Tally competitor domains
+            for _rank_str, comp_data in competitors.items():
+                if not isinstance(comp_data, dict):
+                    continue
+                comp_d = comp_data.get('domain', '').lower().replace('www.', '')
+                if not comp_d:
+                    continue
+                if project_domain_clean and (
+                    comp_d == project_domain_clean
+                    or project_domain_clean in comp_d
+                    or comp_d in project_domain_clean
+                ):
+                    continue
+                if comp_d in _COMP_EXCLUDE:
+                    continue
+
+                domain_counts[comp_d] = domain_counts.get(comp_d, 0) + 1
+                domain_kw_ids.setdefault(comp_d, []).append(kw.id)
+
+        # Sort by frequency, keep top 100
+        sorted_domains = dict(
+            sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)[:100]
+        )
+
+        SeoCompetitorAnalysis.objects.filter(
+            domain_id=domain_id, status='SCHD'
+        ).update(
+            status='COMP',
+            total_keywords=total_kw,
+            unique_domains=len(sorted_domains),
+            total_domain_hits=sum(sorted_domains.values()) if sorted_domains else 0,
+            analysis_json={'domains': sorted_domains, 'keys': domain_kw_ids},
+        )
+        logger.info(
+            f"[CompAnalysis] Domain {domain_id}: {total_kw} kw → "
+            f"{len(sorted_domains)} competitors ({fresh_calls} fresh calls)"
+        )
+
+    except Exception as e:
+        logger.error(f"[CompAnalysis] Error for domain {domain_id}: {e}", exc_info=True)
+        SeoCompetitorAnalysis.objects.filter(
+            domain_id=domain_id, status='SCHD'
+        ).update(status='FAIL')
+    finally:
+        connection.close()
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def seo_competitor_start(request):
     """
     Start competitor analysis for a domain.
     Body: { domain_id: int }
-    Triggers engine task to aggregate competitor domains from stored SERP data.
+    Runs analysis in a background thread (reads stored SERP data + fresh calls).
     """
+    import threading
+
     domain_id = request.data.get('domain_id')
     if not domain_id:
         return Response({'error': 'domain_id required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -923,17 +1130,13 @@ def seo_competitor_start(request):
     else:
         analysis = SeoCompetitorAnalysis.objects.create(domain_id=int(domain_id), status='SCHD')
 
-    # Trigger engine task
-    import requests as http_requests
-    engine_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001')
-    try:
-        http_requests.post(
-            f'{engine_url}/api/seo/analyze-competitors/',
-            json={'domain_id': int(domain_id)},
-            timeout=5,
-        )
-    except Exception as e:
-        logger.warning(f"Engine competitor analysis trigger failed: {e}")
+    # Run analysis in background thread (no engine/Celery dependency)
+    t = threading.Thread(
+        target=_run_competitor_analysis,
+        args=(int(domain_id),),
+        daemon=True,
+    )
+    t.start()
 
     return Response({'status': 'SCHD', 'id': analysis.id})
 
@@ -1021,9 +1224,22 @@ def seo_competitor_add(request):
 
 
 def _build_competitor_keywords(domain_id, project):
-    """Build SeoCompetitorKeyword rows from stored snippets_details.competitors."""
+    """
+    Build SeoCompetitorKeyword rows from stored competitor data.
+    Reads from snippets_details['competitors'] first, falls back to
+    SeoSerpFeatureHistory.comp_today for existing keywords.
+    """
     competitor_domain = project.competitor_domain
-    keywords = SeoKeywordRank.objects.filter(domain_id=domain_id).select_related('keyword')
+    keywords = list(SeoKeywordRank.objects.filter(domain_id=domain_id).select_related('keyword'))
+
+    # Pre-load SeoSerpFeatureHistory comp_today
+    serp_history_map = {}
+    serp_histories = SeoSerpFeatureHistory.objects.filter(
+        seo_keyword_rank_id__in=[kw.id for kw in keywords]
+    ).values_list('seo_keyword_rank_id', 'comp_today')
+    for kw_id, comp_today in serp_histories:
+        if comp_today and isinstance(comp_today, dict):
+            serp_history_map[kw_id] = comp_today
 
     rows = []
     for kw in keywords:
@@ -1032,7 +1248,38 @@ def _build_competitor_keywords(domain_id, project):
         their_rank = 0
         their_url = ''
 
+        # Source 1: snippets_details['competitors']
         competitors = kw.snippets_details.get('competitors', {}) if kw.snippets_details else {}
+
+        # Source 2: SeoSerpFeatureHistory.comp_today (rank-keyed or {tp,bf,ar} format)
+        if not competitors:
+            comp_today = serp_history_map.get(kw.id, {})
+            if comp_today:
+                first_key = next(iter(comp_today), None)
+                if first_key and first_key not in ('tp', 'bf', 'ar'):
+                    for rk, cd in comp_today.items():
+                        if isinstance(cd, dict) and cd.get('domain'):
+                            competitors[str(rk)] = {
+                                'url': cd.get('url', ''),
+                                'domain': cd.get('domain', ''),
+                                'rank': cd.get('rank', 0),
+                            }
+                else:
+                    for segment_key in ('tp', 'bf', 'ar'):
+                        segment = comp_today.get(segment_key, [])
+                        if isinstance(segment, list):
+                            for item in segment:
+                                if isinstance(item, dict):
+                                    rn = item.get('rn', '')
+                                    dn = item.get('dn', '')
+                                    lk = item.get('lk', '')
+                                    if rn and dn:
+                                        competitors[str(rn)] = {
+                                            'url': lk,
+                                            'domain': dn,
+                                            'rank': int(rn) if str(rn).isdigit() else 0,
+                                        }
+
         for _rank_str, comp_data in competitors.items():
             if isinstance(comp_data, dict):
                 comp_d = comp_data.get('domain', '')
@@ -1123,17 +1370,35 @@ def seo_competitor_keywords(request, pk):
     if project.domain_id not in allowed_ids:
         return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
 
-    kws = SeoCompetitorKeyword.objects.filter(competitor=project).order_by('our_rank', 'keyword_text')
+    kws = SeoCompetitorKeyword.objects.filter(
+        competitor=project
+    ).select_related('seo_keyword_rank').order_by('our_rank', 'keyword_text')
+
     data = []
     for kw in kws:
-        data.append({
+        skr = kw.seo_keyword_rank  # Related SeoKeywordRank with full ranking data
+        row = {
             'id': kw.id,
             'keyword': kw.keyword_text,
             'our_rank': kw.our_rank,
             'their_rank': kw.their_rank,
             'our_url': kw.our_url,
             'their_url': kw.their_url,
-        })
+            'best_rank': 0,
+            'search_volume': None,
+            'last_ranked_date': None,
+            'featured_snippet': False,
+            'knowledge_panel': False,
+            'ads': False,
+        }
+        if skr:
+            row['best_rank'] = skr.top_rank or 0
+            row['search_volume'] = skr.search_volume
+            row['last_ranked_date'] = skr.last_ranked_date
+            row['featured_snippet'] = skr.featured_snippet or False
+            row['knowledge_panel'] = skr.knowledge_panel or False
+            row['ads'] = skr.ads or False
+        data.append(row)
 
     return Response({
         'competitor_domain': project.competitor_domain,
