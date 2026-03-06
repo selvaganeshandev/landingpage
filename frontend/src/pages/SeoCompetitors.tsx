@@ -78,6 +78,7 @@ const SeoCompetitors = () => {
 
   // View state
   const [view, setView] = useState<"init" | "analyzing" | "selecting" | "direct" | "keywords">("init");
+  const [pageLoading, setPageLoading] = useState(true);
   const [analysisStatus, setAnalysisStatus] = useState("INIT");
   const [totalKeywords, setTotalKeywords] = useState(0);
   const [uniqueDomains, setUniqueDomains] = useState(0);
@@ -116,7 +117,8 @@ const SeoCompetitors = () => {
   }, [domainId]);
 
   const loadStatus = useCallback(async () => {
-    if (!domainId) return;
+    if (!domainId) { setPageLoading(false); return; }
+    setPageLoading(true);
     try {
       const data = await apiClient.getSeoCompetitorStatus(domainId);
       const st = data.status as string;
@@ -148,7 +150,9 @@ const SeoCompetitors = () => {
         }
         // else: view stays "init" (set by useEffect reset)
       }
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally {
+      setPageLoading(false);
+    }
   }, [domainId, loadProjects]);
 
   useEffect(() => {
@@ -292,6 +296,18 @@ const SeoCompetitors = () => {
       {extra && <div className="flex items-center gap-2.5 flex-wrap">{extra}</div>}
     </div>
   );
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+     PAGE LOADER — shown while initial loadStatus is in progress
+     ═══════════════════════════════════════════════════════════════════════════ */
+  if (pageLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-32">
+        <Loader2 className="h-10 w-10 animate-spin text-primary mb-4" />
+        <span className="text-muted-foreground text-sm">Loading competitors...</span>
+      </div>
+    );
+  }
 
   /* ═══════════════════════════════════════════════════════════════════════════
      SHARED VIEW: INIT + ANALYZING (matches RankMax single-page layout)
@@ -464,7 +480,7 @@ const SeoCompetitors = () => {
   if (view === "selecting") {
     return (
       <div className="bg-background animate-fade-in">
-        <div className="p-6 sm:p-8 pb-24">
+        <div className="p-6 sm:p-8 pb-32">
           <Header />
 
           {/* Subheader: All Competitors + Search */}

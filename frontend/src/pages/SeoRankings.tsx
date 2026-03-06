@@ -74,6 +74,7 @@ import {
   X,
   Plus,
   SearchX,
+  Loader2,
 } from "lucide-react";
 
 // Types matching the backend SeoKeywordRankSerializer
@@ -186,7 +187,8 @@ const SeoRankings = () => {
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [showOverview, setShowOverview] = useState(true);
   const [selectedKeywords, setSelectedKeywords] = useState<number[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState(0);
   const [refreshCompleted, setRefreshCompleted] = useState(0);
@@ -613,11 +615,14 @@ const SeoRankings = () => {
       toast({ title: "No domain", description: "Please select a domain first" });
       return;
     }
+    setExporting(true);
     try {
       const blob = await apiClient.exportSeoKeywordsPdf(Number(activeDomainId));
       downloadBlob(blob, `seo_keywords_${Date.now()}.pdf`);
     } catch {
       toast({ title: "Export failed", description: "Could not generate PDF. Please try again.", variant: "destructive" });
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -675,9 +680,9 @@ const SeoRankings = () => {
       </div>
 
       {loading && (
-        <div className="flex items-center justify-center py-12">
-          <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground mr-2" />
-          <span className="text-muted-foreground">Loading SEO data...</span>
+        <div className="flex flex-col items-center justify-center py-32">
+          <Loader2 className="h-10 w-10 animate-spin text-primary mb-4" />
+          <span className="text-muted-foreground text-sm">Loading SEO data...</span>
         </div>
       )}
 
@@ -687,6 +692,7 @@ const SeoRankings = () => {
         </Card>
       )}
 
+      {!loading && activeDomainId && (<>
       {/* Overview Section */}
       <Card className="shadow-elegant border border-border backdrop-blur-sm bg-card/80">
         <CardHeader className="flex flex-row items-center justify-between py-3 px-4">
@@ -1022,19 +1028,19 @@ const SeoRankings = () => {
               {/* Export Dropdown */}
               <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="gap-2">
-                    <Download className="h-4 w-4" />
-                    Export
+                  <Button variant="outline" className="gap-2" disabled={exporting}>
+                    {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    {exporting ? 'Exporting...' : 'Export'}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-56">
-                  <DropdownMenuItem className="cursor-pointer" onClick={handleExportCsv}>
+                  <DropdownMenuItem className="cursor-pointer" onClick={handleExportCsv} disabled={exporting}>
                     Export Project In .CSV
                   </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer" onClick={handleExportPdf}>
+                  <DropdownMenuItem className="cursor-pointer" onClick={handleExportPdf} disabled={exporting}>
                     Export Project In .PDF
                   </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer" onClick={handleExportTxt}>
+                  <DropdownMenuItem className="cursor-pointer" onClick={handleExportTxt} disabled={exporting}>
                     Export Keywords In .TXT
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -1569,6 +1575,8 @@ const SeoRankings = () => {
         )}
       </div>
 
+      </>)}
+
       {/* Refresh Progress Bar — fixed bottom, like RankMax */}
       {refreshing && (
         <div
@@ -1652,9 +1660,6 @@ const SeoRankings = () => {
                 }}
                 className="flex-1"
               />
-              <Button size="sm" onClick={handleAddTag} variant="outline">
-                <Plus className="h-4 w-4" />
-              </Button>
             </div>
 
             {/* Current Tags */}
