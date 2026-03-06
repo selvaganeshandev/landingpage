@@ -143,12 +143,22 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   filterByPermissions: (checkPermission) => {
     const { navGroups } = get();
 
-    const filteredGroups = navGroups
-      .map(group => ({
-        ...group,
-        items: group.items.filter(item => checkPermission(item.module, item.requiredLevel))
-      }))
-      .filter(group => group.items.length > 0 || group.sectionLabel); // Keep section labels visible
+    // First pass: filter items by permissions
+    const withFilteredItems = navGroups.map(group => ({
+      ...group,
+      items: group.items.filter(item => checkPermission(item.module, item.requiredLevel))
+    }));
+
+    // Second pass: keep groups with items, and section labels only if at least one following group (before the next section label) has items
+    const filteredGroups = withFilteredItems.filter((group, index) => {
+      if (!group.sectionLabel) return group.items.length > 0;
+      // Check if any group after this section label (up to the next section label) has items
+      for (let i = index + 1; i < withFilteredItems.length; i++) {
+        if (withFilteredItems[i].sectionLabel) break;
+        if (withFilteredItems[i].items.length > 0) return true;
+      }
+      return false;
+    });
 
     set({ filteredNavGroups: filteredGroups });
   },
