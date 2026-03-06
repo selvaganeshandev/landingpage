@@ -226,12 +226,37 @@ const SeoRankings = () => {
   }, []);
 
   // Start polling refresh status via /seo/refresh-status/ endpoint
+  const pollCountRef = useRef(0);
+  const lastCompletedRef = useRef(-1);
+  const staleCountRef = useRef(0);
+  const MAX_POLL_ATTEMPTS = 120; // 120 * 5s = 10 minutes max
+  const MAX_STALE_POLLS = 6; // 6 * 5s = 30s with no progress → consider stale
+
+  const resetRefreshState = useCallback(() => {
+    setRefreshing(false);
+    setRefreshProgress(0);
+    setRefreshCompleted(0);
+    setRefreshTotal(0);
+  }, []);
+
   const startRefreshPolling = useCallback((domainId: string) => {
     // Prevent duplicate polling
     if (pollIntervalRef.current) return;
     setRefreshing(true);
+    pollCountRef.current = 0;
+    lastCompletedRef.current = -1;
+    staleCountRef.current = 0;
 
     pollIntervalRef.current = setInterval(async () => {
+      pollCountRef.current += 1;
+
+      // Safety: stop polling after max attempts
+      if (pollCountRef.current > MAX_POLL_ATTEMPTS) {
+        stopPolling();
+        resetRefreshState();
+        return;
+      }
+
       try {
         const statusRes = await apiClient.getSeoRefreshStatus(domainId) as {
           refreshing: boolean; total: number; completed: number; progress: number; status: string;
@@ -240,6 +265,21 @@ const SeoRankings = () => {
         setRefreshTotal(statusRes.total);
         setRefreshCompleted(statusRes.completed);
         setRefreshProgress(statusRes.progress);
+
+        // Detect stale refresh: if completed count hasn't changed, increment stale counter
+        if (statusRes.completed === lastCompletedRef.current) {
+          staleCountRef.current += 1;
+        } else {
+          staleCountRef.current = 0;
+          lastCompletedRef.current = statusRes.completed;
+        }
+
+        // If no progress for MAX_STALE_POLLS consecutive checks, treat as stale
+        if (staleCountRef.current >= MAX_STALE_POLLS) {
+          stopPolling();
+          resetRefreshState();
+          return;
+        }
 
         if (!statusRes.refreshing || statusRes.status === 'done') {
           // Refresh complete — stop polling, fetch final data
@@ -254,23 +294,21 @@ const SeoRankings = () => {
           setOverview(overviewRes || null);
 
           // Hide progress bar after brief delay
-          setTimeout(() => {
-            setRefreshing(false);
-            setRefreshProgress(0);
-            setRefreshCompleted(0);
-            setRefreshTotal(0);
-          }, 2000);
+          setTimeout(() => resetRefreshState(), 2000);
         }
       } catch {
         // Keep polling on transient network errors
       }
     }, 5000);
-  }, [stopPolling]);
+  }, [stopPolling, resetRefreshState]);
 
-  // Cleanup polling on unmount
+  // Cleanup polling on unmount or domain change
   useEffect(() => {
-    return () => stopPolling();
-  }, [stopPolling]);
+    return () => {
+      stopPolling();
+      resetRefreshState();
+    };
+  }, [stopPolling, resetRefreshState, activeDomainId]);
 
   // Fetch SEO data — also detects active refresh on page load/reload
   const fetchSeoData = useCallback(async () => {
@@ -287,12 +325,41 @@ const SeoRankings = () => {
       setSeoKeywords((keywordsRes || []).map(mapKeywordForUI));
       setOverview(overviewRes || null);
 
-      // Detect if engine is still processing keywords (survives page reload)
-      const hasActiveRefresh = (keywordsRes || []).some(
-        (kw: SeoKeyword) => ['avail', 'busy', 'load', 'read'].includes(kw.auto_call_status)
-      );
-      if (hasActiveRefresh && !pollIntervalRef.current) {
-        startRefreshPolling(activeDomainId);
+      // Check the refresh-status endpoint to see if a refresh is actually in progress.
+      // Do two checks 5s apart to verify progress is actually moving (not stale state).
+      if (!pollIntervalRef.current) {
+        try {
+          const firstCheck = await apiClient.getSeoRefreshStatus(activeDomainId) as {
+            refreshing: boolean; total: number; completed: number; progress: number; status: string;
+          };
+          if (firstCheck.refreshing && firstCheck.status !== 'done') {
+            // If already partially complete (completed > 0), it's likely real
+            if (firstCheck.completed > 0) {
+              setRefreshTotal(firstCheck.total);
+              setRefreshCompleted(firstCheck.completed);
+              setRefreshProgress(firstCheck.progress);
+              startRefreshPolling(activeDomainId);
+            } else {
+              // completed === 0: could be stale. Wait 5s and re-check
+              await new Promise(r => setTimeout(r, 5000));
+              // Bail if domain changed while waiting
+              if (activeDomainRef.current !== activeDomainId) return;
+              const secondCheck = await apiClient.getSeoRefreshStatus(activeDomainId) as {
+                refreshing: boolean; total: number; completed: number; progress: number; status: string;
+              };
+              if (secondCheck.refreshing && secondCheck.status !== 'done' &&
+                  (secondCheck.completed > firstCheck.completed || secondCheck.progress > firstCheck.progress)) {
+                setRefreshTotal(secondCheck.total);
+                setRefreshCompleted(secondCheck.completed);
+                setRefreshProgress(secondCheck.progress);
+                startRefreshPolling(activeDomainId);
+              }
+              // If no progress between checks → stale, don't start polling
+            }
+          }
+        } catch {
+          // No active refresh or endpoint error — ignore
+        }
       }
     } catch (err) {
       console.error("Failed to fetch SEO data:", err);
