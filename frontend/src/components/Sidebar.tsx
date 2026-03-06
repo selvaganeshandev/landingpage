@@ -30,9 +30,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Check,
-  Eye,
-  EyeOff,
-  Trash2,
 } from "lucide-react";
 import { DomainSelector } from "./DomainSelector";
 import { Separator } from "@/components/ui/separator";
@@ -48,16 +45,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import {
   Command,
   CommandEmpty,
@@ -79,127 +66,21 @@ import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDomainProcessing }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void; navigate: any; isDomainProcessing?: boolean }) => {
   const [submenuOpen, setSubmenuOpen] = useState(false);
-  const [recentsVisible, setRecentsVisible] = useState(true);
-  const [deleteConversationId, setDeleteConversationId] = useState<number | null>(null);
 
   // Check if any item in group is active
   const hasActiveItem = group.items.some((item: any) => location.pathname === item.path);
 
-  // Special handling for scrollable recent chats
-  if (group.scrollable && isSidebarOpen) {
+  // Section label - just render a text header (same style as Recents was)
+  if (group.sectionLabel) {
+    if (!isSidebarOpen) {
+      // Show a divider line when sidebar is collapsed
+      return <Separator className="my-2" />;
+    }
     return (
-      <div className="flex flex-col">
-        <div className="flex items-center justify-between px-3 py-2 mt-2">
-          <p className="text-xs font-semibold text-muted-foreground">{group.name}</p>
-          <button
-            onClick={() => setRecentsVisible(!recentsVisible)}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            {recentsVisible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-          </button>
-        </div>
-        <div
-          className={cn(
-            "overflow-hidden transition-all duration-300 ease-in-out",
-            recentsVisible ? "max-h-[300px] opacity-100" : "max-h-0 opacity-0"
-          )}
-        >
-          <div className="overflow-y-auto space-y-0.5" style={{ maxHeight: '300px' }}>
-          {group.items.map((item: any, idx: number) => {
-            const isActive = location.pathname === item.path;
-
-            return (
-              <div
-                key={idx}
-                className={cn(
-                  "recent-chat-item group w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg hover:bg-accent",
-                  isActive && "text-primary"
-                )}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigate(item.path);
-                    onItemClick();
-                  }}
-                  className="flex-1 text-left truncate"
-                >
-                  <span className="truncate">{item.name}</span>
-                </button>
-                {item.conversationId && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteConversationId(item.conversationId);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-destructive/10 rounded"
-                      title="Delete conversation"
-                    >
-                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                    </button>
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        </div>
-
-        {/* Delete Confirmation Dialog */}
-        <AlertDialog open={deleteConversationId !== null} onOpenChange={(open) => !open && setDeleteConversationId(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete Conversation?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will permanently delete this chat conversation. This action cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={async () => {
-                  if (deleteConversationId) {
-                    try {
-                      const { api } = await import('@/services/api');
-                      await api.deleteChatConversation(deleteConversationId);
-                      // Refresh recent conversations
-                      const { useNavigationStore } = await import('@/stores/navigationStore');
-                      const { updateRecentChats } = useNavigationStore.getState();
-                      const response = await api.getChatConversations();
-                      if (response.conversations) {
-                        const sorted = [...response.conversations].sort((a: any, b: any) =>
-                          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-                        );
-                        updateRecentChats(sorted.slice(0, 20));
-                      }
-                      // Navigate to new chat if deleting current conversation
-                      const urlParams = new URLSearchParams(window.location.search);
-                      if (urlParams.get('conversation') === String(deleteConversationId)) {
-                        navigate('/chat');
-                      }
-                    } catch (error) {
-                      console.error('Failed to delete conversation:', error);
-                    } finally {
-                      setDeleteConversationId(null);
-                    }
-                  }
-                }}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+      <div className="px-3 py-1.5 mt-1">
+        <p className="text-xs font-semibold text-muted-foreground">{group.name}</p>
       </div>
     );
-  }
-
-  // Don't show scrollable groups in closed state
-  if (group.scrollable && !isSidebarOpen) {
-    return null;
   }
 
   // If group has only one item, render it directly
@@ -220,7 +101,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
           "flex items-center opacity-50 cursor-not-allowed",
           "text-muted-foreground",
           isSidebarOpen
-            ? "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+            ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
             : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
         )}
       >
@@ -237,7 +118,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
             ? "bg-primary text-primary-foreground"
             : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
           isSidebarOpen
-            ? "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+            ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
             : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
         )}
       >
@@ -271,7 +152,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
         {isSidebarOpen ? (
           <button
             className={cn(
-              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium",
+              "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium",
               hasActiveItem
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -588,7 +469,7 @@ export const Sidebar = () => {
         )}
       </div>
 
-      <nav className={cn("space-y-1 flex-1", isOpen ? "p-4" : "px-3 py-4")}>
+      <nav className={cn("space-y-0.5 flex-1", isOpen ? "p-4" : "px-3 py-4")}>
           {filteredNavGroups.map((group, index) => (
             <div key={index}>
               {group.separator && isOpen && <Separator className="mt-4 mb-0" />}
@@ -637,7 +518,7 @@ export const Sidebar = () => {
                       location.pathname === "/organization-settings"
                         ? "bg-primary text-primary-foreground"
                         : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+                      "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
                     )}
                   >
                     <Settings className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/organization-settings" ? "text-primary-foreground" : "text-muted-foreground")} />
@@ -674,7 +555,7 @@ export const Sidebar = () => {
                       location.pathname === "/profile"
                         ? "bg-primary text-primary-foreground"
                         : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+                      "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
                     )}
                   >
                     <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
@@ -711,7 +592,7 @@ export const Sidebar = () => {
                       location.pathname === "/profile"
                         ? "bg-primary text-primary-foreground"
                         : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      "gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+                      "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
                     )}
                   >
                     <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
@@ -744,7 +625,7 @@ export const Sidebar = () => {
               onClick={handleLogoutClick}
               className={cn(
                 "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                "w-full gap-3 px-3 py-2.5 text-sm font-medium rounded-lg"
+                "w-full gap-3 px-3 py-2 text-sm font-medium rounded-lg"
               )}
             >
               <LogOut className="h-5 w-5 flex-shrink-0" />

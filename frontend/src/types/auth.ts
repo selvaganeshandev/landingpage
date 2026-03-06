@@ -73,6 +73,9 @@ export const MODULES = {
   REPORTS: 'reports',
   ORGANIZATION_SETTINGS: 'organization_settings',
   TEAM_MANAGEMENT: 'team_management',
+  // SEO Monitoring modules
+  SEO_RANKINGS: 'seo_rankings',
+  SEO_COMPETITORS: 'seo_competitors',
 } as const;
 
 export type ModuleKey = typeof MODULES[keyof typeof MODULES];

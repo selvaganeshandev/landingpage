@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Project Report</title>
+  <style>
+    body {
+      font-family: arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    table, p {
+      font-family: arial, sans-serif;
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th {
+      background-color: #6d73ef;
+      color: #fff;
+    }
+    td, th {
+      border: 1px solid #dddddd;
+      text-align: left;
+      padding: 8px;
+    }
+    tr:nth-child(even) {
+      background-color: #dddddd;
+    }
+    .f-semi-color {
+      color: #8a8a8a;
+    }
+    @page {
+      size: 15in 9.25in;
+      margin: 27mm 16mm 27mm 16mm;
+    }
+    .favicon {
+      border: 1px solid #e4e5f8;
+      margin: 0;
+      padding: 4px;
+      width: 40px;
+      height: 40px;
+      display: inline-block;
+      line-height: 5px;
+      border-radius: 5px;
+      background-color: #ffffff;
+    }
+    .brand-header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    a {
+      color: #763de1;
+      text-decoration: none;
+    }
+    .arrow-up {
+      color: #16a34a;
+      font-weight: bold;
+    }
+    .arrow-down {
+      color: #dc2626;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Brand Header — logo image (same style as Rankmaxx) -->
+  <div class="brand-header">
+    <img src="data:image/png;base64,{{ logo_base64 }}"
+         alt="PromptMaxx"
+         style="max-height: 80px; max-width: 400px;" />
+  </div>
+
+  <!-- Project Info Row -->
+  <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+    <div style="display: flex; width: 900px;">
+      <div style="margin-top: 10px;">
+        <img class="favicon"
+             alt="favicon"
+             src="https://www.google.com/s2/favicons?sz=64&domain_url={{ domainurl }}/" />
+      </div>
+      <div style="margin-left: 1rem;">
+        <p style="height: 8px;"><b>Project : </b>{{ projectname }}</p>
+        <p style="height: 8px;"><b>Domain  : </b>{{ domainurl }}</p>
+      </div>
+    </div>
+    <div style="text-align: right;">
+      <p><b>Date : </b>{{ reportdate }}</p>
+    </div>
+  </div>
+
+  <!-- Keywords Table -->
+  <table>
+    <tr>
+      <th style="text-align: center;">#</th>
+      <th>Keyword</th>
+      <th style="text-align: center;">Rank</th>
+      <th style="text-align: center;">Best rank</th>
+      <th style="text-align: center; width: 50px;">1d</th>
+      <th style="text-align: center; width: 50px;">7d</th>
+      <th style="text-align: center;">Volume</th>
+      <th style="text-align: center;">Comp</th>
+      <th>URL</th>
+      <th style="text-align: center;">Region</th>
+      <th style="text-align: center;">Date added</th>
+    </tr>
+
+    {% for kw in keywords %}
+    <tr>
+      <td style="text-align: center;">{{ forloop.counter }}</td>
+
+      <td style="width: 250px;">{{ kw.keyword }}</td>
+
+      {% if kw.rank_now == 0 %}
+        <td style="text-align: center; width: 100px;" class="f-semi-color">(not ranked)</td>
+      {% else %}
+        <td style="text-align: center; width: 80px;">{{ kw.rank_now }}</td>
+      {% endif %}
+
+      <td style="text-align: center; width: 60px;">
+        {% if kw.top_rank > 0 %}
+          {{ kw.top_rank }}
+        {% else %}
+          <span class="f-semi-color">-</span>
+        {% endif %}
+      </td>
+
+      <td style="text-align: center;">
+        {% if kw.day_val == 0 %}
+          <span class="f-semi-color">-</span>
+        {% else %}
+          {{ kw.day_val }}
+          {% if kw.day_mark == 'up' %}
+            <span class="arrow-up">&#8593;</span>
+          {% elif kw.day_mark == 'down' %}
+            <span class="arrow-down">&#8595;</span>
+          {% endif %}
+        {% endif %}
+      </td>
+
+      <td style="text-align: center;">
+        {% if kw.week_val == 0 %}
+          <span class="f-semi-color">-</span>
+        {% else %}
+          {{ kw.week_val }}
+          {% if kw.week_mark == 'up' %}
+            <span class="arrow-up">&#8593;</span>
+          {% elif kw.week_mark == 'down' %}
+            <span class="arrow-down">&#8595;</span>
+          {% endif %}
+        {% endif %}
+      </td>
+
+      {% if kw.search_volume %}
+        <td style="text-align: center; width: 80px;">{{ kw.search_volume }}</td>
+      {% else %}
+        <td class="f-semi-color" style="text-align: center; width: 60px;">(NA)</td>
+      {% endif %}
+
+      <td style="text-align: center; width: 60px;">{{ kw.comp }}</td>
+
+      <td style="width: 240px; word-break: break-word;">
+        <a href="{{ kw.site_url }}">{{ kw.domain_slug }}</a>
+      </td>
+
+      <td style="text-align: center; width: 90px;">{{ kw.region }}</td>
+
+      <td style="text-align: center; width: 140px;">{{ kw.created_date }}</td>
+    </tr>
+    {% endfor %}
+
+  </table>
+
+</body>
+</html>

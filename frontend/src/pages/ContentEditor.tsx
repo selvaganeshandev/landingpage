@@ -1974,6 +1974,25 @@ const ContentEditor = () => {
   };
 
   // Handle publish button click - opens dialog
+  const handleExportDocx = () => {
+    const htmlContent = editorRef.current?.innerHTML || content;
+    if (!htmlContent) {
+      toast({ title: "Nothing to export", description: "Editor content is empty." });
+      return;
+    }
+    const fullHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${title || "Content"}</title></head><body>${htmlContent}</body></html>`;
+    const blob = new Blob([fullHtml], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const filename = (title || "content").replace(/[^a-zA-Z0-9\s-]/g, "").trim().replace(/\s+/g, "_");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${filename}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const handlePublishClick = async () => {
     if (!id) return;
 
@@ -2059,7 +2078,7 @@ const ContentEditor = () => {
                 Publish
               </Button>
             )}
-            <Button variant="default" size="sm">
+            <Button variant="default" size="sm" onClick={handleExportDocx}>
               <Share2 className="h-4 w-4 mr-2" />
               Export
             </Button>

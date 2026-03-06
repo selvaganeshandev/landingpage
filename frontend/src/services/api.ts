@@ -1581,6 +1581,147 @@ export const apiClient = {
       method: 'PATCH',
       body: JSON.stringify({ status: newStatus }),
     }),
+
+  // ===== SEO Rankings =====
+  getSeoKeywords: (params: { domain_id: string; platform?: string; search?: string; status?: string }) => {
+    const searchParams = new URLSearchParams({ domain_id: params.domain_id });
+    if (params.platform) searchParams.append('platform', params.platform);
+    if (params.search) searchParams.append('search', params.search);
+    if (params.status) searchParams.append('status', params.status);
+    return apiRequest(`/seo/keywords/?${searchParams.toString()}`);
+  },
+
+  addSeoKeyword: (data: {
+    keyword: number;
+    domain: number;
+    platform?: string;
+    target_url?: string;
+    region?: string;
+    isocode?: string;
+    language_code?: string;
+    geo_target?: string;
+    geo_target_uule?: string;
+  }) =>
+    apiRequest('/seo/keywords/add/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  bulkAddSeoKeywords: (data: {
+    domain_id: number;
+    keywords: Array<{
+      keyword_id: number;
+      platform?: string;
+      target_url?: string;
+      region?: string;
+      isocode?: string;
+      language_code?: string;
+    }>;
+  }) =>
+    apiRequest('/seo/keywords/bulk-add/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getSeoKeywordDetail: (id: number) =>
+    apiRequest(`/seo/keywords/${id}/`),
+
+  deleteSeoKeyword: (id: number) =>
+    apiRequest(`/seo/keywords/${id}/`, { method: 'DELETE' }),
+
+  getSeoRankHistory: (seoKwId: number, days?: number) => {
+    const params = days ? `?days=${days}` : '';
+    return apiRequest(`/seo/keywords/${seoKwId}/history/${params}`);
+  },
+
+  getSeoSerpFeatures: (seoKwId: number) =>
+    apiRequest(`/seo/keywords/${seoKwId}/serp-features/`),
+
+  getSeoDomainMetrics: (params: { domain_id: string; days?: number }) => {
+    const searchParams = new URLSearchParams({ domain_id: params.domain_id });
+    if (params.days) searchParams.append('days', String(params.days));
+    return apiRequest(`/seo/metrics/?${searchParams.toString()}`);
+  },
+
+  getSeoDomainOverview: (domainId: string) =>
+    apiRequest(`/seo/overview/?domain_id=${domainId}`),
+
+  triggerSeoRanking: (data: { domain_id?: number; seo_keyword_rank_id?: number }) =>
+    apiRequest('/seo/trigger/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getSeoRefreshStatus: (domainId: string) =>
+    apiRequest(`/seo/refresh-status/?domain_id=${domainId}`),
+
+  bulkDeleteSeoKeywords: (ids: number[]) =>
+    apiRequest('/seo/keywords/bulk-delete/', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
+
+  updateSeoKeywordTags: (data: { ids: number[]; tags: string[]; mode?: 'merge' | 'replace' }) =>
+    apiRequest('/seo/keywords/update-tags/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  removeSeoKeywordTag: (data: { domain_id: number; tag: string }) =>
+    apiRequest('/seo/keywords/remove-tag/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getSeoKeywordTags: (domainId: string, ids?: number[]) => {
+    const params = new URLSearchParams({ domain_id: domainId });
+    if (ids && ids.length) params.append('ids', ids.join(','));
+    return apiRequest(`/seo/keywords/get-tags/?${params.toString()}`);
+  },
+
+  toggleSeoKeywordFavourite: (data: { id?: number; domain_id?: number; value: number }) =>
+    apiRequest('/seo/keywords/favourite/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  exportSeoKeywordsPdf: async (domainId: number): Promise<Blob> => {
+    const token = getAuthToken();
+    const headers: HeadersInit = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${API_BASE_URL}/seo/keywords/pdf-export/`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ domain_id: domainId }),
+    });
+    if (!response.ok) throw new Error('PDF export failed');
+    return response.blob();
+  },
+
+  // ===== SEO Competitor Analysis =====
+  startSeoCompetitorAnalysis: (domainId: number) =>
+    apiRequest('/seo/competitors/start/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId }),
+    }),
+
+  getSeoCompetitorStatus: (domainId: number) =>
+    apiRequest(`/seo/competitors/status/?domain_id=${domainId}`),
+
+  addSeoCompetitor: (domainId: number, competitorDomain: string) =>
+    apiRequest('/seo/competitors/add/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId, competitor_domain: competitorDomain }),
+    }),
+
+  deleteSeoCompetitor: (projectId: number) =>
+    apiRequest(`/seo/competitors/${projectId}/delete/`, { method: 'DELETE' }),
+
+  getSeoCompetitorProjects: (domainId: number) =>
+    apiRequest(`/seo/competitors/projects/?domain_id=${domainId}`),
+
+  getSeoCompetitorKeywords: (projectId: number) =>
+    apiRequest(`/seo/competitors/${projectId}/keywords/`),
 };
 
 // Also export as 'api' for flexibility

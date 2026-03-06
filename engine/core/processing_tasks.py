@@ -526,3 +526,61 @@ def process_single_report_email_task(self, scheduled_report_id: int):
         logger.error(f"Error processing scheduled report {scheduled_report_id}: {e}", exc_info=True)
         raise self.retry(exc=e, countdown=60)
 
+
+# ==================== SEO RANKING PROCESSING ====================
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_seo_keyword_task(self, seo_keyword_rank_id: int):
+    """
+    Process a single SEO keyword: fetch SERP data via ScrapingDog, parse, save rank.
+
+    Args:
+        seo_keyword_rank_id: ID of SeoKeywordRank to process
+    """
+    try:
+        from core.seo_ranking_processor import SeoRankingProcessor
+        processor = SeoRankingProcessor()
+        result = processor.process_single_keyword(seo_keyword_rank_id)
+        logger.info(f"[SEO] Processed keyword {seo_keyword_rank_id}: success={result}")
+        return {'success': result, 'seo_keyword_rank_id': seo_keyword_rank_id}
+    except Exception as e:
+        logger.error(f"[SEO] Error processing keyword {seo_keyword_rank_id}: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=30)
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def process_seo_domain_task(self, domain_id: int):
+    """
+    Process all SEO keywords for a domain: fetch SERP, parse, save, recalculate metrics.
+
+    Args:
+        domain_id: ID of Domain to process all SEO keywords for
+    """
+    try:
+        from core.seo_ranking_processor import SeoRankingProcessor
+        processor = SeoRankingProcessor()
+        result = processor.process_domain_rankings(domain_id)
+        logger.info(f"[SEO] Domain {domain_id} processing complete: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"[SEO] Error processing domain {domain_id}: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=60)
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def analyze_seo_competitors_task(self, domain_id: int):
+    """
+    Aggregate competitor domains from stored SERP snippets_details for a domain.
+    Reads snippets_details.competitors from each keyword and tallies frequency.
+
+    Args:
+        domain_id: ID of Domain to analyze competitors for
+    """
+    try:
+        from core.seo_competitor_processor import analyze_competitors_for_domain
+        result = analyze_competitors_for_domain(domain_id)
+        logger.info(f"[CompAnalysis] Domain {domain_id}: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"[CompAnalysis] Error for domain {domain_id}: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=30)

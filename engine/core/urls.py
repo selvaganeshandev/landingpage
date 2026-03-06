@@ -51,4 +51,9 @@ urlpatterns = [
     path('integrations/scheduler/start/', views.start_integration_insights_scheduler, name='start_integration_insights_scheduler'),
     path('integrations/process-pending/', views.process_pending_insights, name='process_pending_insights'),
     path('integrations/pending-insights/', views.get_pending_insights, name='get_pending_insights'),
+
+    # SEO Ranking
+    path('seo/process-keyword/', views.seo_process_keyword, name='seo_process_keyword'),
+    path('seo/process-domain/', views.seo_process_domain, name='seo_process_domain'),
+    path('seo/analyze-competitors/', views.seo_analyze_competitors, name='seo_analyze_competitors'),
 ]

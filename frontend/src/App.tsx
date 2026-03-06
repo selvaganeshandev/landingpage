@@ -32,6 +32,9 @@ import ContentEditor from "./pages/ContentEditor";
 import BulkContentUpload from "./pages/BulkContentUpload";
 import AutomationSettings from "./pages/AutomationSettings";
 import TrafficAttribution from "./pages/TrafficAttribution";
+import SeoRankings from "./pages/SeoRankings";
+import SeoCompetitors from "./pages/SeoCompetitors";
+import SeoReports from "./pages/SeoReports";
 import SignIn from "./pages/Auth";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -212,6 +215,23 @@ const App = () => (
                 </ProtectedRoute>
               } />
               
+              {/* SEO Monitoring */}
+              <Route path="/seo-rankings" element={
+                <ProtectedRoute requiredPermission={MODULES.SEO_RANKINGS}>
+                  <SeoRankings />
+                </ProtectedRoute>
+              } />
+              <Route path="/seo-competitors" element={
+                <ProtectedRoute requiredPermission={MODULES.SEO_COMPETITORS}>
+                  <SeoCompetitors />
+                </ProtectedRoute>
+              } />
+              <Route path="/seo-reports" element={
+                <ProtectedRoute requiredPermission={MODULES.SEO_RANKINGS}>
+                  <SeoReports />
+                </ProtectedRoute>
+              } />
+
               {/* Other routes */}
               <Route path="/content-calendar" element={<ContentCalendar />} />
               <Route path="/content-editor/:id" element={<ContentEditor />} />

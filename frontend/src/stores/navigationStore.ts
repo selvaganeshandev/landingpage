@@ -9,7 +9,6 @@ import {
   Target,
   Link2,
   LineChart,
-  Globe,
   Bell,
   Users,
   FileText,
@@ -18,10 +17,9 @@ import {
   AlertTriangle,
   Activity,
   Lightbulb,
-  MessageSquarePlus,
-  Clock,
   Calendar,
   ExternalLink,
+  SearchCheck,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -39,6 +37,7 @@ export interface NavGroup {
   items: NavItem[];
   separator?: boolean;
   scrollable?: boolean;
+  sectionLabel?: boolean; // If true, renders as a text label header only
 }
 
 interface NavigationState {
@@ -48,21 +47,21 @@ interface NavigationState {
   // Actions
   filterByPermissions: (checkPermission: (module: string, level?: 'read' | 'write' | 'admin') => boolean) => void;
   getFilteredNavGroups: () => NavGroup[];
-  updateRecentChats: (conversations: Array<{ id: number; title: string; updated_at: string }>) => void;
 }
 
 const allNavGroups: NavGroup[] = [
-  {
-    name: "Chat",
-    items: [
-      { name: "New Chat", path: "/chat", icon: MessageSquarePlus, module: MODULES.DASHBOARD },
-    ],
-  },
   {
     name: "Overview",
     items: [
       { name: "Insights", path: "/insights", icon: LayoutDashboard, module: MODULES.DASHBOARD },
     ],
+  },
+  // GEO Monitoring Section
+  {
+    name: "GEO Monitoring",
+    sectionLabel: true,
+    separator: true,
+    items: [],
   },
   {
     name: "Tracking",
@@ -85,6 +84,48 @@ const allNavGroups: NavGroup[] = [
     ],
   },
   {
+    name: "Advanced",
+    icon: Sparkles,
+    items: [
+      { name: "Traffic Attribution", path: "/traffic", icon: Link2, module: MODULES.TRAFFIC_ATTRIBUTION },
+      { name: "Misinformation", path: "/misinformation", icon: AlertTriangle, module: MODULES.MISINFORMATION_ALERTS },
+    ],
+  },
+  {
+    name: "GEO Reports",
+    items: [
+      { name: "Reports", path: "/reports", icon: FileText, module: MODULES.REPORTS },
+    ],
+  },
+  // SEO Monitoring Section
+  {
+    name: "SEO Monitoring",
+    sectionLabel: true,
+    separator: true,
+    items: [],
+  },
+  {
+    name: "Rankings",
+    icon: SearchCheck,
+    items: [
+      { name: "Keyword Rankings", path: "/seo-rankings", icon: TrendingUp, module: MODULES.SEO_RANKINGS },
+      { name: "Competitors", path: "/seo-competitors", icon: Users, module: MODULES.SEO_COMPETITORS },
+    ],
+  },
+  {
+    name: "Organic Reports",
+    items: [
+      { name: "Organic Reports", path: "/seo-reports", icon: FileText, module: MODULES.SEO_RANKINGS },
+    ],
+  },
+  // Strategy Section
+  {
+    name: "Strategy",
+    sectionLabel: true,
+    separator: true,
+    items: [],
+  },
+  {
     name: "Strategy",
     icon: Lightbulb,
     items: [
@@ -92,28 +133,6 @@ const allNavGroups: NavGroup[] = [
       { name: "Competitors", path: "/competitors", icon: Users, module: MODULES.COMPETITORS },
       { name: "Content Planner", path: "/content-calendar", icon: Calendar, module: MODULES.CONTENT_PLANNER },
     ],
-  },
-  {
-    name: "Advanced",
-    icon: Sparkles,
-    items: [
-      // { name: "Multilingual", path: "/multilingual", icon: Globe, module: MODULES.MULTILINGUAL },
-      { name: "Traffic Attribution", path: "/traffic", icon: Link2, module: MODULES.TRAFFIC_ATTRIBUTION },
-      { name: "Misinformation", path: "/misinformation", icon: AlertTriangle, module: MODULES.MISINFORMATION_ALERTS },
-    ],
-  },
-  {
-    name: "Reporting",
-    items: [
-      { name: "Reports", path: "/reports", icon: FileText, module: MODULES.REPORTS },
-    ],
-  },
-  {
-    name: "Recents",
-    icon: Clock,
-    separator: true,
-    scrollable: true,
-    items: [],
   },
 ];
 
@@ -124,46 +143,27 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   filterByPermissions: (checkPermission) => {
     const { navGroups } = get();
 
-    const filteredGroups = navGroups
-      .map(group => ({
-        ...group,
-        items: group.items.filter(item => checkPermission(item.module, item.requiredLevel))
-      }))
-      .filter(group => group.items.length > 0 || group.name === "Recents"); // Keep Recents visible even when empty
+    // First pass: filter items by permissions
+    const withFilteredItems = navGroups.map(group => ({
+      ...group,
+      items: group.items.filter(item => checkPermission(item.module, item.requiredLevel))
+    }));
+
+    // Second pass: keep groups with items, and section labels only if at least one following group (before the next section label) has items
+    const filteredGroups = withFilteredItems.filter((group, index) => {
+      if (!group.sectionLabel) return group.items.length > 0;
+      // Check if any group after this section label (up to the next section label) has items
+      for (let i = index + 1; i < withFilteredItems.length; i++) {
+        if (withFilteredItems[i].sectionLabel) break;
+        if (withFilteredItems[i].items.length > 0) return true;
+      }
+      return false;
+    });
 
     set({ filteredNavGroups: filteredGroups });
   },
 
   getFilteredNavGroups: () => {
     return get().filteredNavGroups;
-  },
-
-  updateRecentChats: (conversations) => {
-    const { navGroups, filteredNavGroups } = get();
-
-    // Convert conversations to nav items (limit to 20 most recent)
-    const recentItems = conversations
-      .slice(0, 20)
-      .map(conv => ({
-        name: conv.title || `Chat ${conv.id}`,
-        path: `/chat?conversation=${conv.id}`,
-        icon: MessageSquare,
-        module: MODULES.DASHBOARD,
-        conversationId: conv.id, // Store conversation ID for delete
-      }));
-
-    // Update both navGroups and filteredNavGroups
-    const updatedNavGroups = navGroups.map(group =>
-      group.name === "Recents" ? { ...group, items: recentItems } : group
-    );
-
-    const updatedFilteredGroups = filteredNavGroups.map(group =>
-      group.name === "Recents" ? { ...group, items: recentItems } : group
-    );
-
-    set({
-      navGroups: updatedNavGroups,
-      filteredNavGroups: updatedFilteredGroups,
-    });
   },
 }));
