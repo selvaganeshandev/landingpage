@@ -7,7 +7,9 @@ seo_rankings tables via shared_models (managed=False).
 """
 import logging
 import base64
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
+
+from django.utils import timezone
 
 import requests
 from django.conf import settings
@@ -400,7 +402,7 @@ class SeoRankingProcessor:
                     keyword_snippet=kw_snip,
                     search_results=parsed['search_results'],
                     cannibalisation=parsed['cannibalisation'],
-                    last_ranked_date=datetime.now(),
+                    last_ranked_date=timezone.now(),
                     auto_call_status='done',
                     auto_refresh_count=seo_kw.auto_refresh_count + 1,
                 )
