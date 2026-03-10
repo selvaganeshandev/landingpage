@@ -1980,7 +1980,8 @@ const ContentEditor = () => {
       toast({ title: "Nothing to export", description: "Editor content is empty." });
       return;
     }
-    const fullHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${title || "Content"}</title></head><body>${htmlContent}</body></html>`;
+    const titleHtml = title ? `<h1 style="font-size:26pt;font-weight:bold;margin-bottom:12pt;">${title}</h1>` : "";
+    const fullHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${title || "Content"}</title></head><body>${titleHtml}${htmlContent}</body></html>`;
     const blob = new Blob([fullHtml], { type: "application/msword" });
     const url = URL.createObjectURL(blob);
     const filename = (title || "content").replace(/[^a-zA-Z0-9\s-]/g, "").trim().replace(/\s+/g, "_");
