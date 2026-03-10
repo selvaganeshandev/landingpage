@@ -1,4 +1,4 @@
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -8,11 +8,13 @@ from django.db import transaction, connection
 from django.db import IntegrityError
 from django.db.utils import ProgrammingError
 from django.conf import settings
-from .models import Domain, DomainAccess, InternalLinkMap
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from .models import Domain, DomainAccess, InternalLinkMap, ReferenceDocument
 from .serializers import (
     DomainSerializer, DomainDetailSerializer,
     DomainAccessSerializer, DomainAccessCreateSerializer,
-    InternalLinkMapSerializer, InternalLinkMapCreateSerializer
+    InternalLinkMapSerializer, InternalLinkMapCreateSerializer,
+    ReferenceDocumentSerializer
 )
 from authentication.serializers import AccountSerializer
 from authentication.models import Account
@@ -2678,3 +2680,346 @@ def internal_link_map_import_csv(request, domain_id):
         'created_count': created_count,
         'errors': errors if errors else None
     }, status=status.HTTP_201_CREATED if created_count > 0 else status.HTTP_400_BAD_REQUEST)
+
+
+# ===== Reference Repository =====
+
+def _extract_text_from_file(file_obj, file_type):
+    """
+    Extract plain text from uploaded file.
+    Returns extracted text string.
+    """
+    import io
+
+    file_obj.seek(0)
+    file_bytes = file_obj.read()
+    file_obj.seek(0)
+
+    if file_type == 'pdf':
+        try:
+            import pdfplumber
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                pages_text = []
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        pages_text.append(text)
+                return '\n\n'.join(pages_text)
+        except Exception as e:
+            logger.warning(f"PDF extraction failed: {e}")
+            return ''
+
+    elif file_type == 'docx':
+        # Try python-docx first (handles .docx files)
+        try:
+            from docx import Document
+            doc = Document(io.BytesIO(file_bytes))
+            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            text = '\n\n'.join(paragraphs)
+            if text.strip():
+                return text
+        except Exception:
+            pass
+
+        # Fallback: Use LibreOffice for legacy .doc files
+        try:
+            import subprocess
+            import tempfile
+            import os
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                input_path = os.path.join(tmp_dir, 'input.doc')
+                with open(input_path, 'wb') as f:
+                    f.write(file_bytes)
+                # Convert to plain text using LibreOffice
+                subprocess.run(
+                    ['libreoffice', '--headless', '--convert-to', 'txt:Text', '--outdir', tmp_dir, input_path],
+                    capture_output=True, timeout=30
+                )
+                txt_path = os.path.join(tmp_dir, 'input.txt')
+                if os.path.exists(txt_path):
+                    with open(txt_path, 'r', encoding='utf-8', errors='replace') as f:
+                        return f.read()
+            logger.warning("LibreOffice DOC conversion produced no output")
+            return ''
+        except Exception as e:
+            logger.warning(f"DOC/DOCX extraction failed: {e}")
+            return ''
+
+    elif file_type == 'pptx':
+        # Try python-pptx first (handles .pptx files)
+        try:
+            from pptx import Presentation
+            prs = Presentation(io.BytesIO(file_bytes))
+            slides_text = []
+            for slide in prs.slides:
+                slide_parts = []
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        for paragraph in shape.text_frame.paragraphs:
+                            text = paragraph.text.strip()
+                            if text:
+                                slide_parts.append(text)
+                if slide_parts:
+                    slides_text.append('\n'.join(slide_parts))
+            text = '\n\n'.join(slides_text)
+            if text.strip():
+                return text
+        except Exception:
+            pass
+
+        # Fallback: Use LibreOffice for legacy .ppt files
+        try:
+            import subprocess
+            import tempfile
+            import os
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                input_path = os.path.join(tmp_dir, 'input.ppt')
+                with open(input_path, 'wb') as f:
+                    f.write(file_bytes)
+                subprocess.run(
+                    ['libreoffice', '--headless', '--convert-to', 'txt:Text', '--outdir', tmp_dir, input_path],
+                    capture_output=True, timeout=30
+                )
+                txt_path = os.path.join(tmp_dir, 'input.txt')
+                if os.path.exists(txt_path):
+                    with open(txt_path, 'r', encoding='utf-8', errors='replace') as f:
+                        return f.read()
+            logger.warning("LibreOffice PPT conversion produced no output")
+            return ''
+        except Exception as e:
+            logger.warning(f"PPT/PPTX extraction failed: {e}")
+            return ''
+
+    elif file_type == 'csv':
+        try:
+            import csv as csv_module
+            text_stream = io.StringIO(file_bytes.decode('utf-8', errors='replace'))
+            reader = csv_module.reader(text_stream)
+            rows = []
+            for row in reader:
+                rows.append(', '.join(row))
+            return '\n'.join(rows)
+        except Exception as e:
+            logger.warning(f"CSV extraction failed: {e}")
+            return ''
+
+    elif file_type == 'xlsx':
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+            sheets_text = []
+            for ws in wb.worksheets:
+                rows = []
+                for row in ws.iter_rows(values_only=True):
+                    cell_values = [str(cell) if cell is not None else '' for cell in row]
+                    row_text = ', '.join(v for v in cell_values if v)
+                    if row_text:
+                        rows.append(row_text)
+                if rows:
+                    sheets_text.append('\n'.join(rows))
+            wb.close()
+            return '\n\n'.join(sheets_text)
+        except Exception as e:
+            logger.warning(f"XLSX extraction failed: {e}")
+            return ''
+
+    return ''
+
+
+def _get_file_type_from_extension(filename):
+    """Map file extension to file_type choice."""
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    ext_map = {
+        'pdf': 'pdf',
+        'pptx': 'pptx',
+        'ppt': 'pptx',
+        'docx': 'docx',
+        'doc': 'docx',
+        'csv': 'csv',
+        'xlsx': 'xlsx',
+        'xls': 'xlsx',
+    }
+    return ext_map.get(ext)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def reference_document_list(request, domain_id):
+    """
+    GET: List all reference documents for a domain
+    POST: Upload a file or add a text note
+    """
+    try:
+        domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': 'Domain not found or not in your organization'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if request.method == 'GET':
+        docs = ReferenceDocument.objects.filter(domain=domain)
+        serializer = ReferenceDocumentSerializer(docs, many=True, context={'request': request})
+        total_size = sum(d.file_size for d in docs)
+        return Response({
+            'reference_documents': serializer.data,
+            'total_files': docs.count(),
+            'total_size_bytes': total_size,
+            'max_files': ReferenceDocument.MAX_FILES_PER_DOMAIN,
+        })
+
+    # POST - Upload file or add text note
+    current_count = ReferenceDocument.objects.filter(domain=domain).count()
+    if current_count >= ReferenceDocument.MAX_FILES_PER_DOMAIN:
+        return Response(
+            {'error': f'Maximum {ReferenceDocument.MAX_FILES_PER_DOMAIN} reference documents per domain'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Check if this is a text note
+    if request.data.get('file_type') == 'text':
+        text_content = request.data.get('text_content', '').strip()
+        title = request.data.get('title', 'Text Note').strip()
+        description = request.data.get('description', '').strip()
+
+        if not text_content:
+            return Response(
+                {'error': 'text_content is required for text notes'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if len(text_content) > ReferenceDocument.MAX_TEXT_LENGTH:
+            return Response(
+                {'error': f'Text content exceeds maximum length of {ReferenceDocument.MAX_TEXT_LENGTH} characters'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        doc = ReferenceDocument.objects.create(
+            domain=domain,
+            file_name=title,
+            file_type='text',
+            file_size=0,
+            extracted_text=text_content,
+            description=description,
+            uploaded_by=request.user,
+        )
+        serializer = ReferenceDocumentSerializer(doc, context={'request': request})
+        return Response({
+            'message': 'Text note added successfully',
+            'reference_document': serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    # File upload
+    uploaded_file = request.FILES.get('file')
+    if not uploaded_file:
+        return Response(
+            {'error': 'No file provided. Send a file or set file_type=text for text notes'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Determine file type from extension
+    file_type = _get_file_type_from_extension(uploaded_file.name)
+    if not file_type:
+        return Response(
+            {'error': 'Unsupported file type. Allowed: PDF, PPT/PPTX, DOC/DOCX, CSV, XLS/XLSX'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Check file size limit
+    max_size = ReferenceDocument.MAX_FILE_SIZES.get(file_type, 5 * 1024 * 1024)
+    if uploaded_file.size > max_size:
+        max_mb = max_size / (1024 * 1024)
+        return Response(
+            {'error': f'File too large. Maximum size for {file_type.upper()} is {max_mb:.0f} MB'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Extract text from file
+    extracted_text = _extract_text_from_file(uploaded_file, file_type)
+    if not extracted_text:
+        logger.warning(f"No text extracted from {uploaded_file.name} ({file_type})")
+
+    description = request.data.get('description', '').strip()
+
+    doc = ReferenceDocument.objects.create(
+        domain=domain,
+        file=uploaded_file,
+        file_name=uploaded_file.name,
+        file_type=file_type,
+        file_size=uploaded_file.size,
+        extracted_text=extracted_text,
+        description=description,
+        uploaded_by=request.user,
+    )
+
+    serializer = ReferenceDocumentSerializer(doc, context={'request': request})
+    return Response({
+        'message': 'File uploaded successfully',
+        'reference_document': serializer.data
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'DELETE', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def reference_document_detail(request, domain_id, doc_id):
+    """
+    GET: Get single reference document details
+    DELETE: Remove a reference document
+    PATCH: Update text note content or description
+    """
+    try:
+        domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
+        doc = ReferenceDocument.objects.get(id=doc_id, domain=domain)
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': 'Domain not found or not in your organization'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except ReferenceDocument.DoesNotExist:
+        return Response(
+            {'error': 'Reference document not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if request.method == 'GET':
+        serializer = ReferenceDocumentSerializer(doc, context={'request': request})
+        return Response({'reference_document': serializer.data})
+
+    if request.method == 'DELETE':
+        # Delete the physical file if it exists
+        if doc.file:
+            try:
+                doc.file.delete(save=False)
+            except Exception as e:
+                logger.warning(f"Failed to delete file for reference doc {doc.id}: {e}")
+        doc.delete()
+        return Response({'message': 'Reference document deleted successfully'})
+
+    # PATCH - Update text note or description
+    if request.method == 'PATCH':
+        if doc.file_type == 'text':
+            text_content = request.data.get('text_content')
+            if text_content is not None:
+                text_content = text_content.strip()
+                if len(text_content) > ReferenceDocument.MAX_TEXT_LENGTH:
+                    return Response(
+                        {'error': f'Text content exceeds maximum length of {ReferenceDocument.MAX_TEXT_LENGTH} characters'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                doc.extracted_text = text_content
+
+            title = request.data.get('title')
+            if title is not None:
+                doc.file_name = title.strip()
+
+        description = request.data.get('description')
+        if description is not None:
+            doc.description = description.strip()
+
+        doc.save()
+        serializer = ReferenceDocumentSerializer(doc, context={'request': request})
+        return Response({
+            'message': 'Reference document updated successfully',
+            'reference_document': serializer.data
+        })

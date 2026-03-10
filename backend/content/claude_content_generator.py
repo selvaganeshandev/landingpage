@@ -23,6 +23,97 @@ class ClaudeContentGenerator:
         self.client = Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-5-20250929"
 
+    def match_reference_content(self, title, keywords, article_type, reference_docs):
+        """
+        Check if any reference repository documents contain content relevant
+        to the given title and keywords. Returns matched excerpts or empty string.
+
+        Args:
+            title (str): Article title
+            keywords (str): Target keywords (comma-separated)
+            article_type (str): Type of article
+            reference_docs (QuerySet): ReferenceDocument objects with extracted_text
+
+        Returns:
+            str: Relevant excerpts from matched documents, or empty string
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Build document text for the prompt
+        docs_text = ""
+        for doc in reference_docs:
+            if not doc.extracted_text or not doc.extracted_text.strip():
+                continue
+            # Truncate each doc to 15,000 chars to stay within token limits
+            text = doc.extracted_text[:15000]
+            docs_text += f"\n{'=' * 50}\nDOCUMENT: {doc.file_name} (Type: {doc.file_type.upper()})\n{'=' * 50}\n{text}\n"
+
+        if not docs_text.strip():
+            return ''
+
+        system_prompt = """You are a content research assistant. Your task is to analyze brand reference documents and find content that is relevant to a specific article topic.
+
+INSTRUCTIONS:
+1. Read each reference document carefully
+2. For each document, check if it contains information relevant to the given article title and keywords
+3. If relevant content is found, extract ONLY the relevant paragraphs/sections
+4. Preserve exact brand names, product names, statistics, facts, and specific terminology
+5. Keep total extracted content under 2000 words
+6. Tag each excerpt with its source document name
+
+OUTPUT FORMAT:
+If relevant content is found:
+---
+[Source: {document_name}]
+{extracted relevant paragraph or section}
+
+[Source: {document_name}]
+{extracted relevant paragraph or section}
+---
+
+If NO document contains relevant content:
+NO_RELEVANT_CONTENT
+
+IMPORTANT:
+- Only extract content that is DIRECTLY useful for writing the given article
+- Do NOT extract generic/unrelated sections even if they are interesting
+- Do NOT summarize - preserve the original wording for brand accuracy
+- Do NOT add your own commentary"""
+
+        user_prompt = f"""I am about to write an article. Check if any of the brand's reference documents contain content relevant to this topic:
+
+**Article Title:** {title}
+**Target Keywords:** {keywords}
+**Content Type:** {article_type}
+
+Below are the brand's reference documents:
+{docs_text}
+
+Now extract ONLY the relevant portions. If nothing is relevant, return exactly: NO_RELEVANT_CONTENT"""
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=2048,
+                temperature=0.2,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+
+            matched_content = response.content[0].text.strip()
+
+            if 'NO_RELEVANT_CONTENT' in matched_content:
+                logger.info("No relevant reference content found for this topic")
+                return ''
+
+            logger.info(f"Found relevant reference content ({len(matched_content)} chars)")
+            return matched_content
+
+        except Exception as e:
+            logger.warning(f"Reference content matching failed (non-fatal): {str(e)}")
+            return ''
+
     def generate_content(self, params):
         """
         Generate content based on provided parameters
@@ -299,6 +390,33 @@ When using these references:
 - Do NOT simply copy content - create original content informed by these references
 """
 
+        # Add reference repository context if available
+        reference_repository_context = params.get('reference_repository_context', '')
+        if reference_repository_context:
+            user_prompt += f"""
+**Brand Reference Repository (Use as Source Material):**
+The following content was extracted from the brand's internal reference documents
+(brand guides, previous content, presentations, templates, data sheets).
+This is verified brand-specific information.
+
+USE THIS CONTENT TO:
+- Use the exact brand terminology, product names, and service descriptions found here
+- Incorporate specific facts, statistics, and data points from these references
+- Match the brand's communication style demonstrated in these references
+- Include relevant details that only someone with internal brand knowledge would know
+- Ensure consistency with existing brand content
+
+DO NOT:
+- Copy paragraphs verbatim - rephrase and integrate naturally
+- Force irrelevant reference content into the article
+- Contradict any facts stated in these references
+
+Reference Content:
+--- START REFERENCE CONTENT ---
+{reference_repository_context}
+--- END REFERENCE CONTENT ---
+"""
+
         user_prompt += """
 **Structure Guidelines:**
 """
@@ -522,6 +640,25 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks, no extra text."""
 **Additional Instructions:** {additional_instructions}
 """
 
+        # Add reference repository context if available
+        reference_repository_context = params.get('reference_repository_context', '')
+        if reference_repository_context:
+            user_prompt += f"""
+**Brand Reference Repository (Plan Outline Using This):**
+The following content was extracted from the brand's internal reference documents.
+Use it to plan the outline structure:
+
+- Create sections that cover topics/themes mentioned in these references
+- Use the brand's specific terminology and product names in section headings
+- Include key points based on facts and details found in these references
+- Ensure the outline structure can accommodate insights from this material
+
+Reference Content:
+--- START REFERENCE CONTENT ---
+{reference_repository_context}
+--- END REFERENCE CONTENT ---
+"""
+
         user_prompt += f"""
 Return a JSON array with this exact structure:
 [
@@ -670,6 +807,25 @@ Return ONLY the JSON array, nothing else."""
 
         if additional_instructions:
             user_prompt += f"""**Additional Instructions:** {additional_instructions}
+"""
+
+        # Add reference repository context if available
+        reference_repository_context = params.get('reference_repository_context', '')
+        if reference_repository_context:
+            user_prompt += f"""
+**Brand Reference Repository (Use as Source Material):**
+The following content was extracted from the brand's internal reference documents.
+Incorporate relevant details from this material into the appropriate outline sections:
+
+- Use exact brand terminology, product names, and service descriptions
+- Include specific facts, statistics, and data points where they fit each section
+- Match the brand's tone and style demonstrated in these references
+- Do NOT copy verbatim - rephrase and integrate naturally into each section
+
+Reference Content:
+--- START REFERENCE CONTENT ---
+{reference_repository_context}
+--- END REFERENCE CONTENT ---
 """
 
         user_prompt += """

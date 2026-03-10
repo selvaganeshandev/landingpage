@@ -42,6 +42,11 @@ import {
   Trash2,
   Edit2,
   ExternalLink,
+  BookOpen,
+  File,
+  FileSpreadsheet,
+  Presentation,
+  MessageSquare,
 } from "lucide-react";
 import {
   Table,
@@ -155,6 +160,20 @@ export default function DomainSettings() {
   const [csvFileName, setCsvFileName] = useState("");
   const [isImporting, setIsImporting] = useState(false);
 
+  // Reference Repository state
+  const [referenceDocuments, setReferenceDocuments] = useState<any[]>([]);
+  const [isLoadingRefDocs, setIsLoadingRefDocs] = useState(false);
+  const [isUploadingRefDoc, setIsUploadingRefDoc] = useState(false);
+  const [isDeletingRefDoc, setIsDeletingRefDoc] = useState(false);
+  const [refDocTotalFiles, setRefDocTotalFiles] = useState(0);
+  const [refDocTotalSize, setRefDocTotalSize] = useState(0);
+  const [refDocMaxFiles, setRefDocMaxFiles] = useState(20);
+  const [showAddTextNoteDialog, setShowAddTextNoteDialog] = useState(false);
+  const [textNoteTitle, setTextNoteTitle] = useState("");
+  const [textNoteContent, setTextNoteContent] = useState("");
+  const [textNoteDescription, setTextNoteDescription] = useState("");
+  const [isSavingTextNote, setIsSavingTextNote] = useState(false);
+
   const MAX_KEYWORD_LENGTH = 255;
 
   const initialTab = searchParams.get("tab") || "basic-info";
@@ -179,6 +198,13 @@ export default function DomainSettings() {
   useEffect(() => {
     if (activeTab === 'internal-links' && domainId && internalLinks.length === 0) {
       fetchInternalLinks();
+    }
+  }, [activeTab, domainId]);
+
+  // Fetch reference documents when reference-repository tab is active
+  useEffect(() => {
+    if (activeTab === 'reference-repository' && domainId && referenceDocuments.length === 0) {
+      fetchReferenceDocuments();
     }
   }, [activeTab, domainId]);
 
@@ -518,6 +544,154 @@ export default function DomainSettings() {
     }
 
     event.target.value = '';
+  };
+
+  // ===== Reference Repository Functions =====
+  const fetchReferenceDocuments = async () => {
+    if (!domainId) return;
+    setIsLoadingRefDocs(true);
+    try {
+      const response: any = await apiClient.getReferenceDocuments(parseInt(domainId));
+      setReferenceDocuments(response.reference_documents || []);
+      setRefDocTotalFiles(response.total_files || 0);
+      setRefDocTotalSize(response.total_size_bytes || 0);
+      setRefDocMaxFiles(response.max_files || 20);
+    } catch (error: any) {
+      console.error('Error fetching reference documents:', error);
+    } finally {
+      setIsLoadingRefDocs(false);
+    }
+  };
+
+  const handleReferenceFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !domain) return;
+
+    const allowedExtensions = ['.pdf', '.ppt', '.pptx', '.doc', '.docx', '.csv', '.xls', '.xlsx'];
+    const fileExt = '.' + file.name.split('.').pop()?.toLowerCase();
+    if (!allowedExtensions.includes(fileExt)) {
+      toast({
+        title: "Unsupported File Type",
+        description: "Allowed formats: PDF, PPT/PPTX, DOC/DOCX, CSV, XLS/XLSX",
+        variant: "destructive",
+      });
+      event.target.value = '';
+      return;
+    }
+
+    // Check file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      toast({
+        title: "File Too Large",
+        description: "Maximum file size is 10 MB.",
+        variant: "destructive",
+      });
+      event.target.value = '';
+      return;
+    }
+
+    setIsUploadingRefDoc(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response: any = await apiClient.uploadReferenceDocument(domain.id, formData);
+      toast({
+        title: "File Uploaded",
+        description: response.message || "Reference document uploaded successfully.",
+      });
+      fetchReferenceDocuments();
+    } catch (error: any) {
+      toast({
+        title: "Upload Error",
+        description: error.message || "Failed to upload file.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingRefDoc(false);
+      event.target.value = '';
+    }
+  };
+
+  const handleAddTextNote = async () => {
+    if (!domain || !textNoteContent.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter text content.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSavingTextNote(true);
+    try {
+      const response: any = await apiClient.addReferenceTextNote(domain.id, {
+        file_type: 'text',
+        title: textNoteTitle.trim() || 'Text Note',
+        text_content: textNoteContent.trim(),
+        description: textNoteDescription.trim(),
+      });
+
+      toast({
+        title: "Text Note Added",
+        description: response.message || "Text note added successfully.",
+      });
+
+      setTextNoteTitle("");
+      setTextNoteContent("");
+      setTextNoteDescription("");
+      setShowAddTextNoteDialog(false);
+      fetchReferenceDocuments();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add text note.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingTextNote(false);
+    }
+  };
+
+  const handleDeleteReferenceDoc = async (docId: number) => {
+    if (!domain) return;
+    setIsDeletingRefDoc(true);
+    try {
+      await apiClient.deleteReferenceDocument(domain.id, docId);
+      toast({
+        title: "Document Deleted",
+        description: "Reference document removed successfully.",
+      });
+      fetchReferenceDocuments();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete document.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingRefDoc(false);
+    }
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  const getFileTypeIcon = (fileType: string) => {
+    switch (fileType) {
+      case 'pdf': return <File className="h-4 w-4 text-red-500" />;
+      case 'docx': return <FileText className="h-4 w-4 text-blue-500" />;
+      case 'pptx': return <Presentation className="h-4 w-4 text-orange-500" />;
+      case 'csv': return <FileSpreadsheet className="h-4 w-4 text-green-500" />;
+      case 'xlsx': return <FileSpreadsheet className="h-4 w-4 text-green-600" />;
+      case 'text': return <MessageSquare className="h-4 w-4 text-purple-500" />;
+      default: return <File className="h-4 w-4 text-gray-500" />;
+    }
   };
 
   // Load domain data
@@ -1428,6 +1602,10 @@ export default function DomainSettings() {
             <Activity className="h-4 w-4" />
             Health
           </TabsTrigger>
+          <TabsTrigger value="reference-repository" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+            <BookOpen className="h-4 w-4" />
+            Reference Repository
+          </TabsTrigger>
         </TabsList>
 
         {/* Basic Info Tab */}
@@ -1835,34 +2013,34 @@ export default function DomainSettings() {
         {/* Health Tab */}
         <TabsContent value="health" className="space-y-4 mt-6">
           <Card className="border border-border">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
+            <CardHeader>
+              <div className="flex items-center justify-between">
                 <CardTitle>Website Health Check</CardTitle>
-                <CardDescription>
-                  Technical assessment of your website's AI-friendliness and SEO optimization
-                </CardDescription>
+                {/* Hide button when domain is processing */}
+                {domain?.processing_status !== 'PROC' && domain?.processing_status !== 'SCHD' && (
+                  <Button
+                    onClick={fetchHealthCheck}
+                    disabled={isLoadingHealth}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {isLoadingHealth ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Checking...
+                      </>
+                    ) : (
+                      <>
+                        <Activity className="h-4 w-4 mr-2" />
+                        Run Health Check
+                      </>
+                    )}
+                  </Button>
+                )}
               </div>
-              {/* Hide button when domain is processing */}
-              {domain?.processing_status !== 'PROC' && domain?.processing_status !== 'SCHD' && (
-                <Button
-                  onClick={fetchHealthCheck}
-                  disabled={isLoadingHealth}
-                  size="sm"
-                  variant="outline"
-                >
-                  {isLoadingHealth ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Checking...
-                    </>
-                  ) : (
-                    <>
-                      <Activity className="h-4 w-4 mr-2" />
-                      Run Health Check
-                    </>
-                  )}
-                </Button>
-              )}
+              <CardDescription>
+                Technical assessment of your website's AI-friendliness and SEO optimization
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               {domain?.processing_status === 'PROC' || domain?.processing_status === 'SCHD' ? (
@@ -2260,35 +2438,35 @@ export default function DomainSettings() {
         {/* Internal Links Tab */}
         <TabsContent value="internal-links" className="space-y-4 mt-6">
           <Card className="border border-border">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
+            <CardHeader>
+              <div className="flex items-center justify-between">
                 <CardTitle>Internal Link Map</CardTitle>
-                <CardDescription>
-                  Manage internal links that can be automatically inserted into content during generation
-                </CardDescription>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowImportDialog(true)}
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import CSV
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setNewLinkTopic("");
+                      setNewLinkKeywords("");
+                      setNewLinkUrl("");
+                      setShowAddLinkDialog(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Link
+                  </Button>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowImportDialog(true)}
-                >
-                  <Upload className="h-4 w-4 mr-2" />
-                  Import CSV
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setNewLinkTopic("");
-                    setNewLinkKeywords("");
-                    setNewLinkUrl("");
-                    setShowAddLinkDialog(true);
-                  }}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Link
-                </Button>
-              </div>
+              <CardDescription>
+                Manage internal links that can be automatically inserted into content during generation
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {isLoadingInternalLinks ? (
@@ -2382,7 +2560,210 @@ export default function DomainSettings() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Reference Repository Tab */}
+        <TabsContent value="reference-repository" className="space-y-4 mt-6">
+          <Card className="border border-border">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Reference Repository</CardTitle>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs whitespace-nowrap">
+                    {refDocTotalFiles}/{refDocMaxFiles} files
+                  </Badge>
+                  <Badge variant="outline" className="text-xs whitespace-nowrap">
+                    {formatFileSize(refDocTotalSize)} used
+                  </Badge>
+                </div>
+              </div>
+              <CardDescription>
+                Upload brand documents (PDF, PPT, Word, CSV, Excel) and text notes to enhance AI content generation with brand-specific context.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Upload Section */}
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="relative flex-1">
+                  <input
+                    type="file"
+                    accept=".pdf,.ppt,.pptx,.doc,.docx,.csv,.xls,.xlsx"
+                    onChange={handleReferenceFileUpload}
+                    className="hidden"
+                    id="ref-file-upload"
+                    disabled={isUploadingRefDoc || refDocTotalFiles >= refDocMaxFiles}
+                  />
+                  <label
+                    htmlFor="ref-file-upload"
+                    className={`flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors ${
+                      isUploadingRefDoc || refDocTotalFiles >= refDocMaxFiles ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    {isUploadingRefDoc ? (
+                      <>
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        <span className="text-sm">Uploading & extracting text...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-5 w-5 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">
+                          Upload File (PDF, PPT, Word, CSV, Excel — max 10 MB)
+                        </span>
+                      </>
+                    )}
+                  </label>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowAddTextNoteDialog(true)}
+                  disabled={refDocTotalFiles >= refDocMaxFiles}
+                  className="gap-2"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  Add Text Note
+                </Button>
+              </div>
+
+              {/* Info Banner */}
+              <div className="bg-muted/30 border border-border rounded-lg p-3 text-sm text-muted-foreground">
+                <div className="flex items-start gap-2">
+                  <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>
+                    Uploaded documents are automatically analyzed during content generation. When your article topic matches content in these references, the AI will use brand-specific terminology, facts, and context to produce more accurate content.
+                  </span>
+                </div>
+              </div>
+
+              {/* Documents List */}
+              {isLoadingRefDocs ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                  <span>Loading reference documents...</span>
+                </div>
+              ) : referenceDocuments.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <BookOpen className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                  <p className="text-lg font-medium">No reference documents yet</p>
+                  <p className="text-sm mt-1">Upload brand guides, previous content, or templates to enhance AI-generated content.</p>
+                </div>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">Type</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead className="hidden md:table-cell">Description</TableHead>
+                        <TableHead className="w-24 text-right">Size</TableHead>
+                        <TableHead className="w-36 hidden sm:table-cell">Uploaded</TableHead>
+                        <TableHead className="w-16 text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {referenceDocuments.map((doc: any) => (
+                        <TableRow key={doc.id}>
+                          <TableCell>
+                            <div className="flex items-center justify-center">
+                              {getFileTypeIcon(doc.file_type)}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium text-sm">{doc.file_name}</div>
+                            <div className="text-xs text-muted-foreground uppercase">{doc.file_type}</div>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            <span className="text-sm text-muted-foreground line-clamp-1">
+                              {doc.description || (doc.file_type === 'text' ? doc.extracted_text?.substring(0, 80) + '...' : '—')}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right text-sm">
+                            {doc.file_size > 0 ? formatFileSize(doc.file_size) : '—'}
+                          </TableCell>
+                          <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
+                            {new Date(doc.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeleteReferenceDoc(doc.id)}
+                              disabled={isDeletingRefDoc}
+                              className="h-8 w-8"
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
+
+      {/* Add Text Note Dialog */}
+      <Dialog open={showAddTextNoteDialog} onOpenChange={setShowAddTextNoteDialog}>
+        <DialogContent className="sm:max-w-[550px]">
+          <DialogHeader>
+            <DialogTitle>Add Text Note</DialogTitle>
+            <DialogDescription>
+              Add prompts, templates, or brand notes that will be used as context during content generation.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="text-note-title">Title</Label>
+              <Input
+                id="text-note-title"
+                value={textNoteTitle}
+                onChange={(e) => setTextNoteTitle(e.target.value)}
+                placeholder="e.g., Brand Voice Guidelines, ChatGPT Prompt Template..."
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="text-note-content">Content *</Label>
+              <Textarea
+                id="text-note-content"
+                value={textNoteContent}
+                onChange={(e) => setTextNoteContent(e.target.value)}
+                placeholder="Paste your prompts, templates, brand notes, or any text content here..."
+                className="min-h-[200px]"
+              />
+              <p className="text-xs text-muted-foreground">{textNoteContent.length}/50,000 characters</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="text-note-desc">Description (optional)</Label>
+              <Input
+                id="text-note-desc"
+                value={textNoteDescription}
+                onChange={(e) => setTextNoteDescription(e.target.value)}
+                placeholder="Brief description of what this note contains..."
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddTextNoteDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddTextNote} disabled={isSavingTextNote || !textNoteContent.trim()}>
+              {isSavingTextNote ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Note
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Internal Link Dialog */}
       <Dialog open={showAddLinkDialog} onOpenChange={setShowAddLinkDialog}>
