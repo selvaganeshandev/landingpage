@@ -306,3 +306,94 @@ class InternalLinkMap(models.Model):
 
     def __str__(self):
         return f"{self.domain.name} - {self.topic}"
+
+
+class ReferenceDocument(models.Model):
+    """
+    Stores reference documents (PDF, PPT, Word, CSV, Excel) and text notes
+    for a domain's Reference Repository. Extracted text is used during
+    content generation to provide brand-specific context.
+    """
+    FILE_TYPE_CHOICES = [
+        ('pdf', 'PDF'),
+        ('pptx', 'PowerPoint'),
+        ('docx', 'Word Document'),
+        ('csv', 'CSV'),
+        ('xlsx', 'Excel'),
+        ('text', 'Text Note'),
+    ]
+
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='reference_documents',
+        help_text="Domain this reference document belongs to"
+    )
+    file = models.FileField(
+        upload_to='reference_docs/%Y/%m/',
+        blank=True,
+        null=True,
+        help_text="Uploaded file (null for text notes)"
+    )
+    file_name = models.CharField(
+        max_length=255,
+        help_text="Original file name or title for text notes"
+    )
+    file_type = models.CharField(
+        max_length=10,
+        choices=FILE_TYPE_CHOICES,
+        help_text="Type of reference document"
+    )
+    file_size = models.PositiveIntegerField(
+        default=0,
+        help_text="File size in bytes (0 for text notes)"
+    )
+    extracted_text = models.TextField(
+        blank=True,
+        default='',
+        help_text="Text content extracted from the uploaded file or user-entered text"
+    )
+    description = models.TextField(
+        blank=True,
+        default='',
+        help_text="User-provided description or context about this document"
+    )
+    uploaded_by = models.ForeignKey(
+        'authentication.Account',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='uploaded_reference_docs',
+        help_text="User who uploaded this document"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Timestamp when the document was uploaded"
+    )
+    modified_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Timestamp when the document was last modified"
+    )
+
+    # File size limits in bytes
+    MAX_FILE_SIZES = {
+        'pdf': 10 * 1024 * 1024,    # 10 MB
+        'pptx': 10 * 1024 * 1024,   # 10 MB
+        'docx': 5 * 1024 * 1024,    # 5 MB
+        'csv': 5 * 1024 * 1024,     # 5 MB
+        'xlsx': 5 * 1024 * 1024,    # 5 MB
+    }
+    MAX_TEXT_LENGTH = 50000  # 50,000 characters for text notes
+    MAX_FILES_PER_DOMAIN = 20
+
+    class Meta:
+        db_table = 'reference_documents'
+        verbose_name = 'Reference Document'
+        verbose_name_plural = 'Reference Documents'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['domain', '-created_at']),
+            models.Index(fields=['domain', 'file_type']),
+        ]
+
+    def __str__(self):
+        return f"{self.domain.name} - {self.file_name} ({self.file_type})"

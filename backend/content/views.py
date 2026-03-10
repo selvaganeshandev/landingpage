@@ -24,7 +24,7 @@ from .serializers import (
     BulkUploadBatchSerializer, BulkUploadBatchListSerializer, BulkUploadItemSerializer
 )
 from .claude_content_generator import ClaudeContentGenerator
-from domains.models import Domain
+from domains.models import Domain, ReferenceDocument
 from django.db import transaction, connection
 from django.db.models import Count, Q
 from django.utils import timezone as django_timezone
@@ -86,6 +86,27 @@ def generate_content(request):
         # Import and initialize Claude content generator
         generator = ClaudeContentGenerator()
 
+        # Check reference repository for relevant content
+        reference_repository_context = ''
+        reference_docs = ReferenceDocument.objects.filter(domain=domain)
+        logger.info(f"[REF-REPO] Domain {domain.id}: Found {reference_docs.count()} reference document(s)")
+        if reference_docs.exists():
+            for doc in reference_docs:
+                logger.info(f"[REF-REPO] Doc: {doc.file_name} | Type: {doc.file_type} | Text length: {len(doc.extracted_text or '')} chars")
+            try:
+                reference_repository_context = generator.match_reference_content(
+                    title=validated_data['title'],
+                    keywords=validated_data['keywords'],
+                    article_type=validated_data.get('article_type', 'blog'),
+                    reference_docs=reference_docs
+                )
+                if reference_repository_context:
+                    logger.info(f"[REF-REPO] MATCH FOUND - Relevant content ({len(reference_repository_context)} chars) will be injected into generation prompt")
+                else:
+                    logger.info(f"[REF-REPO] NO MATCH - No relevant content found for title: {validated_data['title']}")
+            except Exception as e:
+                logger.warning(f"[REF-REPO] Reference matching failed (non-fatal): {str(e)}")
+
         # Prepare generation parameters
         generation_params = {
             'title': validated_data['title'],
@@ -106,6 +127,7 @@ def generate_content(request):
             'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
             'additional_instructions': validated_data.get('additional_instructions', ''),
             'brand_values': validated_data.get('brand_values', ''),
+            'reference_repository_context': reference_repository_context,
         }
 
         # Generate content using Claude
@@ -205,6 +227,22 @@ def generate_outline(request):
         # Initialize Claude content generator
         generator = ClaudeContentGenerator()
 
+        # Check reference repository for relevant content
+        reference_repository_context = ''
+        reference_docs = ReferenceDocument.objects.filter(domain=domain)
+        if reference_docs.exists():
+            try:
+                reference_repository_context = generator.match_reference_content(
+                    title=validated_data['title'],
+                    keywords=validated_data['keywords'],
+                    article_type=validated_data.get('article_type', 'blog'),
+                    reference_docs=reference_docs
+                )
+                if reference_repository_context:
+                    logger.info(f"Found relevant reference content for outline generation, domain {domain.id}")
+            except Exception as e:
+                logger.warning(f"Reference matching failed (non-fatal): {str(e)}")
+
         # Prepare generation parameters
         generation_params = {
             'title': validated_data['title'],
@@ -219,6 +257,7 @@ def generate_outline(request):
             'key_messages': validated_data.get('key_messages', ''),
             'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
             'additional_instructions': validated_data.get('additional_instructions', ''),
+            'reference_repository_context': reference_repository_context,
         }
 
         # Generate outline
@@ -287,6 +326,22 @@ def generate_content_from_outline(request):
         # Initialize Claude content generator
         generator = ClaudeContentGenerator()
 
+        # Check reference repository for relevant content
+        reference_repository_context = ''
+        reference_docs = ReferenceDocument.objects.filter(domain=domain)
+        if reference_docs.exists():
+            try:
+                reference_repository_context = generator.match_reference_content(
+                    title=validated_data['title'],
+                    keywords=validated_data['keywords'],
+                    article_type=validated_data.get('article_type', 'blog'),
+                    reference_docs=reference_docs
+                )
+                if reference_repository_context:
+                    logger.info(f"Found relevant reference content for outline-to-content, domain {domain.id}")
+            except Exception as e:
+                logger.warning(f"Reference matching failed (non-fatal): {str(e)}")
+
         # Prepare generation parameters
         generation_params = {
             'title': validated_data['title'],
@@ -302,6 +357,7 @@ def generate_content_from_outline(request):
             'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
             'additional_instructions': validated_data.get('additional_instructions', ''),
             'brand_values': validated_data.get('brand_values', ''),
+            'reference_repository_context': reference_repository_context,
         }
 
         # Generate content from outline

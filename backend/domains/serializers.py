@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Domain, DomainAccess, InternalLinkMap
+from .models import Domain, DomainAccess, InternalLinkMap, ReferenceDocument
 
 
 class DomainSerializer(serializers.ModelSerializer):
@@ -117,3 +117,33 @@ class InternalLinkMapCreateSerializer(serializers.ModelSerializer):
         if not value.startswith(('http://', 'https://')):
             raise serializers.ValidationError("URL must start with http:// or https://")
         return value
+
+
+class ReferenceDocumentSerializer(serializers.ModelSerializer):
+    """Serializer for ReferenceDocument model"""
+    uploaded_by_email = serializers.CharField(source='uploaded_by.email', read_only=True, default='')
+    uploaded_by_name = serializers.SerializerMethodField()
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReferenceDocument
+        fields = [
+            'id', 'domain', 'file_name', 'file_type', 'file_size',
+            'description', 'extracted_text',
+            'uploaded_by', 'uploaded_by_email', 'uploaded_by_name',
+            'file_url', 'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at', 'uploaded_by']
+
+    def get_uploaded_by_name(self, obj):
+        if obj.uploaded_by:
+            return f"{obj.uploaded_by.first_name} {obj.uploaded_by.last_name}".strip() or obj.uploaded_by.email
+        return ''
+
+    def get_file_url(self, obj):
+        if obj.file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.file.url)
+            return obj.file.url
+        return None

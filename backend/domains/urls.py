@@ -21,4 +21,8 @@ urlpatterns = [
     path('<int:domain_id>/internal-links/', views.internal_link_map_list, name='internal_link_map_list'),
     path('<int:domain_id>/internal-links/<int:link_id>/', views.internal_link_map_detail, name='internal_link_map_detail'),
     path('<int:domain_id>/internal-links/import/', views.internal_link_map_import_csv, name='internal_link_map_import_csv'),
+
+    # Reference Repository Management
+    path('<int:domain_id>/reference-repository/', views.reference_document_list, name='reference_document_list'),
+    path('<int:domain_id>/reference-repository/<int:doc_id>/', views.reference_document_detail, name='reference_document_detail'),
 ]

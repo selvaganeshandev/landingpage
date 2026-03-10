@@ -90,7 +90,8 @@ async function apiRequest<T>(
   const { skipAuth, useEngine, timeout, ...fetchOptions } = options;
 
   const headers: HeadersInit = {
-    'Content-Type': 'application/json',
+    // Don't set Content-Type for FormData - let browser set it with boundary
+    ...(fetchOptions.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     ...fetchOptions.headers,
   };
 
@@ -512,6 +513,33 @@ export const apiClient = {
     apiRequest(`/domains/${domainId}/internal-links/import/`, {
       method: 'POST',
       body: JSON.stringify({ csv_data: csvData }),
+    }),
+
+  // ===== Reference Repository =====
+  getReferenceDocuments: (domainId: number) =>
+    apiRequest(`/domains/${domainId}/reference-repository/`),
+
+  uploadReferenceDocument: (domainId: number, formData: FormData) =>
+    apiRequest(`/domains/${domainId}/reference-repository/`, {
+      method: 'POST',
+      body: formData,
+    }),
+
+  addReferenceTextNote: (domainId: number, data: { title: string; text_content: string; description?: string; file_type: string }) =>
+    apiRequest(`/domains/${domainId}/reference-repository/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  deleteReferenceDocument: (domainId: number, docId: number) =>
+    apiRequest(`/domains/${domainId}/reference-repository/${docId}/`, {
+      method: 'DELETE',
+    }),
+
+  updateReferenceDocument: (domainId: number, docId: number, data: any) =>
+    apiRequest(`/domains/${domainId}/reference-repository/${docId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
     }),
 
   // ===== Keywords =====
