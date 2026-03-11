@@ -579,11 +579,11 @@ export default function DomainSettings() {
       return;
     }
 
-    // Check file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
+    // Check file size (max 25MB)
+    if (file.size > 25 * 1024 * 1024) {
       toast({
         title: "File Too Large",
-        description: "Maximum file size is 10 MB.",
+        description: "Maximum file size is 25 MB.",
         variant: "destructive",
       });
       event.target.value = '';
@@ -2607,7 +2607,7 @@ export default function DomainSettings() {
                       <>
                         <Upload className="h-5 w-5 text-muted-foreground" />
                         <span className="text-sm text-muted-foreground">
-                          Upload File (PDF, PPT, Word, CSV, Excel — max 10 MB)
+                          Upload File (PDF, PPT, Word, CSV, Excel — max 25 MB)
                         </span>
                       </>
                     )}

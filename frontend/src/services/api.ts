@@ -355,6 +355,10 @@ export const apiClient = {
     body: JSON.stringify(data),
   }),
 
+  deleteInvitation: (invitationId: string) => apiRequest(`/auth/invitation/${invitationId}/delete/`, {
+    method: 'DELETE',
+  }),
+
   getInvitationDetails: (invitationId: string) => 
     apiRequest(`/auth/invitation/${invitationId}/`, { skipAuth: true }),
 

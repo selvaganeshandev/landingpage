@@ -5,9 +5,9 @@ from rest_framework_simplejwt.views import (
 )
 from .auth_views import (
     login, profile, profile_update, update_active_domain, logout,
-    send_invitation, get_invitation_details, accept_invitation, 
+    send_invitation, get_invitation_details, accept_invitation, delete_invitation,
     assign_permissions, check_permissions,
-    list_permissions, list_user_permissions, update_permission, 
+    list_permissions, list_user_permissions, update_permission,
     delete_permission, get_available_modules, bulk_assign_permissions,
     revoke_all_permissions, grant_all_permissions, get_permission_summary,
     organization_management, team_members, team_member_management,
@@ -31,6 +31,7 @@ urlpatterns = [
     path('invite/', send_invitation, name='send_invitation'),
     path('invitation/<uuid:invitation_id>/', get_invitation_details, name='get_invitation_details'),
     path('accept-invitation/<uuid:invitation_id>/', accept_invitation, name='accept_invitation'),
+    path('invitation/<uuid:invitation_id>/delete/', delete_invitation, name='delete_invitation'),
     
     # Permission Management APIs
     path('permissions/assign/', assign_permissions, name='assign_permissions'),

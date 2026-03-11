@@ -45,8 +45,8 @@ class ClaudeContentGenerator:
         for doc in reference_docs:
             if not doc.extracted_text or not doc.extracted_text.strip():
                 continue
-            # Truncate each doc to 15,000 chars to stay within token limits
-            text = doc.extracted_text[:15000]
+            # Truncate each doc to 30,000 chars to stay within token limits
+            text = doc.extracted_text[:30000]
             docs_text += f"\n{'=' * 50}\nDOCUMENT: {doc.file_name} (Type: {doc.file_type.upper()})\n{'=' * 50}\n{text}\n"
 
         if not docs_text.strip():
