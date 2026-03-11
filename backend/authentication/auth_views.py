@@ -558,6 +558,19 @@ def organization_management(request):
     })
 
 
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_invitation(request, invitation_id):
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response({'error': 'Only organisation administrators can delete invitations'}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        invitation = TeamInvitation.objects.get(id=invitation_id, organisation=request.user.organisation)
+    except TeamInvitation.DoesNotExist:
+        return Response({'error': 'Invitation not found or not in your organization'}, status=status.HTTP_404_NOT_FOUND)
+    invitation.delete()
+    return Response({'message': 'Invitation deleted successfully'})
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def team_members(request):

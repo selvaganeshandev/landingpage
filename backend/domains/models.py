@@ -376,11 +376,11 @@ class ReferenceDocument(models.Model):
 
     # File size limits in bytes
     MAX_FILE_SIZES = {
-        'pdf': 10 * 1024 * 1024,    # 10 MB
-        'pptx': 10 * 1024 * 1024,   # 10 MB
-        'docx': 5 * 1024 * 1024,    # 5 MB
-        'csv': 5 * 1024 * 1024,     # 5 MB
-        'xlsx': 5 * 1024 * 1024,    # 5 MB
+        'pdf': 25 * 1024 * 1024,    # 25 MB
+        'pptx': 25 * 1024 * 1024,   # 25 MB
+        'docx': 25 * 1024 * 1024,   # 25 MB
+        'csv': 25 * 1024 * 1024,    # 25 MB
+        'xlsx': 25 * 1024 * 1024,   # 25 MB
     }
     MAX_TEXT_LENGTH = 50000  # 50,000 characters for text notes
     MAX_FILES_PER_DOMAIN = 20

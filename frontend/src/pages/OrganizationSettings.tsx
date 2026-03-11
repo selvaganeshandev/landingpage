@@ -176,6 +176,7 @@ export default function OrganizationSettings() {
   // Confirm dialogs
   const [confirmDomainId, setConfirmDomainId] = useState<number | null>(null);
   const [confirmMemberId, setConfirmMemberId] = useState<number | null>(null);
+  const [confirmInvitationId, setConfirmInvitationId] = useState<string | null>(null);
 
   // Dialog states
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
@@ -1375,6 +1376,23 @@ export default function OrganizationSettings() {
     }
   };
 
+  const handleDeleteInvitation = async (invitationId: string) => {
+    try {
+      await apiClient.deleteInvitation(invitationId);
+      await loadTeamMembers();
+      toast({
+        title: "Invitation deleted",
+        description: "The invitation has been deleted successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error deleting invitation",
+        description: error.message || "Failed to delete invitation. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleUpdateRole = async (id: number, newRole: "admin" | "user") => {
     try {
       setIsUpdatingMember(id);
@@ -1693,6 +1711,16 @@ export default function OrganizationSettings() {
                         )}
                       </div>
                     </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setConfirmInvitationId(inv.id)}
+                      title="Delete Invitation"
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -2507,6 +2535,32 @@ export default function OrganizationSettings() {
               }}
             >
               Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm Delete Invitation */}
+      <Dialog open={confirmInvitationId !== null} onOpenChange={(open) => !open && setConfirmInvitationId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Invitation</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this invitation? You will be able to send a new invitation to this email afterwards.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmInvitationId(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (confirmInvitationId !== null) {
+                  await handleDeleteInvitation(confirmInvitationId);
+                  setConfirmInvitationId(null);
+                }
+              }}
+            >
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>
