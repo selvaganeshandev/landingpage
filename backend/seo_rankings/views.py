@@ -3,7 +3,7 @@ SEO Rankings — API views.
 All endpoints are org-scoped via request.user.organisation → Domain access.
 """
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -16,6 +16,7 @@ from domains.models import Domain
 from .models import (
     SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory, SeoDomainDailyMetrics,
     SeoCompetitorAnalysis, SeoCompetitorProject, SeoCompetitorKeyword,
+    SeoReportSheet,
 )
 from .serializers import (
     SeoKeywordRankSerializer,
@@ -1404,3 +1405,644 @@ def seo_competitor_keywords(request, pk):
         'competitor_domain': project.competitor_domain,
         'keywords': data,
     })
+
+
+# ---------------------------------------------------------------------------
+# SEO Report Sheets CRUD
+# ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_report_sheet_list(request):
+    """List all report sheets for a domain."""
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    sheets = SeoReportSheet.objects.filter(
+        domain_id=domain_id, is_active=True
+    ).order_by('-created_at')
+
+    data = []
+    for s in sheets:
+        data.append({
+            'id': s.id,
+            'sheet_name': s.sheet_name,
+            'category': s.category,
+            'sheet_type': s.sheet_type,
+            'metrics': s.metrics,
+            'change_units': s.change_units,
+            'schedule': s.schedule,
+            'duration': s.duration,
+            'order_by': s.order_by,
+            'created_at': s.created_at.isoformat(),
+        })
+
+    return Response({'sheets': data, 'count': len(data)})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_report_sheet_add(request):
+    """Add a new report sheet."""
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    sheet_name = request.data.get('sheet_name', '').strip()
+    category = request.data.get('category', 'gsc')
+    sheet_type = request.data.get('sheet_type', '')
+    metrics = request.data.get('metrics', [])
+    change_units = request.data.get('change_units', [])
+    schedule = request.data.get('schedule', 'weekly')
+    duration = request.data.get('duration', 2)
+    order_by = request.data.get('order_by', 'Ascending')
+
+    if not sheet_name:
+        return Response({'error': 'sheet_name is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not sheet_type:
+        return Response({'error': 'sheet_type is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validate GSC/GA connection before allowing sheet creation
+    from integrations.models import Integration
+
+    gsc_types = ('gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries', 'gsc_overview')
+    ga_types = ('ga_landing_pages', 'ga_other_sources', 'ga_overview')
+
+    if sheet_type in gsc_types:
+        gsc_integration = Integration.objects.filter(
+            domain_id=domain_id, type='search_console', status='active'
+        ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+        if not gsc_integration:
+            return Response(
+                {'error': 'Connect Google Search Console to add GSC sheet.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        # Verify actual API access before creating the sheet
+        gsc_check = _verify_gsc_access(gsc_integration)
+        if gsc_check:
+            return Response({'error': gsc_check}, status=status.HTTP_400_BAD_REQUEST)
+
+    if sheet_type in ga_types:
+        ga_integration = Integration.objects.filter(
+            domain_id=domain_id, type='google_analytics', status='active'
+        ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+        if not ga_integration:
+            return Response(
+                {'error': 'Connect Google Analytics to add GA sheet.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        # Verify actual API access before creating the sheet
+        ga_check = _verify_ga_access(ga_integration)
+        if ga_check:
+            return Response({'error': ga_check}, status=status.HTTP_400_BAD_REQUEST)
+
+    sheet = SeoReportSheet.objects.create(
+        domain_id=domain_id,
+        created_by=request.user,
+        sheet_name=sheet_name,
+        category=category,
+        sheet_type=sheet_type,
+        metrics=metrics,
+        change_units=change_units,
+        schedule=schedule,
+        duration=duration,
+        order_by=order_by,
+    )
+
+    return Response({
+        'id': sheet.id,
+        'message': f'Report sheet "{sheet_name}" added successfully.',
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def seo_report_sheet_delete(request, pk):
+    """Soft-delete a report sheet."""
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    try:
+        sheet = SeoReportSheet.objects.get(id=pk, is_active=True)
+    except SeoReportSheet.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if sheet.domain_id not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    sheet.is_active = False
+    sheet.save(update_fields=['is_active', 'modified_at'])
+
+    return Response({'message': 'Report sheet deleted successfully.'})
+
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def seo_report_sheet_update(request, pk):
+    """Update a report sheet."""
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    try:
+        sheet = SeoReportSheet.objects.get(id=pk, is_active=True)
+    except SeoReportSheet.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if sheet.domain_id not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    update_fields = ['modified_at']
+    for field in ['sheet_name', 'category', 'sheet_type', 'metrics', 'change_units', 'schedule', 'duration', 'order_by']:
+        if field in request.data:
+            setattr(sheet, field, request.data[field])
+            update_fields.append(field)
+
+    sheet.save(update_fields=update_fields)
+
+    return Response({
+        'id': sheet.id,
+        'message': 'Report sheet updated successfully.',
+    })
+
+
+# ---------------------------------------------------------------------------
+# Report Sheet Data — Fetch live GSC/GA data for configured sheets
+# ---------------------------------------------------------------------------
+
+
+def _verify_gsc_access(integration):
+    """
+    Test GSC API access for the integration. Returns error string if failed, None if OK.
+    """
+    try:
+        from integrations.google_oauth import get_credentials_from_integration
+        from googleapiclient.discovery import build
+
+        credentials = get_credentials_from_integration(integration)
+        if not credentials:
+            return 'Google Search Console credentials are invalid or expired. Please reconnect GSC.'
+
+        service = build('searchconsole', 'v1', credentials=credentials)
+        site_url = integration.provider_id
+
+        # Make a minimal test query to verify access
+        service.searchanalytics().query(
+            siteUrl=site_url,
+            body={
+                'startDate': (date.today() - timedelta(days=7)).isoformat(),
+                'endDate': (date.today() - timedelta(days=3)).isoformat(),
+                'dimensions': ['page'],
+                'rowLimit': 1,
+            }
+        ).execute()
+        return None  # Access OK
+    except Exception as e:
+        err = str(e)
+        if 'permission' in err.lower() or '403' in err:
+            return 'Insufficient permissions for this GSC property. Please verify that the connected Google account has access to this site in Google Search Console.'
+        if 'not found' in err.lower() or '404' in err:
+            return 'The GSC site property was not found. Please reconnect Google Search Console.'
+        if 'invalid' in err.lower() or 'expired' in err.lower() or '401' in err:
+            return 'Google Search Console credentials have expired. Please reconnect GSC in Domain Settings.'
+        logger.error(f"GSC access verification failed: {e}")
+        return 'Unable to access Google Search Console. Please reconnect GSC in Domain Settings.'
+
+
+def _verify_ga_access(integration):
+    """
+    Test GA4 API access for the integration. Returns error string if failed, None if OK.
+    """
+    try:
+        from integrations.google_oauth import get_credentials_from_integration
+        from googleapiclient.discovery import build
+
+        credentials = get_credentials_from_integration(integration)
+        if not credentials:
+            return 'Google Analytics credentials are invalid or expired. Please reconnect GA.'
+
+        service = build('analyticsdata', 'v1beta', credentials=credentials)
+        property_id = integration.provider_id
+
+        # Make a minimal test query to verify access
+        service.properties().runReport(
+            property=property_id,
+            body={
+                'dateRanges': [{'startDate': (date.today() - timedelta(days=7)).isoformat(), 'endDate': (date.today() - timedelta(days=1)).isoformat()}],
+                'dimensions': [{'name': 'date'}],
+                'metrics': [{'name': 'sessions'}],
+                'limit': 1,
+            }
+        ).execute()
+        return None  # Access OK
+    except Exception as e:
+        err = str(e)
+        if 'permission' in err.lower() or '403' in err:
+            return 'Insufficient permissions for this GA4 property. Please verify that the connected Google account has access to this property in Google Analytics.'
+        if 'not found' in err.lower() or '404' in err:
+            return 'The GA4 property was not found. Please reconnect Google Analytics.'
+        if 'invalid' in err.lower() or 'expired' in err.lower() or '401' in err:
+            return 'Google Analytics credentials have expired. Please reconnect GA in Domain Settings.'
+        logger.error(f"GA access verification failed: {e}")
+        return 'Unable to access Google Analytics. Please reconnect GA in Domain Settings.'
+
+
+def _get_date_ranges(schedule, duration, order_asc=True):
+    """
+    Calculate date ranges based on schedule (weekly/monthly) and duration.
+    Returns list of (start_date, end_date, label) tuples.
+    GSC data has ~3 day lag so we offset accordingly.
+    """
+    today = date.today() - timedelta(days=3)  # GSC data lag
+    ranges = []
+
+    if schedule == 'weekly':
+        # Find last Sunday as week end
+        days_since_sunday = (today.weekday() + 1) % 7
+        last_sunday = today - timedelta(days=days_since_sunday)
+
+        for i in range(duration):
+            end = last_sunday - timedelta(weeks=i)
+            start = end - timedelta(days=6)
+            label = f"{start.strftime('%d %b')}-{end.strftime('%d %b')}"
+            ranges.append((start, end, label))
+    else:  # monthly
+        for i in range(duration):
+            # Go back i months
+            month = today.month - i
+            year = today.year
+            while month <= 0:
+                month += 12
+                year -= 1
+            # First and last day of that month
+            import calendar
+            _, last_day = calendar.monthrange(year, month)
+            start = date(year, month, 1)
+            end = date(year, month, last_day)
+            if end > today:
+                end = today
+            label = start.strftime('%b %Y')
+            ranges.append((start, end, label))
+
+    if order_asc:
+        ranges.reverse()
+    return ranges
+
+
+def _fetch_gsc_report_data(integration, sheet):
+    """Fetch GSC data for a report sheet configuration."""
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('searchconsole', 'v1', credentials=credentials)
+    site_url = integration.provider_id
+
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+    metrics_list = sheet.metrics or ['clicks', 'impressions', 'ctr', 'position']
+    change_units = sheet.change_units or []
+
+    # Determine dimension based on sheet_type
+    if sheet.sheet_type in ('gsc_pages',):
+        dimension = 'page'
+        dim_label = 'Pages'
+    elif sheet.sheet_type in ('gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries'):
+        dimension = 'query'
+        dim_label = 'Queries'
+    else:
+        dimension = 'page'
+        dim_label = 'Pages'
+
+    # Fetch data for each date range and metric
+    all_keys = set()
+    range_data = {}  # {range_label: {key: {metric: value}}}
+    api_errors = []
+
+    for start_dt, end_dt, label in date_ranges:
+        request_body = {
+            'startDate': start_dt.isoformat(),
+            'endDate': end_dt.isoformat(),
+            'dimensions': [dimension],
+            'rowLimit': 500,
+        }
+
+        # Add brand filter for branded/non-branded queries
+        if sheet.sheet_type == 'gsc_branded_queries':
+            domain_name = site_url.replace('sc-domain:', '').replace('https://', '').replace('http://', '').split('/')[0].split('.')[0]
+            request_body['dimensionFilterGroups'] = [{
+                'filters': [{'dimension': 'query', 'operator': 'contains', 'expression': domain_name}]
+            }]
+        elif sheet.sheet_type == 'gsc_non_branded_queries':
+            domain_name = site_url.replace('sc-domain:', '').replace('https://', '').replace('http://', '').split('/')[0].split('.')[0]
+            request_body['dimensionFilterGroups'] = [{
+                'filters': [{'dimension': 'query', 'operator': 'excludingRegex', 'expression': f'(?i){domain_name}'}]
+            }]
+
+        try:
+            response = service.searchanalytics().query(
+                siteUrl=site_url, body=request_body
+            ).execute()
+
+            data_map = {}
+            for row in response.get('rows', []):
+                key = row.get('keys', [''])[0]
+                all_keys.add(key)
+                data_map[key] = {
+                    'clicks': row.get('clicks', 0),
+                    'impressions': row.get('impressions', 0),
+                    'ctr': round(row.get('ctr', 0) * 100, 2),
+                    'position': round(row.get('position', 0), 1),
+                }
+            range_data[label] = data_map
+        except Exception as e:
+            logger.error(f"GSC API error for sheet {sheet.id}: {e}")
+            range_data[label] = {}
+            api_errors.append(str(e))
+
+    # If ALL ranges failed and no data collected, return error
+    if not all_keys and len(api_errors) == len(date_ranges) and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GSC API error: {api_errors[0]}'}
+
+    # Build columns
+    columns = ['Sr No', dim_label]
+    range_labels = [r[2] for r in date_ranges]
+
+    for metric in metrics_list:
+        metric_label = metric.capitalize()
+        if metric == 'ctr':
+            metric_label = 'CTR'
+        for rl in range_labels:
+            columns.append(f"{rl} {metric_label}")
+        # Add change columns
+        if len(range_labels) >= 2 and 'number' in change_units:
+            columns.append(f"{metric_label} Change")
+        if len(range_labels) >= 2 and 'percentage' in change_units:
+            columns.append(f"{metric_label} Change (%)")
+
+    # Build rows
+    sorted_keys = sorted(all_keys)
+    rows = []
+    for idx, key in enumerate(sorted_keys, 1):
+        row = {'Sr No': idx, dim_label: key}
+        for metric in metrics_list:
+            metric_label = metric.capitalize()
+            if metric == 'ctr':
+                metric_label = 'CTR'
+            values_for_change = []
+            for rl in range_labels:
+                val = range_data.get(rl, {}).get(key, {}).get(metric, 0)
+                row[f"{rl} {metric_label}"] = val
+                values_for_change.append(val)
+
+            if len(values_for_change) >= 2:
+                last_val = values_for_change[-1]
+                prev_val = values_for_change[-2]
+                diff = round(last_val - prev_val, 2)
+                if 'number' in change_units:
+                    row[f"{metric_label} Change"] = diff
+                if 'percentage' in change_units:
+                    pct = round((diff / prev_val) * 100, 2) if prev_val != 0 else 0
+                    row[f"{metric_label} Change (%)"] = f"{pct}%"
+
+        rows.append(row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+        'metrics_headers': [m.upper() if m == 'ctr' else m.capitalize() for m in metrics_list],
+    }
+
+
+def _fetch_ga_report_data(integration, sheet):
+    """Fetch GA data for a report sheet configuration."""
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('analyticsdata', 'v1beta', credentials=credentials)
+    property_id = integration.provider_id
+
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+
+    if sheet.sheet_type == 'ga_landing_pages':
+        ga_dimension = 'landingPage'
+        dim_label = 'Landing Pages'
+        ga_metrics = ['sessions', 'totalUsers', 'screenPageViews', 'bounceRate']
+        metric_labels = ['Sessions', 'Users', 'Page Views', 'Bounce Rate']
+    else:
+        ga_dimension = 'sessionDefaultChannelGroup'
+        dim_label = 'Source'
+        ga_metrics = ['sessions', 'totalUsers']
+        metric_labels = ['Sessions', 'Users']
+
+    change_units = sheet.change_units or []
+
+    all_keys = set()
+    range_data = {}
+    api_errors = []
+
+    for start_dt, end_dt, label in date_ranges:
+        try:
+            body = {
+                'dateRanges': [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+                'dimensions': [{'name': ga_dimension}],
+                'metrics': [{'name': m} for m in ga_metrics],
+                'limit': 500,
+            }
+            response = service.properties().runReport(
+                property=property_id, body=body
+            ).execute()
+
+            data_map = {}
+            for row in response.get('rows', []):
+                key = row['dimensionValues'][0]['value']
+                all_keys.add(key)
+                vals = {}
+                for i, ml in enumerate(metric_labels):
+                    raw = row['metricValues'][i]['value']
+                    vals[ml] = round(float(raw), 2) if '.' in raw else int(raw)
+                data_map[key] = vals
+            range_data[label] = data_map
+        except Exception as e:
+            logger.error(f"GA API error for sheet {sheet.id}: {e}")
+            range_data[label] = {}
+            api_errors.append(str(e))
+
+    # If ALL ranges failed and no data collected, return error
+    if not all_keys and len(api_errors) == len(date_ranges) and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GA API error: {api_errors[0]}'}
+
+    # Build columns
+    columns = ['Sr No', dim_label]
+    range_labels = [r[2] for r in date_ranges]
+
+    for ml in metric_labels:
+        for rl in range_labels:
+            columns.append(f"{rl} {ml}")
+        if len(range_labels) >= 2 and 'number' in change_units:
+            columns.append(f"{ml} Change")
+        if len(range_labels) >= 2 and 'percentage' in change_units:
+            columns.append(f"{ml} Change (%)")
+
+    # Build rows
+    sorted_keys = sorted(all_keys)
+    rows = []
+    for idx, key in enumerate(sorted_keys, 1):
+        row = {'Sr No': idx, dim_label: key}
+        for ml in metric_labels:
+            values_for_change = []
+            for rl in range_labels:
+                val = range_data.get(rl, {}).get(key, {}).get(ml, 0)
+                row[f"{rl} {ml}"] = val
+                values_for_change.append(val)
+            if len(values_for_change) >= 2:
+                diff = round(values_for_change[-1] - values_for_change[-2], 2)
+                if 'number' in change_units:
+                    row[f"{ml} Change"] = diff
+                if 'percentage' in change_units:
+                    pct = round((diff / values_for_change[-2]) * 100, 2) if values_for_change[-2] != 0 else 0
+                    row[f"{ml} Change (%)"] = f"{pct}%"
+        rows.append(row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+        'metrics_headers': metric_labels,
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_report_sheet_data(request):
+    """
+    Fetch live data for all report sheets of a domain.
+    Query params: domain_id (required)
+    Returns report data for each configured sheet.
+    """
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    sheets = SeoReportSheet.objects.filter(
+        domain_id=domain_id, is_active=True
+    ).order_by('-created_at')
+
+    if not sheets.exists():
+        return Response({'reports': [], 'count': 0})
+
+    # Get integrations for this domain
+    from integrations.models import Integration
+
+    gsc_integration = Integration.objects.filter(
+        domain_id=domain_id, type='search_console', status='active'
+    ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+
+    ga_integration = Integration.objects.filter(
+        domain_id=domain_id, type='google_analytics', status='active'
+    ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+
+    reports = []
+    for sheet in sheets:
+        report_entry = {
+            'sheet_id': sheet.id,
+            'sheet_name': sheet.sheet_name,
+            'sheet_type': sheet.sheet_type,
+            'category': sheet.category,
+            'schedule': sheet.schedule,
+            'duration': sheet.duration,
+            'order_by': sheet.order_by,
+            'metrics': sheet.metrics,
+            'change_units': sheet.change_units,
+            'columns': [],
+            'rows': [],
+            'total_rows': 0,
+            'error': None,
+        }
+
+        try:
+            if sheet.category == 'gsc' and sheet.sheet_type in (
+                'gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries'
+            ):
+                if not gsc_integration:
+                    report_entry['error'] = 'Google Search Console not connected'
+                else:
+                    data = _fetch_gsc_report_data(gsc_integration, sheet)
+                    report_entry.update(data)
+
+            elif sheet.category == 'ga' and sheet.sheet_type in (
+                'ga_landing_pages', 'ga_other_sources'
+            ):
+                if not ga_integration:
+                    report_entry['error'] = 'Google Analytics not connected'
+                else:
+                    data = _fetch_ga_report_data(ga_integration, sheet)
+                    report_entry.update(data)
+
+            elif sheet.sheet_type == 'keyword_ranking':
+                # Build keyword ranking data from existing SeoKeywordRank
+                kw_metrics = sheet.metrics or ['keywords']
+                kws = SeoKeywordRank.objects.select_related('keyword').filter(
+                    domain_id=domain_id
+                ).order_by('keyword__keyword')[:500]
+
+                columns = ['Sr No', 'Keywords']
+                if 'average_volume' in kw_metrics:
+                    columns.append('Search Volume')
+                if 'landing_pages' in kw_metrics:
+                    columns.append('Ranking URL')
+                if 'base_ranking' in kw_metrics:
+                    columns.append('Base Rank')
+
+                rows = []
+                for idx, kw in enumerate(kws, 1):
+                    row = {'Sr No': idx, 'Keywords': kw.keyword.keyword if kw.keyword else ''}
+                    if 'average_volume' in kw_metrics:
+                        row['Search Volume'] = kw.search_volume or 0
+                    if 'landing_pages' in kw_metrics:
+                        row['Ranking URL'] = ''
+                    if 'base_ranking' in kw_metrics:
+                        row['Base Rank'] = kw.rank_now or '-'
+                    rows.append(row)
+
+                report_entry['columns'] = columns
+                report_entry['rows'] = rows
+                report_entry['total_rows'] = len(rows)
+
+            elif sheet.sheet_type == 'domain_metrics':
+                report_entry['columns'] = ['Metric', 'Value']
+                report_entry['rows'] = [{'Metric': 'Domain Metrics', 'Value': 'Coming soon'}]
+                report_entry['total_rows'] = 1
+
+            elif sheet.sheet_type in ('gsc_overview', 'ga_overview', 'keyword_ranking_overview'):
+                report_entry['columns'] = ['Metric', 'Value']
+                report_entry['rows'] = [{'Metric': 'Overview', 'Value': 'Coming soon'}]
+                report_entry['total_rows'] = 1
+
+            else:
+                report_entry['error'] = f'Unsupported report type: {sheet.sheet_type}'
+
+        except Exception as e:
+            logger.error(f"Error fetching data for sheet {sheet.id}: {e}")
+            report_entry['error'] = str(e)
+
+        reports.append(report_entry)
+
+    return Response({'reports': reports, 'count': len(reports)})

@@ -374,3 +374,96 @@ class SeoCompetitorKeyword(models.Model):
 
     def __str__(self):
         return f"{self.keyword_text}: us={self.our_rank} vs {self.competitor.competitor_domain}={self.their_rank}"
+
+
+class SeoReportSheet(models.Model):
+    """
+    SEO Report sheet configuration. Ported from RankMax ReportSheets model.
+    Each sheet defines a report tab with its type, metrics, schedule, and display settings.
+    """
+    SHEET_TYPE_CHOICES = [
+        ('gsc_queries', 'GSC Queries'),
+        ('gsc_branded_queries', 'GSC Branded Queries'),
+        ('gsc_non_branded_queries', 'GSC Non-Branded Queries'),
+        ('gsc_pages', 'GSC Pages'),
+        ('ga_landing_pages', 'GA Landing Pages'),
+        ('ga_other_sources', 'GA Other Sources'),
+        ('ga_overview', 'GA Overview'),
+        ('keyword_ranking', 'Keyword Ranking'),
+        ('domain_metrics', 'Domain Metrics'),
+        ('gsc_overview', 'GSC Overview'),
+        ('keyword_ranking_overview', 'Keyword Ranking Overview'),
+    ]
+    SCHEDULE_CHOICES = [
+        ('weekly', 'Weekly'),
+        ('monthly', 'Monthly'),
+    ]
+    CATEGORY_CHOICES = [
+        ('gsc', 'Google Search Console'),
+        ('ga', 'Google Analytics'),
+        ('rank', 'Keyword Ranking'),
+        ('base', 'Domain Metrics'),
+        ('overview', 'Summary'),
+    ]
+
+    domain = models.ForeignKey(
+        'domains.Domain',
+        on_delete=models.CASCADE,
+        related_name='seo_report_sheets',
+        help_text="Domain this report belongs to"
+    )
+    created_by = models.ForeignKey(
+        'authentication.Account',
+        on_delete=models.CASCADE,
+        related_name='seo_report_sheets',
+    )
+    sheet_name = models.CharField(max_length=255, help_text="Report display name")
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        default='gsc',
+        help_text="Report category tab"
+    )
+    sheet_type = models.CharField(
+        max_length=30,
+        choices=SHEET_TYPE_CHOICES,
+        help_text="Type of data in this report sheet"
+    )
+    metrics = models.JSONField(
+        default=list, blank=True,
+        help_text="Selected metrics for the report"
+    )
+    change_units = models.JSONField(
+        default=list, blank=True,
+        help_text="Comparison units: number, percentage"
+    )
+    schedule = models.CharField(
+        max_length=10,
+        choices=SCHEDULE_CHOICES,
+        default='weekly',
+    )
+    duration = models.IntegerField(
+        default=2,
+        help_text="Number of intervals to include"
+    )
+    order_by = models.CharField(
+        max_length=20,
+        default='Ascending',
+        help_text="Date sort order"
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'seo_report_sheets'
+        verbose_name = 'SEO Report Sheet'
+        verbose_name_plural = 'SEO Report Sheets'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['domain', '-created_at']),
+            models.Index(fields=['domain', 'category']),
+        ]
+
+    def __str__(self):
+        return f"{self.sheet_name} [{self.category}] — {self.domain.name}"
