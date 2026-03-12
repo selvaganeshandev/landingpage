@@ -244,8 +244,8 @@ def google_callback(request):
             }
         )
 
-        # Redirect back to frontend with success
-        redirect_url = f'{FRONTEND_URL}/organization-settings/domains/{domain_id}?tab=integrations&success=google_connected&type={integration_type}'
+        # Redirect back to frontend with success and actual status
+        redirect_url = f'{FRONTEND_URL}/organization-settings/domains/{domain_id}?tab=integrations&success=google_connected&type={integration_type}&status={integration_status}'
         return redirect(redirect_url)
 
     except json.JSONDecodeError:

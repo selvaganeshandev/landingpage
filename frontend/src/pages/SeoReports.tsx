@@ -27,7 +27,8 @@ import {
 } from "lucide-react";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
-const ROWS_PER_PAGE = 50;
+const ROWS_PER_PAGE_OPTIONS = [5, 10, 25, 50];
+const DEFAULT_ROWS_PER_PAGE = 5;
 
 const SHEET_TYPE_LABELS: Record<string, string> = {
   gsc_queries: "GSC Queries",
@@ -276,15 +277,16 @@ function ReportWidget({
   const [editName, setEditName] = useState(sheet.sheet_name);
   const [menuOpen, setMenuOpen] = useState(false);
   const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const columns: string[] = reportData?.columns || [];
   const allRows: any[] = reportData?.rows || [];
   const totalRows = allRows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / ROWS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
   const paginatedRows = allRows.slice(
-    page * ROWS_PER_PAGE,
-    (page + 1) * ROWS_PER_PAGE
+    page * rowsPerPage,
+    (page + 1) * rowsPerPage
   );
 
   const hasData = columns.length > 0 && allRows.length > 0;
@@ -609,10 +611,24 @@ function ReportWidget({
 
           {/* Pagination */}
           <div className="flex items-center justify-end gap-4 px-5 py-3 border-t text-sm text-muted-foreground">
-            <span>Rows per page: {ROWS_PER_PAGE}</span>
+            <span className="flex items-center gap-1">
+              Rows per page:
+              <select
+                value={rowsPerPage}
+                onChange={(e) => {
+                  setRowsPerPage(Number(e.target.value));
+                  setPage(0);
+                }}
+                className="ml-1 border rounded px-1 py-0.5 text-sm bg-white cursor-pointer"
+              >
+                {ROWS_PER_PAGE_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+            </span>
             <span>
-              {page * ROWS_PER_PAGE + 1}-
-              {Math.min((page + 1) * ROWS_PER_PAGE, totalRows)} of {totalRows}
+              {page * rowsPerPage + 1}-
+              {Math.min((page + 1) * rowsPerPage, totalRows)} of {totalRows}
             </span>
             <div className="flex items-center gap-1">
               <button

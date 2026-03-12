@@ -1122,10 +1122,20 @@ export default function DomainSettings() {
 
     if (success === 'google_connected') {
       const integrationName = type === 'search_console' ? 'Google Search Console' : 'Google Analytics';
-      toast({
-        title: `${integrationName} Connected`,
-        description: `Your ${integrationName} account has been successfully connected.`,
-      });
+      const integrationStatus = urlParams.get('status');
+      if (integrationStatus === 'disconnected') {
+        const noItemsLabel = type === 'search_console' ? 'sites' : 'properties';
+        toast({
+          title: `No ${integrationName} ${noItemsLabel} found`,
+          description: `Your Google account was authenticated, but no ${noItemsLabel} were found. Please ensure ${integrationName} is set up for this account.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: `${integrationName} Connected`,
+          description: `Your ${integrationName} account has been successfully connected.`,
+        });
+      }
       // Clean URL
       window.history.replaceState({}, '', window.location.pathname);
       loadIntegrations();
@@ -1826,7 +1836,7 @@ export default function DomainSettings() {
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Google Analytics */}
-              <div className={`p-4 border rounded-lg ${isProperlyConnected(getIntegration('google_analytics')) ? 'border-green-500 bg-green-50' : getIntegration('google_analytics')?.status === 'disconnected' ? 'border-red-200 bg-red-50' : ''}`}>
+              <div className={`p-4 border rounded-lg ${isProperlyConnected(getIntegration('google_analytics')) ? 'border-green-500 bg-green-50' : getIntegration('google_analytics')?.status === 'disconnected' && !getIntegration('google_analytics')?.has_credentials ? 'border-red-200 bg-red-50' : getIntegration('google_analytics')?.status === 'disconnected' && getIntegration('google_analytics')?.has_credentials ? 'border-amber-300 bg-amber-50' : ''}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center">
@@ -1846,12 +1856,14 @@ export default function DomainSettings() {
                               Connected - Track AI referral traffic
                               {(getIntegration('google_analytics')?.credentials?.selected_property_name || getIntegration('google_analytics')?.provider_id) && (
                                 <span className="block mt-1 text-xs font-medium text-gray-700">
-                                  Property: {getIntegration('google_analytics')?.credentials?.selected_property_name || 
-                                    getIntegration('google_analytics')?.provider_id?.replace('properties/', '') || 
+                                  Property: {getIntegration('google_analytics')?.credentials?.selected_property_name ||
+                                    getIntegration('google_analytics')?.provider_id?.replace('properties/', '') ||
                                     getIntegration('google_analytics')?.provider_id}
                                 </span>
                               )}
                             </>
+                          ) : getIntegration('google_analytics')?.status === 'disconnected' && getIntegration('google_analytics')?.has_credentials ? (
+                            'Authenticated - No GA4 properties found. Try reconnecting or check your Google Analytics setup.'
                           ) : getIntegration('google_analytics')?.status === 'disconnected' ? (
                             'Not connected - No properties found'
                           ) : (
@@ -1873,6 +1885,27 @@ export default function DomainSettings() {
                           onClick={() => handleDisconnectIntegration(getIntegration('google_analytics')!.id)}
                         >
                           Disconnect
+                        </Button>
+                      </div>
+                    ) : getIntegration('google_analytics')?.status === 'disconnected' && getIntegration('google_analytics')?.has_credentials ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-amber-600 font-medium">Authenticated</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            await handleRemoveIntegration(getIntegration('google_analytics')!.id);
+                            handleConnectGoogleAnalytics();
+                          }}
+                        >
+                          Reconnect
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveIntegration(getIntegration('google_analytics')!.id)}
+                        >
+                          Remove
                         </Button>
                       </div>
                     ) : getIntegration('google_analytics')?.status === 'disconnected' ? (
@@ -1915,7 +1948,7 @@ export default function DomainSettings() {
               </div>
 
               {/* Google Search Console */}
-              <div className={`p-4 border rounded-lg ${isProperlyConnected(getIntegration('search_console')) ? 'border-green-500 bg-green-50' : getIntegration('search_console')?.status === 'disconnected' ? 'border-red-200 bg-red-50' : ''}`}>
+              <div className={`p-4 border rounded-lg ${isProperlyConnected(getIntegration('search_console')) ? 'border-green-500 bg-green-50' : getIntegration('search_console')?.status === 'disconnected' && !getIntegration('search_console')?.has_credentials ? 'border-red-200 bg-red-50' : getIntegration('search_console')?.status === 'disconnected' && getIntegration('search_console')?.has_credentials ? 'border-amber-300 bg-amber-50' : ''}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-lg bg-green-100 flex items-center justify-center">
@@ -1935,12 +1968,14 @@ export default function DomainSettings() {
                               Connected - Monitor search performance
                               {(getIntegration('search_console')?.credentials?.selected_site_name || getIntegration('search_console')?.provider_id) && (
                                 <span className="block mt-1 text-xs font-medium text-gray-700">
-                                  Site: {getIntegration('search_console')?.credentials?.selected_site_name || 
-                                    getIntegration('search_console')?.provider_id?.replace('sc-domain:', '')?.replace('https://', '')?.replace('http://', '')?.replace(/\/$/, '') || 
+                                  Site: {getIntegration('search_console')?.credentials?.selected_site_name ||
+                                    getIntegration('search_console')?.provider_id?.replace('sc-domain:', '')?.replace('https://', '')?.replace('http://', '')?.replace(/\/$/, '') ||
                                     getIntegration('search_console')?.provider_id}
                                 </span>
                               )}
                             </>
+                          ) : getIntegration('search_console')?.status === 'disconnected' && getIntegration('search_console')?.has_credentials ? (
+                            'Authenticated - No Search Console sites found. Try reconnecting or verify your site in Google Search Console.'
                           ) : getIntegration('search_console')?.status === 'disconnected' ? (
                             'Not connected - No sites found'
                           ) : (
@@ -1962,6 +1997,27 @@ export default function DomainSettings() {
                           onClick={() => handleDisconnectIntegration(getIntegration('search_console')!.id)}
                         >
                           Disconnect
+                        </Button>
+                      </div>
+                    ) : getIntegration('search_console')?.status === 'disconnected' && getIntegration('search_console')?.has_credentials ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-amber-600 font-medium">Authenticated</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            await handleRemoveIntegration(getIntegration('search_console')!.id);
+                            handleConnectGoogleSearchConsole();
+                          }}
+                        >
+                          Reconnect
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveIntegration(getIntegration('search_console')!.id)}
+                        >
+                          Remove
                         </Button>
                       </div>
                     ) : getIntegration('search_console')?.status === 'disconnected' ? (

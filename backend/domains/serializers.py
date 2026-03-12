@@ -24,19 +24,26 @@ class DomainSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
 
+    def _get_latest_health_check(self, obj):
+        """Get the latest health check, using prefetched data if available."""
+        if hasattr(obj, '_prefetched_objects_cache') and 'health_checks' in obj._prefetched_objects_cache:
+            checks = obj._prefetched_objects_cache['health_checks']
+            return checks[0] if checks else None
+        return obj.health_checks.first()
+
     def get_latest_health_score(self, obj):
         """Get the latest health check score percentage"""
-        latest_check = obj.health_checks.first()  # Already ordered by -created_at in model
+        latest_check = self._get_latest_health_check(obj)
         return latest_check.percentage if latest_check else None
 
     def get_latest_health_grade(self, obj):
         """Get the latest health check grade"""
-        latest_check = obj.health_checks.first()
+        latest_check = self._get_latest_health_check(obj)
         return latest_check.grade if latest_check else None
 
     def get_latest_health_grade_color(self, obj):
         """Get the latest health check grade color"""
-        latest_check = obj.health_checks.first()
+        latest_check = self._get_latest_health_check(obj)
         return latest_check.grade_color if latest_check else None
 
 
