@@ -1925,6 +1925,614 @@ def _fetch_ga_report_data(integration, sheet):
     }
 
 
+def _fetch_gsc_overview_data(integration, sheet):
+    """
+    GSC Overview — aggregate clicks, impressions, CTR, position across date
+    ranges (no dimension breakdown).  Mirrors RankMaxx gsc_report overview.
+    """
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('searchconsole', 'v1', credentials=credentials)
+    site_url = integration.provider_id
+
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+    change_units = sheet.change_units or []
+
+    metrics_map = [
+        ('Clicks', 'clicks'),
+        ('Impressions', 'impressions'),
+        ('CTR', 'ctr'),
+        ('Avg Position', 'position'),
+    ]
+
+    range_labels = [r[2] for r in date_ranges]
+
+    # Fetch aggregate data for each date range
+    range_values = {}  # label -> {metric: value}
+    api_errors = []
+    for start_dt, end_dt, label in date_ranges:
+        try:
+            response = service.searchanalytics().query(
+                siteUrl=site_url,
+                body={
+                    'startDate': start_dt.isoformat(),
+                    'endDate': end_dt.isoformat(),
+                    'rowLimit': 1,
+                }
+            ).execute()
+            rows = response.get('rows', [])
+            if rows:
+                r = rows[0]
+                range_values[label] = {
+                    'clicks': r.get('clicks', 0),
+                    'impressions': r.get('impressions', 0),
+                    'ctr': round(r.get('ctr', 0) * 100, 2),
+                    'position': round(r.get('position', 0), 1),
+                }
+            else:
+                range_values[label] = {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
+        except Exception as e:
+            logger.error(f"GSC Overview API error for sheet {sheet.id}: {e}")
+            range_values[label] = {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
+            api_errors.append(str(e))
+
+    if len(api_errors) == len(date_ranges) and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GSC API error: {api_errors[0]}'}
+
+    # Build table: one row per metric, columns = date-range labels + change
+    columns = ['Metric']
+    for rl in range_labels:
+        columns.append(rl)
+    if len(range_labels) >= 2 and 'number' in change_units:
+        columns.append('Change')
+    if len(range_labels) >= 2 and 'percentage' in change_units:
+        columns.append('Change (%)')
+
+    rows = []
+    for label, key in metrics_map:
+        row = {'Metric': label}
+        values = []
+        for rl in range_labels:
+            val = range_values.get(rl, {}).get(key, 0)
+            row[rl] = val
+            values.append(val)
+        if len(values) >= 2:
+            diff = round(values[-1] - values[-2], 2)
+            if 'number' in change_units:
+                row['Change'] = diff
+            if 'percentage' in change_units:
+                pct = round((diff / values[-2]) * 100, 2) if values[-2] != 0 else 0
+                row['Change (%)'] = f"{pct}%"
+        rows.append(row)
+
+    return {'columns': columns, 'rows': rows, 'total_rows': len(rows)}
+
+
+def _fetch_ga_overview_data(integration, sheet):
+    """
+    GA Overview — aggregate sessions, users, bounce rate, engagement rate
+    across date ranges (no dimension breakdown).
+    """
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('analyticsdata', 'v1beta', credentials=credentials)
+    property_id = integration.provider_id
+
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+    change_units = sheet.change_units or []
+
+    ga_metrics = ['sessions', 'totalUsers', 'screenPageViews', 'bounceRate', 'engagementRate']
+    metric_labels = ['Sessions', 'Users', 'Page Views', 'Bounce Rate', 'Engagement Rate']
+
+    range_labels = [r[2] for r in date_ranges]
+
+    range_values = {}
+    api_errors = []
+    for start_dt, end_dt, label in date_ranges:
+        try:
+            response = service.properties().runReport(
+                property=property_id,
+                body={
+                    'dateRanges': [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+                    'metrics': [{'name': m} for m in ga_metrics],
+                }
+            ).execute()
+            rows = response.get('rows', [])
+            if rows:
+                vals = {}
+                for i, ml in enumerate(metric_labels):
+                    raw = rows[0]['metricValues'][i]['value']
+                    vals[ml] = round(float(raw), 2) if '.' in raw else int(raw)
+                range_values[label] = vals
+            else:
+                range_values[label] = {ml: 0 for ml in metric_labels}
+        except Exception as e:
+            logger.error(f"GA Overview API error for sheet {sheet.id}: {e}")
+            range_values[label] = {ml: 0 for ml in metric_labels}
+            api_errors.append(str(e))
+
+    if len(api_errors) == len(date_ranges) and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GA API error: {api_errors[0]}'}
+
+    columns = ['Metric']
+    for rl in range_labels:
+        columns.append(rl)
+    if len(range_labels) >= 2 and 'number' in change_units:
+        columns.append('Change')
+    if len(range_labels) >= 2 and 'percentage' in change_units:
+        columns.append('Change (%)')
+
+    rows = []
+    for ml in metric_labels:
+        row = {'Metric': ml}
+        values = []
+        for rl in range_labels:
+            val = range_values.get(rl, {}).get(ml, 0)
+            row[rl] = val
+            values.append(val)
+        if len(values) >= 2:
+            diff = round(values[-1] - values[-2], 2)
+            if 'number' in change_units:
+                row['Change'] = diff
+            if 'percentage' in change_units:
+                pct = round((diff / values[-2]) * 100, 2) if values[-2] != 0 else 0
+                row['Change (%)'] = f"{pct}%"
+        rows.append(row)
+
+    return {'columns': columns, 'rows': rows, 'total_rows': len(rows)}
+
+
+def _fetch_domain_metrics_data(domain_id, sheet):
+    """
+    Domain Metrics — show ranking distribution over time from
+    SeoDomainDailyMetrics (top-1, top-3, top-10, etc.) similar to how
+    RankMaxx shows DA/DR from DomainTracking.
+    """
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+    change_units = sheet.change_units or []
+
+    range_labels = [r[2] for r in date_ranges]
+
+    metric_defs = [
+        ('Top 1 Keywords', 'top_1_count'),
+        ('Top 3 Keywords', 'top_3_count'),
+        ('Top 10 Keywords', 'top_10_count'),
+        ('Top 50 Keywords', 'top_50_count'),
+        ('Top 100 Keywords', 'top_100_count'),
+        ('Not Ranked', 'not_ranked_count'),
+        ('Rankmax Score', 'score_meter'),
+    ]
+
+    range_values = {}
+    for start_dt, end_dt, label in date_ranges:
+        metric = SeoDomainDailyMetrics.objects.filter(
+            domain_id=domain_id,
+            snapshot_date__gte=start_dt,
+            snapshot_date__lte=end_dt,
+        ).order_by('-snapshot_date').first()
+
+        if metric:
+            range_values[label] = {
+                'top_1_count': metric.top_1_count,
+                'top_3_count': metric.top_3_count,
+                'top_10_count': metric.top_10_count,
+                'top_50_count': metric.top_50_count,
+                'top_100_count': metric.top_100_count,
+                'not_ranked_count': metric.not_ranked_count,
+                'score_meter': float(metric.score_meter),
+            }
+        else:
+            range_values[label] = {k: 0 for _, k in metric_defs}
+
+    columns = ['Metric']
+    for rl in range_labels:
+        columns.append(rl)
+    if len(range_labels) >= 2 and 'number' in change_units:
+        columns.append('Change')
+    if len(range_labels) >= 2 and 'percentage' in change_units:
+        columns.append('Change (%)')
+
+    rows = []
+    for label, key in metric_defs:
+        row = {'Metric': label}
+        values = []
+        for rl in range_labels:
+            val = range_values.get(rl, {}).get(key, 0)
+            row[rl] = val
+            values.append(val)
+        if len(values) >= 2:
+            diff = round(values[-1] - values[-2], 2)
+            if 'number' in change_units:
+                row['Change'] = diff
+            if 'percentage' in change_units:
+                pct = round((diff / values[-2]) * 100, 2) if values[-2] != 0 else 0
+                row['Change (%)'] = f"{pct}%"
+        rows.append(row)
+
+    return {'columns': columns, 'rows': rows, 'total_rows': len(rows)}
+
+
+def _fetch_keyword_ranking_overview(domain_id, sheet):
+    """
+    Keyword Ranking Overview — current ranking distribution snapshot,
+    similar to RankMaxx keyword_monthly_ranking_report.
+    """
+    kws = SeoKeywordRank.objects.filter(domain_id=domain_id)
+    total = kws.count()
+    if total == 0:
+        return {
+            'columns': ['Metric', 'Count', 'Percentage'],
+            'rows': [{'Metric': 'No keywords tracked', 'Count': 0, 'Percentage': '0%'}],
+            'total_rows': 1,
+        }
+
+    from django.db.models import Q, Count
+
+    buckets = [
+        ('Top 1', Q(rank_now=1)),
+        ('Top 3', Q(rank_now__gte=1, rank_now__lte=3)),
+        ('Top 5', Q(rank_now__gte=1, rank_now__lte=5)),
+        ('Top 10', Q(rank_now__gte=1, rank_now__lte=10)),
+        ('Top 20', Q(rank_now__gte=1, rank_now__lte=20)),
+        ('Top 50', Q(rank_now__gte=1, rank_now__lte=50)),
+        ('Top 100', Q(rank_now__gte=1, rank_now__lte=100)),
+        ('Not Ranked', Q(rank_now=0) | Q(rank_now__isnull=True)),
+        ('Improved (1D)', Q(day_mark='up')),
+        ('Declined (1D)', Q(day_mark='down')),
+    ]
+
+    rows = []
+    for idx, (label, q_filter) in enumerate(buckets, 1):
+        cnt = kws.filter(q_filter).count()
+        pct = round(cnt / total * 100, 1) if total > 0 else 0
+        rows.append({'Sr No': idx, 'Metric': label, 'Count': cnt, 'Percentage': f"{pct}%"})
+
+    return {
+        'columns': ['Sr No', 'Metric', 'Count', 'Percentage'],
+        'rows': rows,
+        'total_rows': len(rows),
+    }
+
+
+def _ordinal_convert(n):
+    """Convert day number to ordinal: 1->1st, 2->2nd, 3->3rd, 4->4th, etc."""
+    return f"{n:d}{'tsnrhtdd'[(n // 10 % 10 != 1) * (n % 10 < 4) * n % 10::4]}"
+
+
+def _ordinal_day_convert(d):
+    """Convert a date to format like '2nd Mar', '9th Mar'."""
+    return f"{_ordinal_convert(d.day)} {d.strftime('%b')}"
+
+
+def _classify_rank(rank):
+    """Classify rank into reporting brackets."""
+    if 1 <= rank <= 5:
+        return 'Top 5'
+    elif 6 <= rank <= 10:
+        return 'Top 6 - 10'
+    elif 11 <= rank <= 20:
+        return 'Top 11 - 20'
+    elif 21 <= rank <= 30:
+        return 'Top 21 - 30'
+    elif 31 <= rank <= 50:
+        return 'Top 31 - 50'
+    else:
+        return 'Above 50'
+
+
+def _fetch_keyword_ranking_weekly(domain_id, sheet):
+    """
+    Keyword Ranking Weekly report — shows ranking values at weekly intervals
+    with date columns like '2nd Mar', '9th Mar' and change calculations.
+    Mirrors RankMaxx keyword_ranking_report().
+    """
+    from django.db.models import Q
+    from collections import defaultdict
+
+    duration_limit = sheet.duration or 2
+    kw_metrics = sheet.metrics or []
+    order_asc = sheet.order_by.lower() in ('ascending', 'asc')
+
+    # Get keywords for this domain
+    kws = list(
+        SeoKeywordRank.objects.select_related('keyword').filter(
+            domain_id=domain_id
+        ).order_by('keyword__keyword')[:500]
+    )
+    if not kws:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'overview': []}
+
+    # Determine the most recent ranked date across all keywords
+    last_ranked = None
+    for kw in kws:
+        if kw.last_ranked_date:
+            d = kw.last_ranked_date.date() if hasattr(kw.last_ranked_date, 'date') else kw.last_ranked_date
+            if last_ranked is None or d > last_ranked:
+                last_ranked = d
+
+    if not last_ranked:
+        last_ranked = date.today()
+
+    # Calculate weekly column dates (default tracking day = Monday)
+    today_weekday = last_ranked.weekday()  # 0=Monday
+    target_day = 0  # Monday
+    remain_count = (today_weekday - target_day + 7) % 7
+
+    week_dates = []
+    for i in range(duration_limit):
+        week_date = last_ranked - timedelta(days=remain_count + 7 * i)
+        week_dates.append(week_date)
+
+    # Labels for each week column
+    week_labels = [_ordinal_day_convert(d) for d in week_dates]
+
+    # Fetch rank history for all keywords at the relevant date range
+    min_date = week_dates[-1] - timedelta(days=3) if week_dates else last_ranked - timedelta(days=90)
+    max_date = week_dates[0] + timedelta(days=3) if week_dates else last_ranked
+
+    kw_ids = [kw.id for kw in kws]
+
+    history_qs = SeoRankHistory.objects.filter(
+        seo_keyword_rank_id__in=kw_ids,
+        snapshot_date__gte=min_date,
+        snapshot_date__lte=max_date,
+    ).values_list('seo_keyword_rank_id', 'snapshot_date', 'rank_position')
+
+    # Build lookup: {kw_id: {date: rank}}
+    history_map = defaultdict(dict)
+    for kw_id, snap_date, rank_pos in history_qs:
+        history_map[kw_id][snap_date] = rank_pos
+
+    def _get_rank_for_date(kw_id, target_date):
+        """Get rank at target_date, or try ±1-3 days."""
+        h = history_map.get(kw_id, {})
+        if target_date in h:
+            return h[target_date]
+        for offset in [1, -1, 2, -2, 3, -3]:
+            d = target_date + timedelta(days=offset)
+            if d in h:
+                return h[d]
+        return None
+
+    # Build columns
+    columns = ['Sr No', 'Keywords']
+    if 'average_volume' in kw_metrics:
+        columns.append('Avg. Volume')
+    if 'landing_pages' in kw_metrics:
+        columns.append('Landing Pages')
+    if 'base_ranking' in kw_metrics:
+        columns.append('Base Ranking')
+
+    # Add week date columns (ordered oldest to newest if asc, newest to oldest if desc)
+    ordered_labels = list(reversed(week_labels)) if order_asc else week_labels
+    ordered_dates = list(reversed(week_dates)) if order_asc else week_dates
+    columns.extend(ordered_labels)
+
+    # Change column
+    if len(week_labels) >= 2:
+        change_label = f"Change ({week_labels[0]} vs {week_labels[1]})"
+        columns.append(change_label)
+    else:
+        change_label = None
+
+    # Build rows
+    rows = []
+    for idx, kw in enumerate(kws, 1):
+        kw_text = kw.keyword.keyword if kw.keyword else ''
+        row = {'Sr No': idx, 'Keywords': kw_text}
+
+        if 'average_volume' in kw_metrics:
+            row['Avg. Volume'] = kw.search_volume if kw.search_volume else '-'
+        if 'landing_pages' in kw_metrics:
+            if kw.site_url and kw.rank_now and kw.rank_now > 0:
+                row['Landing Pages'] = kw.site_url
+            else:
+                row['Landing Pages'] = ''
+        if 'base_ranking' in kw_metrics:
+            row['Base Ranking'] = kw.rank_since_start if kw.rank_since_start and kw.rank_since_start > 0 else 100
+
+        # Fill in week ranking values
+        rank_values = {}
+        for i, (wd, wl) in enumerate(zip(week_dates, week_labels)):
+            rank = _get_rank_for_date(kw.id, wd)
+            if rank is not None and rank > 0:
+                rank_values[wl] = rank
+            else:
+                rank_values[wl] = 'NA'
+
+        for label in ordered_labels:
+            row[label] = rank_values.get(label, 'NA')
+
+        # Calculate change between most recent two weeks
+        if change_label and len(week_labels) >= 2:
+            curr = rank_values.get(week_labels[0], 'NA')
+            prev = rank_values.get(week_labels[1], 'NA')
+            if isinstance(curr, int) and isinstance(prev, int):
+                row[change_label] = prev - curr  # positive = improved
+            else:
+                row[change_label] = 'NA'
+
+        rows.append(row)
+
+    # Build overview: keyword count per rank bracket per week
+    brackets = ['Top 5', 'Top 6 - 10', 'Top 11 - 20', 'Top 21 - 30', 'Top 31 - 50', 'Above 50']
+    overview_rows = []
+    for bracket in brackets:
+        ov_row = {'primary keyword ranking': bracket}
+        if 'base_ranking' in kw_metrics:
+            # Base ranking bracket count
+            base_count = sum(
+                1 for kw in kws
+                if _classify_rank(kw.rank_since_start if kw.rank_since_start and kw.rank_since_start > 0 else 100) == bracket
+            )
+            ov_row['Base Ranking'] = base_count
+
+        for wd, wl in zip(week_dates, week_labels):
+            count = 0
+            for kw in kws:
+                rank = _get_rank_for_date(kw.id, wd)
+                if rank and rank > 0 and _classify_rank(rank) == bracket:
+                    count += 1
+            ov_row[wl] = count
+        overview_rows.append(ov_row)
+
+    # Add change column to overview
+    if change_label and len(week_labels) >= 2:
+        for ov_row in overview_rows:
+            curr_val = ov_row.get(week_labels[0], 0)
+            prev_val = ov_row.get(week_labels[1], 0)
+            ov_row[change_label] = curr_val - prev_val
+
+    # Total row
+    total_row = {'primary keyword ranking': 'Total keywords'}
+    for key in overview_rows[0]:
+        if key != 'primary keyword ranking':
+            total_row[key] = sum(r.get(key, 0) for r in overview_rows if isinstance(r.get(key), int))
+    overview_rows.append(total_row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+        'overview': overview_rows,
+    }
+
+
+def _fetch_keyword_ranking_monthly(domain_id, sheet):
+    """
+    Keyword Ranking Monthly report — shows ranking values at monthly intervals
+    with date columns like 'Mar/2024', 'Feb/2024' and MOM Change.
+    Mirrors RankMaxx keyword_monthly_ranking_report().
+    """
+    from collections import defaultdict
+    import calendar
+
+    duration_limit = sheet.duration or 2
+    kw_metrics = sheet.metrics or []
+    order_asc = sheet.order_by.lower() in ('ascending', 'asc')
+
+    kws = list(
+        SeoKeywordRank.objects.select_related('keyword').filter(
+            domain_id=domain_id
+        ).order_by('keyword__keyword')[:500]
+    )
+    if not kws:
+        return {'columns': [], 'rows': [], 'total_rows': 0}
+
+    # Calculate monthly sample dates (4th of each month, like RankMaxx)
+    today = date.today()
+    month_dates = []
+    for i in range(duration_limit):
+        month = today.month - i
+        year = today.year
+        while month <= 0:
+            month += 12
+            year -= 1
+        sample_date = date(year, month, 4)
+        month_dates.append(sample_date)
+
+    month_labels = [d.strftime('%b/%Y') for d in month_dates]
+
+    # Fetch rank history
+    kw_ids = [kw.id for kw in kws]
+    min_date = month_dates[-1] - timedelta(days=5) if month_dates else today - timedelta(days=365)
+    max_date = month_dates[0] + timedelta(days=5) if month_dates else today
+
+    history_qs = SeoRankHistory.objects.filter(
+        seo_keyword_rank_id__in=kw_ids,
+        snapshot_date__gte=min_date,
+        snapshot_date__lte=max_date,
+    ).values_list('seo_keyword_rank_id', 'snapshot_date', 'rank_position')
+
+    history_map = defaultdict(dict)
+    for kw_id, snap_date, rank_pos in history_qs:
+        history_map[kw_id][snap_date] = rank_pos
+
+    def _get_rank_for_date(kw_id, target_date):
+        h = history_map.get(kw_id, {})
+        if target_date in h:
+            return h[target_date]
+        for offset in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5]:
+            d = target_date + timedelta(days=offset)
+            if d in h:
+                return h[d]
+        return None
+
+    # Build columns
+    columns = ['Sr No', 'Keywords']
+    if 'average_volume' in kw_metrics:
+        columns.append('Avg. Volume')
+    if 'landing_pages' in kw_metrics:
+        columns.append('Landing Pages')
+    if 'base_ranking' in kw_metrics:
+        columns.append('Base Ranking')
+
+    ordered_labels = list(reversed(month_labels)) if order_asc else month_labels
+    ordered_dates = list(reversed(month_dates)) if order_asc else month_dates
+    columns.extend(ordered_labels)
+    columns.append('MOM Change')
+
+    # Build rows
+    rows = []
+    for idx, kw in enumerate(kws, 1):
+        kw_text = kw.keyword.keyword if kw.keyword else ''
+        row = {'Sr No': idx, 'Keywords': kw_text}
+
+        if 'average_volume' in kw_metrics:
+            row['Avg. Volume'] = kw.search_volume if kw.search_volume else '-'
+        if 'landing_pages' in kw_metrics:
+            if kw.site_url and kw.rank_now and kw.rank_now > 0:
+                row['Landing Pages'] = kw.site_url
+            else:
+                row['Landing Pages'] = ''
+        if 'base_ranking' in kw_metrics:
+            row['Base Ranking'] = kw.rank_since_start if kw.rank_since_start and kw.rank_since_start > 0 else 100
+
+        # Fill in monthly ranking values
+        rank_values = {}
+        for md, ml in zip(month_dates, month_labels):
+            rank = _get_rank_for_date(kw.id, md)
+            if rank is not None and rank > 0:
+                rank_values[ml] = rank
+            else:
+                rank_values[ml] = 'NA'
+
+        for label in ordered_labels:
+            row[label] = rank_values.get(label, 'NA')
+
+        # MOM Change: most recent month rank vs previous month rank
+        if len(month_labels) >= 2:
+            curr = rank_values.get(month_labels[0], 'NA')
+            prev = rank_values.get(month_labels[1], 'NA')
+            if isinstance(curr, int) and isinstance(prev, int):
+                row['MOM Change'] = prev - curr  # positive = improved
+            else:
+                row['MOM Change'] = 'NA'
+        else:
+            row['MOM Change'] = 'NA'
+
+        rows.append(row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+    }
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def seo_report_sheet_data(request):
@@ -1997,44 +2605,34 @@ def seo_report_sheet_data(request):
                     report_entry.update(data)
 
             elif sheet.sheet_type == 'keyword_ranking':
-                # Build keyword ranking data from existing SeoKeywordRank
-                kw_metrics = sheet.metrics or ['keywords']
-                kws = SeoKeywordRank.objects.select_related('keyword').filter(
-                    domain_id=domain_id
-                ).order_by('keyword__keyword')[:500]
-
-                columns = ['Sr No', 'Keywords']
-                if 'average_volume' in kw_metrics:
-                    columns.append('Search Volume')
-                if 'landing_pages' in kw_metrics:
-                    columns.append('Ranking URL')
-                if 'base_ranking' in kw_metrics:
-                    columns.append('Base Rank')
-
-                rows = []
-                for idx, kw in enumerate(kws, 1):
-                    row = {'Sr No': idx, 'Keywords': kw.keyword.keyword if kw.keyword else ''}
-                    if 'average_volume' in kw_metrics:
-                        row['Search Volume'] = kw.search_volume or 0
-                    if 'landing_pages' in kw_metrics:
-                        row['Ranking URL'] = ''
-                    if 'base_ranking' in kw_metrics:
-                        row['Base Rank'] = kw.rank_now or '-'
-                    rows.append(row)
-
-                report_entry['columns'] = columns
-                report_entry['rows'] = rows
-                report_entry['total_rows'] = len(rows)
+                # Route to weekly or monthly keyword ranking report
+                if sheet.schedule == 'monthly':
+                    data = _fetch_keyword_ranking_monthly(domain_id, sheet)
+                else:
+                    data = _fetch_keyword_ranking_weekly(domain_id, sheet)
+                report_entry.update(data)
 
             elif sheet.sheet_type == 'domain_metrics':
-                report_entry['columns'] = ['Metric', 'Value']
-                report_entry['rows'] = [{'Metric': 'Domain Metrics', 'Value': 'Coming soon'}]
-                report_entry['total_rows'] = 1
+                data = _fetch_domain_metrics_data(domain_id, sheet)
+                report_entry.update(data)
 
-            elif sheet.sheet_type in ('gsc_overview', 'ga_overview', 'keyword_ranking_overview'):
-                report_entry['columns'] = ['Metric', 'Value']
-                report_entry['rows'] = [{'Metric': 'Overview', 'Value': 'Coming soon'}]
-                report_entry['total_rows'] = 1
+            elif sheet.sheet_type == 'gsc_overview':
+                if not gsc_integration:
+                    report_entry['error'] = 'Google Search Console not connected'
+                else:
+                    data = _fetch_gsc_overview_data(gsc_integration, sheet)
+                    report_entry.update(data)
+
+            elif sheet.sheet_type == 'ga_overview':
+                if not ga_integration:
+                    report_entry['error'] = 'Google Analytics not connected'
+                else:
+                    data = _fetch_ga_overview_data(ga_integration, sheet)
+                    report_entry.update(data)
+
+            elif sheet.sheet_type == 'keyword_ranking_overview':
+                data = _fetch_keyword_ranking_overview(domain_id, sheet)
+                report_entry.update(data)
 
             else:
                 report_entry['error'] = f'Unsupported report type: {sheet.sheet_type}'

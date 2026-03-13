@@ -27,7 +27,7 @@ const TABS: { key: TabKey; label: string }[] = [
 ];
 
 const WEEK_INTERVALS = [
-  "Past 2 weeks", "Past 3 weeks", "Past 4 weeks", "Past 5 weeks",
+  "Past 1 week", "Past 2 weeks", "Past 3 weeks", "Past 4 weeks", "Past 5 weeks",
   "Past 6 weeks", "Past 7 weeks", "Past 8 weeks", "Past 9 weeks",
   "Past 10 weeks", "Past 11 weeks", "Past 12 weeks",
 ];
@@ -134,7 +134,7 @@ const ConfigureSeoReport = () => {
     if (match) duration = parseInt(match[1]);
 
     switch (activeTab) {
-      case "gsc":
+      case "gsc": {
         if (!isGscConnected) {
           toast({ title: "Validation", description: "Connect Google Search Console to add GSC sheet.", variant: "destructive" });
           return;
@@ -147,9 +147,46 @@ const ConfigureSeoReport = () => {
           toast({ title: "Validation", description: "Please select the Metrics.", variant: "destructive" });
           return;
         }
-        sheetType = formState.gscTypes[0];
+        // RankMaxx creates one sheet per selected type.
+        // If both branded & non-branded are selected, merge into 'gsc_queries'.
+        const selectedTypes = [...formState.gscTypes];
+        const hasBranded = selectedTypes.includes("gsc_branded_queries");
+        const hasNonBranded = selectedTypes.includes("gsc_non_branded_queries");
+        const sheetTypes: string[] = [];
+        if (selectedTypes.includes("gsc_pages")) sheetTypes.push("gsc_pages");
+        if (hasBranded && hasNonBranded) {
+          sheetTypes.push("gsc_queries");
+        } else {
+          if (hasBranded) sheetTypes.push("gsc_branded_queries");
+          if (hasNonBranded) sheetTypes.push("gsc_non_branded_queries");
+        }
         metrics = formState.gscMetrics;
-        break;
+
+        // Create one sheet per resolved type
+        setLoading(true);
+        try {
+          for (const st of sheetTypes) {
+            await apiClient.addSeoReportSheet({
+              domain_id: selectedDomain.id,
+              sheet_name: formState.sheetName.trim(),
+              category: activeTab,
+              sheet_type: st,
+              metrics,
+              change_units: changeUnits,
+              schedule,
+              duration,
+              order_by: formState.orderBy,
+            });
+          }
+          toast({ title: "Success", description: `Report "${formState.sheetName}" added successfully.` });
+          navigate("/seo-reports");
+        } catch (err: any) {
+          toast({ title: "Error", description: err.message || "Failed to add report.", variant: "destructive" });
+        } finally {
+          setLoading(false);
+        }
+        return; // Early return — we handled submission above
+      }
 
       case "ga":
         if (!isGaConnected) {
@@ -160,12 +197,8 @@ const ConfigureSeoReport = () => {
         break;
 
       case "rank":
-        if (formState.rankMetrics.length < 2) {
-          toast({ title: "Validation", description: "Choose at least three keyword metrics.", variant: "destructive" });
-          return;
-        }
         sheetType = "keyword_ranking";
-        metrics = ["keywords", ...formState.rankMetrics];
+        metrics = formState.rankMetrics.length > 0 ? formState.rankMetrics : [];
         break;
 
       case "base":
@@ -178,6 +211,7 @@ const ConfigureSeoReport = () => {
           google_analytics: "ga_overview",
           google_search_console: "gsc_overview",
           keyword_ranking: "keyword_ranking_overview",
+          domain_metrics: "domain_metrics",
         };
         if (formState.summaryMetric === "google_analytics" && !isGaConnected) {
           toast({ title: "Validation", description: "Connect Google Analytics to add GA sheet.", variant: "destructive" });
@@ -289,36 +323,43 @@ const ConfigureSeoReport = () => {
             />
           </div>
 
-          {/* Tab-specific content */}
+          {/* Tab-specific content (non-overview tabs show metrics first) */}
           {activeTab === "gsc" && <GscForm formState={formState} toggleArrayItem={toggleArrayItem} />}
           {activeTab === "ga" && <GaForm formState={formState} setFormState={setFormState} />}
           {activeTab === "rank" && <RankForm formState={formState} toggleArrayItem={toggleArrayItem} />}
           {activeTab === "base" && <BaseForm />}
-          {activeTab === "overview" && <OverviewForm formState={formState} setFormState={setFormState} />}
 
           {/* Duration & Order By */}
           {activeTab !== "base" ? (
-            <DurationOrderSection formState={formState} setFormState={setFormState} isMonthly={isMonthly} />
+            <DurationOrderSection
+              formState={formState}
+              setFormState={setFormState}
+              isMonthly={isMonthly}
+              hideOrderBy={activeTab === "overview" && formState.summaryMetric === "keyword_ranking"}
+            />
           ) : (
             <BaseDurationSection formState={formState} setFormState={setFormState} />
           )}
+
+          {/* Summary tab: Metrics come AFTER Duration (matches RankMaxx layout) */}
+          {activeTab === "overview" && <OverviewForm formState={formState} setFormState={setFormState} />}
 
           {/* Comparison section */}
           {(activeTab === "gsc" || (activeTab === "ga" && formState.gaType === "Landing Pages") || activeTab === "base") && (
             <ComparisonSection formState={formState} toggleArrayItem={toggleArrayItem} />
           )}
-        </div>
-      </div>
 
-      {/* ── Fixed Footer ── */}
-      <div className="sticky bottom-0 bg-white border-t flex items-center justify-center gap-5 py-4 z-10">
-        <Button variant="outline" className="min-w-[130px]" onClick={() => navigate("/seo-reports")} disabled={loading}>
-          Cancel
-        </Button>
-        <Button className="min-w-[150px]" onClick={handleSubmit} disabled={loading}>
-          {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-          Add Report
-        </Button>
+          {/* Action buttons (inside form card, like RankMaxx) */}
+          <div className="flex items-center justify-center gap-5 pt-2 pb-1">
+            <Button variant="outline" className="min-w-[130px]" onClick={() => navigate("/seo-reports")} disabled={loading}>
+              Cancel
+            </Button>
+            <Button className="min-w-[150px]" onClick={handleSubmit} disabled={loading}>
+              {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Add Report
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -426,8 +467,6 @@ function BaseForm() {
         {[
           "Domain Authority (MOZ)", "Domain Rating (AHREF)",
           "Number of Backlinks (AHREF)", "Referring Domains (AHREF)",
-          "Mobile Speed", "Desktop Speed",
-          "Core Web Vital (Mobile)", "Mobile Friendliness",
         ].map((label) => (
           <label key={label} className="flex items-center gap-2 cursor-not-allowed opacity-70">
             <Checkbox checked={true} disabled />
@@ -444,11 +483,12 @@ function BaseForm() {
 function OverviewForm({ formState, setFormState }: { formState: any; setFormState: React.Dispatch<React.SetStateAction<any>> }) {
   return (
     <FormSection title="Metrics">
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         {[
           { value: "google_analytics", label: "Google Analytics" },
           { value: "google_search_console", label: "Google Search Console" },
           { value: "keyword_ranking", label: "Keyword Ranking" },
+          { value: "domain_metrics", label: "Domain Metrics" },
         ].map((item) => (
           <label key={item.value} className="flex items-center gap-2 cursor-pointer">
             <input
@@ -469,7 +509,7 @@ function OverviewForm({ formState, setFormState }: { formState: any; setFormStat
 
 // ─── Duration & Order By ─────────────────────────────────────────────────────
 
-function DurationOrderSection({ formState, setFormState, isMonthly }: { formState: any; setFormState: React.Dispatch<React.SetStateAction<any>>; isMonthly: boolean }) {
+function DurationOrderSection({ formState, setFormState, isMonthly, hideOrderBy = false }: { formState: any; setFormState: React.Dispatch<React.SetStateAction<any>>; isMonthly: boolean; hideOrderBy?: boolean }) {
   return (
     <div className="bg-white rounded-lg p-5">
       <div className="flex flex-wrap gap-12">
@@ -503,20 +543,22 @@ function DurationOrderSection({ formState, setFormState, isMonthly }: { formStat
             )}
           </div>
         </div>
-        <div>
-          <h3 className="text-sm font-semibold mb-3 pb-2 border-b">Order By</h3>
-          <Label className="text-xs text-muted-foreground">
-            Date Sort <span className="text-destructive">*</span>
-          </Label>
-          <div className="mt-2">
-            <Select value={formState.orderBy} onValueChange={(v) => setFormState((p: any) => ({ ...p, orderBy: v }))}>
-              <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {ORDER_BY_VALS.map((v) => (<SelectItem key={v} value={v}>{v}</SelectItem>))}
-              </SelectContent>
-            </Select>
+        {!hideOrderBy && (
+          <div>
+            <h3 className="text-sm font-semibold mb-3 pb-2 border-b">Order By</h3>
+            <Label className="text-xs text-muted-foreground">
+              Date Sort <span className="text-destructive">*</span>
+            </Label>
+            <div className="mt-2">
+              <Select value={formState.orderBy} onValueChange={(v) => setFormState((p: any) => ({ ...p, orderBy: v }))}>
+                <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ORDER_BY_VALS.map((v) => (<SelectItem key={v} value={v}>{v}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

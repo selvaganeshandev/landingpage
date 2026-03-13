@@ -283,6 +283,7 @@ function ReportWidget({
   const columns: string[] = reportData?.columns || [];
   const allRows: any[] = reportData?.rows || [];
   const totalRows = allRows.length;
+  const hasSrNo = columns.includes("Sr No");
   const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
   const paginatedRows = allRows.slice(
     page * rowsPerPage,
@@ -509,7 +510,7 @@ function ReportWidget({
                             col === "Sr No"
                               ? 0
                               : isDimCol
-                                ? 60
+                                ? (hasSrNo ? 60 : 0)
                                 : undefined,
                           backgroundColor: "#f6f9fe",
                           zIndex: isDimCol || col === "Sr No" ? 2 : undefined,
@@ -569,7 +570,7 @@ function ReportWidget({
                                 col === "Sr No"
                                   ? 0
                                   : isDimCol
-                                    ? 60
+                                    ? (hasSrNo ? 60 : 0)
                                     : undefined,
                               backgroundColor: bg,
                               zIndex:

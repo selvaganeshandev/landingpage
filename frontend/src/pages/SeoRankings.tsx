@@ -456,20 +456,27 @@ const SeoRankings = () => {
     }
   };
 
-  const handleAddTag = () => {
-    const tag = tagInput.trim().toLowerCase();
-    if (!tag) return;
+  // Validate & commit a single tag string into pendingTags.
+  // Returns the updated pendingTags array (needed by handleSaveTags to
+  // capture the value synchronously before the async save).
+  const commitTag = (raw: string, currentTags: string[]): string[] => {
+    const tag = raw.trim().toLowerCase();
+    if (!tag) return currentTags;
     if (!/^[a-zA-Z0-9\s-]+$/.test(tag)) {
       toast({ title: "Invalid tag", description: "Tags can only contain letters, numbers, spaces and hyphens" });
-      return;
+      return currentTags;
     }
-    if (pendingTags.length >= 20) {
+    if (currentTags.length >= 20) {
       toast({ title: "Limit reached", description: "Maximum 20 tags per keyword" });
-      return;
+      return currentTags;
     }
-    if (!pendingTags.includes(tag)) {
-      setPendingTags(prev => [...prev, tag]);
-    }
+    if (currentTags.includes(tag)) return currentTags;
+    return [...currentTags, tag];
+  };
+
+  const handleAddTag = () => {
+    const updated = commitTag(tagInput, pendingTags);
+    if (updated !== pendingTags) setPendingTags(updated);
     setTagInput("");
   };
 
@@ -479,61 +486,56 @@ const SeoRankings = () => {
 
   const handleSaveTags = async () => {
     setTagLoading(true);
+
+    // Auto-commit whatever is still in the input field so the user
+    // doesn't lose typed text when clicking "Save Tags" without
+    // pressing Enter first (mirrors RankMaxx handleInputBlur behaviour).
+    let finalTags = [...pendingTags];
+    if (tagInput.trim()) {
+      finalTags = commitTag(tagInput, finalTags);
+      setTagInput("");
+      setPendingTags(finalTags);
+    }
+
+    const idsToSave = [...tagKeywordIds];
+    const tagsToSave = [...finalTags];
+    const bulkMode: 'merge' | 'replace' =
+      idsToSave.length > 1 ? 'merge' : 'replace';
+
     try {
-      // when multiple keywords are selected we only want to *add* the tags,
-      // not wipe out each keyword's existing values.  the API supports two
-      // modes – ``merge`` adds to the current list, ``replace`` overwrites.
-      // keep the old behaviour for single‑item edits (inline tag editor) but
-      // default to merge for bulk operations.
-      const bulkMode: 'merge' | 'replace' =
-        tagKeywordIds.length > 1 ? 'merge' : 'replace';
-
-      console.log('[Tag Save] Sending:', { ids: tagKeywordIds, tags: pendingTags, mode: bulkMode });
-      const tagResult = await apiClient.updateSeoKeywordTags({
-        ids: tagKeywordIds,
-        tags: pendingTags,
+      await apiClient.updateSeoKeywordTags({
+        ids: idsToSave,
+        tags: tagsToSave,
         mode: bulkMode,
-      }) as { status: string; message: string; updated_count: number };
-      console.log('[Tag Save] Response:', tagResult);
-
-      if (!tagResult || tagResult.updated_count === 0) {
-        toast({ title: "Warning", description: "No keywords were updated. The server couldn't find the selected keywords.", variant: "destructive" });
-        setTagDialogOpen(false);
-        setTagKeywordIds([]);
-        return;
-      }
-
-      // Update local state according to the mode we used.  ``merge`` has to
-      // preserve whatever tags each keyword already had, ``replace`` simply
-      // mirrors the pending list.
-      const savedCount = tagKeywordIds.length;
-      const savedTagKeywordIds = [...tagKeywordIds];
-      const savedPendingTags = [...pendingTags];
-      console.log('[Tag Save] Updating local state for ids:', savedTagKeywordIds, 'with tags:', savedPendingTags, 'mode:', bulkMode);
-
-      setSeoKeywords(prev => {
-        const updated = prev.map(kw => {
-          if (!savedTagKeywordIds.includes(kw.id)) return kw;
-          if (bulkMode === 'replace') {
-            console.log('[Tag Save] Replacing tags for kw.id=', kw.id, 'old:', kw.tags, 'new:', savedPendingTags);
-            return { ...kw, tags: [...savedPendingTags] };
-          }
-          // merge: union of existing tags and pendingTags (deduped)
-          const existing = kw.tags || [];
-          const union = Array.from(new Set([...existing, ...savedPendingTags]));
-          console.log('[Tag Save] Merging tags for kw.id=', kw.id, 'old:', kw.tags, 'new:', union);
-          return { ...kw, tags: union };
-        });
-        console.log('[Tag Save] State updated. Sample:', updated.find(k => savedTagKeywordIds.includes(k.id))?.tags);
-        return updated;
       });
 
       setTagDialogOpen(false);
       setTagKeywordIds([]);
-      toast({ title: "Tags updated", description: `Tags applied to ${savedCount} keyword(s)` });
-    } catch (err: any) {
-      console.error('[Tag Save] Error:', err);
-      toast({ title: "Error", description: err?.message || "Failed to update tags", variant: "destructive" });
+      toast({ title: "Tags updated", description: `Tags applied to ${idsToSave.length} keyword(s)` });
+
+      // Re-fetch keywords from backend so the UI is always in sync with the
+      // database (mirrors RankMaxx grid-view behaviour which does a full
+      // tableUpdate after every tag save).
+      if (activeDomainId) {
+        try {
+          const keywordsRes = await apiClient.getSeoKeywords({ domain_id: activeDomainId }) as SeoKeyword[];
+          setSeoKeywords((keywordsRes || []).map(mapKeywordForUI));
+        } catch {
+          // Fall back to optimistic local update if re-fetch fails
+          setSeoKeywords(prev =>
+            prev.map(kw => {
+              if (!idsToSave.includes(kw.id)) return kw;
+              if (bulkMode === 'replace') {
+                return { ...kw, tags: [...tagsToSave] };
+              }
+              const existing = kw.tags || [];
+              return { ...kw, tags: Array.from(new Set([...existing, ...tagsToSave])) };
+            })
+          );
+        }
+      }
+    } catch {
+      toast({ title: "Error", description: "Failed to update tags", variant: "destructive" });
     } finally {
       setTagLoading(false);
     }
@@ -1711,6 +1713,7 @@ const SeoRankings = () => {
                         </TableHead>
                         <TableHead className="text-xs font-semibold py-1.5">KEYWORD</TableHead>
                         <TableHead className="text-center text-xs font-semibold py-1.5 w-14">RANK</TableHead>
+                        <TableHead className="text-center text-xs font-semibold py-1.5 w-14">TAGS</TableHead>
                         <TableHead className="w-8 py-1.5"></TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1766,6 +1769,42 @@ const SeoRankings = () => {
                               <span className="text-muted-foreground text-xs">{keyword.rankDisplay}</span>
                             ) : (
                               <span className="font-semibold text-xs">{keyword.rank}</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center py-1.5">
+                            {keyword.tags.length > 0 ? (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="inline-flex items-center gap-1 cursor-pointer hover:text-primary">
+                                      {keyword.tags.length}
+                                      <Tag className="h-3 w-3 text-primary" />
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="p-2 max-w-xs">
+                                    <div className="flex flex-wrap gap-1 items-center">
+                                      {keyword.tags.map((tag: string) => (
+                                        <span key={tag} className="inline-block bg-muted text-foreground text-xs rounded px-1.5 py-0.5 capitalize">
+                                          {tag}
+                                        </span>
+                                      ))}
+                                      <span
+                                        className="inline-block bg-primary/20 text-primary text-xs rounded px-1.5 py-0.5 cursor-pointer hover:bg-primary/30 font-medium"
+                                        onClick={() => handleInlineTagOpen(keyword.id)}
+                                      >
+                                        ADD
+                                      </span>
+                                    </div>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : (
+                              <span
+                                className="text-xs text-primary font-medium cursor-pointer hover:underline"
+                                onClick={() => handleInlineTagOpen(keyword.id)}
+                              >
+                                ADD
+                              </span>
                             )}
                           </TableCell>
                           <TableCell className="py-1.5 w-8">
@@ -1890,7 +1929,10 @@ const SeoRankings = () => {
       </AlertDialog>
 
       {/* Tag Management Dialog */}
-      <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
+      <Dialog open={tagDialogOpen} onOpenChange={(open) => {
+        setTagDialogOpen(open);
+        if (!open) { setTagKeywordIds([]); setPendingTags([]); setTagInput(""); }
+      }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Manage Tags</DialogTitle>
@@ -1912,6 +1954,7 @@ const SeoRankings = () => {
                     handleAddTag();
                   }
                 }}
+                onBlur={handleAddTag}
                 className="flex-1"
               />
             </div>
