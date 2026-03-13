@@ -1754,6 +1754,38 @@ export const apiClient = {
 
   getSeoCompetitorKeywords: (projectId: number) =>
     apiRequest(`/seo/competitors/${projectId}/keywords/`),
+
+  // SEO Report Sheets
+  getSeoReportSheets: (domainId: number) =>
+    apiRequest(`/seo/report-sheets/?domain_id=${domainId}`),
+
+  addSeoReportSheet: (data: {
+    domain_id: number;
+    sheet_name: string;
+    category: string;
+    sheet_type: string;
+    metrics?: string[];
+    change_units?: string[];
+    schedule?: string;
+    duration?: number;
+    order_by?: string;
+  }) =>
+    apiRequest('/seo/report-sheets/add/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  deleteSeoReportSheet: (id: number) =>
+    apiRequest(`/seo/report-sheets/${id}/delete/`, { method: 'DELETE' }),
+
+  updateSeoReportSheet: (id: number, data: Record<string, any>) =>
+    apiRequest(`/seo/report-sheets/${id}/update/`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  getSeoReportSheetData: (domainId: number) =>
+    apiRequest(`/seo/report-sheets/data/?domain_id=${domainId}`),
 };
 
 // Also export as 'api' for flexibility

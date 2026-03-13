@@ -75,6 +75,8 @@ import {
   Plus,
   SearchX,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 // Types matching the backend SeoKeywordRankSerializer
@@ -195,15 +197,22 @@ const SeoRankings = () => {
   const [refreshTotal, setRefreshTotal] = useState(0);
   const [seoKeywords, setSeoKeywords] = useState<ReturnType<typeof mapKeywordForUI>[]>([]);
   const [overview, setOverview] = useState<OverviewData | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [gridTagPages, setGridTagPages] = useState<Record<string, number>>({});
+  const KEYWORDS_PER_PAGE = 10;
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeDomainRef = useRef<string>("");
 
-  // Tag dialog state
+  // Tag dialog state — tagKeywordIds tracks which keywords the tag dialog
+  // operates on, kept separate from the table-checkbox selectedKeywords so
+  // that opening the inline "ADD" tag editor doesn't clear the user's row
+  // selection (mirrors how RankMaxx passes IDs directly to ManageTagFullPage).
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [pendingTags, setPendingTags] = useState<string[]>([]);
   const [allDomainTags, setAllDomainTags] = useState<string[]>([]);
   const [tagLoading, setTagLoading] = useState(false);
+  const [tagKeywordIds, setTagKeywordIds] = useState<number[]>([]);
 
   // Delete dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -430,12 +439,14 @@ const SeoRankings = () => {
       toast({ title: "No selection", description: "Select at least one keyword to add tags" });
       return;
     }
+    const ids = [...selectedKeywords];
+    setTagKeywordIds(ids);
     setTagDialogOpen(true);
     setPendingTags([]);
     setTagInput("");
     // Fetch existing tags for the domain
     try {
-      const res = await apiClient.getSeoKeywordTags(activeDomainId, selectedKeywords) as {
+      const res = await apiClient.getSeoKeywordTags(activeDomainId, ids) as {
         all_tags: string[]; common_tags: string[];
       };
       setAllDomainTags(res.all_tags || []);
@@ -445,20 +456,27 @@ const SeoRankings = () => {
     }
   };
 
-  const handleAddTag = () => {
-    const tag = tagInput.trim().toLowerCase();
-    if (!tag) return;
+  // Validate & commit a single tag string into pendingTags.
+  // Returns the updated pendingTags array (needed by handleSaveTags to
+  // capture the value synchronously before the async save).
+  const commitTag = (raw: string, currentTags: string[]): string[] => {
+    const tag = raw.trim().toLowerCase();
+    if (!tag) return currentTags;
     if (!/^[a-zA-Z0-9\s-]+$/.test(tag)) {
       toast({ title: "Invalid tag", description: "Tags can only contain letters, numbers, spaces and hyphens" });
-      return;
+      return currentTags;
     }
-    if (pendingTags.length >= 20) {
+    if (currentTags.length >= 20) {
       toast({ title: "Limit reached", description: "Maximum 20 tags per keyword" });
-      return;
+      return currentTags;
     }
-    if (!pendingTags.includes(tag)) {
-      setPendingTags(prev => [...prev, tag]);
-    }
+    if (currentTags.includes(tag)) return currentTags;
+    return [...currentTags, tag];
+  };
+
+  const handleAddTag = () => {
+    const updated = commitTag(tagInput, pendingTags);
+    if (updated !== pendingTags) setPendingTags(updated);
     setTagInput("");
   };
 
@@ -468,40 +486,54 @@ const SeoRankings = () => {
 
   const handleSaveTags = async () => {
     setTagLoading(true);
-    try {
-      // when multiple keywords are selected we only want to *add* the tags,
-      // not wipe out each keyword's existing values.  the API supports two
-      // modes – ``merge`` adds to the current list, ``replace`` overwrites.
-      // keep the old behaviour for single‑item edits (inline tag editor) but
-      // default to merge for bulk operations.
-      const bulkMode: 'merge' | 'replace' =
-        selectedKeywords.length > 1 ? 'merge' : 'replace';
 
+    // Auto-commit whatever is still in the input field so the user
+    // doesn't lose typed text when clicking "Save Tags" without
+    // pressing Enter first (mirrors RankMaxx handleInputBlur behaviour).
+    let finalTags = [...pendingTags];
+    if (tagInput.trim()) {
+      finalTags = commitTag(tagInput, finalTags);
+      setTagInput("");
+      setPendingTags(finalTags);
+    }
+
+    const idsToSave = [...tagKeywordIds];
+    const tagsToSave = [...finalTags];
+    const bulkMode: 'merge' | 'replace' =
+      idsToSave.length > 1 ? 'merge' : 'replace';
+
+    try {
       await apiClient.updateSeoKeywordTags({
-        ids: selectedKeywords,
-        tags: pendingTags,
+        ids: idsToSave,
+        tags: tagsToSave,
         mode: bulkMode,
       });
 
-      // Update local state according to the mode we used.  ``merge`` has to
-      // preserve whatever tags each keyword already had, ``replace`` simply
-      // mirrors the pending list.
-      setSeoKeywords(prev =>
-        prev.map(kw => {
-          if (!selectedKeywords.includes(kw.id)) return kw;
-          if (bulkMode === 'replace') {
-            return { ...kw, tags: pendingTags };
-          }
-          // merge: union of existing tags and pendingTags (deduped)
-          const existing = kw.tags || [];
-          const union = Array.from(new Set([...existing, ...pendingTags]));
-          return { ...kw, tags: union };
-        })
-      );
-
       setTagDialogOpen(false);
-      setSelectedKeywords([]);
-      toast({ title: "Tags updated", description: `Tags applied to ${selectedKeywords.length} keyword(s)` });
+      setTagKeywordIds([]);
+      toast({ title: "Tags updated", description: `Tags applied to ${idsToSave.length} keyword(s)` });
+
+      // Re-fetch keywords from backend so the UI is always in sync with the
+      // database (mirrors RankMaxx grid-view behaviour which does a full
+      // tableUpdate after every tag save).
+      if (activeDomainId) {
+        try {
+          const keywordsRes = await apiClient.getSeoKeywords({ domain_id: activeDomainId }) as SeoKeyword[];
+          setSeoKeywords((keywordsRes || []).map(mapKeywordForUI));
+        } catch {
+          // Fall back to optimistic local update if re-fetch fails
+          setSeoKeywords(prev =>
+            prev.map(kw => {
+              if (!idsToSave.includes(kw.id)) return kw;
+              if (bulkMode === 'replace') {
+                return { ...kw, tags: [...tagsToSave] };
+              }
+              const existing = kw.tags || [];
+              return { ...kw, tags: Array.from(new Set([...existing, ...tagsToSave])) };
+            })
+          );
+        }
+      }
     } catch {
       toast({ title: "Error", description: "Failed to update tags", variant: "destructive" });
     } finally {
@@ -511,7 +543,7 @@ const SeoRankings = () => {
 
   // ---------- Inline Tag Add (from TAGS column "ADD" click) ----------
   const handleInlineTagOpen = async (kwId: number) => {
-    setSelectedKeywords([kwId]);
+    setTagKeywordIds([kwId]);
     setTagDialogOpen(true);
     setPendingTags([]);
     setTagInput("");
@@ -532,7 +564,7 @@ const SeoRankings = () => {
   // ---------- Group Tag Open (Grid View group card header) ----------
   const handleGroupTagOpen = async (kwIds: number[]) => {
     if (kwIds.length === 0) return;
-    setSelectedKeywords(kwIds);
+    setTagKeywordIds(kwIds);
     setTagDialogOpen(true);
     setPendingTags([]);
     setTagInput("");
@@ -551,6 +583,19 @@ const SeoRankings = () => {
   const filteredKeywords = seoKeywords.filter(kw =>
     kw.keyword.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Pagination
+  const totalPages = Math.ceil(filteredKeywords.length / KEYWORDS_PER_PAGE);
+  const paginatedKeywords = filteredKeywords.slice(
+    (currentPage - 1) * KEYWORDS_PER_PAGE,
+    currentPage * KEYWORDS_PER_PAGE
+  );
+
+  // Reset page when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+    setGridTagPages({});
+  }, [searchQuery]);
 
   // Column visibility state
   const [visibleColumns, setVisibleColumns] = useState<ColumnVisibility>({
@@ -714,9 +759,9 @@ const SeoRankings = () => {
   };
 
   // Group keywords by tags for grid view
-  const getTagGroups = () => {
+  const getTagGroups = (keywordsList: typeof filteredKeywords = filteredKeywords) => {
     const groups: Record<string, typeof filteredKeywords> = {};
-    filteredKeywords.forEach((kw) => {
+    keywordsList.forEach((kw) => {
       if (kw.tags.length === 0) {
         if (!groups["No-tags"]) groups["No-tags"] = [];
         groups["No-tags"].push(kw);
@@ -1297,7 +1342,7 @@ const SeoRankings = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredKeywords.length === 0 && (
+                  {paginatedKeywords.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={14} className="py-16 text-center">
                         <div className="flex flex-col items-center gap-3">
@@ -1314,7 +1359,7 @@ const SeoRankings = () => {
                       </TableCell>
                     </TableRow>
                   )}
-                  {filteredKeywords.map((keyword) => (
+                  {paginatedKeywords.map((keyword) => (
                     <TableRow key={keyword.id} className="hover:bg-muted/30">
                       <TableCell className="py-1.5">
                         <Checkbox
@@ -1466,13 +1511,34 @@ const SeoRankings = () => {
                       {visibleColumns.tags && (
                         <TableCell className="text-center py-1.5 text-sm">
                           {keyword.tags.length > 0 ? (
-                            <span
-                              className="inline-flex items-center gap-1 cursor-pointer hover:text-primary"
-                              onClick={() => handleInlineTagOpen(keyword.id)}
-                            >
-                              {keyword.tags.length}
-                              <Tag className="h-3 w-3 text-primary" />
-                            </span>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span
+                                    className="inline-flex items-center gap-1 cursor-pointer hover:text-primary"
+                                    onClick={() => handleInlineTagOpen(keyword.id)}
+                                  >
+                                    {keyword.tags.length}
+                                    <Tag className="h-3 w-3 text-primary" />
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="p-2 max-w-xs">
+                                  <div className="flex flex-wrap gap-1 items-center">
+                                    {keyword.tags.map((tag: string) => (
+                                      <span key={tag} className="inline-block bg-muted text-foreground text-xs rounded px-1.5 py-0.5 capitalize">
+                                        {tag}
+                                      </span>
+                                    ))}
+                                    <span
+                                      className="inline-block bg-primary/20 text-primary text-xs rounded px-1.5 py-0.5 cursor-pointer hover:bg-primary/30 font-medium"
+                                      onClick={() => handleInlineTagOpen(keyword.id)}
+                                    >
+                                      ADD
+                                    </span>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                           ) : (
                             <span
                               className="text-xs text-primary font-medium cursor-pointer hover:underline"
@@ -1495,6 +1561,70 @@ const SeoRankings = () => {
                   ))}
                 </TableBody>
               </Table>
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+                  <p className="text-sm text-muted-foreground">
+                    Showing {(currentPage - 1) * KEYWORDS_PER_PAGE + 1}-{Math.min(currentPage * KEYWORDS_PER_PAGE, filteredKeywords.length)} of {filteredKeywords.length} keywords
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(1)}
+                      disabled={currentPage === 1}
+                    >
+                      First
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter(page => page === 1 || page === totalPages || Math.abs(page - currentPage) <= 2)
+                      .reduce<(number | string)[]>((acc, page, idx, arr) => {
+                        if (idx > 0 && page - (arr[idx - 1] as number) > 1) acc.push('...');
+                        acc.push(page);
+                        return acc;
+                      }, [])
+                      .map((item, idx) =>
+                        item === '...' ? (
+                          <span key={`ellipsis-${idx}`} className="px-2 text-muted-foreground">...</span>
+                        ) : (
+                          <Button
+                            key={item}
+                            variant={currentPage === item ? "default" : "outline"}
+                            size="sm"
+                            className="min-w-[32px]"
+                            onClick={() => setCurrentPage(item as number)}
+                          >
+                            {item}
+                          </Button>
+                        )
+                      )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(totalPages)}
+                      disabled={currentPage === totalPages}
+                    >
+                      Last
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         ) : (
@@ -1515,7 +1645,20 @@ const SeoRankings = () => {
                 </div>
               </Card>
             )}
-            {Object.entries(getTagGroups()).map(([tagName, keywords]) => (
+            {Object.entries(getTagGroups()).map(([tagName, keywords]) => {
+              const tagPage = gridTagPages[tagName] || 1;
+              const tagTotalPages = Math.ceil(keywords.length / KEYWORDS_PER_PAGE);
+              const tagPaginatedKws = keywords.slice(
+                (tagPage - 1) * KEYWORDS_PER_PAGE,
+                tagPage * KEYWORDS_PER_PAGE
+              );
+              const setTagPage = (page: number | ((p: number) => number)) => {
+                setGridTagPages(prev => ({
+                  ...prev,
+                  [tagName]: typeof page === 'function' ? page(prev[tagName] || 1) : page,
+                }));
+              };
+              return (
               <Card key={tagName} className="shadow-elegant border border-border backdrop-blur-sm bg-card/80 overflow-hidden">
                 {/* Grid Card Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/20">
@@ -1535,7 +1678,13 @@ const SeoRankings = () => {
                             variant="outline"
                             size="icon"
                             className="h-7 w-7"
-                            onClick={() => handleGroupTagOpen(keywords.map(kw => kw.id))}
+                            onClick={() => {
+                              // Use selected keywords within this group if any are checked,
+                              // otherwise fall back to all keywords in the group (like RankMaxx).
+                              const groupIds = keywords.map(kw => kw.id);
+                              const selectedInGroup = groupIds.filter(id => selectedKeywords.includes(id));
+                              handleGroupTagOpen(selectedInGroup.length > 0 ? selectedInGroup : groupIds);
+                            }}
                           >
                             <Tag className="h-3.5 w-3.5" />
                           </Button>
@@ -1564,11 +1713,12 @@ const SeoRankings = () => {
                         </TableHead>
                         <TableHead className="text-xs font-semibold py-1.5">KEYWORD</TableHead>
                         <TableHead className="text-center text-xs font-semibold py-1.5 w-14">RANK</TableHead>
+                        <TableHead className="text-center text-xs font-semibold py-1.5 w-14">TAGS</TableHead>
                         <TableHead className="w-8 py-1.5"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {keywords.map((keyword) => (
+                      {tagPaginatedKws.map((keyword) => (
                         <TableRow key={keyword.id} className="hover:bg-muted/30">
                           <TableCell className="py-1.5">
                             <Checkbox
@@ -1621,6 +1771,42 @@ const SeoRankings = () => {
                               <span className="font-semibold text-xs">{keyword.rank}</span>
                             )}
                           </TableCell>
+                          <TableCell className="text-center py-1.5">
+                            {keyword.tags.length > 0 ? (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="inline-flex items-center gap-1 cursor-pointer hover:text-primary">
+                                      {keyword.tags.length}
+                                      <Tag className="h-3 w-3 text-primary" />
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="p-2 max-w-xs">
+                                    <div className="flex flex-wrap gap-1 items-center">
+                                      {keyword.tags.map((tag: string) => (
+                                        <span key={tag} className="inline-block bg-muted text-foreground text-xs rounded px-1.5 py-0.5 capitalize">
+                                          {tag}
+                                        </span>
+                                      ))}
+                                      <span
+                                        className="inline-block bg-primary/20 text-primary text-xs rounded px-1.5 py-0.5 cursor-pointer hover:bg-primary/30 font-medium"
+                                        onClick={() => handleInlineTagOpen(keyword.id)}
+                                      >
+                                        ADD
+                                      </span>
+                                    </div>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : (
+                              <span
+                                className="text-xs text-primary font-medium cursor-pointer hover:underline"
+                                onClick={() => handleInlineTagOpen(keyword.id)}
+                              >
+                                ADD
+                              </span>
+                            )}
+                          </TableCell>
                           <TableCell className="py-1.5 w-8">
                             <Button
                               variant="ghost"
@@ -1635,9 +1821,49 @@ const SeoRankings = () => {
                       ))}
                     </TableBody>
                   </Table>
+                  {/* Per-tag pagination */}
+                  {tagTotalPages > 1 && (
+                    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-muted/10">
+                      <p className="text-xs text-muted-foreground">
+                        {(tagPage - 1) * KEYWORDS_PER_PAGE + 1}-{Math.min(tagPage * KEYWORDS_PER_PAGE, keywords.length)} of {keywords.length}
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => setTagPage(p => Math.max(1, p - 1))}
+                          disabled={tagPage === 1}
+                        >
+                          <ChevronLeft className="h-3 w-3" />
+                        </Button>
+                        {Array.from({ length: tagTotalPages }, (_, i) => i + 1).map(p => (
+                          <Button
+                            key={p}
+                            variant={tagPage === p ? "default" : "outline"}
+                            size="sm"
+                            className="h-6 w-6 px-0 text-xs"
+                            onClick={() => setTagPage(p)}
+                          >
+                            {p}
+                          </Button>
+                        ))}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => setTagPage(p => Math.min(tagTotalPages, p + 1))}
+                          disabled={tagPage === tagTotalPages}
+                        >
+                          <ChevronRight className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -1703,12 +1929,15 @@ const SeoRankings = () => {
       </AlertDialog>
 
       {/* Tag Management Dialog */}
-      <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
+      <Dialog open={tagDialogOpen} onOpenChange={(open) => {
+        setTagDialogOpen(open);
+        if (!open) { setTagKeywordIds([]); setPendingTags([]); setTagInput(""); }
+      }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Manage Tags</DialogTitle>
             <DialogDescription>
-              You have selected {selectedKeywords.length} keyword(s). Add or remove tags below.
+              You have selected {tagKeywordIds.length} keyword(s). Add or remove tags below.
             </DialogDescription>
           </DialogHeader>
 
@@ -1725,6 +1954,7 @@ const SeoRankings = () => {
                     handleAddTag();
                   }
                 }}
+                onBlur={handleAddTag}
                 className="flex-1"
               />
             </div>

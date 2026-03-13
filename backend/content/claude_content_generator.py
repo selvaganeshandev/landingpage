@@ -705,14 +705,61 @@ Return ONLY the JSON array, nothing else."""
             outline_text = response.content[0].text.strip()
 
             # Clean up the response if it has markdown code blocks
-            if outline_text.startswith('```'):
-                outline_text = outline_text.split('```')[1]
-                if outline_text.startswith('json'):
-                    outline_text = outline_text[4:]
-                outline_text = outline_text.strip()
+            if '```' in outline_text:
+                parts = outline_text.split('```')
+                for part in parts[1:]:
+                    cleaned = part.strip()
+                    if cleaned.startswith('json'):
+                        cleaned = cleaned[4:].strip()
+                    if cleaned.startswith('['):
+                        outline_text = cleaned
+                        break
+
+            # Extract JSON array if there's surrounding text
+            outline_text = outline_text.strip()
+            if not outline_text.startswith('['):
+                start_idx = outline_text.find('[')
+                if start_idx != -1:
+                    outline_text = outline_text[start_idx:]
+            if not outline_text.endswith(']'):
+                end_idx = outline_text.rfind(']')
+                if end_idx != -1:
+                    outline_text = outline_text[:end_idx + 1]
+
+            # Remove trailing commas before ] or } (common LLM JSON error)
+            outline_text = re.sub(r',\s*([}\]])', r'\1', outline_text)
 
             # Parse the JSON
-            outline_sections = json.loads(outline_text)
+            try:
+                outline_sections = json.loads(outline_text)
+            except json.JSONDecodeError:
+                # Retry: ask Claude to fix the malformed JSON
+                fix_response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=2048,
+                    temperature=0,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"The following JSON is malformed. Fix it and return ONLY valid JSON, nothing else:\n\n{outline_text}"
+                        }
+                    ]
+                )
+                fixed_text = fix_response.content[0].text.strip()
+                if '```' in fixed_text:
+                    parts = fixed_text.split('```')
+                    for part in parts[1:]:
+                        cleaned = part.strip()
+                        if cleaned.startswith('json'):
+                            cleaned = cleaned[4:].strip()
+                        if cleaned.startswith('[') or cleaned.startswith('{'):
+                            fixed_text = cleaned
+                            break
+                start_idx = fixed_text.find('[')
+                end_idx = fixed_text.rfind(']')
+                if start_idx != -1 and end_idx != -1:
+                    fixed_text = fixed_text[start_idx:end_idx + 1]
+                outline_sections = json.loads(fixed_text)
 
             generation_time = time.time() - start_time
 

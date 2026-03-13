@@ -68,10 +68,29 @@ def domain_list(request):
                 domain__organisation=request.user.organisation
             ).values_list('domain_id', flat=True)
             domains = Domain.objects.filter(id__in=domain_ids)
-        
+
+        # Optimize queries: select_related for FK, prefetch_related for reverse FK
+        domains = domains.select_related('organisation').prefetch_related('health_checks')
+
+        # Pagination support
+        page = request.query_params.get('page')
+        page_size = request.query_params.get('page_size')
+
+        total_count = domains.count()
+
+        if page and page_size:
+            try:
+                page = int(page)
+                page_size = int(page_size)
+                offset = (page - 1) * page_size
+                domains = domains[offset:offset + page_size]
+            except (ValueError, TypeError):
+                pass
+
         serializer = DomainSerializer(domains, many=True)
         return Response({
-            'domains': serializer.data
+            'domains': serializer.data,
+            'total_count': total_count,
         })
     
     elif request.method == 'POST':

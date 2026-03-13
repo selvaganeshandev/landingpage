@@ -168,6 +168,13 @@ export default function OrganizationSettings() {
   });
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
 
+  // Pagination state for domains
+  const [domainPage, setDomainPage] = useState(1);
+  const [domainTotalCount, setDomainTotalCount] = useState(0);
+  const [isLoadingMoreDomains, setIsLoadingMoreDomains] = useState(false);
+  const [domainSearchQuery, setDomainSearchQuery] = useState("");
+  const DOMAINS_PAGE_SIZE = 20;
+
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdatingOrg, setIsUpdatingOrg] = useState(false);
@@ -193,6 +200,11 @@ export default function OrganizationSettings() {
   const [newKeywordsList, setNewKeywordsList] = useState<string[]>([]);
   const [isAddingKeywords, setIsAddingKeywords] = useState(false);
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
+
+  // Team members search and pagination
+  const [teamSearchQuery, setTeamSearchQuery] = useState("");
+  const TEAM_PAGE_SIZE = 20;
+  const [teamVisibleCount, setTeamVisibleCount] = useState(TEAM_PAGE_SIZE);
 
   // Project Access Manager states
   const [projectAccessDialogOpen, setProjectAccessDialogOpen] = useState(false);
@@ -233,8 +245,16 @@ export default function OrganizationSettings() {
 
     if (!hasProcessingDomains) return;
 
-    const interval = setInterval(() => {
-      loadDomains();
+    const interval = setInterval(async () => {
+      // Reload all currently loaded pages during polling
+      try {
+        const totalPages = domainPage;
+        const data = await apiClient.getDomains({ page: '1', page_size: String(totalPages * DOMAINS_PAGE_SIZE) });
+        setDomains(data.domains);
+        setDomainTotalCount(data.total_count ?? data.domains.length);
+      } catch (error) {
+        console.error("Error polling domains:", error);
+      }
     }, 10000); // Poll every 10 seconds
 
     return () => clearInterval(interval);
@@ -295,12 +315,27 @@ export default function OrganizationSettings() {
     }
   };
 
-  const loadDomains = async () => {
+  const loadDomains = async (page: number = 1, append: boolean = false) => {
     try {
-      const data = await apiClient.getDomains();
-      setDomains(data.domains);
+      const data = await apiClient.getDomains({ page: String(page), page_size: String(DOMAINS_PAGE_SIZE) });
+      if (append) {
+        setDomains(prev => [...prev, ...data.domains]);
+      } else {
+        setDomains(data.domains);
+      }
+      setDomainTotalCount(data.total_count ?? data.domains.length);
+      setDomainPage(page);
     } catch (error) {
       console.error("Error loading domains:", error);
+    }
+  };
+
+  const loadMoreDomains = async () => {
+    try {
+      setIsLoadingMoreDomains(true);
+      await loadDomains(domainPage + 1, true);
+    } finally {
+      setIsLoadingMoreDomains(false);
     }
   };
 
@@ -1543,10 +1578,23 @@ export default function OrganizationSettings() {
         <TabsContent value="domains" className="space-y-6">
           <Card className="border border-border">
             <CardHeader>
-              <CardTitle>Domains</CardTitle>
-              <CardDescription>
-                Add and manage domains for your organization. All brand monitoring will be scoped to these domains.
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Domains ({domainTotalCount})</CardTitle>
+                  <CardDescription>
+                    Add and manage domains for your organization. All brand monitoring will be scoped to these domains.
+                  </CardDescription>
+                </div>
+                <div className="relative w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search domains..."
+                    value={domainSearchQuery}
+                    onChange={(e) => setDomainSearchQuery(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-3">
@@ -1556,7 +1604,11 @@ export default function OrganizationSettings() {
                 <p>No domains added yet</p>
               </div>
             ) : (
-              domains.map((domain) => {
+              domains.filter((domain) => {
+                if (!domainSearchQuery.trim()) return true;
+                const query = domainSearchQuery.toLowerCase();
+                return domain.name.toLowerCase().includes(query) || domain.url.toLowerCase().includes(query);
+              }).map((domain) => {
                 const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
                 const isFailed = domain.processing_status === 'FAIL';
                 const isCompleted = !domain.processing_status || domain.processing_status === 'COMP';
@@ -1661,6 +1713,23 @@ export default function OrganizationSettings() {
               })
             )}
           </div>
+          {domains.length < domainTotalCount && (
+            <div className="flex justify-center pt-2">
+              <Button
+                onClick={loadMoreDomains}
+                disabled={isLoadingMoreDomains}
+              >
+                {isLoadingMoreDomains ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  'Load More'
+                )}
+              </Button>
+            </div>
+          )}
           </CardContent>
           </Card>
         </TabsContent>
@@ -1668,16 +1737,35 @@ export default function OrganizationSettings() {
         <TabsContent value="team" className="space-y-6">
           <Card className="border border-border">
             <CardHeader>
-              <CardTitle>Team Members</CardTitle>
-              <CardDescription>
-                Manage your organization's team members and their roles
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Team Members ({teamMembers.length + invitations.length})</CardTitle>
+                  <CardDescription>
+                    Manage your organization's team members and their roles
+                  </CardDescription>
+                </div>
+                <div className="relative w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search members..."
+                    value={teamSearchQuery}
+                    onChange={(e) => { setTeamSearchQuery(e.target.value); setTeamVisibleCount(TEAM_PAGE_SIZE); }}
+                    className="pl-9"
+                  />
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {invitations.length > 0 && (
+              {invitations.filter((inv) => {
+                if (!teamSearchQuery.trim()) return true;
+                return inv.email.toLowerCase().includes(teamSearchQuery.toLowerCase());
+              }).length > 0 && (
             <div className="space-y-3">
               <h4 className="text-sm font-medium">Team Invitations</h4>
-              {invitations.map((inv) => (
+              {invitations.filter((inv) => {
+                if (!teamSearchQuery.trim()) return true;
+                return inv.email.toLowerCase().includes(teamSearchQuery.toLowerCase());
+              }).map((inv) => (
                 <div
                   key={inv.id}
                   className="flex items-center justify-between p-4 border rounded-lg"
@@ -1735,7 +1823,12 @@ export default function OrganizationSettings() {
                 <p>No team members yet</p>
               </div>
             ) : (
-              teamMembers.map((member) => {
+              teamMembers.filter((member) => {
+                if (!teamSearchQuery.trim()) return true;
+                const query = teamSearchQuery.toLowerCase();
+                const name = `${member.first_name} ${member.last_name}`.toLowerCase();
+                return name.includes(query) || member.email.toLowerCase().includes(query);
+              }).slice(0, teamVisibleCount).map((member) => {
                 const RoleIcon = getRoleIcon(member.role);
                 const memberName = `${member.first_name} ${member.last_name}`.trim() || member.email.split('@')[0];
                 return (
@@ -1802,6 +1895,23 @@ export default function OrganizationSettings() {
               })
               )}
             </div>
+          {(() => {
+            const filteredCount = teamMembers.filter((member) => {
+              if (!teamSearchQuery.trim()) return true;
+              const query = teamSearchQuery.toLowerCase();
+              const name = `${member.first_name} ${member.last_name}`.toLowerCase();
+              return name.includes(query) || member.email.toLowerCase().includes(query);
+            }).length;
+            return teamVisibleCount < filteredCount ? (
+              <div className="flex justify-center pt-2">
+                <Button
+                  onClick={() => setTeamVisibleCount(prev => prev + TEAM_PAGE_SIZE)}
+                >
+                  Load More
+                </Button>
+              </div>
+            ) : null;
+          })()}
           </CardContent>
           </Card>
         </TabsContent>

@@ -3,7 +3,7 @@ SEO Rankings — API views.
 All endpoints are org-scoped via request.user.organisation → Domain access.
 """
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -16,6 +16,7 @@ from domains.models import Domain
 from .models import (
     SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory, SeoDomainDailyMetrics,
     SeoCompetitorAnalysis, SeoCompetitorProject, SeoCompetitorKeyword,
+    SeoReportSheet,
 )
 from .serializers import (
     SeoKeywordRankSerializer,
@@ -1404,3 +1405,1242 @@ def seo_competitor_keywords(request, pk):
         'competitor_domain': project.competitor_domain,
         'keywords': data,
     })
+
+
+# ---------------------------------------------------------------------------
+# SEO Report Sheets CRUD
+# ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_report_sheet_list(request):
+    """List all report sheets for a domain."""
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    sheets = SeoReportSheet.objects.filter(
+        domain_id=domain_id, is_active=True
+    ).order_by('-created_at')
+
+    data = []
+    for s in sheets:
+        data.append({
+            'id': s.id,
+            'sheet_name': s.sheet_name,
+            'category': s.category,
+            'sheet_type': s.sheet_type,
+            'metrics': s.metrics,
+            'change_units': s.change_units,
+            'schedule': s.schedule,
+            'duration': s.duration,
+            'order_by': s.order_by,
+            'created_at': s.created_at.isoformat(),
+        })
+
+    return Response({'sheets': data, 'count': len(data)})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_report_sheet_add(request):
+    """Add a new report sheet."""
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    sheet_name = request.data.get('sheet_name', '').strip()
+    category = request.data.get('category', 'gsc')
+    sheet_type = request.data.get('sheet_type', '')
+    metrics = request.data.get('metrics', [])
+    change_units = request.data.get('change_units', [])
+    schedule = request.data.get('schedule', 'weekly')
+    duration = request.data.get('duration', 2)
+    order_by = request.data.get('order_by', 'Ascending')
+
+    if not sheet_name:
+        return Response({'error': 'sheet_name is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not sheet_type:
+        return Response({'error': 'sheet_type is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validate GSC/GA connection before allowing sheet creation
+    from integrations.models import Integration
+
+    gsc_types = ('gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries', 'gsc_overview')
+    ga_types = ('ga_landing_pages', 'ga_other_sources', 'ga_overview')
+
+    if sheet_type in gsc_types:
+        gsc_integration = Integration.objects.filter(
+            domain_id=domain_id, type='search_console', status='active'
+        ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+        if not gsc_integration:
+            return Response(
+                {'error': 'Connect Google Search Console to add GSC sheet.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        # Verify actual API access before creating the sheet
+        gsc_check = _verify_gsc_access(gsc_integration)
+        if gsc_check:
+            return Response({'error': gsc_check}, status=status.HTTP_400_BAD_REQUEST)
+
+    if sheet_type in ga_types:
+        ga_integration = Integration.objects.filter(
+            domain_id=domain_id, type='google_analytics', status='active'
+        ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+        if not ga_integration:
+            return Response(
+                {'error': 'Connect Google Analytics to add GA sheet.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        # Verify actual API access before creating the sheet
+        ga_check = _verify_ga_access(ga_integration)
+        if ga_check:
+            return Response({'error': ga_check}, status=status.HTTP_400_BAD_REQUEST)
+
+    sheet = SeoReportSheet.objects.create(
+        domain_id=domain_id,
+        created_by=request.user,
+        sheet_name=sheet_name,
+        category=category,
+        sheet_type=sheet_type,
+        metrics=metrics,
+        change_units=change_units,
+        schedule=schedule,
+        duration=duration,
+        order_by=order_by,
+    )
+
+    return Response({
+        'id': sheet.id,
+        'message': f'Report sheet "{sheet_name}" added successfully.',
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def seo_report_sheet_delete(request, pk):
+    """Soft-delete a report sheet."""
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    try:
+        sheet = SeoReportSheet.objects.get(id=pk, is_active=True)
+    except SeoReportSheet.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if sheet.domain_id not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    sheet.is_active = False
+    sheet.save(update_fields=['is_active', 'modified_at'])
+
+    return Response({'message': 'Report sheet deleted successfully.'})
+
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def seo_report_sheet_update(request, pk):
+    """Update a report sheet."""
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    try:
+        sheet = SeoReportSheet.objects.get(id=pk, is_active=True)
+    except SeoReportSheet.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if sheet.domain_id not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    update_fields = ['modified_at']
+    for field in ['sheet_name', 'category', 'sheet_type', 'metrics', 'change_units', 'schedule', 'duration', 'order_by']:
+        if field in request.data:
+            setattr(sheet, field, request.data[field])
+            update_fields.append(field)
+
+    sheet.save(update_fields=update_fields)
+
+    return Response({
+        'id': sheet.id,
+        'message': 'Report sheet updated successfully.',
+    })
+
+
+# ---------------------------------------------------------------------------
+# Report Sheet Data — Fetch live GSC/GA data for configured sheets
+# ---------------------------------------------------------------------------
+
+
+def _verify_gsc_access(integration):
+    """
+    Test GSC API access for the integration. Returns error string if failed, None if OK.
+    """
+    try:
+        from integrations.google_oauth import get_credentials_from_integration
+        from googleapiclient.discovery import build
+
+        credentials = get_credentials_from_integration(integration)
+        if not credentials:
+            return 'Google Search Console credentials are invalid or expired. Please reconnect GSC.'
+
+        service = build('searchconsole', 'v1', credentials=credentials)
+        site_url = integration.provider_id
+
+        # Make a minimal test query to verify access
+        service.searchanalytics().query(
+            siteUrl=site_url,
+            body={
+                'startDate': (date.today() - timedelta(days=7)).isoformat(),
+                'endDate': (date.today() - timedelta(days=3)).isoformat(),
+                'dimensions': ['page'],
+                'rowLimit': 1,
+            }
+        ).execute()
+        return None  # Access OK
+    except Exception as e:
+        err = str(e)
+        if 'permission' in err.lower() or '403' in err:
+            return 'Insufficient permissions for this GSC property. Please verify that the connected Google account has access to this site in Google Search Console.'
+        if 'not found' in err.lower() or '404' in err:
+            return 'The GSC site property was not found. Please reconnect Google Search Console.'
+        if 'invalid' in err.lower() or 'expired' in err.lower() or '401' in err:
+            return 'Google Search Console credentials have expired. Please reconnect GSC in Domain Settings.'
+        logger.error(f"GSC access verification failed: {e}")
+        return 'Unable to access Google Search Console. Please reconnect GSC in Domain Settings.'
+
+
+def _verify_ga_access(integration):
+    """
+    Test GA4 API access for the integration. Returns error string if failed, None if OK.
+    """
+    try:
+        from integrations.google_oauth import get_credentials_from_integration
+        from googleapiclient.discovery import build
+
+        credentials = get_credentials_from_integration(integration)
+        if not credentials:
+            return 'Google Analytics credentials are invalid or expired. Please reconnect GA.'
+
+        service = build('analyticsdata', 'v1beta', credentials=credentials)
+        property_id = integration.provider_id
+
+        # Make a minimal test query to verify access
+        service.properties().runReport(
+            property=property_id,
+            body={
+                'dateRanges': [{'startDate': (date.today() - timedelta(days=7)).isoformat(), 'endDate': (date.today() - timedelta(days=1)).isoformat()}],
+                'dimensions': [{'name': 'date'}],
+                'metrics': [{'name': 'sessions'}],
+                'limit': 1,
+            }
+        ).execute()
+        return None  # Access OK
+    except Exception as e:
+        err = str(e)
+        if 'permission' in err.lower() or '403' in err:
+            return 'Insufficient permissions for this GA4 property. Please verify that the connected Google account has access to this property in Google Analytics.'
+        if 'not found' in err.lower() or '404' in err:
+            return 'The GA4 property was not found. Please reconnect Google Analytics.'
+        if 'invalid' in err.lower() or 'expired' in err.lower() or '401' in err:
+            return 'Google Analytics credentials have expired. Please reconnect GA in Domain Settings.'
+        logger.error(f"GA access verification failed: {e}")
+        return 'Unable to access Google Analytics. Please reconnect GA in Domain Settings.'
+
+
+def _get_date_ranges(schedule, duration, order_asc=True):
+    """
+    Calculate date ranges based on schedule (weekly/monthly) and duration.
+    Returns list of (start_date, end_date, label) tuples.
+    GSC data has ~3 day lag so we offset accordingly.
+    """
+    today = date.today() - timedelta(days=3)  # GSC data lag
+    ranges = []
+
+    if schedule == 'weekly':
+        # Find last Sunday as week end
+        days_since_sunday = (today.weekday() + 1) % 7
+        last_sunday = today - timedelta(days=days_since_sunday)
+
+        for i in range(duration):
+            end = last_sunday - timedelta(weeks=i)
+            start = end - timedelta(days=6)
+            label = f"{start.strftime('%d %b')}-{end.strftime('%d %b')}"
+            ranges.append((start, end, label))
+    else:  # monthly
+        for i in range(duration):
+            # Go back i months
+            month = today.month - i
+            year = today.year
+            while month <= 0:
+                month += 12
+                year -= 1
+            # First and last day of that month
+            import calendar
+            _, last_day = calendar.monthrange(year, month)
+            start = date(year, month, 1)
+            end = date(year, month, last_day)
+            if end > today:
+                end = today
+            label = start.strftime('%b %Y')
+            ranges.append((start, end, label))
+
+    if order_asc:
+        ranges.reverse()
+    return ranges
+
+
+def _fetch_gsc_report_data(integration, sheet):
+    """Fetch GSC data for a report sheet configuration."""
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('searchconsole', 'v1', credentials=credentials)
+    site_url = integration.provider_id
+
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+    metrics_list = sheet.metrics or ['clicks', 'impressions', 'ctr', 'position']
+    change_units = sheet.change_units or []
+
+    # Determine dimension based on sheet_type
+    if sheet.sheet_type in ('gsc_pages',):
+        dimension = 'page'
+        dim_label = 'Pages'
+    elif sheet.sheet_type in ('gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries'):
+        dimension = 'query'
+        dim_label = 'Queries'
+    else:
+        dimension = 'page'
+        dim_label = 'Pages'
+
+    # Fetch data for each date range and metric
+    all_keys = set()
+    range_data = {}  # {range_label: {key: {metric: value}}}
+    api_errors = []
+
+    for start_dt, end_dt, label in date_ranges:
+        request_body = {
+            'startDate': start_dt.isoformat(),
+            'endDate': end_dt.isoformat(),
+            'dimensions': [dimension],
+            'rowLimit': 500,
+        }
+
+        # Add brand filter for branded/non-branded queries
+        if sheet.sheet_type == 'gsc_branded_queries':
+            domain_name = site_url.replace('sc-domain:', '').replace('https://', '').replace('http://', '').split('/')[0].split('.')[0]
+            request_body['dimensionFilterGroups'] = [{
+                'filters': [{'dimension': 'query', 'operator': 'contains', 'expression': domain_name}]
+            }]
+        elif sheet.sheet_type == 'gsc_non_branded_queries':
+            domain_name = site_url.replace('sc-domain:', '').replace('https://', '').replace('http://', '').split('/')[0].split('.')[0]
+            request_body['dimensionFilterGroups'] = [{
+                'filters': [{'dimension': 'query', 'operator': 'excludingRegex', 'expression': f'(?i){domain_name}'}]
+            }]
+
+        try:
+            response = service.searchanalytics().query(
+                siteUrl=site_url, body=request_body
+            ).execute()
+
+            data_map = {}
+            for row in response.get('rows', []):
+                key = row.get('keys', [''])[0]
+                all_keys.add(key)
+                data_map[key] = {
+                    'clicks': row.get('clicks', 0),
+                    'impressions': row.get('impressions', 0),
+                    'ctr': round(row.get('ctr', 0) * 100, 2),
+                    'position': round(row.get('position', 0), 1),
+                }
+            range_data[label] = data_map
+        except Exception as e:
+            logger.error(f"GSC API error for sheet {sheet.id}: {e}")
+            range_data[label] = {}
+            api_errors.append(str(e))
+
+    # If ALL ranges failed and no data collected, return error
+    if not all_keys and len(api_errors) == len(date_ranges) and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GSC API error: {api_errors[0]}'}
+
+    # Build columns
+    columns = ['Sr No', dim_label]
+    range_labels = [r[2] for r in date_ranges]
+
+    for metric in metrics_list:
+        metric_label = metric.capitalize()
+        if metric == 'ctr':
+            metric_label = 'CTR'
+        for rl in range_labels:
+            columns.append(f"{rl} {metric_label}")
+        # Add change columns
+        if len(range_labels) >= 2 and 'number' in change_units:
+            columns.append(f"{metric_label} Change")
+        if len(range_labels) >= 2 and 'percentage' in change_units:
+            columns.append(f"{metric_label} Change (%)")
+
+    # Build rows
+    sorted_keys = sorted(all_keys)
+    rows = []
+    for idx, key in enumerate(sorted_keys, 1):
+        row = {'Sr No': idx, dim_label: key}
+        for metric in metrics_list:
+            metric_label = metric.capitalize()
+            if metric == 'ctr':
+                metric_label = 'CTR'
+            values_for_change = []
+            for rl in range_labels:
+                val = range_data.get(rl, {}).get(key, {}).get(metric, 0)
+                row[f"{rl} {metric_label}"] = val
+                values_for_change.append(val)
+
+            if len(values_for_change) >= 2:
+                last_val = values_for_change[-1]
+                prev_val = values_for_change[-2]
+                diff = round(last_val - prev_val, 2)
+                if 'number' in change_units:
+                    row[f"{metric_label} Change"] = diff
+                if 'percentage' in change_units:
+                    pct = round((diff / prev_val) * 100, 2) if prev_val != 0 else 0
+                    row[f"{metric_label} Change (%)"] = f"{pct}%"
+
+        rows.append(row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+        'metrics_headers': [m.upper() if m == 'ctr' else m.capitalize() for m in metrics_list],
+    }
+
+
+def _fetch_ga_report_data(integration, sheet):
+    """Fetch GA data for a report sheet configuration."""
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('analyticsdata', 'v1beta', credentials=credentials)
+    property_id = integration.provider_id
+
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+
+    if sheet.sheet_type == 'ga_landing_pages':
+        ga_dimension = 'landingPage'
+        dim_label = 'Landing Pages'
+        ga_metrics = ['sessions', 'totalUsers', 'screenPageViews', 'bounceRate']
+        metric_labels = ['Sessions', 'Users', 'Page Views', 'Bounce Rate']
+    else:
+        ga_dimension = 'sessionDefaultChannelGroup'
+        dim_label = 'Source'
+        ga_metrics = ['sessions', 'totalUsers']
+        metric_labels = ['Sessions', 'Users']
+
+    change_units = sheet.change_units or []
+
+    all_keys = set()
+    range_data = {}
+    api_errors = []
+
+    for start_dt, end_dt, label in date_ranges:
+        try:
+            body = {
+                'dateRanges': [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+                'dimensions': [{'name': ga_dimension}],
+                'metrics': [{'name': m} for m in ga_metrics],
+                'limit': 500,
+            }
+            response = service.properties().runReport(
+                property=property_id, body=body
+            ).execute()
+
+            data_map = {}
+            for row in response.get('rows', []):
+                key = row['dimensionValues'][0]['value']
+                all_keys.add(key)
+                vals = {}
+                for i, ml in enumerate(metric_labels):
+                    raw = row['metricValues'][i]['value']
+                    vals[ml] = round(float(raw), 2) if '.' in raw else int(raw)
+                data_map[key] = vals
+            range_data[label] = data_map
+        except Exception as e:
+            logger.error(f"GA API error for sheet {sheet.id}: {e}")
+            range_data[label] = {}
+            api_errors.append(str(e))
+
+    # If ALL ranges failed and no data collected, return error
+    if not all_keys and len(api_errors) == len(date_ranges) and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GA API error: {api_errors[0]}'}
+
+    # Build columns
+    columns = ['Sr No', dim_label]
+    range_labels = [r[2] for r in date_ranges]
+
+    for ml in metric_labels:
+        for rl in range_labels:
+            columns.append(f"{rl} {ml}")
+        if len(range_labels) >= 2 and 'number' in change_units:
+            columns.append(f"{ml} Change")
+        if len(range_labels) >= 2 and 'percentage' in change_units:
+            columns.append(f"{ml} Change (%)")
+
+    # Build rows
+    sorted_keys = sorted(all_keys)
+    rows = []
+    for idx, key in enumerate(sorted_keys, 1):
+        row = {'Sr No': idx, dim_label: key}
+        for ml in metric_labels:
+            values_for_change = []
+            for rl in range_labels:
+                val = range_data.get(rl, {}).get(key, {}).get(ml, 0)
+                row[f"{rl} {ml}"] = val
+                values_for_change.append(val)
+            if len(values_for_change) >= 2:
+                diff = round(values_for_change[-1] - values_for_change[-2], 2)
+                if 'number' in change_units:
+                    row[f"{ml} Change"] = diff
+                if 'percentage' in change_units:
+                    pct = round((diff / values_for_change[-2]) * 100, 2) if values_for_change[-2] != 0 else 0
+                    row[f"{ml} Change (%)"] = f"{pct}%"
+        rows.append(row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+        'metrics_headers': metric_labels,
+    }
+
+
+def _fetch_gsc_overview_data(integration, sheet):
+    """
+    GSC Overview — aggregate clicks, impressions, CTR, position across date
+    ranges (no dimension breakdown).  Mirrors RankMaxx gsc_report overview.
+    """
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('searchconsole', 'v1', credentials=credentials)
+    site_url = integration.provider_id
+
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+    change_units = sheet.change_units or []
+
+    metrics_map = [
+        ('Clicks', 'clicks'),
+        ('Impressions', 'impressions'),
+        ('CTR', 'ctr'),
+        ('Avg Position', 'position'),
+    ]
+
+    range_labels = [r[2] for r in date_ranges]
+
+    # Fetch aggregate data for each date range
+    range_values = {}  # label -> {metric: value}
+    api_errors = []
+    for start_dt, end_dt, label in date_ranges:
+        try:
+            response = service.searchanalytics().query(
+                siteUrl=site_url,
+                body={
+                    'startDate': start_dt.isoformat(),
+                    'endDate': end_dt.isoformat(),
+                    'rowLimit': 1,
+                }
+            ).execute()
+            rows = response.get('rows', [])
+            if rows:
+                r = rows[0]
+                range_values[label] = {
+                    'clicks': r.get('clicks', 0),
+                    'impressions': r.get('impressions', 0),
+                    'ctr': round(r.get('ctr', 0) * 100, 2),
+                    'position': round(r.get('position', 0), 1),
+                }
+            else:
+                range_values[label] = {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
+        except Exception as e:
+            logger.error(f"GSC Overview API error for sheet {sheet.id}: {e}")
+            range_values[label] = {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
+            api_errors.append(str(e))
+
+    if len(api_errors) == len(date_ranges) and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GSC API error: {api_errors[0]}'}
+
+    # Build table: one row per metric, columns = date-range labels + change
+    columns = ['Metric']
+    for rl in range_labels:
+        columns.append(rl)
+    if len(range_labels) >= 2 and 'number' in change_units:
+        columns.append('Change')
+    if len(range_labels) >= 2 and 'percentage' in change_units:
+        columns.append('Change (%)')
+
+    rows = []
+    for label, key in metrics_map:
+        row = {'Metric': label}
+        values = []
+        for rl in range_labels:
+            val = range_values.get(rl, {}).get(key, 0)
+            row[rl] = val
+            values.append(val)
+        if len(values) >= 2:
+            diff = round(values[-1] - values[-2], 2)
+            if 'number' in change_units:
+                row['Change'] = diff
+            if 'percentage' in change_units:
+                pct = round((diff / values[-2]) * 100, 2) if values[-2] != 0 else 0
+                row['Change (%)'] = f"{pct}%"
+        rows.append(row)
+
+    return {'columns': columns, 'rows': rows, 'total_rows': len(rows)}
+
+
+def _fetch_ga_overview_data(integration, sheet):
+    """
+    GA Overview — aggregate sessions, users, bounce rate, engagement rate
+    across date ranges (no dimension breakdown).
+    """
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('analyticsdata', 'v1beta', credentials=credentials)
+    property_id = integration.provider_id
+
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+    change_units = sheet.change_units or []
+
+    ga_metrics = ['sessions', 'totalUsers', 'screenPageViews', 'bounceRate', 'engagementRate']
+    metric_labels = ['Sessions', 'Users', 'Page Views', 'Bounce Rate', 'Engagement Rate']
+
+    range_labels = [r[2] for r in date_ranges]
+
+    range_values = {}
+    api_errors = []
+    for start_dt, end_dt, label in date_ranges:
+        try:
+            response = service.properties().runReport(
+                property=property_id,
+                body={
+                    'dateRanges': [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+                    'metrics': [{'name': m} for m in ga_metrics],
+                }
+            ).execute()
+            rows = response.get('rows', [])
+            if rows:
+                vals = {}
+                for i, ml in enumerate(metric_labels):
+                    raw = rows[0]['metricValues'][i]['value']
+                    vals[ml] = round(float(raw), 2) if '.' in raw else int(raw)
+                range_values[label] = vals
+            else:
+                range_values[label] = {ml: 0 for ml in metric_labels}
+        except Exception as e:
+            logger.error(f"GA Overview API error for sheet {sheet.id}: {e}")
+            range_values[label] = {ml: 0 for ml in metric_labels}
+            api_errors.append(str(e))
+
+    if len(api_errors) == len(date_ranges) and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GA API error: {api_errors[0]}'}
+
+    columns = ['Metric']
+    for rl in range_labels:
+        columns.append(rl)
+    if len(range_labels) >= 2 and 'number' in change_units:
+        columns.append('Change')
+    if len(range_labels) >= 2 and 'percentage' in change_units:
+        columns.append('Change (%)')
+
+    rows = []
+    for ml in metric_labels:
+        row = {'Metric': ml}
+        values = []
+        for rl in range_labels:
+            val = range_values.get(rl, {}).get(ml, 0)
+            row[rl] = val
+            values.append(val)
+        if len(values) >= 2:
+            diff = round(values[-1] - values[-2], 2)
+            if 'number' in change_units:
+                row['Change'] = diff
+            if 'percentage' in change_units:
+                pct = round((diff / values[-2]) * 100, 2) if values[-2] != 0 else 0
+                row['Change (%)'] = f"{pct}%"
+        rows.append(row)
+
+    return {'columns': columns, 'rows': rows, 'total_rows': len(rows)}
+
+
+def _fetch_domain_metrics_data(domain_id, sheet):
+    """
+    Domain Metrics — show ranking distribution over time from
+    SeoDomainDailyMetrics (top-1, top-3, top-10, etc.) similar to how
+    RankMaxx shows DA/DR from DomainTracking.
+    """
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+    change_units = sheet.change_units or []
+
+    range_labels = [r[2] for r in date_ranges]
+
+    metric_defs = [
+        ('Top 1 Keywords', 'top_1_count'),
+        ('Top 3 Keywords', 'top_3_count'),
+        ('Top 10 Keywords', 'top_10_count'),
+        ('Top 50 Keywords', 'top_50_count'),
+        ('Top 100 Keywords', 'top_100_count'),
+        ('Not Ranked', 'not_ranked_count'),
+        ('Rankmax Score', 'score_meter'),
+    ]
+
+    range_values = {}
+    for start_dt, end_dt, label in date_ranges:
+        metric = SeoDomainDailyMetrics.objects.filter(
+            domain_id=domain_id,
+            snapshot_date__gte=start_dt,
+            snapshot_date__lte=end_dt,
+        ).order_by('-snapshot_date').first()
+
+        if metric:
+            range_values[label] = {
+                'top_1_count': metric.top_1_count,
+                'top_3_count': metric.top_3_count,
+                'top_10_count': metric.top_10_count,
+                'top_50_count': metric.top_50_count,
+                'top_100_count': metric.top_100_count,
+                'not_ranked_count': metric.not_ranked_count,
+                'score_meter': float(metric.score_meter),
+            }
+        else:
+            range_values[label] = {k: 0 for _, k in metric_defs}
+
+    columns = ['Metric']
+    for rl in range_labels:
+        columns.append(rl)
+    if len(range_labels) >= 2 and 'number' in change_units:
+        columns.append('Change')
+    if len(range_labels) >= 2 and 'percentage' in change_units:
+        columns.append('Change (%)')
+
+    rows = []
+    for label, key in metric_defs:
+        row = {'Metric': label}
+        values = []
+        for rl in range_labels:
+            val = range_values.get(rl, {}).get(key, 0)
+            row[rl] = val
+            values.append(val)
+        if len(values) >= 2:
+            diff = round(values[-1] - values[-2], 2)
+            if 'number' in change_units:
+                row['Change'] = diff
+            if 'percentage' in change_units:
+                pct = round((diff / values[-2]) * 100, 2) if values[-2] != 0 else 0
+                row['Change (%)'] = f"{pct}%"
+        rows.append(row)
+
+    return {'columns': columns, 'rows': rows, 'total_rows': len(rows)}
+
+
+def _fetch_keyword_ranking_overview(domain_id, sheet):
+    """
+    Keyword Ranking Overview — current ranking distribution snapshot,
+    similar to RankMaxx keyword_monthly_ranking_report.
+    """
+    kws = SeoKeywordRank.objects.filter(domain_id=domain_id)
+    total = kws.count()
+    if total == 0:
+        return {
+            'columns': ['Metric', 'Count', 'Percentage'],
+            'rows': [{'Metric': 'No keywords tracked', 'Count': 0, 'Percentage': '0%'}],
+            'total_rows': 1,
+        }
+
+    from django.db.models import Q, Count
+
+    buckets = [
+        ('Top 1', Q(rank_now=1)),
+        ('Top 3', Q(rank_now__gte=1, rank_now__lte=3)),
+        ('Top 5', Q(rank_now__gte=1, rank_now__lte=5)),
+        ('Top 10', Q(rank_now__gte=1, rank_now__lte=10)),
+        ('Top 20', Q(rank_now__gte=1, rank_now__lte=20)),
+        ('Top 50', Q(rank_now__gte=1, rank_now__lte=50)),
+        ('Top 100', Q(rank_now__gte=1, rank_now__lte=100)),
+        ('Not Ranked', Q(rank_now=0) | Q(rank_now__isnull=True)),
+        ('Improved (1D)', Q(day_mark='up')),
+        ('Declined (1D)', Q(day_mark='down')),
+    ]
+
+    rows = []
+    for idx, (label, q_filter) in enumerate(buckets, 1):
+        cnt = kws.filter(q_filter).count()
+        pct = round(cnt / total * 100, 1) if total > 0 else 0
+        rows.append({'Sr No': idx, 'Metric': label, 'Count': cnt, 'Percentage': f"{pct}%"})
+
+    return {
+        'columns': ['Sr No', 'Metric', 'Count', 'Percentage'],
+        'rows': rows,
+        'total_rows': len(rows),
+    }
+
+
+def _ordinal_convert(n):
+    """Convert day number to ordinal: 1->1st, 2->2nd, 3->3rd, 4->4th, etc."""
+    return f"{n:d}{'tsnrhtdd'[(n // 10 % 10 != 1) * (n % 10 < 4) * n % 10::4]}"
+
+
+def _ordinal_day_convert(d):
+    """Convert a date to format like '2nd Mar', '9th Mar'."""
+    return f"{_ordinal_convert(d.day)} {d.strftime('%b')}"
+
+
+def _classify_rank(rank):
+    """Classify rank into reporting brackets."""
+    if 1 <= rank <= 5:
+        return 'Top 5'
+    elif 6 <= rank <= 10:
+        return 'Top 6 - 10'
+    elif 11 <= rank <= 20:
+        return 'Top 11 - 20'
+    elif 21 <= rank <= 30:
+        return 'Top 21 - 30'
+    elif 31 <= rank <= 50:
+        return 'Top 31 - 50'
+    else:
+        return 'Above 50'
+
+
+def _fetch_keyword_ranking_weekly(domain_id, sheet):
+    """
+    Keyword Ranking Weekly report — shows ranking values at weekly intervals
+    with date columns like '2nd Mar', '9th Mar' and change calculations.
+    Mirrors RankMaxx keyword_ranking_report().
+    """
+    from django.db.models import Q
+    from collections import defaultdict
+
+    duration_limit = sheet.duration or 2
+    kw_metrics = sheet.metrics or []
+    order_asc = sheet.order_by.lower() in ('ascending', 'asc')
+
+    # Get keywords for this domain
+    kws = list(
+        SeoKeywordRank.objects.select_related('keyword').filter(
+            domain_id=domain_id
+        ).order_by('keyword__keyword')[:500]
+    )
+    if not kws:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'overview': []}
+
+    # Determine the most recent ranked date across all keywords
+    last_ranked = None
+    for kw in kws:
+        if kw.last_ranked_date:
+            d = kw.last_ranked_date.date() if hasattr(kw.last_ranked_date, 'date') else kw.last_ranked_date
+            if last_ranked is None or d > last_ranked:
+                last_ranked = d
+
+    if not last_ranked:
+        last_ranked = date.today()
+
+    # Calculate weekly column dates (default tracking day = Monday)
+    today_weekday = last_ranked.weekday()  # 0=Monday
+    target_day = 0  # Monday
+    remain_count = (today_weekday - target_day + 7) % 7
+
+    week_dates = []
+    for i in range(duration_limit):
+        week_date = last_ranked - timedelta(days=remain_count + 7 * i)
+        week_dates.append(week_date)
+
+    # Labels for each week column
+    week_labels = [_ordinal_day_convert(d) for d in week_dates]
+
+    # Fetch rank history for all keywords at the relevant date range
+    min_date = week_dates[-1] - timedelta(days=3) if week_dates else last_ranked - timedelta(days=90)
+    max_date = week_dates[0] + timedelta(days=3) if week_dates else last_ranked
+
+    kw_ids = [kw.id for kw in kws]
+
+    history_qs = SeoRankHistory.objects.filter(
+        seo_keyword_rank_id__in=kw_ids,
+        snapshot_date__gte=min_date,
+        snapshot_date__lte=max_date,
+    ).values_list('seo_keyword_rank_id', 'snapshot_date', 'rank_position')
+
+    # Build lookup: {kw_id: {date: rank}}
+    history_map = defaultdict(dict)
+    for kw_id, snap_date, rank_pos in history_qs:
+        history_map[kw_id][snap_date] = rank_pos
+
+    def _get_rank_for_date(kw_id, target_date):
+        """Get rank at target_date, or try ±1-3 days."""
+        h = history_map.get(kw_id, {})
+        if target_date in h:
+            return h[target_date]
+        for offset in [1, -1, 2, -2, 3, -3]:
+            d = target_date + timedelta(days=offset)
+            if d in h:
+                return h[d]
+        return None
+
+    # Build columns
+    columns = ['Sr No', 'Keywords']
+    if 'average_volume' in kw_metrics:
+        columns.append('Avg. Volume')
+    if 'landing_pages' in kw_metrics:
+        columns.append('Landing Pages')
+    if 'base_ranking' in kw_metrics:
+        columns.append('Base Ranking')
+
+    # Add week date columns (ordered oldest to newest if asc, newest to oldest if desc)
+    ordered_labels = list(reversed(week_labels)) if order_asc else week_labels
+    ordered_dates = list(reversed(week_dates)) if order_asc else week_dates
+    columns.extend(ordered_labels)
+
+    # Change column
+    if len(week_labels) >= 2:
+        change_label = f"Change ({week_labels[0]} vs {week_labels[1]})"
+        columns.append(change_label)
+    else:
+        change_label = None
+
+    # Build rows
+    rows = []
+    for idx, kw in enumerate(kws, 1):
+        kw_text = kw.keyword.keyword if kw.keyword else ''
+        row = {'Sr No': idx, 'Keywords': kw_text}
+
+        if 'average_volume' in kw_metrics:
+            row['Avg. Volume'] = kw.search_volume if kw.search_volume else '-'
+        if 'landing_pages' in kw_metrics:
+            if kw.site_url and kw.rank_now and kw.rank_now > 0:
+                row['Landing Pages'] = kw.site_url
+            else:
+                row['Landing Pages'] = ''
+        if 'base_ranking' in kw_metrics:
+            row['Base Ranking'] = kw.rank_since_start if kw.rank_since_start and kw.rank_since_start > 0 else 100
+
+        # Fill in week ranking values
+        rank_values = {}
+        for i, (wd, wl) in enumerate(zip(week_dates, week_labels)):
+            rank = _get_rank_for_date(kw.id, wd)
+            if rank is not None and rank > 0:
+                rank_values[wl] = rank
+            else:
+                rank_values[wl] = 'NA'
+
+        for label in ordered_labels:
+            row[label] = rank_values.get(label, 'NA')
+
+        # Calculate change between most recent two weeks
+        if change_label and len(week_labels) >= 2:
+            curr = rank_values.get(week_labels[0], 'NA')
+            prev = rank_values.get(week_labels[1], 'NA')
+            if isinstance(curr, int) and isinstance(prev, int):
+                row[change_label] = prev - curr  # positive = improved
+            else:
+                row[change_label] = 'NA'
+
+        rows.append(row)
+
+    # Build overview: keyword count per rank bracket per week
+    brackets = ['Top 5', 'Top 6 - 10', 'Top 11 - 20', 'Top 21 - 30', 'Top 31 - 50', 'Above 50']
+    overview_rows = []
+    for bracket in brackets:
+        ov_row = {'primary keyword ranking': bracket}
+        if 'base_ranking' in kw_metrics:
+            # Base ranking bracket count
+            base_count = sum(
+                1 for kw in kws
+                if _classify_rank(kw.rank_since_start if kw.rank_since_start and kw.rank_since_start > 0 else 100) == bracket
+            )
+            ov_row['Base Ranking'] = base_count
+
+        for wd, wl in zip(week_dates, week_labels):
+            count = 0
+            for kw in kws:
+                rank = _get_rank_for_date(kw.id, wd)
+                if rank and rank > 0 and _classify_rank(rank) == bracket:
+                    count += 1
+            ov_row[wl] = count
+        overview_rows.append(ov_row)
+
+    # Add change column to overview
+    if change_label and len(week_labels) >= 2:
+        for ov_row in overview_rows:
+            curr_val = ov_row.get(week_labels[0], 0)
+            prev_val = ov_row.get(week_labels[1], 0)
+            ov_row[change_label] = curr_val - prev_val
+
+    # Total row
+    total_row = {'primary keyword ranking': 'Total keywords'}
+    for key in overview_rows[0]:
+        if key != 'primary keyword ranking':
+            total_row[key] = sum(r.get(key, 0) for r in overview_rows if isinstance(r.get(key), int))
+    overview_rows.append(total_row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+        'overview': overview_rows,
+    }
+
+
+def _fetch_keyword_ranking_monthly(domain_id, sheet):
+    """
+    Keyword Ranking Monthly report — shows ranking values at monthly intervals
+    with date columns like 'Mar/2024', 'Feb/2024' and MOM Change.
+    Mirrors RankMaxx keyword_monthly_ranking_report().
+    """
+    from collections import defaultdict
+    import calendar
+
+    duration_limit = sheet.duration or 2
+    kw_metrics = sheet.metrics or []
+    order_asc = sheet.order_by.lower() in ('ascending', 'asc')
+
+    kws = list(
+        SeoKeywordRank.objects.select_related('keyword').filter(
+            domain_id=domain_id
+        ).order_by('keyword__keyword')[:500]
+    )
+    if not kws:
+        return {'columns': [], 'rows': [], 'total_rows': 0}
+
+    # Calculate monthly sample dates (4th of each month, like RankMaxx)
+    today = date.today()
+    month_dates = []
+    for i in range(duration_limit):
+        month = today.month - i
+        year = today.year
+        while month <= 0:
+            month += 12
+            year -= 1
+        sample_date = date(year, month, 4)
+        month_dates.append(sample_date)
+
+    month_labels = [d.strftime('%b/%Y') for d in month_dates]
+
+    # Fetch rank history
+    kw_ids = [kw.id for kw in kws]
+    min_date = month_dates[-1] - timedelta(days=5) if month_dates else today - timedelta(days=365)
+    max_date = month_dates[0] + timedelta(days=5) if month_dates else today
+
+    history_qs = SeoRankHistory.objects.filter(
+        seo_keyword_rank_id__in=kw_ids,
+        snapshot_date__gte=min_date,
+        snapshot_date__lte=max_date,
+    ).values_list('seo_keyword_rank_id', 'snapshot_date', 'rank_position')
+
+    history_map = defaultdict(dict)
+    for kw_id, snap_date, rank_pos in history_qs:
+        history_map[kw_id][snap_date] = rank_pos
+
+    def _get_rank_for_date(kw_id, target_date):
+        h = history_map.get(kw_id, {})
+        if target_date in h:
+            return h[target_date]
+        for offset in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5]:
+            d = target_date + timedelta(days=offset)
+            if d in h:
+                return h[d]
+        return None
+
+    # Build columns
+    columns = ['Sr No', 'Keywords']
+    if 'average_volume' in kw_metrics:
+        columns.append('Avg. Volume')
+    if 'landing_pages' in kw_metrics:
+        columns.append('Landing Pages')
+    if 'base_ranking' in kw_metrics:
+        columns.append('Base Ranking')
+
+    ordered_labels = list(reversed(month_labels)) if order_asc else month_labels
+    ordered_dates = list(reversed(month_dates)) if order_asc else month_dates
+    columns.extend(ordered_labels)
+    columns.append('MOM Change')
+
+    # Build rows
+    rows = []
+    for idx, kw in enumerate(kws, 1):
+        kw_text = kw.keyword.keyword if kw.keyword else ''
+        row = {'Sr No': idx, 'Keywords': kw_text}
+
+        if 'average_volume' in kw_metrics:
+            row['Avg. Volume'] = kw.search_volume if kw.search_volume else '-'
+        if 'landing_pages' in kw_metrics:
+            if kw.site_url and kw.rank_now and kw.rank_now > 0:
+                row['Landing Pages'] = kw.site_url
+            else:
+                row['Landing Pages'] = ''
+        if 'base_ranking' in kw_metrics:
+            row['Base Ranking'] = kw.rank_since_start if kw.rank_since_start and kw.rank_since_start > 0 else 100
+
+        # Fill in monthly ranking values
+        rank_values = {}
+        for md, ml in zip(month_dates, month_labels):
+            rank = _get_rank_for_date(kw.id, md)
+            if rank is not None and rank > 0:
+                rank_values[ml] = rank
+            else:
+                rank_values[ml] = 'NA'
+
+        for label in ordered_labels:
+            row[label] = rank_values.get(label, 'NA')
+
+        # MOM Change: most recent month rank vs previous month rank
+        if len(month_labels) >= 2:
+            curr = rank_values.get(month_labels[0], 'NA')
+            prev = rank_values.get(month_labels[1], 'NA')
+            if isinstance(curr, int) and isinstance(prev, int):
+                row['MOM Change'] = prev - curr  # positive = improved
+            else:
+                row['MOM Change'] = 'NA'
+        else:
+            row['MOM Change'] = 'NA'
+
+        rows.append(row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_report_sheet_data(request):
+    """
+    Fetch live data for all report sheets of a domain.
+    Query params: domain_id (required)
+    Returns report data for each configured sheet.
+    """
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    sheets = SeoReportSheet.objects.filter(
+        domain_id=domain_id, is_active=True
+    ).order_by('-created_at')
+
+    if not sheets.exists():
+        return Response({'reports': [], 'count': 0})
+
+    # Get integrations for this domain
+    from integrations.models import Integration
+
+    gsc_integration = Integration.objects.filter(
+        domain_id=domain_id, type='search_console', status='active'
+    ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+
+    ga_integration = Integration.objects.filter(
+        domain_id=domain_id, type='google_analytics', status='active'
+    ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+
+    reports = []
+    for sheet in sheets:
+        report_entry = {
+            'sheet_id': sheet.id,
+            'sheet_name': sheet.sheet_name,
+            'sheet_type': sheet.sheet_type,
+            'category': sheet.category,
+            'schedule': sheet.schedule,
+            'duration': sheet.duration,
+            'order_by': sheet.order_by,
+            'metrics': sheet.metrics,
+            'change_units': sheet.change_units,
+            'columns': [],
+            'rows': [],
+            'total_rows': 0,
+            'error': None,
+        }
+
+        try:
+            if sheet.category == 'gsc' and sheet.sheet_type in (
+                'gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries'
+            ):
+                if not gsc_integration:
+                    report_entry['error'] = 'Google Search Console not connected'
+                else:
+                    data = _fetch_gsc_report_data(gsc_integration, sheet)
+                    report_entry.update(data)
+
+            elif sheet.category == 'ga' and sheet.sheet_type in (
+                'ga_landing_pages', 'ga_other_sources'
+            ):
+                if not ga_integration:
+                    report_entry['error'] = 'Google Analytics not connected'
+                else:
+                    data = _fetch_ga_report_data(ga_integration, sheet)
+                    report_entry.update(data)
+
+            elif sheet.sheet_type == 'keyword_ranking':
+                # Route to weekly or monthly keyword ranking report
+                if sheet.schedule == 'monthly':
+                    data = _fetch_keyword_ranking_monthly(domain_id, sheet)
+                else:
+                    data = _fetch_keyword_ranking_weekly(domain_id, sheet)
+                report_entry.update(data)
+
+            elif sheet.sheet_type == 'domain_metrics':
+                data = _fetch_domain_metrics_data(domain_id, sheet)
+                report_entry.update(data)
+
+            elif sheet.sheet_type == 'gsc_overview':
+                if not gsc_integration:
+                    report_entry['error'] = 'Google Search Console not connected'
+                else:
+                    data = _fetch_gsc_overview_data(gsc_integration, sheet)
+                    report_entry.update(data)
+
+            elif sheet.sheet_type == 'ga_overview':
+                if not ga_integration:
+                    report_entry['error'] = 'Google Analytics not connected'
+                else:
+                    data = _fetch_ga_overview_data(ga_integration, sheet)
+                    report_entry.update(data)
+
+            elif sheet.sheet_type == 'keyword_ranking_overview':
+                data = _fetch_keyword_ranking_overview(domain_id, sheet)
+                report_entry.update(data)
+
+            else:
+                report_entry['error'] = f'Unsupported report type: {sheet.sheet_type}'
+
+        except Exception as e:
+            logger.error(f"Error fetching data for sheet {sheet.id}: {e}")
+            report_entry['error'] = str(e)
+
+        reports.append(report_entry)
+
+    return Response({'reports': reports, 'count': len(reports)})

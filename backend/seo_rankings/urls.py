@@ -39,4 +39,11 @@ urlpatterns = [
     path('competitors/<int:pk>/delete/', views.seo_competitor_delete, name='seo-competitor-delete'),
     path('competitors/projects/', views.seo_competitor_projects, name='seo-competitor-projects'),
     path('competitors/<int:pk>/keywords/', views.seo_competitor_keywords, name='seo-competitor-keywords'),
+
+    # SEO Report Sheets
+    path('report-sheets/', views.seo_report_sheet_list, name='seo-report-sheet-list'),
+    path('report-sheets/add/', views.seo_report_sheet_add, name='seo-report-sheet-add'),
+    path('report-sheets/<int:pk>/delete/', views.seo_report_sheet_delete, name='seo-report-sheet-delete'),
+    path('report-sheets/<int:pk>/update/', views.seo_report_sheet_update, name='seo-report-sheet-update'),
+    path('report-sheets/data/', views.seo_report_sheet_data, name='seo-report-sheet-data'),
 ]
