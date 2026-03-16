@@ -203,6 +203,7 @@ export default function OrganizationSettings() {
 
   // Team members search and pagination
   const [teamSearchQuery, setTeamSearchQuery] = useState("");
+  const [teamSearchForced, setTeamSearchForced] = useState(false);
   const TEAM_PAGE_SIZE = 20;
   const [teamVisibleCount, setTeamVisibleCount] = useState(TEAM_PAGE_SIZE);
 
@@ -249,7 +250,9 @@ export default function OrganizationSettings() {
       // Reload all currently loaded pages during polling
       try {
         const totalPages = domainPage;
-        const data = await apiClient.getDomains({ page: '1', page_size: String(totalPages * DOMAINS_PAGE_SIZE) });
+        const params: any = { page: '1', page_size: String(totalPages * DOMAINS_PAGE_SIZE) };
+        if (domainSearchQuery.trim()) params.search = domainSearchQuery.trim();
+        const data = await apiClient.getDomains(params);
         setDomains(data.domains);
         setDomainTotalCount(data.total_count ?? data.domains.length);
       } catch (error) {
@@ -315,9 +318,13 @@ export default function OrganizationSettings() {
     }
   };
 
-  const loadDomains = async (page: number = 1, append: boolean = false) => {
+  const loadDomains = async (page: number = 1, append: boolean = false, search: string = "") => {
     try {
-      const data = await apiClient.getDomains({ page: String(page), page_size: String(DOMAINS_PAGE_SIZE) });
+      const params: any = { page: String(page), page_size: String(DOMAINS_PAGE_SIZE) };
+      if (search.trim()) {
+        params.search = search.trim();
+      }
+      const data = await apiClient.getDomains(params);
       if (append) {
         setDomains(prev => [...prev, ...data.domains]);
       } else {
@@ -333,11 +340,28 @@ export default function OrganizationSettings() {
   const loadMoreDomains = async () => {
     try {
       setIsLoadingMoreDomains(true);
-      await loadDomains(domainPage + 1, true);
+      await loadDomains(domainPage + 1, true, domainSearchQuery);
     } finally {
       setIsLoadingMoreDomains(false);
     }
   };
+
+  // Debounced server-side domain search - triggers after 3+ chars or when cleared
+  const [domainSearchInitialized, setDomainSearchInitialized] = useState(false);
+  useEffect(() => {
+    if (!domainSearchInitialized) {
+      setDomainSearchInitialized(true);
+      return;
+    }
+    const trimmed = domainSearchQuery.trim();
+    // Only search when 3+ characters typed, or when search is cleared (reload all)
+    if (trimmed.length > 0 && trimmed.length < 3) return;
+    const timer = setTimeout(() => {
+      setDomainPage(1);
+      loadDomains(1, false, domainSearchQuery);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [domainSearchQuery]);
 
   const loadTeamMembers = async () => {
     try {
@@ -1591,6 +1615,7 @@ export default function OrganizationSettings() {
                     placeholder="Search domains..."
                     value={domainSearchQuery}
                     onChange={(e) => setDomainSearchQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { setDomainPage(1); loadDomains(1, false, domainSearchQuery); } }}
                     className="pl-9"
                   />
                 </div>
@@ -1601,14 +1626,10 @@ export default function OrganizationSettings() {
             {domains.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <Globe className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                <p>No domains added yet</p>
+                <p>{domainSearchQuery.trim() ? "No domains found" : "No domains added yet"}</p>
               </div>
             ) : (
-              domains.filter((domain) => {
-                if (!domainSearchQuery.trim()) return true;
-                const query = domainSearchQuery.toLowerCase();
-                return domain.name.toLowerCase().includes(query) || domain.url.toLowerCase().includes(query);
-              }).map((domain) => {
+              domains.map((domain) => {
                 const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
                 const isFailed = domain.processing_status === 'FAIL';
                 const isCompleted = !domain.processing_status || domain.processing_status === 'COMP';
@@ -1749,7 +1770,8 @@ export default function OrganizationSettings() {
                   <Input
                     placeholder="Search members..."
                     value={teamSearchQuery}
-                    onChange={(e) => { setTeamSearchQuery(e.target.value); setTeamVisibleCount(TEAM_PAGE_SIZE); }}
+                    onChange={(e) => { setTeamSearchQuery(e.target.value); setTeamSearchForced(false); setTeamVisibleCount(TEAM_PAGE_SIZE); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { setTeamSearchForced(true); setTeamVisibleCount(TEAM_PAGE_SIZE); } }}
                     className="pl-9"
                   />
                 </div>
@@ -1757,13 +1779,13 @@ export default function OrganizationSettings() {
             </CardHeader>
             <CardContent className="space-y-4">
               {invitations.filter((inv) => {
-                if (!teamSearchQuery.trim()) return true;
+                if (!teamSearchQuery.trim() || (teamSearchQuery.trim().length < 3 && !teamSearchForced)) return true;
                 return inv.email.toLowerCase().includes(teamSearchQuery.toLowerCase());
               }).length > 0 && (
             <div className="space-y-3">
               <h4 className="text-sm font-medium">Team Invitations</h4>
               {invitations.filter((inv) => {
-                if (!teamSearchQuery.trim()) return true;
+                if (!teamSearchQuery.trim() || (teamSearchQuery.trim().length < 3 && !teamSearchForced)) return true;
                 return inv.email.toLowerCase().includes(teamSearchQuery.toLowerCase());
               }).map((inv) => (
                 <div
@@ -1824,7 +1846,7 @@ export default function OrganizationSettings() {
               </div>
             ) : (
               teamMembers.filter((member) => {
-                if (!teamSearchQuery.trim()) return true;
+                if (!teamSearchQuery.trim() || (teamSearchQuery.trim().length < 3 && !teamSearchForced)) return true;
                 const query = teamSearchQuery.toLowerCase();
                 const name = `${member.first_name} ${member.last_name}`.toLowerCase();
                 return name.includes(query) || member.email.toLowerCase().includes(query);
@@ -1897,7 +1919,7 @@ export default function OrganizationSettings() {
             </div>
           {(() => {
             const filteredCount = teamMembers.filter((member) => {
-              if (!teamSearchQuery.trim()) return true;
+              if (!teamSearchQuery.trim() || (teamSearchQuery.trim().length < 3 && !teamSearchForced)) return true;
               const query = teamSearchQuery.toLowerCase();
               const name = `${member.first_name} ${member.last_name}`.toLowerCase();
               return name.includes(query) || member.email.toLowerCase().includes(query);

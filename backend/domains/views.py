@@ -72,6 +72,13 @@ def domain_list(request):
         # Optimize queries: select_related for FK, prefetch_related for reverse FK
         domains = domains.select_related('organisation').prefetch_related('health_checks')
 
+        # Search support
+        search = request.query_params.get('search', '').strip()
+        if search:
+            domains = domains.filter(
+                Q(name__icontains=search) | Q(url__icontains=search)
+            )
+
         # Pagination support
         page = request.query_params.get('page')
         page_size = request.query_params.get('page_size')
