@@ -40,13 +40,21 @@ export interface NavGroup {
   sectionLabel?: boolean; // If true, renders as a text label header only
 }
 
+export interface RecentChat {
+  id: number;
+  title?: string;
+  updated_at: string;
+}
+
 interface NavigationState {
   navGroups: NavGroup[];
   filteredNavGroups: NavGroup[];
+  recentChats: RecentChat[];
 
   // Actions
   filterByPermissions: (checkPermission: (module: string, level?: 'read' | 'write' | 'admin') => boolean) => void;
   getFilteredNavGroups: () => NavGroup[];
+  updateRecentChats: (chats: RecentChat[]) => void;
 }
 
 const allNavGroups: NavGroup[] = [
@@ -139,6 +147,7 @@ const allNavGroups: NavGroup[] = [
 export const useNavigationStore = create<NavigationState>((set, get) => ({
   navGroups: allNavGroups,
   filteredNavGroups: allNavGroups,
+  recentChats: [],
 
   filterByPermissions: (checkPermission) => {
     const { navGroups } = get();
@@ -165,5 +174,9 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   getFilteredNavGroups: () => {
     return get().filteredNavGroups;
+  },
+
+  updateRecentChats: (chats) => {
+    set({ recentChats: chats });
   },
 }));

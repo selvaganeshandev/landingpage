@@ -30,15 +30,18 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Check,
+  Eye,
+  MessageSquareText,
 } from "lucide-react";
 import { DomainSelector } from "./DomainSelector";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { useNavigationStore } from "@/stores/navigationStore";
+import { useNavigationStore, type RecentChat } from "@/stores/navigationStore";
 import { useDomainStore } from "@/stores/domainStore";
 import { MODULES } from "@/types/auth";
 import { useSidebar } from "@/contexts/SidebarContext";
+import { apiClient } from "@/services/api";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -241,11 +244,12 @@ export const Sidebar = () => {
     return null;
   }
   const { toast } = useToast();
-  const { filteredNavGroups, filterByPermissions } = useNavigationStore();
+  const { filteredNavGroups, filterByPermissions, recentChats, updateRecentChats } = useNavigationStore();
   const { isOpen, toggleSidebar } = useSidebar();
   const { selectedDomain, domains, setSelectedDomain, setDomainSwitching } = useDomainStore();
   const [domainPopoverOpen, setDomainPopoverOpen] = useState(false);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
+  const [recentsExpanded, setRecentsExpanded] = useState(true);
 
   // Check if domain is currently processing
   const domainProcessingStatus = selectedDomain?.processing_status || null;
@@ -257,6 +261,25 @@ export const Sidebar = () => {
       filterByPermissions(checkPermission);
     }
   }, [user, checkPermission, filterByPermissions]);
+
+  // Load recent chats when domain changes
+  useEffect(() => {
+    if (!selectedDomain) return;
+    const loadRecents = async () => {
+      try {
+        const response = await apiClient.getChatConversations({ domain_id: selectedDomain.id });
+        if (response.conversations) {
+          const sorted = [...response.conversations].sort((a: any, b: any) =>
+            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+          );
+          updateRecentChats(sorted.slice(0, 10));
+        }
+      } catch (error) {
+        // Silently fail - recents are not critical
+      }
+    };
+    loadRecents();
+  }, [selectedDomain]);
 
   const handleItemClick = () => {
     // Close any open popovers when clicking on items
@@ -483,6 +506,60 @@ export const Sidebar = () => {
               />
             </div>
           ))}
+
+          {/* Recents Section - after Strategy */}
+          {isOpen && <Separator className="mt-4 mb-0" />}
+          {isOpen ? (
+            <div className="mt-1">
+              <button
+                onClick={() => setRecentsExpanded(!recentsExpanded)}
+                className="flex items-center justify-between w-full px-3 py-1.5"
+              >
+                <span className="text-xs font-semibold text-muted-foreground">Recents</span>
+                <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+              {recentsExpanded && (
+                <div className="space-y-0.5 max-h-40 overflow-y-auto">
+                  {recentChats.length > 0 ? (
+                    recentChats.slice(0, 10).map((chat) => (
+                      <Link
+                        key={chat.id}
+                        to={`/chat?conversation=${chat.id}`}
+                        className={cn(
+                          "flex items-center gap-2 px-3 py-1.5 text-sm rounded-md",
+                          location.pathname === '/chat' && new URLSearchParams(location.search).get('conversation') === String(chat.id)
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                        )}
+                      >
+                        <MessageSquareText className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="truncate text-xs">{chat.title || `Chat ${chat.id}`}</span>
+                      </Link>
+                    ))
+                  ) : (
+                    <p className="px-3 py-1.5 text-xs text-muted-foreground">No recent chats</p>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/chat"
+                  className={cn(
+                    "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                    "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
+                  )}
+                >
+                  <MessageSquareText className="h-5 w-5 flex-shrink-0" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Recent Chats</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
       </nav>
 
       <div className={cn("border-t border-border mt-auto space-y-1 pt-0", isOpen ? "px-4 pb-4" : "px-3 pb-4")}>
