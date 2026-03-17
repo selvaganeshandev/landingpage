@@ -1655,6 +1655,21 @@ export const apiClient = {
       body: JSON.stringify(data),
     }),
 
+  importSeoKeywords: (data: FormData | {
+    domain_id: number;
+    keywords: string[];
+    platform?: string;
+    region?: string;
+    isocode?: string;
+    language_code?: string;
+    geo_target?: string;
+    geo_target_uule?: string;
+  }) =>
+    apiRequest('/seo/keywords/import/', {
+      method: 'POST',
+      body: data instanceof FormData ? data : JSON.stringify(data),
+    }),
+
   getSeoKeywordDetail: (id: number) =>
     apiRequest(`/seo/keywords/${id}/`),
 

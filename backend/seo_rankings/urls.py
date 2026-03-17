@@ -6,6 +6,7 @@ urlpatterns = [
     path('keywords/', views.seo_keyword_list, name='seo-keyword-list'),
     path('keywords/add/', views.seo_keyword_add, name='seo-keyword-add'),
     path('keywords/bulk-add/', views.seo_keyword_bulk_add, name='seo-keyword-bulk-add'),
+    path('keywords/import/', views.seo_keyword_import, name='seo-keyword-import'),
     path('keywords/<int:pk>/', views.seo_keyword_detail, name='seo-keyword-detail'),
 
     # Rank history
