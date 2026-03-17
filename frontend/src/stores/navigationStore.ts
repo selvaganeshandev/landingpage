@@ -116,14 +116,14 @@ const allNavGroups: NavGroup[] = [
     name: "Rankings",
     icon: SearchCheck,
     items: [
-      { name: "Keyword Rankings", path: "/seo-rankings", icon: TrendingUp, module: MODULES.SEO_RANKINGS },
+      { name: "Keyword Rankings", path: "/seo-rankings", icon: TrendingUp, module: MODULES.KEYWORD_RANKINGS },
       { name: "Competitors", path: "/seo-competitors", icon: Users, module: MODULES.SEO_COMPETITORS },
     ],
   },
   {
     name: "Organic Reports",
     items: [
-      { name: "Organic Reports", path: "/seo-reports", icon: FileText, module: MODULES.SEO_RANKINGS },
+      { name: "Organic Reports", path: "/seo-reports", icon: FileText, module: MODULES.ORGANIC_REPORTS },
     ],
   },
   // Strategy Section
