@@ -548,10 +548,14 @@ def process_seo_keyword_task(self, seo_keyword_rank_id: int):
         raise self.retry(exc=e, countdown=30)
 
 
-@shared_task(bind=True, ignore_result=True, max_retries=3)
+@shared_task(bind=True, ignore_result=True, max_retries=0)
 def process_seo_domain_task(self, domain_id: int):
     """
     Process all SEO keywords for a domain: fetch SERP, parse, save, recalculate metrics.
+
+    This task never retries because process_domain_rankings handles all errors
+    internally (per-keyword try/except). Retrying would re-process already-done
+    keywords, wasting API credits.
 
     Args:
         domain_id: ID of Domain to process all SEO keywords for
@@ -564,7 +568,16 @@ def process_seo_domain_task(self, domain_id: int):
         return result
     except Exception as e:
         logger.error(f"[SEO] Error processing domain {domain_id}: {e}", exc_info=True)
-        raise self.retry(exc=e, countdown=60)
+        # Mark any remaining 'avail'/'busy' keywords as 'fail' so the frontend
+        # sees the refresh as complete rather than stuck forever
+        try:
+            from shared_models.seo_models import SeoKeywordRank
+            SeoKeywordRank.objects.filter(
+                domain_id=domain_id,
+                auto_call_status__in=['avail', 'busy']
+            ).update(auto_call_status='fail')
+        except Exception:
+            pass
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
