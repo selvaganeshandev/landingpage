@@ -8,6 +8,7 @@ seo_rankings tables via shared_models (managed=False).
 import logging
 import time
 import base64
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
 from django.utils import timezone
@@ -15,6 +16,9 @@ from django.utils import timezone
 import requests
 from django.conf import settings
 from django.db import transaction
+
+# Concurrency for ScrapingDog API calls (configurable via Django settings)
+SCRAPINGDOG_CONCURRENCY = getattr(settings, 'SCRAPINGDOG_CONCURRENCY', 10)
 
 logger = logging.getLogger(__name__)
 
@@ -499,45 +503,63 @@ class SeoRankingProcessor:
             logger.info(f"No SEO keywords to process for domain {domain_id}")
             return {'processed': 0, 'success': 0, 'failed': 0}
 
-        logger.info(f"Starting SEO rank check for domain {domain_id}: {total} keywords")
+        concurrency = SCRAPINGDOG_CONCURRENCY
+        logger.info(
+            f"Starting SEO rank check for domain {domain_id}: "
+            f"{total} keywords, concurrency={concurrency}"
+        )
 
         success_count = 0
         fail_count = 0
+        processed_count = 0
 
-        for idx, kw_id in enumerate(keyword_ids, 1):
+        def _safe_process(kw_id):
+            """Wrapper that never raises — returns (kw_id, True/False).
+            Each thread gets its own DB connection which is cleaned up after use."""
             try:
+                from django.db import connection as thread_conn
+                thread_conn.close_if_unusable_or_obsolete()
                 result = self.process_single_keyword(kw_id)
-                if result:
-                    success_count += 1
-                else:
-                    fail_count += 1
+                return (kw_id, result)
             except Exception as e:
-                # Catch ANY error so one bad keyword never kills the entire batch
                 logger.error(
-                    f"[SEO] Unexpected error processing keyword ID {kw_id} "
-                    f"({idx}/{total}): {e}", exc_info=True
+                    f"[SEO] Unexpected error processing keyword ID {kw_id}: {e}",
+                    exc_info=True
                 )
                 try:
                     SeoKeywordRank.objects.filter(id=kw_id).update(auto_call_status='fail')
                 except Exception:
                     pass
-                fail_count += 1
+                return (kw_id, False)
+            finally:
+                # Close this thread's DB connection to avoid connection leaks
+                from django.db import connection as thread_conn
+                thread_conn.close()
 
-            # Log progress every 50 keywords
-            if idx % 50 == 0:
-                logger.info(
-                    f"[SEO] Domain {domain_id} progress: {idx}/{total} "
-                    f"(success={success_count}, failed={fail_count})"
-                )
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = {
+                executor.submit(_safe_process, kw_id): kw_id
+                for kw_id in keyword_ids
+            }
 
-            # Close stale DB connections every 100 keywords to prevent
-            # "server closed the connection unexpectedly" on long runs
-            if idx % 100 == 0:
-                connection.close_if_unusable_or_obsolete()
+            for future in as_completed(futures):
+                kw_id, result = future.result()
+                processed_count += 1
+                if result:
+                    success_count += 1
+                else:
+                    fail_count += 1
 
-            # Small delay between keywords to avoid ScrapingDog rate limiting
-            if idx < total:
-                time.sleep(0.5)
+                # Log progress every 50 keywords
+                if processed_count % 50 == 0:
+                    logger.info(
+                        f"[SEO] Domain {domain_id} progress: {processed_count}/{total} "
+                        f"(success={success_count}, failed={fail_count})"
+                    )
+
+                # Close stale DB connections in main thread every 100 keywords
+                if processed_count % 100 == 0:
+                    connection.close_if_unusable_or_obsolete()
 
         # Recalculate domain metrics (wrapped so it never kills the task)
         metrics = None

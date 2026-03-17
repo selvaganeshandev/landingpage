@@ -270,6 +270,17 @@ def seo_keyword_import(request):
     language_code = request.data.get('language_code', 'en')
     geo_target = request.data.get('geo_target', '')
     geo_target_uule = request.data.get('geo_target_uule', '')
+    target_url = request.data.get('target_url', '')
+
+    # Tags support — accept JSON string (from FormData) or list (from JSON body)
+    import json as _json
+    raw_tags = request.data.get('tags', [])
+    if isinstance(raw_tags, str):
+        try:
+            raw_tags = _json.loads(raw_tags)
+        except (ValueError, TypeError):
+            raw_tags = []
+    tags = list(set(t.strip().lower() for t in raw_tags if isinstance(t, str) and t.strip()))[:20]
 
     # ---- Step 1: Bulk get-or-create in Keyword table ----
     from keywords.models import Keyword as KwModel
@@ -296,18 +307,24 @@ def seo_keyword_import(request):
                 kw_skipped += 1
 
             # ---- Step 2: Create SeoKeywordRank entry ----
+            defaults = {
+                'region': region,
+                'isocode': isocode,
+                'language_code': language_code,
+                'geo_target': geo_target,
+                'geo_target_uule': geo_target_uule,
+                'auto_call_status': 'avail',
+            }
+            if target_url:
+                defaults['target_url'] = target_url
+            if tags:
+                defaults['tags'] = tags
+
             seo_obj, seo_was_new = SeoKeywordRank.objects.get_or_create(
                 keyword=kw_obj,
                 domain=domain,
                 platform=platform,
-                defaults={
-                    'region': region,
-                    'isocode': isocode,
-                    'language_code': language_code,
-                    'geo_target': geo_target,
-                    'geo_target_uule': geo_target_uule,
-                    'auto_call_status': 'avail',
-                }
+                defaults=defaults,
             )
             if seo_was_new:
                 seo_created += 1
