@@ -265,6 +265,10 @@ class UserPermission(models.Model):
         ('traffic_attribution', 'Traffic Attribution'),
         ('misinformation_alerts', 'Misinformation Alerts'),
         
+        # SEO Monitoring
+        ('keyword_rankings', 'Keyword Rankings'),
+        ('organic_reports', 'Organic Reports'),
+
         # Reporting
         ('reports', 'Reports'),
         

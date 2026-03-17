@@ -32,6 +32,7 @@ import {
   Settings,
   Loader2,
   Calendar,
+  SearchCheck,
 } from "lucide-react";
 
 const featureCategories = [
@@ -72,6 +73,13 @@ const featureCategories = [
     features: [
       { id: "traffic_attribution", name: "Traffic Attribution", icon: Link2, description: "Track traffic sources" },
       { id: "misinformation_alerts", name: "Misinformation Alerts", icon: AlertTriangle, description: "Monitor brand misinformation" },
+    ]
+  },
+  {
+    name: "SEO Monitoring",
+    features: [
+      { id: "keyword_rankings", name: "Keyword Rankings", icon: SearchCheck, description: "View keyword ranking positions and trends" },
+      { id: "organic_reports", name: "Organic Reports", icon: FileText, description: "Generate and view organic search reports" },
     ]
   },
   {
