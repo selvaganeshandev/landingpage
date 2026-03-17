@@ -77,6 +77,8 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  Upload,
+  FileUp,
 } from "lucide-react";
 
 // Types matching the backend SeoKeywordRankSerializer
@@ -218,6 +220,24 @@ const SeoRankings = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // Import dialog state
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importKeywordsText, setImportKeywordsText] = useState("");
+  const [importPlatform, setImportPlatform] = useState("desktop");
+  const [importRegion, setImportRegion] = useState("google.com");
+  const [importIsocode, setImportIsocode] = useState("us");
+  const [importLanguageCode, setImportLanguageCode] = useState("en");
+  const [importResult, setImportResult] = useState<{
+    success: boolean;
+    keyword_created_count: number;
+    keyword_skipped_count: number;
+    seo_created_count: number;
+    seo_skipped_count: number;
+    total_processed: number;
+  } | null>(null);
+
   const { toast } = useToast();
 
   // Use the domain store (same source as the sidebar DomainSelector)
@@ -269,18 +289,24 @@ const SeoRankings = () => {
       try {
         const statusRes = await apiClient.getSeoRefreshStatus(domainId) as {
           refreshing: boolean; total: number; completed: number; progress: number; status: string;
+          running?: number;
         };
 
         setRefreshTotal(statusRes.total);
         setRefreshCompleted(statusRes.completed);
         setRefreshProgress(statusRes.progress);
 
-        // Detect stale refresh: if completed count hasn't changed, increment stale counter
-        if (statusRes.completed === lastCompletedRef.current) {
+        // Detect stale refresh: only count as stale when no keywords are actively running
+        // Each keyword can take 30s+ (10 paginated API calls), so don't treat as stale
+        // while the backend still has keywords in 'busy'/'avail' status
+        const hasRunningKeywords = (statusRes.running ?? 0) > 0 || statusRes.refreshing;
+        if (statusRes.completed === lastCompletedRef.current && !hasRunningKeywords) {
           staleCountRef.current += 1;
         } else {
+          if (statusRes.completed !== lastCompletedRef.current) {
+            lastCompletedRef.current = statusRes.completed;
+          }
           staleCountRef.current = 0;
-          lastCompletedRef.current = statusRes.completed;
         }
 
         // If no progress for MAX_STALE_POLLS consecutive checks, treat as stale
@@ -738,6 +764,86 @@ const SeoRankings = () => {
     }
   };
 
+  // ---------- Import Keywords ----------
+  const handleImportKeywords = async () => {
+    if (!activeDomainId) return;
+    setImportLoading(true);
+    setImportResult(null);
+
+    try {
+      let result: any;
+
+      if (importFile) {
+        // CSV file upload
+        const formData = new FormData();
+        formData.append('domain_id', activeDomainId);
+        formData.append('file', importFile);
+        formData.append('platform', importPlatform);
+        formData.append('region', importRegion);
+        formData.append('isocode', importIsocode);
+        formData.append('language_code', importLanguageCode);
+        result = await apiClient.importSeoKeywords(formData);
+      } else if (importKeywordsText.trim()) {
+        // Text input — split by newlines/commas
+        const keywords = importKeywordsText
+          .split(/[\n,]+/)
+          .map(k => k.trim())
+          .filter(k => k.length > 0);
+
+        if (keywords.length === 0) {
+          toast({ title: "No keywords", description: "Enter at least one keyword", variant: "destructive" });
+          setImportLoading(false);
+          return;
+        }
+
+        result = await apiClient.importSeoKeywords({
+          domain_id: Number(activeDomainId),
+          keywords,
+          platform: importPlatform,
+          region: importRegion,
+          isocode: importIsocode,
+          language_code: importLanguageCode,
+        });
+      } else {
+        toast({ title: "No input", description: "Upload a CSV file or enter keywords", variant: "destructive" });
+        setImportLoading(false);
+        return;
+      }
+
+      setImportResult(result);
+      toast({
+        title: "Import complete",
+        description: `${result.seo_created_count} keyword(s) added to SEO tracking`,
+      });
+
+      // Refresh keyword list
+      const [keywordsRes, overviewRes] = await Promise.all([
+        apiClient.getSeoKeywords({ domain_id: activeDomainId }) as Promise<SeoKeyword[]>,
+        apiClient.getSeoDomainOverview(activeDomainId) as Promise<OverviewData>,
+      ]);
+      setSeoKeywords((keywordsRes || []).map(mapKeywordForUI));
+      setOverview(overviewRes || null);
+    } catch (err: any) {
+      toast({
+        title: "Import failed",
+        description: err?.message || "Could not import keywords. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const resetImportDialog = () => {
+    setImportFile(null);
+    setImportKeywordsText("");
+    setImportPlatform("desktop");
+    setImportRegion("google.com");
+    setImportIsocode("us");
+    setImportLanguageCode("en");
+    setImportResult(null);
+  };
+
   const formatVolume = (volume: number | null) => {
     if (volume === null) return "NA";
     if (volume >= 1000) return `${(volume / 1000).toFixed(1)}K`;
@@ -1157,6 +1263,12 @@ const SeoRankings = () => {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+
+              {/* Import Button */}
+              <Button variant="outline" className="gap-2" onClick={() => { resetImportDialog(); setImportDialogOpen(true); }}>
+                <Upload className="h-4 w-4" />
+                Import
+              </Button>
             </div>
 
             <div className="flex items-center gap-2">
@@ -2020,6 +2132,180 @@ const SeoRankings = () => {
                 'Save Tags'
               )}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import Keywords Dialog */}
+      <Dialog open={importDialogOpen} onOpenChange={(open) => {
+        setImportDialogOpen(open);
+        if (!open) resetImportDialog();
+      }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Import Keywords</DialogTitle>
+            <DialogDescription>
+              Import keywords from a CSV file or paste them directly. Keywords will be added to SEO tracking for the current domain.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* CSV File Upload */}
+            <div>
+              <Label className="text-sm font-medium mb-2 block">Upload CSV File</Label>
+              <div
+                className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                onClick={() => document.getElementById('import-csv-input')?.click()}
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const file = e.dataTransfer.files?.[0];
+                  if (file && (file.name.endsWith('.csv') || file.name.endsWith('.txt'))) {
+                    setImportFile(file);
+                    setImportKeywordsText("");
+                  }
+                }}
+              >
+                <input
+                  id="import-csv-input"
+                  type="file"
+                  accept=".csv,.txt"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setImportFile(file);
+                      setImportKeywordsText("");
+                    }
+                  }}
+                />
+                {importFile ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <FileUp className="h-5 w-5 text-primary" />
+                    <span className="text-sm font-medium">{importFile.name}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5"
+                      onClick={(e) => { e.stopPropagation(); setImportFile(null); }}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div>
+                    <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      Drag & drop a CSV/TXT file, or click to browse
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      CSV should have a "keyword" column, or one keyword per line
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* OR Divider */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-xs text-muted-foreground uppercase">or paste keywords</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+
+            {/* Text Input */}
+            <div>
+              <textarea
+                className="w-full min-h-[100px] rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-y"
+                placeholder={"Enter keywords (one per line or comma-separated):\nbacklink management tool\nbacklink system\nlinkody alternative"}
+                value={importKeywordsText}
+                onChange={(e) => { setImportKeywordsText(e.target.value); setImportFile(null); }}
+                disabled={!!importFile}
+              />
+            </div>
+
+            {/* SEO Config */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Platform</Label>
+                <select
+                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+                  value={importPlatform}
+                  onChange={(e) => setImportPlatform(e.target.value)}
+                >
+                  <option value="desktop">Desktop</option>
+                  <option value="mobile">Mobile</option>
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Region</Label>
+                <Input
+                  value={importRegion}
+                  onChange={(e) => setImportRegion(e.target.value)}
+                  placeholder="google.com"
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Country (ISO)</Label>
+                <Input
+                  value={importIsocode}
+                  onChange={(e) => setImportIsocode(e.target.value)}
+                  placeholder="us"
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Language</Label>
+                <Input
+                  value={importLanguageCode}
+                  onChange={(e) => setImportLanguageCode(e.target.value)}
+                  placeholder="en"
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Import Result */}
+            {importResult && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
+                <p className="text-sm font-medium text-green-600">Import Successful</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>Keywords created:</span>
+                  <span className="font-medium text-foreground">{importResult.keyword_created_count}</span>
+                  <span>Keywords existing:</span>
+                  <span className="font-medium text-foreground">{importResult.keyword_skipped_count}</span>
+                  <span>SEO tracking added:</span>
+                  <span className="font-medium text-foreground">{importResult.seo_created_count}</span>
+                  <span>Already tracked:</span>
+                  <span className="font-medium text-foreground">{importResult.seo_skipped_count}</span>
+                  <span>Total processed:</span>
+                  <span className="font-medium text-foreground">{importResult.total_processed}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
+              {importResult ? 'Close' : 'Cancel'}
+            </Button>
+            {!importResult && (
+              <Button onClick={handleImportKeywords} disabled={importLoading || (!importFile && !importKeywordsText.trim())} className="gradient-primary">
+                {importLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import Keywords
+                  </>
+                )}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

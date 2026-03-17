@@ -171,6 +171,162 @@ def seo_keyword_bulk_add(request):
     }, status=status.HTTP_201_CREATED)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_import(request):
+    """
+    Import keywords from an external source (e.g. RankMaxx CSV export) into
+    both the Keyword table and SEO tracking in a single call.
+
+    Accepts keyword text strings directly — no need to pre-create Keyword
+    objects or know their IDs.  Does NOT trigger domain processing or change
+    domain.processing_status, so existing prompt-generation flows are
+    unaffected.
+
+    Body (JSON):
+    {
+        "domain_id": 123,
+        "platform": "desktop",          // optional, default "desktop"
+        "region": "google.co.in",       // optional, default "google.com"
+        "isocode": "in",                // optional, default "us"
+        "language_code": "en",          // optional, default "en"
+        "geo_target": "",               // optional
+        "geo_target_uule": "",          // optional
+        "keywords": [
+            "backlink management tool",
+            "backlink system",
+            "linkody alternative"
+        ]
+    }
+
+    Body (CSV upload — multipart/form-data):
+        domain_id, platform, region, isocode, language_code  (form fields)
+        file: CSV with a "keyword" column (or single-column, no header)
+
+    Returns: { created_count, skipped_count, seo_created_count, seo_skipped_count, details }
+    """
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response({'error': 'Only admins can import keywords'}, status=status.HTTP_403_FORBIDDEN)
+
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        domain = Domain.objects.get(pk=domain_id, organisation=request.user.organisation)
+    except Domain.DoesNotExist:
+        return Response({'error': 'Domain not found or not in your organization'}, status=status.HTTP_404_NOT_FOUND)
+
+    # ---- Collect keyword strings ----
+    keyword_strings = []
+
+    # Source 1: JSON list
+    json_keywords = request.data.get('keywords', [])
+    if isinstance(json_keywords, list):
+        keyword_strings.extend([str(k).strip().lower() for k in json_keywords if str(k).strip()])
+
+    # Source 2: CSV file upload
+    csv_file = request.FILES.get('file')
+    if csv_file:
+        import csv, io
+        try:
+            decoded = csv_file.read().decode('utf-8-sig')
+            reader = csv.DictReader(io.StringIO(decoded))
+            fieldnames = [f.lower().strip() for f in (reader.fieldnames or [])]
+
+            if 'keyword' in fieldnames:
+                for row in reader:
+                    kw = (row.get('keyword') or row.get('Keyword') or '').strip().lower()
+                    if kw:
+                        keyword_strings.append(kw)
+            else:
+                # Single-column CSV or no header — treat every non-empty line as a keyword
+                csv_file.seek(0)
+                decoded = csv_file.read().decode('utf-8-sig')
+                for line in decoded.splitlines():
+                    kw = line.strip().strip('"').strip("'").lower()
+                    if kw:
+                        keyword_strings.append(kw)
+        except Exception as e:
+            return Response({'error': f'Failed to parse CSV file: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_keywords = []
+    for kw in keyword_strings:
+        if kw not in seen and len(kw) <= 255:
+            seen.add(kw)
+            unique_keywords.append(kw)
+
+    if not unique_keywords:
+        return Response({'error': 'No valid keywords provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ---- Shared SEO config ----
+    platform = request.data.get('platform', 'desktop')
+    if platform not in ('desktop', 'mobile'):
+        platform = 'desktop'
+    region = request.data.get('region', 'google.com')
+    isocode = request.data.get('isocode', 'us')
+    language_code = request.data.get('language_code', 'en')
+    geo_target = request.data.get('geo_target', '')
+    geo_target_uule = request.data.get('geo_target_uule', '')
+
+    # ---- Step 1: Bulk get-or-create in Keyword table ----
+    from keywords.models import Keyword as KwModel
+
+    kw_created = 0
+    kw_skipped = 0
+    seo_created = 0
+    seo_skipped = 0
+    details = []
+
+    with transaction.atomic():
+        for kw_text in unique_keywords:
+            kw_obj, was_new = KwModel.objects.get_or_create(
+                keyword=kw_text,
+                domain=domain,
+                defaults={
+                    'source': 'manual',
+                    'auto_generate_prompts': False,
+                }
+            )
+            if was_new:
+                kw_created += 1
+            else:
+                kw_skipped += 1
+
+            # ---- Step 2: Create SeoKeywordRank entry ----
+            seo_obj, seo_was_new = SeoKeywordRank.objects.get_or_create(
+                keyword=kw_obj,
+                domain=domain,
+                platform=platform,
+                defaults={
+                    'region': region,
+                    'isocode': isocode,
+                    'language_code': language_code,
+                    'geo_target': geo_target,
+                    'geo_target_uule': geo_target_uule,
+                    'auto_call_status': 'avail',
+                }
+            )
+            if seo_was_new:
+                seo_created += 1
+                details.append({'keyword': kw_text, 'status': 'created'})
+            else:
+                seo_skipped += 1
+                details.append({'keyword': kw_text, 'status': 'already_tracked'})
+
+    return Response({
+        'success': True,
+        'keyword_created_count': kw_created,
+        'keyword_skipped_count': kw_skipped,
+        'seo_created_count': seo_created,
+        'seo_skipped_count': seo_skipped,
+        'total_processed': len(unique_keywords),
+        'details': details[:50],
+    }, status=status.HTTP_201_CREATED)
+
+
 @api_view(['GET', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def seo_keyword_detail(request, pk):
