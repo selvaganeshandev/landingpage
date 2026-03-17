@@ -6,6 +6,7 @@ This processor runs within the Celery engine and directly accesses the
 seo_rankings tables via shared_models (managed=False).
 """
 import logging
+import time
 import base64
 from datetime import date, timedelta
 
@@ -80,7 +81,8 @@ def _extract_domain(url):
 def fetch_serp_data(keyword_text, region, isocode, language_code, uule='', platform='desktop'):
     """
     Call ScrapingDog API to fetch Google SERP data.
-    Makes up to 10 paginated calls (page 0-9) = ~100 results.
+    Makes up to 3 paginated calls (page 0-2) = ~30 results.
+    Includes retry with backoff for rate-limited (429) responses.
     """
     api_key = _get_api_key()
     if not api_key:
@@ -105,40 +107,82 @@ def fetch_serp_data(keyword_text, region, isocode, language_code, uule='', platf
         if uule:
             params['uule'] = uule
 
-        try:
-            resp = session.get(SCRAPINGDOG_URL, params=params, timeout=(3.05, 15))
-            if resp.status_code == 200:
-                page_json = resp.json()
-                if not isinstance(page_json, dict):
-                    continue
+        # Retry up to 2 times per page on rate-limit or transient errors
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                resp = session.get(SCRAPINGDOG_URL, params=params, timeout=(3.05, 15))
 
-                if page_num == 0:
-                    merged_json = page_json.copy()
-                    page_organic = page_json.get('organic_results', [])
-                    first_ranks = [
-                        x.get('rank') for x in page_organic
-                        if isinstance(x, dict) and isinstance(x.get('rank'), int)
-                    ]
-                    base_rank = max(first_ranks) if first_ranks else len(page_organic)
-                    all_organic.extend(page_organic)
+                if resp.status_code == 200:
+                    try:
+                        page_json = resp.json()
+                    except (ValueError, TypeError):
+                        logger.warning(f"ScrapingDog returned non-JSON on page {page_num} for '{keyword_text}'")
+                        break  # skip this page
+                    if not isinstance(page_json, dict):
+                        break  # skip this page
+
+                    if page_num == 0:
+                        merged_json = page_json.copy()
+                        page_organic = page_json.get('organic_results', [])
+                        first_ranks = [
+                            x.get('rank') for x in page_organic
+                            if isinstance(x, dict) and isinstance(x.get('rank'), int)
+                        ]
+                        base_rank = max(first_ranks) if first_ranks else len(page_organic)
+                        all_organic.extend(page_organic)
+                    else:
+                        page_organic = page_json.get('organic_results', [])
+                        for item in page_organic:
+                            if isinstance(item, dict):
+                                base_rank += 1
+                                item['rank'] = base_rank
+                        all_organic.extend(page_organic)
+                    break  # success, move to next page
+
+                elif resp.status_code == 429:
+                    if attempt < max_retries:
+                        wait = 3 * (attempt + 1)  # 3s, 6s backoff
+                        logger.warning(
+                            f"ScrapingDog rate limit on page {page_num} for '{keyword_text}', "
+                            f"retry {attempt + 1}/{max_retries} in {wait}s"
+                        )
+                        time.sleep(wait)
+                        continue
+                    else:
+                        logger.warning(f"ScrapingDog rate limit on page {page_num} for '{keyword_text}', giving up")
+                        break
+
+                elif resp.status_code >= 500:
+                    # Server error — retry
+                    if attempt < max_retries:
+                        wait = 2 * (attempt + 1)
+                        logger.warning(
+                            f"ScrapingDog server error {resp.status_code} on page {page_num} for '{keyword_text}', "
+                            f"retry {attempt + 1}/{max_retries} in {wait}s"
+                        )
+                        time.sleep(wait)
+                        continue
+                    else:
+                        logger.warning(f"ScrapingDog error {resp.status_code} on page {page_num} for '{keyword_text}'")
+                        break
+
                 else:
-                    page_organic = page_json.get('organic_results', [])
-                    for item in page_organic:
-                        if isinstance(item, dict):
-                            base_rank += 1
-                            item['rank'] = base_rank
-                    all_organic.extend(page_organic)
+                    logger.warning(f"ScrapingDog error {resp.status_code} on page {page_num} for '{keyword_text}'")
+                    break
 
-            elif resp.status_code == 429:
-                logger.warning(f"ScrapingDog rate limit hit on page {page_num} for '{keyword_text}'")
-                break
-            else:
-                logger.warning(f"ScrapingDog error {resp.status_code} on page {page_num} for '{keyword_text}'")
-                break
-
-        except requests.RequestException as e:
-            logger.error(f"ScrapingDog request failed for '{keyword_text}' page {page_num}: {e}")
-            break
+            except requests.RequestException as e:
+                if attempt < max_retries:
+                    wait = 2 * (attempt + 1)
+                    logger.warning(
+                        f"ScrapingDog request failed for '{keyword_text}' page {page_num}: {e}, "
+                        f"retry {attempt + 1}/{max_retries} in {wait}s"
+                    )
+                    time.sleep(wait)
+                    continue
+                else:
+                    logger.error(f"ScrapingDog request failed for '{keyword_text}' page {page_num}: {e}")
+                    break
 
     if merged_json:
         merged_json['organic_results'] = all_organic
@@ -304,6 +348,12 @@ class SeoRankingProcessor:
             logger.error(f"SeoKeywordRank {seo_kw_id} not found")
             return False
 
+        # Guard against broken FK or missing keyword
+        if not seo_kw.keyword:
+            logger.error(f"SeoKeywordRank {seo_kw_id} has no linked keyword — skipping")
+            SeoKeywordRank.objects.filter(id=seo_kw.id).update(auto_call_status='fail')
+            return False
+
         keyword_text = seo_kw.keyword.keyword
         target_url = seo_kw.target_url or ''
 
@@ -427,15 +477,24 @@ class SeoRankingProcessor:
             return False
 
     def process_domain_rankings(self, domain_id):
-        """Process all keywords for a domain, then recalculate metrics."""
-        from shared_models.seo_models import SeoKeywordRank, SeoDomainDailyMetrics
+        """Process all keywords for a domain, then recalculate metrics.
 
-        keywords = SeoKeywordRank.objects.filter(
-            domain_id=domain_id,
-            auto_call_status__in=['avail', 'fail']
+        Designed to never crash: every keyword is wrapped in its own
+        try/except so a single bad keyword can never kill the batch.
+        DB connections are kept short-lived to survive long runs (3000+ kw).
+        """
+        from shared_models.seo_models import SeoKeywordRank, SeoDomainDailyMetrics
+        from django.db import connection
+
+        # Fetch IDs upfront to avoid long-lived DB cursor that can drop mid-iteration
+        keyword_ids = list(
+            SeoKeywordRank.objects.filter(
+                domain_id=domain_id,
+                auto_call_status__in=['avail', 'fail']
+            ).values_list('id', flat=True)
         )
 
-        total = keywords.count()
+        total = len(keyword_ids)
         if total == 0:
             logger.info(f"No SEO keywords to process for domain {domain_id}")
             return {'processed': 0, 'success': 0, 'failed': 0}
@@ -445,15 +504,47 @@ class SeoRankingProcessor:
         success_count = 0
         fail_count = 0
 
-        for seo_kw in keywords:
-            result = self.process_single_keyword(seo_kw.id)
-            if result:
-                success_count += 1
-            else:
+        for idx, kw_id in enumerate(keyword_ids, 1):
+            try:
+                result = self.process_single_keyword(kw_id)
+                if result:
+                    success_count += 1
+                else:
+                    fail_count += 1
+            except Exception as e:
+                # Catch ANY error so one bad keyword never kills the entire batch
+                logger.error(
+                    f"[SEO] Unexpected error processing keyword ID {kw_id} "
+                    f"({idx}/{total}): {e}", exc_info=True
+                )
+                try:
+                    SeoKeywordRank.objects.filter(id=kw_id).update(auto_call_status='fail')
+                except Exception:
+                    pass
                 fail_count += 1
 
-        # Recalculate domain metrics
-        metrics = self._calculate_domain_metrics(domain_id)
+            # Log progress every 50 keywords
+            if idx % 50 == 0:
+                logger.info(
+                    f"[SEO] Domain {domain_id} progress: {idx}/{total} "
+                    f"(success={success_count}, failed={fail_count})"
+                )
+
+            # Close stale DB connections every 100 keywords to prevent
+            # "server closed the connection unexpectedly" on long runs
+            if idx % 100 == 0:
+                connection.close_if_unusable_or_obsolete()
+
+            # Small delay between keywords to avoid ScrapingDog rate limiting
+            if idx < total:
+                time.sleep(0.5)
+
+        # Recalculate domain metrics (wrapped so it never kills the task)
+        metrics = None
+        try:
+            metrics = self._calculate_domain_metrics(domain_id)
+        except Exception as e:
+            logger.error(f"[SEO] Error calculating metrics for domain {domain_id}: {e}", exc_info=True)
 
         logger.info(
             f"Domain {domain_id} SEO check complete: "
@@ -544,22 +635,15 @@ class SeoRankingProcessor:
         if total > 0:
             activity = ((improved - declined) / total) * 100
 
-        # Score calculation (Rankmax algorithm)
-        score_per_day = {'first': 0, 'second': 0, 'third': 0, 'top_ten': 0, 'top_hundred': 0, 'beyond_hundred': 0}
-        for kw in keywords:
-            rank = kw.rank_now
-            if rank == 1:
-                score_per_day['first'] += 1
-            elif rank == 2:
-                score_per_day['second'] += 1
-            elif rank == 3:
-                score_per_day['third'] += 1
-            elif 4 <= rank <= 10:
-                score_per_day['top_ten'] += 1
-            elif 11 <= rank <= 100:
-                score_per_day['top_hundred'] += 1
-            elif rank == 0 or rank > 100:
-                score_per_day['beyond_hundred'] += 1
+        # Score calculation (Rankmax algorithm) — use DB counts instead of loading all objects
+        score_per_day = {
+            'first': keywords.filter(rank_now=1).count(),
+            'second': keywords.filter(rank_now=2).count(),
+            'third': keywords.filter(rank_now=3).count(),
+            'top_ten': keywords.filter(rank_now__gte=4, rank_now__lte=10).count(),
+            'top_hundred': keywords.filter(rank_now__gte=11, rank_now__lte=100).count(),
+            'beyond_hundred': keywords.filter(rank_now=0).count() + keywords.filter(rank_now__gt=100).count(),
+        }
 
         score = 0.0
         if total > 0:

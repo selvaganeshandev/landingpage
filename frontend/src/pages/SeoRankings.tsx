@@ -258,7 +258,7 @@ const SeoRankings = () => {
   const pollCountRef = useRef(0);
   const lastCompletedRef = useRef(-1);
   const staleCountRef = useRef(0);
-  const MAX_POLL_ATTEMPTS = 120; // 120 * 5s = 10 minutes max
+  const MAX_POLL_ATTEMPTS = 2160; // 2160 * 5s = 3 hours max (supports 3000+ keywords)
   const MAX_STALE_POLLS = 6; // 6 * 5s = 30s with no progress → consider stale
 
   const resetRefreshState = useCallback(() => {

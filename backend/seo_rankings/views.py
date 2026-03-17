@@ -497,9 +497,19 @@ def seo_domain_overview(request):
         snippets = kw.snippets_details or {}
         if kw.ads and 'ads' in snippets:
             ads_data = snippets['ads']
-            top_count = int(ads_data.get('top_count', 0) or 0)
-            bottom_count = int(ads_data.get('bottom_count', 0) or 0)
-            ads_status = ads_data.get('status', 'no')
+            # ScrapingDog returns ads as a list; convert to counts
+            if isinstance(ads_data, list):
+                top_count = len(ads_data)
+                bottom_count = 0
+                ads_status = 'no'
+            elif isinstance(ads_data, dict):
+                top_count = int(ads_data.get('top_count', 0) or 0)
+                bottom_count = int(ads_data.get('bottom_count', 0) or 0)
+                ads_status = ads_data.get('status', 'no')
+            else:
+                top_count = 0
+                bottom_count = 0
+                ads_status = 'no'
 
             if top_count > 0 and bottom_count > 0:
                 if ads_status == 'yes':
