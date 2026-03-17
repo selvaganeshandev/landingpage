@@ -170,6 +170,7 @@ PERPLEXITY_API_KEY = config('PERPLEXITY_API_KEY', default=None)
 
 # ScrapingDog API Configuration (for web crawling in misinformation detection)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
+SCRAPINGDOG_CONCURRENCY = config('SCRAPINGDOG_CONCURRENCY', default=10, cast=int)
 
 # ==================== EMAIL CONFIGURATION (MAILGUN HTTP API) ====================
 # Mailgun HTTP API Configuration for report email delivery

@@ -1664,6 +1664,8 @@ export const apiClient = {
     language_code?: string;
     geo_target?: string;
     geo_target_uule?: string;
+    target_url?: string;
+    tags?: string[];
   }) =>
     apiRequest('/seo/keywords/import/', {
       method: 'POST',

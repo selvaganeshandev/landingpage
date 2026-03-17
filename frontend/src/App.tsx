@@ -36,6 +36,7 @@ import SeoRankings from "./pages/SeoRankings";
 import SeoCompetitors from "./pages/SeoCompetitors";
 import SeoReports from "./pages/SeoReports";
 import ConfigureSeoReport from "./pages/ConfigureSeoReport";
+import AddSeoKeyword from "./pages/AddSeoKeyword";
 import SignIn from "./pages/Auth";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -220,6 +221,11 @@ const App = () => (
               <Route path="/seo-rankings" element={
                 <ProtectedRoute requiredPermission={MODULES.SEO_RANKINGS}>
                   <SeoRankings />
+                </ProtectedRoute>
+              } />
+              <Route path="/seo-rankings/add-keyword" element={
+                <ProtectedRoute requiredPermission={MODULES.SEO_RANKINGS}>
+                  <AddSeoKeyword />
                 </ProtectedRoute>
               } />
               <Route path="/seo-competitors" element={

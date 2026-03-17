@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
 import { useSidebar } from "@/contexts/SidebarContext";
@@ -79,6 +80,7 @@ import {
   ChevronRight,
   Upload,
   FileUp,
+  ArrowLeft,
 } from "lucide-react";
 
 // Types matching the backend SeoKeywordRankSerializer
@@ -187,6 +189,7 @@ interface ColumnVisibility {
 }
 
 const SeoRankings = () => {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [showOverview, setShowOverview] = useState(true);
@@ -233,6 +236,26 @@ const SeoRankings = () => {
     success: boolean;
     keyword_created_count: number;
     keyword_skipped_count: number;
+    seo_created_count: number;
+    seo_skipped_count: number;
+    total_processed: number;
+  } | null>(null);
+
+  // Add Keyword dialog state (RankMax-style)
+  const [addKeywordDialogOpen, setAddKeywordDialogOpen] = useState(false);
+  const [addKeywordLoading, setAddKeywordLoading] = useState(false);
+  const [addKeywordText, setAddKeywordText] = useState("");
+  const [addKeywordInputMode, setAddKeywordInputMode] = useState<"text" | "csv">("text");
+  const [addKeywordFile, setAddKeywordFile] = useState<File | null>(null);
+  const [addKeywordUrlSlug, setAddKeywordUrlSlug] = useState("");
+  const [addKeywordRegion, setAddKeywordRegion] = useState("google.com");
+  const [addKeywordLanguage, setAddKeywordLanguage] = useState("en");
+  const [addKeywordPlatform, setAddKeywordPlatform] = useState("desktop");
+  const [addKeywordTagsEnabled, setAddKeywordTagsEnabled] = useState(true);
+  const [addKeywordTagInput, setAddKeywordTagInput] = useState("");
+  const [addKeywordTags, setAddKeywordTags] = useState<string[]>([]);
+  const [addKeywordResult, setAddKeywordResult] = useState<{
+    success: boolean;
     seo_created_count: number;
     seo_skipped_count: number;
     total_processed: number;
@@ -844,6 +867,126 @@ const SeoRankings = () => {
     setImportResult(null);
   };
 
+  // ---------- Add Keyword (RankMax-style) ----------
+  const resetAddKeywordDialog = () => {
+    setAddKeywordText("");
+    setAddKeywordInputMode("text");
+    setAddKeywordFile(null);
+    setAddKeywordUrlSlug("");
+    setAddKeywordRegion("google.com");
+    setAddKeywordLanguage("en");
+    setAddKeywordPlatform("desktop");
+    setAddKeywordTagsEnabled(true);
+    setAddKeywordTagInput("");
+    setAddKeywordTags([]);
+    setAddKeywordResult(null);
+  };
+
+  const handleAddKeywordTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((e.key === 'Enter' || e.key === ',') && addKeywordTagInput.trim()) {
+      e.preventDefault();
+      const tag = addKeywordTagInput.trim().toLowerCase();
+      if (!addKeywordTags.includes(tag)) {
+        setAddKeywordTags(prev => [...prev, tag]);
+      }
+      setAddKeywordTagInput("");
+    }
+  };
+
+  const handleAddKeywordSubmit = async () => {
+    if (!activeDomainId) return;
+    setAddKeywordLoading(true);
+    setAddKeywordResult(null);
+
+    try {
+      let result: any;
+
+      if (addKeywordInputMode === "csv" && addKeywordFile) {
+        const formData = new FormData();
+        formData.append('domain_id', activeDomainId);
+        formData.append('file', addKeywordFile);
+        formData.append('platform', addKeywordPlatform);
+        formData.append('region', addKeywordRegion);
+        formData.append('language_code', addKeywordLanguage);
+        if (addKeywordUrlSlug.trim()) {
+          formData.append('target_url', addKeywordUrlSlug.trim());
+        }
+        if (addKeywordTagsEnabled && addKeywordTags.length > 0) {
+          formData.append('tags', JSON.stringify(addKeywordTags));
+        }
+        // Derive isocode from region
+        const isocode = regionToIsocode(addKeywordRegion);
+        formData.append('isocode', isocode);
+        result = await apiClient.importSeoKeywords(formData);
+      } else {
+        // Text input — split by commas/newlines/Enter
+        const keywords = addKeywordText
+          .split(/[\n,]+/)
+          .map(k => k.trim())
+          .filter(k => k.length > 0);
+
+        if (keywords.length === 0) {
+          toast({ title: "No keywords", description: "Enter at least one keyword", variant: "destructive" });
+          setAddKeywordLoading(false);
+          return;
+        }
+
+        const isocode = regionToIsocode(addKeywordRegion);
+        result = await apiClient.importSeoKeywords({
+          domain_id: Number(activeDomainId),
+          keywords,
+          platform: addKeywordPlatform,
+          region: addKeywordRegion,
+          isocode,
+          language_code: addKeywordLanguage,
+          target_url: addKeywordUrlSlug.trim() || undefined,
+          tags: addKeywordTagsEnabled && addKeywordTags.length > 0 ? addKeywordTags : undefined,
+        });
+      }
+
+      setAddKeywordResult(result);
+      toast({
+        title: "Keywords added",
+        description: `${result.seo_created_count} keyword(s) added to SEO tracking`,
+      });
+
+      // Refresh keyword list
+      const [keywordsRes, overviewRes] = await Promise.all([
+        apiClient.getSeoKeywords({ domain_id: activeDomainId }) as Promise<SeoKeyword[]>,
+        apiClient.getSeoDomainOverview(activeDomainId) as Promise<OverviewData>,
+      ]);
+      setSeoKeywords((keywordsRes || []).map(mapKeywordForUI));
+      setOverview(overviewRes || null);
+    } catch (err: any) {
+      toast({
+        title: "Failed to add keywords",
+        description: err?.message || "Could not add keywords. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setAddKeywordLoading(false);
+    }
+  };
+
+  // Map region to ISO code
+  const regionToIsocode = (region: string): string => {
+    const regionMap: Record<string, string> = {
+      'google.com': 'us', 'google.co.uk': 'gb', 'google.ca': 'ca', 'google.com.au': 'au',
+      'google.co.in': 'in', 'google.de': 'de', 'google.fr': 'fr', 'google.es': 'es',
+      'google.it': 'it', 'google.co.jp': 'jp', 'google.com.br': 'br', 'google.com.mx': 'mx',
+      'google.nl': 'nl', 'google.pl': 'pl', 'google.se': 'se', 'google.com.sg': 'sg',
+      'google.co.za': 'za', 'google.com.ng': 'ng', 'google.co.nz': 'nz', 'google.ie': 'ie',
+      'google.at': 'at', 'google.be': 'be', 'google.ch': 'ch', 'google.dk': 'dk',
+      'google.fi': 'fi', 'google.no': 'no', 'google.pt': 'pt', 'google.com.ar': 'ar',
+      'google.cl': 'cl', 'google.co.il': 'il', 'google.com.ph': 'ph', 'google.com.pk': 'pk',
+      'google.com.eg': 'eg', 'google.ae': 'ae', 'google.co.th': 'th', 'google.com.my': 'my',
+      'google.co.id': 'id', 'google.com.vn': 'vn', 'google.co.kr': 'kr', 'google.com.tw': 'tw',
+      'google.com.hk': 'hk', 'google.ru': 'ru', 'google.com.ua': 'ua', 'google.com.tr': 'tr',
+      'google.com.sa': 'sa', 'google.co.ke': 'ke',
+    };
+    return regionMap[region] || 'us';
+  };
+
   const formatVolume = (volume: number | null) => {
     if (volume === null) return "NA";
     if (volume >= 1000) return `${(volume / 1000).toFixed(1)}K`;
@@ -891,9 +1034,9 @@ const SeoRankings = () => {
             Track your organic search rankings and keyword performance
           </p>
         </div>
-        <Button className="gradient-primary shadow-md shadow-primary/20" onClick={handleRefresh} disabled={refreshing || !activeDomainId}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-          {refreshing ? 'Refreshing...' : 'Refresh Data'}
+        <Button className="gradient-primary shadow-md shadow-primary/20" onClick={() => navigate('/seo-rankings/add-keyword')} disabled={!activeDomainId}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Keyword
         </Button>
       </div>
 
@@ -2309,6 +2452,7 @@ const SeoRankings = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </div>
   );
 };
