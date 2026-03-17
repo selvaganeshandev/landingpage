@@ -92,7 +92,7 @@ def fetch_serp_data(keyword_text, region, isocode, language_code, uule='', platf
     merged_json = {}
     base_rank = 0
 
-    for page_num in range(10):
+    for page_num in range(3):
         params = {
             'api_key': api_key,
             'query': keyword_text,
