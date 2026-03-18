@@ -511,38 +511,41 @@ def seo_domain_overview(request):
             rating_4_5 += 1
 
         # Google Ads (matches RankMax Ay/Ao logic)
-        snippets = kw.snippets_details or {}
-        if kw.ads and 'ads' in snippets:
-            ads_data = snippets['ads']
-            # ScrapingDog returns ads as a list; convert to counts
-            if isinstance(ads_data, list):
-                top_count = len(ads_data)
-                bottom_count = 0
-                ads_status = 'no'
-            elif isinstance(ads_data, dict):
-                top_count = int(ads_data.get('top_count', 0) or 0)
-                bottom_count = int(ads_data.get('bottom_count', 0) or 0)
-                ads_status = ads_data.get('status', 'no')
-            else:
-                top_count = 0
-                bottom_count = 0
-                ads_status = 'no'
+        try:
+            snippets = kw.snippets_details or {}
+            if kw.ads and isinstance(snippets, dict) and 'ads' in snippets:
+                ads_data = snippets['ads']
+                # ScrapingDog returns ads as a list; convert to counts
+                if isinstance(ads_data, list):
+                    top_count = len(ads_data)
+                    bottom_count = 0
+                    ads_status = 'no'
+                elif isinstance(ads_data, dict):
+                    top_count = int(ads_data.get('top_count', 0) or 0)
+                    bottom_count = int(ads_data.get('bottom_count', 0) or 0)
+                    ads_status = ads_data.get('status', 'no')
+                else:
+                    top_count = 0
+                    bottom_count = 0
+                    ads_status = 'no'
 
-            if top_count > 0 and bottom_count > 0:
-                if ads_status == 'yes':
-                    ads_you_above_below += 1
-                else:
-                    ads_others_above_below += 1
-            elif top_count > 0:
-                if ads_status == 'yes':
-                    ads_you_above += 1
-                else:
-                    ads_others_above += 1
-            elif bottom_count > 0:
-                if ads_status == 'yes':
-                    ads_you_below += 1
-                else:
-                    ads_others_below += 1
+                if top_count > 0 and bottom_count > 0:
+                    if ads_status == 'yes':
+                        ads_you_above_below += 1
+                    else:
+                        ads_others_above_below += 1
+                elif top_count > 0:
+                    if ads_status == 'yes':
+                        ads_you_above += 1
+                    else:
+                        ads_others_above += 1
+                elif bottom_count > 0:
+                    if ads_status == 'yes':
+                        ads_you_below += 1
+                    else:
+                        ads_others_below += 1
+        except (TypeError, ValueError, AttributeError):
+            pass
 
     today_data = SeoDomainDailyMetricsSerializer(latest).data if latest else None
     # Override rating/ads fields with fresh computed values

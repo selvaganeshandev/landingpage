@@ -14,8 +14,9 @@ from datetime import date, timedelta
 from django.utils import timezone
 
 import requests
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
-from django.db import transaction
+from django.db import connection, transaction
 
 # Concurrency for ScrapingDog API calls (configurable via Django settings)
 SCRAPINGDOG_CONCURRENCY = getattr(settings, 'SCRAPINGDOG_CONCURRENCY', 10)
@@ -536,30 +537,40 @@ class SeoRankingProcessor:
                 from django.db import connection as thread_conn
                 thread_conn.close()
 
-        with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            futures = {
-                executor.submit(_safe_process, kw_id): kw_id
-                for kw_id in keyword_ids
-            }
+        try:
+            with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                futures = {
+                    executor.submit(_safe_process, kw_id): kw_id
+                    for kw_id in keyword_ids
+                }
 
-            for future in as_completed(futures):
-                kw_id, result = future.result()
-                processed_count += 1
-                if result:
-                    success_count += 1
-                else:
-                    fail_count += 1
+                for future in as_completed(futures):
+                    kw_id, result = future.result()
+                    processed_count += 1
+                    if result:
+                        success_count += 1
+                    else:
+                        fail_count += 1
 
-                # Log progress every 50 keywords
-                if processed_count % 50 == 0:
-                    logger.info(
-                        f"[SEO] Domain {domain_id} progress: {processed_count}/{total} "
-                        f"(success={success_count}, failed={fail_count})"
-                    )
+                    # Log progress every 50 keywords
+                    if processed_count % 50 == 0:
+                        logger.info(
+                            f"[SEO] Domain {domain_id} progress: {processed_count}/{total} "
+                            f"(success={success_count}, failed={fail_count})"
+                        )
 
-                # Close stale DB connections in main thread every 100 keywords
-                if processed_count % 100 == 0:
-                    connection.close_if_unusable_or_obsolete()
+                    # Close stale DB connections in main thread every 100 keywords
+                    if processed_count % 100 == 0:
+                        connection.close_if_unusable_or_obsolete()
+
+        except SoftTimeLimitExceeded:
+            logger.warning(
+                f"[SEO] Domain {domain_id} hit time limit at {processed_count}/{total}. "
+                f"Remaining keywords will be marked as fail."
+            )
+            # Cancel pending futures
+            for f in futures:
+                f.cancel()
 
         # Recalculate domain metrics (wrapped so it never kills the task)
         metrics = None

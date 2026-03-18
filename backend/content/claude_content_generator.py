@@ -23,6 +23,20 @@ class ClaudeContentGenerator:
         self.client = Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-5-20250929"
 
+    @staticmethod
+    def _calculate_max_tokens(word_count, is_section=False):
+        """Calculate dynamic max_tokens based on requested word count.
+        HTML content uses ~2 tokens per word (tags + text).
+        Adds buffer for overhead (HTML structure, formatting).
+        """
+        if is_section:
+            # For single section regeneration, smaller buffer needed
+            return max(4096, int(word_count * 2.5) + 500)
+        # Full article: word_count * 2 tokens/word + 1500 buffer for HTML overhead
+        tokens = int(word_count * 2.0) + 1500
+        # Minimum 4096, maximum 16384 (Claude's output limit)
+        return max(4096, min(tokens, 16384))
+
     def match_reference_content(self, title, keywords, article_type, reference_docs):
         """
         Check if any reference repository documents contain content relevant
@@ -139,11 +153,15 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
         # Build the system and user prompts
         system_prompt, user_prompt = self._build_prompts(params)
 
+        # Dynamic max_tokens based on requested word count
+        word_count = params.get('word_count', 1500)
+        max_tokens = self._calculate_max_tokens(word_count)
+
         # Call Claude API
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=max_tokens,
                 temperature=0.7,
                 system=system_prompt,
                 messages=[
@@ -156,6 +174,15 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
 
             # Extract content from response
             content_html = response.content[0].text
+
+            # Detect truncation: if Claude stopped due to token limit, content is incomplete
+            if response.stop_reason == 'max_tokens':
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"Content truncated for word_count={word_count}: "
+                    f"stop_reason=max_tokens, max_tokens={max_tokens}"
+                )
 
             # Calculate generation time
             generation_time = time.time() - start_time
@@ -541,10 +568,14 @@ Please regenerate the following section:
 
 Return ONLY the regenerated HTML content for this specific section."""
 
+        # For section regeneration, use word_count if available, else default
+        section_word_count = params.get('word_count', 1500)
+        max_tokens = self._calculate_max_tokens(section_word_count, is_section=True)
+
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=max_tokens,
                 temperature=0.7,
                 system=system_prompt,
                 messages=[
@@ -883,10 +914,16 @@ IMPORTANT:
 - Use h2 tags for main sections, h3 tags for subsections
 - Return ONLY the HTML content, no markdown"""
 
+        # Calculate total word count from outline sections
+        outline_word_count = sum(s.get('estimated_words', 150) for s in outline)
+        # Use the larger of outline total or params word_count
+        target_word_count = max(outline_word_count, params.get('word_count', 1500))
+        max_tokens = self._calculate_max_tokens(target_word_count)
+
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=max_tokens,
                 temperature=0.7,
                 system=system_prompt,
                 messages=[
@@ -898,6 +935,16 @@ IMPORTANT:
             )
 
             content_html = response.content[0].text
+
+            # Log truncation warning
+            if response.stop_reason == 'max_tokens':
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"Outline content truncated: target={target_word_count} words, "
+                    f"max_tokens={max_tokens}, stop_reason=max_tokens"
+                )
+
             generation_time = time.time() - start_time
             actual_word_count = len(content_html.split())
 
