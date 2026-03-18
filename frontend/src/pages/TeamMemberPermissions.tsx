@@ -79,6 +79,7 @@ const featureCategories = [
     name: "SEO Monitoring",
     features: [
       { id: "keyword_rankings", name: "Keyword Rankings", icon: SearchCheck, description: "View keyword ranking positions and trends" },
+      { id: "seo_competitors", name: "SEO Competitors", icon: Users, description: "Track and compare SEO competitors" },
       { id: "organic_reports", name: "Organic Reports", icon: FileText, description: "Generate and view organic search reports" },
     ]
   },
@@ -135,8 +136,8 @@ export default function TeamMemberPermissions() {
       setIsLoading(true);
       
       // Load team members to find the specific member
-      const teamData = await apiClient.getTeamMembers();
-      const foundMember = teamData.members.find(m => m.id === parseInt(memberId!));
+      const teamData: any = await apiClient.getTeamMembers();
+      const foundMember = teamData.members.find((m: any) => m.id === parseInt(memberId!));
       
       if (!foundMember) {
         toast({
@@ -151,9 +152,9 @@ export default function TeamMemberPermissions() {
       setMember(foundMember);
       
       // Load user permissions
-      const permissionsData = await apiClient.listUserPermissions(foundMember.id);
+      const permissionsData: any = await apiClient.listUserPermissions(foundMember.id);
       setUserPermissions(permissionsData.permissions);
-      
+
       // Initialize permissions state
       initializePermissions(permissionsData.permissions);
       

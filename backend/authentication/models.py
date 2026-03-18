@@ -267,6 +267,7 @@ class UserPermission(models.Model):
         
         # SEO Monitoring
         ('keyword_rankings', 'Keyword Rankings'),
+        ('seo_competitors', 'SEO Competitors'),
         ('organic_reports', 'Organic Reports'),
 
         # Reporting
