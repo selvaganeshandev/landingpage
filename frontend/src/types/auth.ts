@@ -68,15 +68,16 @@ export const MODULES = {
   CONTENT_GAPS: 'content_gaps',
   COMPETITORS: 'competitors',
   CONTENT_PLANNER: 'content_planner',
+  MULTILINGUAL: 'multilingual',
+  AI_COPILOT: 'ai_copilot',
   TRAFFIC_ATTRIBUTION: 'traffic_attribution',
   MISINFORMATION_ALERTS: 'misinformation_alerts',
   REPORTS: 'reports',
   ORGANIZATION_SETTINGS: 'organization_settings',
   TEAM_MANAGEMENT: 'team_management',
   // SEO Monitoring modules
-  SEO_RANKINGS: 'seo_rankings',
-  SEO_COMPETITORS: 'seo_competitors',
   KEYWORD_RANKINGS: 'keyword_rankings',
+  SEO_COMPETITORS: 'seo_competitors',
   ORGANIC_REPORTS: 'organic_reports',
 } as const;
 

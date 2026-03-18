@@ -219,12 +219,12 @@ const App = () => (
               
               {/* SEO Monitoring */}
               <Route path="/seo-rankings" element={
-                <ProtectedRoute requiredPermission={MODULES.SEO_RANKINGS}>
+                <ProtectedRoute requiredPermission={MODULES.KEYWORD_RANKINGS}>
                   <SeoRankings />
                 </ProtectedRoute>
               } />
               <Route path="/seo-rankings/add-keyword" element={
-                <ProtectedRoute requiredPermission={MODULES.SEO_RANKINGS}>
+                <ProtectedRoute requiredPermission={MODULES.KEYWORD_RANKINGS}>
                   <AddSeoKeyword />
                 </ProtectedRoute>
               } />
@@ -234,12 +234,12 @@ const App = () => (
                 </ProtectedRoute>
               } />
               <Route path="/seo-reports" element={
-                <ProtectedRoute requiredPermission={MODULES.SEO_RANKINGS}>
+                <ProtectedRoute requiredPermission={MODULES.ORGANIC_REPORTS}>
                   <SeoReports />
                 </ProtectedRoute>
               } />
               <Route path="/seo-reports/configure" element={
-                <ProtectedRoute requiredPermission={MODULES.SEO_RANKINGS}>
+                <ProtectedRoute requiredPermission={MODULES.ORGANIC_REPORTS}>
                   <ConfigureSeoReport />
                 </ProtectedRoute>
               } />

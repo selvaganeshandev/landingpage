@@ -1407,11 +1407,7 @@ const SeoRankings = () => {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              {/* Import Button */}
-              <Button variant="outline" className="gap-2" onClick={() => { resetImportDialog(); setImportDialogOpen(true); }}>
-                <Upload className="h-4 w-4" />
-                Import
-              </Button>
+              {/* Import Button - hidden, use Add Keyword page instead */}
             </div>
 
             <div className="flex items-center gap-2">
