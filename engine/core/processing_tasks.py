@@ -548,7 +548,15 @@ def process_seo_keyword_task(self, seo_keyword_rank_id: int):
         raise self.retry(exc=e, countdown=30)
 
 
-@shared_task(bind=True, ignore_result=True, max_retries=0)
+@shared_task(
+    bind=True,
+    ignore_result=True,
+    max_retries=0,
+    soft_time_limit=7200,   # 2 hours soft limit (raises SoftTimeLimitExceeded)
+    time_limit=7500,        # 2h 5min hard kill
+    acks_late=True,         # Re-deliver task if worker crashes before completion
+    reject_on_worker_lost=True,  # Reject task if worker is killed (prevents re-queue loop)
+)
 def process_seo_domain_task(self, domain_id: int):
     """
     Process all SEO keywords for a domain: fetch SERP, parse, save, recalculate metrics.
@@ -568,14 +576,17 @@ def process_seo_domain_task(self, domain_id: int):
         return result
     except Exception as e:
         logger.error(f"[SEO] Error processing domain {domain_id}: {e}", exc_info=True)
-        # Mark any remaining 'avail'/'busy' keywords as 'fail' so the frontend
-        # sees the refresh as complete rather than stuck forever
+    finally:
+        # Always clean up stuck keywords — runs even on SoftTimeLimitExceeded,
+        # worker restart, or any other failure mode
         try:
             from shared_models.seo_models import SeoKeywordRank
-            SeoKeywordRank.objects.filter(
+            stuck = SeoKeywordRank.objects.filter(
                 domain_id=domain_id,
                 auto_call_status__in=['avail', 'busy']
             ).update(auto_call_status='fail')
+            if stuck > 0:
+                logger.warning(f"[SEO] Cleaned up {stuck} stuck keywords for domain {domain_id}")
         except Exception:
             pass
 
