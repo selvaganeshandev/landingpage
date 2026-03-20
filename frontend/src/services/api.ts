@@ -1655,6 +1655,9 @@ export const apiClient = {
       body: JSON.stringify(data),
     }),
 
+  getSeoKeywordRemaining: () =>
+    apiRequest('/seo/keywords/remaining/'),
+
   importSeoKeywords: (data: FormData | {
     domain_id: number;
     keywords: string[];
@@ -1733,6 +1736,37 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  // ===== SEO Keyword Detail — Notes =====
+  getSeoKeywordNotes: (seoKwId: number) =>
+    apiRequest(`/seo/keywords/${seoKwId}/notes/`),
+
+  createSeoKeywordNote: (seoKwId: number, data: { title: string; notes: string; note_date: string }) =>
+    apiRequest(`/seo/keywords/${seoKwId}/notes/create/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateSeoKeywordNote: (seoKwId: number, noteId: number, data: { title: string; notes: string; note_date: string }) =>
+    apiRequest(`/seo/keywords/${seoKwId}/notes/${noteId}/`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteSeoKeywordNote: (seoKwId: number, noteId: number) =>
+    apiRequest(`/seo/keywords/${seoKwId}/notes/${noteId}/`, {
+      method: 'DELETE',
+    }),
+
+  // ===== SEO Keyword Detail — Volume History =====
+  getSeoKeywordVolume: (seoKwId: number) =>
+    apiRequest(`/seo/keywords/${seoKwId}/volume/`),
+
+  // ===== SEO Keyword Detail — Competitors =====
+  getSeoKeywordCompetitors: (seoKwId: number, type?: string) => {
+    const params = type ? `?type=${type}` : '';
+    return apiRequest(`/seo/keywords/${seoKwId}/competitors/${params}`);
+  },
 
   exportSeoKeywordsPdf: async (domainId: number): Promise<Blob> => {
     const token = getAuthToken();

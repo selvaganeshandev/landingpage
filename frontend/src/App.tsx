@@ -33,6 +33,7 @@ import BulkContentUpload from "./pages/BulkContentUpload";
 import AutomationSettings from "./pages/AutomationSettings";
 import TrafficAttribution from "./pages/TrafficAttribution";
 import SeoRankings from "./pages/SeoRankings";
+import SeoKeywordDetail from "./pages/SeoKeywordDetail";
 import SeoCompetitors from "./pages/SeoCompetitors";
 import SeoReports from "./pages/SeoReports";
 import ConfigureSeoReport from "./pages/ConfigureSeoReport";
@@ -226,6 +227,11 @@ const App = () => (
               <Route path="/seo-rankings/add-keyword" element={
                 <ProtectedRoute requiredPermission={MODULES.KEYWORD_RANKINGS}>
                   <AddSeoKeyword />
+                </ProtectedRoute>
+              } />
+              <Route path="/seo-rankings/:id" element={
+                <ProtectedRoute requiredPermission={MODULES.KEYWORD_RANKINGS}>
+                  <SeoKeywordDetail />
                 </ProtectedRoute>
               } />
               <Route path="/seo-competitors" element={

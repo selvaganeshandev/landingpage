@@ -16,7 +16,7 @@ from domains.models import Domain
 from .models import (
     SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory, SeoDomainDailyMetrics,
     SeoCompetitorAnalysis, SeoCompetitorProject, SeoCompetitorKeyword,
-    SeoReportSheet,
+    SeoReportSheet, SeoKeywordNote, SeoKeywordVolume,
 )
 from .serializers import (
     SeoKeywordRankSerializer,
@@ -24,6 +24,9 @@ from .serializers import (
     SeoRankHistorySerializer,
     SeoSerpFeatureHistorySerializer,
     SeoDomainDailyMetricsSerializer,
+    SeoKeywordNoteSerializer,
+    SeoKeywordNoteCreateSerializer,
+    SeoKeywordVolumeSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +49,25 @@ def _get_user_domain_ids(user):
 # ---------------------------------------------------------------------------
 # Keyword Rankings CRUD
 # ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_remaining(request):
+    """
+    Return the remaining keyword quota for the user's organisation.
+    Response: { limit, used, remaining }
+    """
+    org = request.user.organisation
+    limit = org.seo_keyword_limit if org else 3000
+    used = SeoKeywordRank.objects.filter(
+        domain__organisation=org
+    ).count()
+    return Response({
+        'limit': limit,
+        'used': used,
+        'remaining': max(0, limit - used),
+    })
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -260,6 +282,19 @@ def seo_keyword_import(request):
 
     if not unique_keywords:
         return Response({'error': 'No valid keywords provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ---- Check keyword quota ----
+    org = request.user.organisation
+    kw_limit = org.seo_keyword_limit if org else 3000
+    current_count = SeoKeywordRank.objects.filter(domain__organisation=org).count()
+    remaining = max(0, kw_limit - current_count)
+    if len(unique_keywords) > remaining:
+        return Response({
+            'error': f'Keyword limit exceeded. You can add {remaining} more keyword(s) (limit: {kw_limit}, used: {current_count}).',
+            'remaining': remaining,
+            'limit': kw_limit,
+            'used': current_count,
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     # ---- Shared SEO config ----
     platform = request.data.get('platform', 'desktop')
@@ -2830,3 +2865,175 @@ def seo_report_sheet_data(request):
         reports.append(report_entry)
 
     return Response({'reports': reports, 'count': len(reports)})
+
+
+# ---------------------------------------------------------------------------
+# Keyword Notes (CRUD) — mirrors RankMax kwNotes
+# ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_notes_list(request, seo_kw_id):
+    """List notes for a keyword."""
+    allowed_ids = list(_get_user_domain_ids(request.user))
+
+    try:
+        seo_kw = SeoKeywordRank.objects.get(pk=seo_kw_id, domain_id__in=allowed_ids)
+    except SeoKeywordRank.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    notes = SeoKeywordNote.objects.filter(seo_keyword_rank=seo_kw).select_related('created_by')
+    serializer = SeoKeywordNoteSerializer(notes, many=True)
+
+    # Also return a list of dates that have notes (for calendar highlighting)
+    note_dates = list(notes.values_list('note_date', flat=True).distinct())
+
+    return Response({
+        'notes': serializer.data,
+        'count': notes.count(),
+        'note_dates': note_dates,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_note_create(request, seo_kw_id):
+    """Create a note for a keyword."""
+    allowed_ids = list(_get_user_domain_ids(request.user))
+
+    try:
+        seo_kw = SeoKeywordRank.objects.get(pk=seo_kw_id, domain_id__in=allowed_ids)
+    except SeoKeywordRank.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = SeoKeywordNoteCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    note = SeoKeywordNote.objects.create(
+        seo_keyword_rank=seo_kw,
+        domain=seo_kw.domain,
+        created_by=request.user,
+        **serializer.validated_data,
+    )
+    return Response(SeoKeywordNoteSerializer(note).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_note_detail(request, seo_kw_id, note_id):
+    """Update or delete a keyword note."""
+    allowed_ids = list(_get_user_domain_ids(request.user))
+
+    try:
+        note = SeoKeywordNote.objects.select_related('seo_keyword_rank').get(
+            pk=note_id,
+            seo_keyword_rank_id=seo_kw_id,
+            seo_keyword_rank__domain_id__in=allowed_ids,
+        )
+    except SeoKeywordNote.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'DELETE':
+        note.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # PUT — update
+    serializer = SeoKeywordNoteCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    note.title = serializer.validated_data['title']
+    note.notes = serializer.validated_data['notes']
+    note.note_date = serializer.validated_data['note_date']
+    note.save()
+    return Response(SeoKeywordNoteSerializer(note).data)
+
+
+# ---------------------------------------------------------------------------
+# Keyword Volume History — mirrors RankMax Volume History tab
+# ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_volume(request, seo_kw_id):
+    """Get volume history for a keyword."""
+    allowed_ids = list(_get_user_domain_ids(request.user))
+
+    try:
+        seo_kw = SeoKeywordRank.objects.get(pk=seo_kw_id, domain_id__in=allowed_ids)
+    except SeoKeywordRank.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        vol = SeoKeywordVolume.objects.get(seo_keyword_rank=seo_kw)
+        return Response(SeoKeywordVolumeSerializer(vol).data)
+    except SeoKeywordVolume.DoesNotExist:
+        # Return empty/default volume data
+        return Response({
+            'id': None,
+            'seo_keyword_rank': seo_kw_id,
+            'average_volume': seo_kw.search_volume or 0,
+            'top_volume': 0,
+            'low_volume': 0,
+            'comp_level': '-',
+            'comp_index': '-',
+            'month_wise_volume': [],
+            'month_labels': [],
+            'status': 'new',
+        })
+
+
+# ---------------------------------------------------------------------------
+# Keyword Competitors — mirrors RankMax Competitors tab
+# ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_keyword_competitors(request, seo_kw_id):
+    """
+    Get competitor domains for a specific keyword.
+    Uses comp_today from SeoSerpFeatureHistory.
+    Query params: type=tp (top 10, default), bf (before you), ar (after you)
+    """
+    allowed_ids = list(_get_user_domain_ids(request.user))
+
+    try:
+        seo_kw = SeoKeywordRank.objects.get(pk=seo_kw_id, domain_id__in=allowed_ids)
+    except SeoKeywordRank.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    comp_type = request.query_params.get('type', 'tp')  # tp, bf, ar
+
+    try:
+        serp_history = SeoSerpFeatureHistory.objects.filter(
+            seo_keyword_rank=seo_kw
+        ).order_by('-modified_at').first()
+    except SeoSerpFeatureHistory.DoesNotExist:
+        serp_history = None
+
+    competitors = []
+    ads = []
+
+    if serp_history:
+        comp_today = serp_history.comp_today or {}
+        competitors = comp_today.get(comp_type, [])
+
+        # Get ad snippet data
+        ad_history = serp_history.ad_snippet_history or {}
+        ad_list = ad_history.get('list', {})
+        ad_recent = ad_history.get('recent', [])
+
+        for domain, ad_data in ad_list.items():
+            ads.append({
+                'domain': domain,
+                'position': ad_data.get('ps', ''),
+                'link': ad_data.get('lk', ''),
+                'is_recent': domain in ad_recent,
+            })
+
+    return Response({
+        'competitors': competitors,
+        'ads': ads,
+        'type': comp_type,
+    })

@@ -65,6 +65,7 @@ class Organisation(models.Model):
         help_text="Whether the organisation is currently using AI monitoring tools"
     )
     team_count = models.PositiveIntegerField(default=1, help_text="Number of team members")
+    seo_keyword_limit = models.PositiveIntegerField(default=3000, help_text="Maximum number of SEO keywords allowed for this organisation")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the organisation was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the organisation was last modified")
     

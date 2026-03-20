@@ -1636,6 +1636,21 @@ const SeoRankings = () => {
                                   variant="ghost"
                                   size="icon"
                                   className="h-6 w-6"
+                                  onClick={() => navigate(`/seo-rankings/${keyword.id}?tab=rank-history`)}
+                                >
+                                  <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Rank History</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
                                   onClick={() => handleToggleFavourite(keyword.id, keyword.favour)}
                                 >
                                   <Star className={`h-3.5 w-3.5 ${keyword.favour ? 'text-purple-500 fill-purple-500' : 'text-muted-foreground'}`} />
@@ -1654,7 +1669,12 @@ const SeoRankings = () => {
                             className="w-5 h-5 object-cover rounded-full shadow-sm flex-shrink-0"
                           />
                           <div className="min-w-0">
-                            <p className="font-medium text-sm truncate">{keyword.keyword}</p>
+                            <p
+                              className="font-medium text-sm truncate cursor-pointer hover:text-primary hover:underline"
+                              onClick={() => navigate(`/seo-rankings/${keyword.id}`)}
+                            >
+                              {keyword.keyword}
+                            </p>
                             {keyword.url ? (
                               <a
                                 href={keyword.url.startsWith('http') ? keyword.url : `https://${keyword.url}`}
@@ -1808,6 +1828,16 @@ const SeoRankings = () => {
                           </div>
                         </TableCell>
                       )}
+                      <TableCell className="py-1.5 w-8">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 rounded-full hover:bg-primary/10"
+                          onClick={() => navigate(`/seo-rankings/${keyword.id}`)}
+                        >
+                          <ChevronRight className="h-4 w-4 text-primary" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
