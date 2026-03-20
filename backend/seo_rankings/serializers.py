@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from .models import SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory, SeoDomainDailyMetrics
+from .models import (
+    SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory,
+    SeoDomainDailyMetrics, SeoKeywordNote, SeoKeywordVolume,
+)
 
 
 class SeoKeywordRankSerializer(serializers.ModelSerializer):
@@ -95,5 +98,43 @@ class SeoDomainDailyMetricsSerializer(serializers.ModelSerializer):
             'ads_others_above_below', 'ads_others_above', 'ads_others_below',
             'total_keywords',
             'snapshot_date', 'created_at', 'modified_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at']
+
+
+class SeoKeywordNoteSerializer(serializers.ModelSerializer):
+    """Serializer for keyword notes."""
+    created_by_name = serializers.CharField(
+        source='created_by.first_name', read_only=True
+    )
+
+    class Meta:
+        model = SeoKeywordNote
+        fields = [
+            'id', 'seo_keyword_rank', 'domain', 'created_by', 'created_by_name',
+            'title', 'notes', 'note_date',
+            'created_at', 'modified_at',
+        ]
+        read_only_fields = ['id', 'created_by', 'domain', 'created_at', 'modified_at']
+
+
+class SeoKeywordNoteCreateSerializer(serializers.Serializer):
+    """Serializer for creating/updating keyword notes."""
+    title = serializers.CharField(max_length=100)
+    notes = serializers.CharField()
+    note_date = serializers.DateField()
+
+
+class SeoKeywordVolumeSerializer(serializers.ModelSerializer):
+    """Serializer for keyword volume history."""
+
+    class Meta:
+        model = SeoKeywordVolume
+        fields = [
+            'id', 'seo_keyword_rank',
+            'average_volume', 'top_volume', 'low_volume',
+            'comp_level', 'comp_index',
+            'month_wise_volume', 'month_labels',
+            'status', 'created_at', 'modified_at',
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']

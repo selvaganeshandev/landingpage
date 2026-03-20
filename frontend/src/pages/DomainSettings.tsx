@@ -58,12 +58,14 @@ import {
 } from "@/components/ui/table";
 import { PageLoader } from "@/components/PageLoader";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
+import { useDomainStore } from "@/stores/domainStore";
 
 export default function DomainSettings() {
   const { domainId } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
+  const { setSelectedDomain, domains } = useDomainStore();
 
   // Domain state
   const [domain, setDomain] = useState<{
@@ -131,11 +133,6 @@ export default function DomainSettings() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Keywords state for Add Keywords dialog
-  const [newKeywordsInput, setNewKeywordsInput] = useState("");
-  const [newKeywordsList, setNewKeywordsList] = useState<string[]>([]);
-  const [isAddingKeywords, setIsAddingKeywords] = useState(false);
-  const [showAddKeywords, setShowAddKeywords] = useState(false);
 
   // Health check state
   const [healthData, setHealthData] = useState<any>(null);
@@ -174,7 +171,6 @@ export default function DomainSettings() {
   const [textNoteDescription, setTextNoteDescription] = useState("");
   const [isSavingTextNote, setIsSavingTextNote] = useState(false);
 
-  const MAX_KEYWORD_LENGTH = 255;
 
   const initialTab = searchParams.get("tab") || "basic-info";
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -739,207 +735,6 @@ export default function DomainSettings() {
     }
   };
 
-  const handleAddKeywordToList = () => {
-    const trimmedInput = newKeywordsInput.trim();
-    if (!trimmedInput) return;
-
-    const newKeywords = trimmedInput
-      .split(',')
-      .map(k => k.trim().toLowerCase())
-      .filter(k => {
-        if (k.length === 0) return false;
-        if (k.length > MAX_KEYWORD_LENGTH) {
-          toast({
-            title: "Keyword too long",
-            description: `"${k}" exceeds ${MAX_KEYWORD_LENGTH} characters.`,
-            variant: "destructive",
-          });
-          return false;
-        }
-        return true;
-      })
-      .filter(k => !newKeywordsList.includes(k));
-
-    if (newKeywords.length > 0) {
-      setNewKeywordsList([...newKeywordsList, ...newKeywords]);
-      setNewKeywordsInput("");
-    }
-  };
-
-  const handleRemoveKeywordFromList = (keyword: string) => {
-    setNewKeywordsList(newKeywordsList.filter(k => k !== keyword));
-  };
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const fileName = file.name.toLowerCase();
-    const isCSV = fileName.endsWith('.csv');
-    const isXLSX = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
-
-    if (!isCSV && !isXLSX) {
-      toast({
-        title: "Invalid file type",
-        description: "Please upload a CSV or XLSX file.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      let keywords: string[] = [];
-
-      if (isCSV) {
-        const text = await file.text();
-        const lines = text.split(/\r?\n/);
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const values: string[] = [];
-          let current = '';
-          let inQuotes = false;
-
-          for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            if (char === '"') {
-              inQuotes = !inQuotes;
-            } else if (char === ',' && !inQuotes) {
-              values.push(current.trim());
-              current = '';
-            } else {
-              current += char;
-            }
-          }
-          values.push(current.trim());
-
-          for (const value of values) {
-            const cleaned = value.replace(/^"|"$/g, '').trim().toLowerCase();
-            if (cleaned && cleaned.length <= MAX_KEYWORD_LENGTH) {
-              keywords.push(cleaned);
-            }
-          }
-        }
-      } else if (isXLSX) {
-        try {
-          const XLSX = await import('xlsx');
-          const arrayBuffer = await file.arrayBuffer();
-          const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-
-          for (const row of data) {
-            if (Array.isArray(row)) {
-              for (const cell of row) {
-                if (cell && typeof cell === 'string') {
-                  const cleaned = cell.trim().toLowerCase();
-                  if (cleaned && cleaned.length <= MAX_KEYWORD_LENGTH) {
-                    keywords.push(cleaned);
-                  }
-                } else if (typeof cell === 'number') {
-                  const cleaned = String(cell).trim().toLowerCase();
-                  if (cleaned && cleaned.length <= MAX_KEYWORD_LENGTH) {
-                    keywords.push(cleaned);
-                  }
-                }
-              }
-            }
-          }
-        } catch (xlsxError: any) {
-          toast({
-            title: "XLSX parsing error",
-            description: xlsxError?.message || "Failed to parse XLSX file.",
-            variant: "destructive",
-          });
-          return;
-        }
-      }
-
-      const uniqueKeywords = [...new Set(keywords.filter(k => k.length > 0))];
-      const newKeywords = uniqueKeywords.filter(k => !newKeywordsList.includes(k));
-
-      if (newKeywords.length === 0) {
-        toast({
-          title: "No new keywords",
-          description: "All keywords from the file are already added or the file is empty.",
-          variant: "default",
-        });
-        return;
-      }
-
-      setNewKeywordsList([...newKeywordsList, ...newKeywords]);
-
-      toast({
-        title: "Keywords uploaded",
-        description: `Added ${newKeywords.length} keyword(s) from ${file.name}`,
-        variant: "default",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Upload error",
-        description: error.message || "Failed to process the file.",
-        variant: "destructive",
-      });
-    } finally {
-      event.target.value = '';
-    }
-  };
-
-  const handleAddKeywordsToDomain = async () => {
-    if (!domain || newKeywordsList.length === 0) {
-      toast({
-        title: "Keywords required",
-        description: "Please add at least one keyword.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      setIsAddingKeywords(true);
-
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (const keywordText of newKeywordsList) {
-        try {
-          await apiClient.createKeyword({
-            keyword: keywordText,
-            domain: domain.id,
-          });
-          successCount++;
-        } catch (error: any) {
-          errorCount++;
-          console.error(`Failed to add keyword "${keywordText}":`, error);
-        }
-      }
-
-      setNewKeywordsInput("");
-      setNewKeywordsList([]);
-      setShowAddKeywords(false);
-
-      if (errorCount === 0) {
-        toast({
-          title: "Keywords added successfully!",
-          description: `Added ${successCount} keyword(s) to ${domain.name}.`,
-        });
-      } else {
-        toast({
-          title: "Partially successful",
-          description: `Added ${successCount} keyword(s), ${errorCount} failed (may already exist).`,
-          variant: "default",
-        });
-      }
-    } catch (error: any) {
-      toast({
-        title: "Error adding keywords",
-        description: error.message || "Failed to add keywords.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsAddingKeywords(false);
-    }
-  };
 
   const handleSaveBasicInfo = async () => {
     if (!domain || !domainName.trim()) return;
@@ -1468,122 +1263,19 @@ export default function DomainSettings() {
             </div>
           </div>
         </div>
-        <Button onClick={() => setShowAddKeywords(true)}>
+        <Button onClick={() => {
+          if (domain) {
+            const storeDomain = domains.find(d => d.id === domain.id);
+            if (storeDomain) {
+              setSelectedDomain(storeDomain);
+            }
+          }
+          navigate('/seo-rankings/add-keyword');
+        }}>
           <Plus className="h-4 w-4 mr-2" />
           Add Keywords
         </Button>
       </div>
-
-      {/* Add Keywords Modal */}
-      <Dialog open={showAddKeywords} onOpenChange={(open) => {
-        setShowAddKeywords(open);
-        if (!open) {
-          setNewKeywordsList([]);
-          setNewKeywordsInput("");
-        }
-      }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Add Keywords</DialogTitle>
-            <DialogDescription>
-              Add additional keywords to track for {domain.name}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <div
-                className="flex flex-wrap gap-2 min-h-[100px] max-h-[300px] overflow-y-auto p-3 border border-input rounded-md bg-background text-sm ring-offset-background focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
-              >
-                {newKeywordsList.map((keyword, index) => (
-                  <Badge
-                    key={index}
-                    variant="default"
-                    className="gap-1 pr-1 h-7"
-                  >
-                    {keyword}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-4 w-4 p-0 hover:bg-background/20"
-                      onClick={() => handleRemoveKeywordFromList(keyword)}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </Badge>
-                ))}
-                <Input
-                  type="text"
-                  placeholder={newKeywordsList.length === 0 ? "Enter keywords and press Enter (e.g., seo, digital marketing)" : "Add more keywords..."}
-                  value={newKeywordsInput}
-                  onChange={(e) => setNewKeywordsInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === ",") {
-                      e.preventDefault();
-                      handleAddKeywordToList();
-                    }
-                  }}
-                  className="flex-1 min-w-[200px] border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 h-7"
-                />
-                <input
-                  type="file"
-                  accept=".csv,.xlsx,.xls"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                  id="keyword-file-upload-domain"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 shrink-0"
-                  onClick={() => document.getElementById('keyword-file-upload-domain')?.click()}
-                  title="Upload keywords from CSV or XLSX"
-                >
-                  <Upload className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="flex justify-between items-center">
-                <p className="text-xs text-muted-foreground">
-                  Type keywords and press Enter, or upload CSV/XLSX files. Max 100 keywords per upload.
-                </p>
-                {newKeywordsList.length > 0 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setNewKeywordsList([]);
-                      setNewKeywordsInput("");
-                    }}
-                    className="h-8 text-xs"
-                  >
-                    Clear all
-                  </Button>
-                )}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddKeywords(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleAddKeywordsToDomain} disabled={isAddingKeywords || newKeywordsList.length === 0}>
-              {isAddingKeywords ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Adding...
-                </>
-              ) : (
-                <>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Keywords
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">

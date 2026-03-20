@@ -467,3 +467,87 @@ class SeoReportSheet(models.Model):
 
     def __str__(self):
         return f"{self.sheet_name} [{self.category}] — {self.domain.name}"
+
+
+class SeoKeywordNote(models.Model):
+    """
+    Notes attached to a keyword. Ported from RankMax kwNotes model.
+    Allows users to annotate keywords with observations, reminders, etc.
+    """
+    seo_keyword_rank = models.ForeignKey(
+        SeoKeywordRank,
+        on_delete=models.CASCADE,
+        related_name='notes',
+    )
+    domain = models.ForeignKey(
+        'domains.Domain',
+        on_delete=models.CASCADE,
+        related_name='seo_keyword_notes',
+    )
+    created_by = models.ForeignKey(
+        'authentication.Account',
+        on_delete=models.CASCADE,
+        related_name='seo_keyword_notes',
+    )
+    title = models.CharField(max_length=100)
+    notes = models.TextField()
+    note_date = models.DateField(help_text="Date the note refers to")
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'seo_keyword_notes'
+        verbose_name = 'SEO Keyword Note'
+        verbose_name_plural = 'SEO Keyword Notes'
+        ordering = ['-note_date', '-created_at']
+        indexes = [
+            models.Index(fields=['seo_keyword_rank', '-note_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.title} — {self.note_date}"
+
+
+class SeoKeywordVolume(models.Model):
+    """
+    Search volume history per keyword. Ported from RankMax keywordVolume model.
+    Tracks monthly search volumes and competition data.
+    """
+    seo_keyword_rank = models.OneToOneField(
+        SeoKeywordRank,
+        on_delete=models.CASCADE,
+        related_name='volume_data',
+    )
+    average_volume = models.IntegerField(default=0, help_text="Average monthly search volume")
+    top_volume = models.IntegerField(default=0, help_text="Highest monthly volume in the period")
+    low_volume = models.IntegerField(default=0, help_text="Lowest monthly volume in the period")
+    comp_level = models.CharField(
+        max_length=20, default='-',
+        help_text="Competition level: Low/Medium/High/UNSPECIFIED"
+    )
+    comp_index = models.CharField(
+        max_length=10, default='-',
+        help_text="Competition index: 0-100 or -"
+    )
+    month_wise_volume = models.JSONField(
+        default=list, blank=True,
+        help_text="Array of monthly search volumes, e.g. [20, 30, 30, 30, 210, 260]"
+    )
+    month_labels = models.JSONField(
+        default=list, blank=True,
+        help_text="Array of month labels, e.g. ['June', 'August', 'October', ...]"
+    )
+    status = models.CharField(
+        max_length=10, default='new',
+        help_text="Volume fetch status: new/done/fail"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'seo_keyword_volumes'
+        verbose_name = 'SEO Keyword Volume'
+        verbose_name_plural = 'SEO Keyword Volumes'
+
+    def __str__(self):
+        return f"Volume for {self.seo_keyword_rank}: avg={self.average_volume}"

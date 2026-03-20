@@ -7,6 +7,7 @@ urlpatterns = [
     path('keywords/add/', views.seo_keyword_add, name='seo-keyword-add'),
     path('keywords/bulk-add/', views.seo_keyword_bulk_add, name='seo-keyword-bulk-add'),
     path('keywords/import/', views.seo_keyword_import, name='seo-keyword-import'),
+    path('keywords/remaining/', views.seo_keyword_remaining, name='seo-keyword-remaining'),
     path('keywords/<int:pk>/', views.seo_keyword_detail, name='seo-keyword-detail'),
 
     # Rank history
@@ -47,4 +48,15 @@ urlpatterns = [
     path('report-sheets/<int:pk>/delete/', views.seo_report_sheet_delete, name='seo-report-sheet-delete'),
     path('report-sheets/<int:pk>/update/', views.seo_report_sheet_update, name='seo-report-sheet-update'),
     path('report-sheets/data/', views.seo_report_sheet_data, name='seo-report-sheet-data'),
+
+    # Keyword Detail — Notes
+    path('keywords/<int:seo_kw_id>/notes/', views.seo_keyword_notes_list, name='seo-keyword-notes-list'),
+    path('keywords/<int:seo_kw_id>/notes/create/', views.seo_keyword_note_create, name='seo-keyword-note-create'),
+    path('keywords/<int:seo_kw_id>/notes/<int:note_id>/', views.seo_keyword_note_detail, name='seo-keyword-note-detail'),
+
+    # Keyword Detail — Volume History
+    path('keywords/<int:seo_kw_id>/volume/', views.seo_keyword_volume, name='seo-keyword-volume'),
+
+    # Keyword Detail — Competitors
+    path('keywords/<int:seo_kw_id>/competitors/', views.seo_keyword_competitors, name='seo-keyword-competitors'),
 ]
