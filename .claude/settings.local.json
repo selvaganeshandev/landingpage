@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python manage.py migrate:*)"
+      "Bash(python manage.py migrate:*)",
+      "Bash(mkdir -p /home/hts-43782/Documents/Ganesh/Source/Promptmaxx/py3.12/src/llm-monitor/backend/domains/management/commands)",
+      "Bash(touch /home/hts-43782/Documents/Ganesh/Source/Promptmaxx/py3.12/src/llm-monitor/backend/domains/management/__init__.py)",
+      "Bash(touch /home/hts-43782/Documents/Ganesh/Source/Promptmaxx/py3.12/src/llm-monitor/backend/domains/management/commands/__init__.py)"
     ],
     "deny": [],
     "ask": []

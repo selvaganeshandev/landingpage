@@ -37,10 +37,72 @@ class ClaudeContentGenerator:
         # Minimum 4096, maximum 16384 (Claude's output limit)
         return max(4096, min(tokens, 16384))
 
+    def _filter_chunks_by_keywords(self, title, keywords, reference_docs):
+        """
+        Pre-filter document chunks locally using keyword matching.
+        Returns only chunks that contain at least one relevant keyword.
+        This runs in Python with zero API cost.
+        """
+        from domains.models import ReferenceDocumentChunk
+
+        # Build search terms from title and keywords
+        search_terms = []
+        if title:
+            # Extract meaningful words from title (skip short/common words)
+            search_terms.extend([
+                word.lower() for word in title.split()
+                if len(word) > 3
+            ])
+        if keywords:
+            # Split comma-separated keywords and their individual words
+            for kw in keywords.split(','):
+                kw = kw.strip().lower()
+                if kw:
+                    search_terms.append(kw)
+                    search_terms.extend([
+                        word for word in kw.split()
+                        if len(word) > 3
+                    ])
+
+        # Remove duplicates
+        search_terms = list(set(search_terms))
+
+        if not search_terms:
+            return []
+
+        # Get all chunks for these documents
+        doc_ids = [doc.id for doc in reference_docs]
+        all_chunks = ReferenceDocumentChunk.objects.filter(
+            document_id__in=doc_ids
+        ).select_related('document').order_by('document', 'chunk_index')
+
+        # Score each chunk by how many keywords it contains
+        scored_chunks = []
+        for chunk in all_chunks:
+            chunk_lower = chunk.chunk_text.lower()
+            score = sum(1 for term in search_terms if term in chunk_lower)
+            if score > 0:
+                scored_chunks.append((score, chunk))
+
+        # Sort by score (highest first) and limit to top chunks
+        scored_chunks.sort(key=lambda x: x[0], reverse=True)
+        # Cap at ~50,000 chars total to keep API cost reasonable
+        selected_chunks = []
+        total_chars = 0
+        max_chars = 50000
+        for score, chunk in scored_chunks:
+            if total_chars + len(chunk.chunk_text) > max_chars:
+                break
+            selected_chunks.append(chunk)
+            total_chars += len(chunk.chunk_text)
+
+        return selected_chunks
+
     def match_reference_content(self, title, keywords, article_type, reference_docs):
         """
         Check if any reference repository documents contain content relevant
-        to the given title and keywords. Returns matched excerpts or empty string.
+        to the given title and keywords. Uses keyword-based chunk filtering
+        to efficiently search entire documents (not just the first 30K chars).
 
         Args:
             title (str): Article title
@@ -54,18 +116,44 @@ class ClaudeContentGenerator:
         import logging
         logger = logging.getLogger(__name__)
 
-        # Build document text for the prompt
-        docs_text = ""
-        for doc in reference_docs:
-            if not doc.extracted_text or not doc.extracted_text.strip():
-                continue
-            # Truncate each doc to 30,000 chars to stay within token limits
-            text = doc.extracted_text[:30000]
-            docs_text += f"\n{'=' * 50}\nDOCUMENT: {doc.file_name} (Type: {doc.file_type.upper()})\n{'=' * 50}\n{text}\n"
+        # Step 1: Try keyword-based chunk filtering (covers entire document)
+        filtered_chunks = self._filter_chunks_by_keywords(title, keywords, reference_docs)
+
+        if filtered_chunks:
+            # Build docs_text from matched chunks
+            docs_text = ""
+            for chunk in filtered_chunks:
+                doc_name = chunk.document.file_name
+                doc_type = chunk.document.file_type.upper()
+                docs_text += (
+                    f"\n{'=' * 50}\n"
+                    f"DOCUMENT: {doc_name} (Type: {doc_type}) - Section {chunk.chunk_index + 1}\n"
+                    f"{'=' * 50}\n"
+                    f"{chunk.chunk_text}\n"
+                )
+            logger.info(
+                f"[REF-MATCH] Chunk filtering: {len(filtered_chunks)} relevant chunks "
+                f"({len(docs_text)} chars) from keyword pre-filter"
+            )
+        else:
+            # Fallback: use original truncation approach for documents without chunks
+            logger.info("[REF-MATCH] No chunks found, falling back to truncated text")
+            docs_text = ""
+            for doc in reference_docs:
+                if not doc.extracted_text or not doc.extracted_text.strip():
+                    continue
+                text = doc.extracted_text[:30000]
+                docs_text += (
+                    f"\n{'=' * 50}\n"
+                    f"DOCUMENT: {doc.file_name} (Type: {doc.file_type.upper()})\n"
+                    f"{'=' * 50}\n"
+                    f"{text}\n"
+                )
 
         if not docs_text.strip():
             return ''
 
+        # Step 2: Send pre-filtered content to Claude for final extraction
         system_prompt = """You are a content research assistant. Your task is to analyze brand reference documents and find content that is relevant to a specific article topic.
 
 INSTRUCTIONS:
@@ -188,7 +276,8 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
             generation_time = time.time() - start_time
 
             # Calculate actual word count
-            actual_word_count = len(content_html.split())
+            plain_text = re.sub(r'<[^>]+>', ' ', content_html)
+            actual_word_count = len(plain_text.split())
 
             return {
                 'content_html': content_html,
@@ -946,7 +1035,8 @@ IMPORTANT:
                 )
 
             generation_time = time.time() - start_time
-            actual_word_count = len(content_html.split())
+            plain_text = re.sub(r'<[^>]+>', ' ', content_html)
+            actual_word_count = len(plain_text.split())
 
             return {
                 'content_html': content_html,
