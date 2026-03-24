@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { MODULES } from "@/types/auth";
 import { apiClient } from "@/services/api";
 import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search, Activity } from "lucide-react";
 import {
@@ -57,7 +58,9 @@ import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 export default function OrganizationSettings() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, checkPermission } = useAuth();
+  const isTeamMember = user?.role === 'user';
+  const hasTeamManagement = isTeamMember && checkPermission(MODULES.TEAM_MANAGEMENT, 'read');
 
   // Organization state
   const [organization, setOrganization] = useState({
@@ -1579,18 +1582,22 @@ export default function OrganizationSettings() {
         <div className="flex items-center justify-between">
           <TabsList className="bg-muted/50 p-1 border border-border">
             <TabsTrigger value="domains" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">All Domains</TabsTrigger>
-            <TabsTrigger value="team" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Team Members</TabsTrigger>
-            <TabsTrigger value="profile" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Profile</TabsTrigger>
+            {(!isTeamMember || hasTeamManagement) && (
+              <TabsTrigger value="team" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Team Members</TabsTrigger>
+            )}
+            {!isTeamMember && (
+              <TabsTrigger value="profile" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Profile</TabsTrigger>
+            )}
           </TabsList>
 
           <div className="flex gap-2">
-            {selectedTab === "domains" && (
+            {selectedTab === "domains" && !isTeamMember && (
               <Button onClick={() => setAddDomainDialogOpen(true)}>
                 <Plus className="h-4 w-4 mr-2" />
                 Add Domain
               </Button>
             )}
-            {selectedTab === "team" && (
+            {selectedTab === "team" && !isTeamMember && (
               <Button onClick={() => setInviteDialogOpen(true)}>
                 <Plus className="h-4 w-4 mr-2" />
                 Invite Member
@@ -1662,50 +1669,52 @@ export default function OrganizationSettings() {
                     </div>
 
                     <div className="flex items-center gap-3">
-                      {/* Health Score Display - First */}
-                      {domain.latest_health_score !== undefined && domain.latest_health_score !== null ? (
-                        <button
-                          onClick={() => navigate(`/organization-settings/domains/${domain.id}?tab=health`)}
-                          className="flex flex-col items-center justify-center px-2 py-1 hover:opacity-80 transition-opacity cursor-pointer"
-                          title="View health check details"
-                        >
-                          <div className={`text-xl font-bold leading-none ${
-                            domain.latest_health_grade_color === 'green' ? 'text-green-600' :
-                            domain.latest_health_grade_color === 'blue' ? 'text-blue-600' :
-                            domain.latest_health_grade_color === 'yellow' ? 'text-yellow-600' :
-                            'text-red-600'
-                          }`}>
-                            {domain.latest_health_score}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                            Health
-                          </div>
-                        </button>
-                      ) : !isProcessing ? (
-                        <button
-                          onClick={() => navigate(`/organization-settings/domains/${domain.id}?tab=health`)}
-                          className="flex items-center gap-1 px-2 py-1 hover:opacity-80 transition-opacity cursor-pointer"
-                          title="Run health check"
-                        >
-                          <Activity className="h-3.5 w-3.5 text-primary" />
-                          <span className="text-primary font-medium text-xs">Run</span>
-                        </button>
-                      ) : null}
+                      {/* Health Score Display - First (hidden for team members) */}
+                      {!isTeamMember && (
+                        domain.latest_health_score !== undefined && domain.latest_health_score !== null ? (
+                          <button
+                            onClick={() => navigate(`/organization-settings/domains/${domain.id}?tab=health`)}
+                            className="flex flex-col items-center justify-center px-2 py-1 hover:opacity-80 transition-opacity cursor-pointer"
+                            title="View health check details"
+                          >
+                            <div className={`text-xl font-bold leading-none ${
+                              domain.latest_health_grade_color === 'green' ? 'text-green-600' :
+                              domain.latest_health_grade_color === 'blue' ? 'text-blue-600' :
+                              domain.latest_health_grade_color === 'yellow' ? 'text-yellow-600' :
+                              'text-red-600'
+                            }`}>
+                              {domain.latest_health_score}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                              Health
+                            </div>
+                          </button>
+                        ) : !isProcessing ? (
+                          <button
+                            onClick={() => navigate(`/organization-settings/domains/${domain.id}?tab=health`)}
+                            className="flex items-center gap-1 px-2 py-1 hover:opacity-80 transition-opacity cursor-pointer"
+                            title="Run health check"
+                          >
+                            <Activity className="h-3.5 w-3.5 text-primary" />
+                            <span className="text-primary font-medium text-xs">Run</span>
+                          </button>
+                        ) : null
+                      )}
 
-                      {/* Status Badge - Second */}
-                      {isProcessing && (
+                      {/* Status Badge - Second (hidden for team members) */}
+                      {!isTeamMember && isProcessing && (
                         <Badge variant="outline" className="gap-1.5 border-orange-500 text-orange-600 bg-orange-50 px-3 py-1">
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           {getStatusLabel()}
                         </Badge>
                       )}
-                      {isFailed && (
+                      {!isTeamMember && isFailed && (
                         <Badge variant="outline" className="gap-1.5 border-red-500 text-red-600 bg-red-50 px-3 py-1">
                           <AlertCircle className="h-3.5 w-3.5" />
                           Failed
                         </Badge>
                       )}
-                      {isCompleted && (
+                      {!isTeamMember && isCompleted && (
                         <Badge variant="outline" className="gap-1.5 border-green-500 text-green-600 bg-green-50 px-3 py-1">
                           <CheckCircle2 className="h-3.5 w-3.5" />
                           Ready
@@ -1715,19 +1724,21 @@ export default function OrganizationSettings() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => navigate(`/organization-settings/domains/${domain.id}`)}
+                        onClick={() => navigate(`/organization-settings/domains/${domain.id}${isTeamMember ? '?tab=integrations' : ''}`)}
                         title="Domain Settings"
                       >
                         <Settings className="h-4 w-4" />
                       </Button>
 
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setConfirmDomainId(domain.id)}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      {!isTeamMember && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setConfirmDomainId(domain.id)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1822,16 +1833,18 @@ export default function OrganizationSettings() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setConfirmInvitationId(inv.id)}
-                      title="Delete Invitation"
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
+                  {!isTeamMember && (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setConfirmInvitationId(inv.id)}
+                        title="Delete Invitation"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ))}
               <Separator />
@@ -1885,32 +1898,34 @@ export default function OrganizationSettings() {
                           Joined {new Date(member.created_at).toLocaleDateString()}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleOpenProjectAccess(member)}
-                          title="Manage Project Access"
-                        >
-                          <Globe className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => navigate(`/organization-settings/members/${member.id}`)}
-                          title="Manage Module Permissions"
-                        >
-                          <Settings className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setConfirmMemberId(member.id)}
-                          disabled={isUpdatingMember === member.id}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
+                      {!isTeamMember && (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => handleOpenProjectAccess(member)}
+                            title="Manage Project Access"
+                          >
+                            <Globe className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => navigate(`/organization-settings/members/${member.id}`)}
+                            title="Manage Module Permissions"
+                          >
+                            <Settings className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setConfirmMemberId(member.id)}
+                            disabled={isUpdatingMember === member.id}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
