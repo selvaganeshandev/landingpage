@@ -2868,6 +2868,50 @@ def _get_file_type_from_extension(filename):
     return ext_map.get(ext)
 
 
+def _create_document_chunks(document):
+    """
+    Split a ReferenceDocument's extracted_text into chunks and store them.
+    Deletes any existing chunks first (for re-chunking on update).
+    """
+    from domains.models import ReferenceDocumentChunk
+
+    # Clear existing chunks
+    document.chunks.all().delete()
+
+    text = document.extracted_text or ''
+    if not text.strip():
+        return
+
+    chunk_size = ReferenceDocumentChunk.CHUNK_SIZE
+    overlap = ReferenceDocumentChunk.CHUNK_OVERLAP
+    chunks = []
+    start = 0
+    chunk_index = 0
+
+    while start < len(text):
+        end = start + chunk_size
+        chunk_text = text[start:end]
+
+        if chunk_text.strip():
+            chunks.append(ReferenceDocumentChunk(
+                document=document,
+                chunk_index=chunk_index,
+                chunk_text=chunk_text
+            ))
+            chunk_index += 1
+
+        # Move forward by (chunk_size - overlap) to maintain context continuity
+        start += chunk_size - overlap
+
+    if chunks:
+        ReferenceDocumentChunk.objects.bulk_create(chunks)
+
+    logger.info(
+        f"[CHUNKING] Document '{document.file_name}' (ID: {document.id}): "
+        f"{len(text)} chars -> {len(chunks)} chunks"
+    )
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
@@ -2930,6 +2974,7 @@ def reference_document_list(request, domain_id):
             description=description,
             uploaded_by=request.user,
         )
+        _create_document_chunks(doc)
         serializer = ReferenceDocumentSerializer(doc, context={'request': request})
         return Response({
             'message': 'Text note added successfully',
@@ -2978,6 +3023,7 @@ def reference_document_list(request, domain_id):
         description=description,
         uploaded_by=request.user,
     )
+    _create_document_chunks(doc)
 
     serializer = ReferenceDocumentSerializer(doc, context={'request': request})
     return Response({
@@ -3044,6 +3090,9 @@ def reference_document_detail(request, domain_id, doc_id):
             doc.description = description.strip()
 
         doc.save()
+        # Re-chunk if text content was updated
+        if doc.file_type == 'text' and request.data.get('text_content') is not None:
+            _create_document_chunks(doc)
         serializer = ReferenceDocumentSerializer(doc, context={'request': request})
         return Response({
             'message': 'Reference document updated successfully',

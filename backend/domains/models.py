@@ -397,3 +397,40 @@ class ReferenceDocument(models.Model):
 
     def __str__(self):
         return f"{self.domain.name} - {self.file_name} ({self.file_type})"
+
+
+class ReferenceDocumentChunk(models.Model):
+    """
+    Stores chunked text from ReferenceDocument for efficient keyword-based
+    matching during content generation. Instead of truncating large documents
+    to 30K chars, we split the entire text into smaller chunks and only send
+    keyword-relevant chunks to the AI.
+    """
+    CHUNK_SIZE = 5000  # characters per chunk
+    CHUNK_OVERLAP = 200  # overlap between chunks for context continuity
+
+    document = models.ForeignKey(
+        ReferenceDocument,
+        on_delete=models.CASCADE,
+        related_name='chunks',
+        help_text="Parent reference document"
+    )
+    chunk_index = models.PositiveIntegerField(
+        help_text="Order of this chunk within the document (0-based)"
+    )
+    chunk_text = models.TextField(
+        help_text="The text content of this chunk"
+    )
+
+    class Meta:
+        db_table = 'reference_document_chunks'
+        verbose_name = 'Reference Document Chunk'
+        verbose_name_plural = 'Reference Document Chunks'
+        ordering = ['document', 'chunk_index']
+        unique_together = ['document', 'chunk_index']
+        indexes = [
+            models.Index(fields=['document', 'chunk_index']),
+        ]
+
+    def __str__(self):
+        return f"{self.document.file_name} - Chunk {self.chunk_index}"
