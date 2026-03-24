@@ -59,6 +59,7 @@ import {
 import { PageLoader } from "@/components/PageLoader";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 import { useDomainStore } from "@/stores/domainStore";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function DomainSettings() {
   const { domainId } = useParams();
@@ -66,6 +67,8 @@ export default function DomainSettings() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const { setSelectedDomain, domains } = useDomainStore();
+  const { user } = useAuth();
+  const isTeamMember = user?.role === 'user';
 
   // Domain state
   const [domain, setDomain] = useState<{
@@ -172,15 +175,19 @@ export default function DomainSettings() {
   const [isSavingTextNote, setIsSavingTextNote] = useState(false);
 
 
-  const initialTab = searchParams.get("tab") || "basic-info";
+  const initialTab = isTeamMember ? "integrations" : (searchParams.get("tab") || "basic-info");
   const [activeTab, setActiveTab] = useState(initialTab);
 
   useEffect(() => {
+    if (isTeamMember) {
+      setActiveTab("integrations");
+      return;
+    }
     const tabParam = searchParams.get("tab");
     if (tabParam && tabParam !== activeTab) {
       setActiveTab(tabParam);
     }
-  }, [searchParams, activeTab]);
+  }, [searchParams, activeTab, isTeamMember]);
 
   // Fetch health data when health tab is active (including on initial load with ?tab=health)
   useEffect(() => {
@@ -1263,51 +1270,65 @@ export default function DomainSettings() {
             </div>
           </div>
         </div>
-        <Button onClick={() => {
-          if (domain) {
-            const storeDomain = domains.find(d => d.id === domain.id);
-            if (storeDomain) {
-              setSelectedDomain(storeDomain);
+        {!isTeamMember && (
+          <Button onClick={() => {
+            if (domain) {
+              const storeDomain = domains.find(d => d.id === domain.id);
+              if (storeDomain) {
+                setSelectedDomain(storeDomain);
+              }
             }
-          }
-          navigate('/seo-rankings/add-keyword');
-        }}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Keywords
-        </Button>
+            navigate('/seo-rankings/add-keyword');
+          }}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Keywords
+          </Button>
+        )}
       </div>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         <TabsList className="bg-muted/50 p-1 border border-border">
-          <TabsTrigger value="basic-info" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
-            <Info className="h-4 w-4" />
-            Basic Info
-          </TabsTrigger>
-          <TabsTrigger value="content-guidelines" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
-            <FileText className="h-4 w-4" />
-            Content Guidelines
-          </TabsTrigger>
-          <TabsTrigger value="internal-links" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
-            <Link2 className="h-4 w-4" />
-            Internal Links
-          </TabsTrigger>
-          <TabsTrigger value="brand-identity" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
-            <Palette className="h-4 w-4" />
-            Brand Identity
-          </TabsTrigger>
+          {!isTeamMember && (
+            <TabsTrigger value="basic-info" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+              <Info className="h-4 w-4" />
+              Basic Info
+            </TabsTrigger>
+          )}
+          {!isTeamMember && (
+            <TabsTrigger value="content-guidelines" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+              <FileText className="h-4 w-4" />
+              Content Guidelines
+            </TabsTrigger>
+          )}
+          {!isTeamMember && (
+            <TabsTrigger value="internal-links" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+              <Link2 className="h-4 w-4" />
+              Internal Links
+            </TabsTrigger>
+          )}
+          {!isTeamMember && (
+            <TabsTrigger value="brand-identity" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+              <Palette className="h-4 w-4" />
+              Brand Identity
+            </TabsTrigger>
+          )}
           <TabsTrigger value="integrations" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
             <Link2 className="h-4 w-4" />
             Integrations
           </TabsTrigger>
-          <TabsTrigger value="health" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
-            <Activity className="h-4 w-4" />
-            Health
-          </TabsTrigger>
-          <TabsTrigger value="reference-repository" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
-            <BookOpen className="h-4 w-4" />
-            Reference Repository
-          </TabsTrigger>
+          {!isTeamMember && (
+            <TabsTrigger value="health" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+              <Activity className="h-4 w-4" />
+              Health
+            </TabsTrigger>
+          )}
+          {!isTeamMember && (
+            <TabsTrigger value="reference-repository" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+              <BookOpen className="h-4 w-4" />
+              Reference Repository
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Basic Info Tab */}

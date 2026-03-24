@@ -566,7 +566,7 @@ export const Sidebar = () => {
           {/* Organization / Profile shortcuts */}
           {user && (
             <div className="space-y-1 mt-4">
-              {(user.role === 'admin' || user.role === 'super_admin') && (
+              {(user.role === 'admin' || user.role === 'super_admin' || (user.role === 'user' && checkPermission && checkPermission('organization_settings', 'read'))) && (
                 !isOpen ? (
                   <Tooltip>
                     <TooltipTrigger asChild>
