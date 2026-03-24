@@ -2722,6 +2722,7 @@ def _extract_text_from_file(file_obj, file_type):
     file_obj.seek(0)
 
     if file_type == 'pdf':
+        # Step 1: Try pdfplumber (fast, works for text-based PDFs)
         try:
             import pdfplumber
             with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
@@ -2730,10 +2731,32 @@ def _extract_text_from_file(file_obj, file_type):
                     text = page.extract_text()
                     if text:
                         pages_text.append(text)
-                return '\n\n'.join(pages_text)
+                if pages_text:
+                    return '\n\n'.join(pages_text)
         except Exception as e:
-            logger.warning(f"PDF extraction failed: {e}")
-            return ''
+            logger.warning(f"PDF pdfplumber extraction failed: {e}")
+
+        # Step 2: Fallback to OCR for scanned/image PDFs
+        try:
+            from pdf2image import convert_from_bytes
+            import pytesseract
+
+            logger.info(f"PDF text extraction empty, attempting OCR fallback")
+            images = convert_from_bytes(file_bytes, dpi=200)
+            ocr_pages = []
+            for i, image in enumerate(images):
+                text = pytesseract.image_to_string(image)
+                if text and text.strip():
+                    ocr_pages.append(text)
+            if ocr_pages:
+                logger.info(f"OCR extracted text from {len(ocr_pages)} pages")
+                return '\n\n'.join(ocr_pages)
+        except ImportError:
+            logger.warning("OCR packages (pytesseract/pdf2image) not installed, skipping OCR")
+        except Exception as e:
+            logger.warning(f"PDF OCR extraction failed: {e}")
+
+        return ''
 
     elif file_type == 'docx':
         # Try python-docx first (handles .docx files)
