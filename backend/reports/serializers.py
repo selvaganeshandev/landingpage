@@ -5,6 +5,7 @@ from .models import ReportTemplate, ScheduledReport, GeneratedReport
 class ReportTemplateSerializer(serializers.ModelSerializer):
     created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
     organisation_name = serializers.CharField(source='organisation.name', read_only=True)
+    description = serializers.CharField(required=False, allow_blank=True, default='')
 
     class Meta:
         model = ReportTemplate

@@ -3,7 +3,7 @@
  * Centralized API client with all backend endpoints
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const ENGINE_URL = import.meta.env.VITE_ENGINE_URL || 'http://localhost:8001';
 
 interface RequestOptions extends RequestInit {

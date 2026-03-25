@@ -2,6 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Download, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { API_BASE_URL } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 
 interface PDFViewerDialogProps {
@@ -23,7 +24,7 @@ export const PDFViewerDialog = ({ open, onOpenChange, reportId, reportName }: PD
         setLoading(true);
         try {
           const token = localStorage.getItem('access_token');
-          const response = await fetch(`http://localhost:8000/reports/generated/${reportId}/download/`, {
+          const response = await fetch(`${API_BASE_URL}/reports/generated/${reportId}/download/`, {
             headers: {
               'Authorization': `Bearer ${token}`,
             },
