@@ -14,7 +14,7 @@ import { GenerateNowDialog } from "@/components/GenerateNowDialog";
 import { ScheduleReportDialog } from "@/components/ScheduleReportDialog";
 import { PDFViewerDialog } from "@/components/PDFViewerDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { apiClient } from "@/services/api";
+import { apiClient, API_BASE_URL } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
 import {
   FileText,
@@ -66,20 +66,20 @@ const Reports = () => {
   // Fetch report templates
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: ['reportTemplates'],
-    queryFn: () => apiClient.getReportTemplates(),
+    queryFn: () => apiClient.getReportTemplates() as Promise<any[]>,
   });
 
   // Fetch scheduled reports (filtered by domain)
   const { data: scheduledReports = [], isLoading: scheduledLoading } = useQuery({
     queryKey: ['scheduledReports', domainId],
-    queryFn: () => apiClient.getScheduledReports(domainId ? { domain_id: domainId } : {}),
+    queryFn: () => apiClient.getScheduledReports(domainId ? { domain_id: domainId } : {}) as Promise<any[]>,
     enabled: !!domainId,
   });
 
   // Fetch generated reports (filtered by domain)
   const { data: generatedReports = [], isLoading: generatedLoading } = useQuery({
     queryKey: ['generatedReports', domainId],
-    queryFn: () => apiClient.getGeneratedReports(domainId ? { domain_id: domainId } : {}),
+    queryFn: () => apiClient.getGeneratedReports(domainId ? { domain_id: domainId } : {}) as Promise<any[]>,
     enabled: !!domainId,
   });
 
@@ -265,7 +265,7 @@ const Reports = () => {
       const template = templates.find((t: any) => t.id === report.template);
       const gridRows = template?.grid_rows || [];
 
-      const response = await fetch('http://localhost:8000/reports/preview-html/', {
+      const response = await fetch(`${API_BASE_URL}/reports/preview-html/`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,

@@ -206,9 +206,6 @@ class HTMLReportGenerator:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Report</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -217,18 +214,16 @@ class HTMLReportGenerator:
         }
 
         body {
-            font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            font-size: 14px;
-            line-height: 1.5;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-size: 13px;
+            line-height: 1.4;
             color: #1f2937;
             background: white;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
         }
 
         @page {
             size: A4;
-            margin: 1.5cm;
+            margin: 1cm 1.2cm;
         }
 
         .report-container {
@@ -237,30 +232,13 @@ class HTMLReportGenerator:
             padding: 0;
         }
 
-        .report-header {
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 1rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .report-header h2 {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: #111827;
-        }
-
-        .report-header p {
-            font-size: 0.875rem;
-            color: #6b7280;
-            margin-top: 0.25rem;
-        }
-
         .grid-row {
             display: grid;
-            gap: 1rem;
-            margin-bottom: 1rem;
-            align-items: start !important;
-            grid-auto-rows: min-content;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+            align-items: stretch;
+            break-inside: avoid;
+            page-break-inside: avoid;
         }
 
         .grid-single { grid-template-columns: 1fr; }
@@ -268,99 +246,63 @@ class HTMLReportGenerator:
         .grid-triple { grid-template-columns: repeat(3, 1fr); }
         .grid-quad { grid-template-columns: repeat(4, 1fr); }
 
-        .widget {
-            break-inside: avoid;
-        }
-
-        .metric-card {
-            padding: 1.5rem;
-            border-radius: 0.75rem;
-            border-width: 1px;
-            border-style: solid;
+        .metric-widget {
+            padding: 0.6rem 0.75rem;
+            border-radius: 0.5rem;
+            border: 1px solid;
             overflow: hidden;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }
 
-        .metric-label {
-            font-size: 0.875rem;
+        .metric-widget .label {
+            font-size: 0.7rem;
             color: #6b7280;
-            font-weight: 500;
-            margin-bottom: 0.5rem;
-            line-height: 1.4;
+            margin: 0 0 0.2rem 0;
+            line-height: 1.3;
         }
 
-        .metric-value {
-            font-size: 2.25rem;
+        .metric-widget .value {
+            font-size: 1.5rem;
             font-weight: 700;
-            line-height: 1.2;
-            letter-spacing: -0.02em;
+            line-height: 1.1;
+            margin: 0;
         }
 
-        .metric-subtitle {
-            font-size: 0.875rem;
-            color: #6b7280;
-            margin-top: 0.5rem;
-            line-height: 1.4;
+        .metric-widget .growth {
+            font-size: 0.65rem;
+            margin: 0.2rem 0 0 0;
+            line-height: 1.3;
         }
-        
-        .metric-growth {
-            display: flex;
-            align-items: center;
-            gap: 0.375rem;
-            font-size: 1rem;
-            margin-top: 0.5rem;
-        }
-        
-        .metric-growth-icon {
-            font-size: 1.125rem;
-            line-height: 1;
-        }
-        
-        .metric-growth-value {
-            font-weight: 600;
-        }
-        
-        .metric-growth-label {
-            color: #6b7280;
-            font-weight: 400;
-        }
-        
-        .metric-status {
-            display: flex;
-            align-items: center;
-            gap: 0.25rem;
-            font-size: 0.875rem;
-            margin-top: 0.5rem;
+
+        .metric-widget .status {
+            font-size: 0.65rem;
+            margin: 0.15rem 0 0 0;
             font-weight: 500;
+            line-height: 1.3;
         }
-        
-        .text-green { color: #16a34a; }
-        .text-red { color: #dc2626; }
-        .text-orange { color: #ea580c; }
-        .text-blue { color: #2563eb; }
-        .text-purple { color: #9333ea; }
-        
-        /* Chart widget styling */
+
+        .metric-widget .subtitle {
+            font-size: 0.6rem;
+            color: #6b7280;
+            margin: 0.15rem 0 0 0;
+            line-height: 1.3;
+        }
+
         .chart-widget {
-            padding: 1.5rem;
+            padding: 1rem;
             border: 1px solid #e5e7eb;
-            border-radius: 0.75rem;
+            border-radius: 0.5rem;
             background: white;
+            break-inside: avoid;
+            page-break-inside: avoid;
         }
-        
+
         .chart-title {
-            font-size: 1.125rem;
+            font-size: 0.9rem;
             font-weight: 600;
             color: #111827;
-            margin-bottom: 1rem;
-        }
-
-        .metric-growth {
-            font-size: 0.875rem;
-            margin-top: 0.5rem;
-        }
-
-        .metric-growth-value {
-            font-weight: 600;
+            margin-bottom: 0.75rem;
         }
 
         @media print {
@@ -401,12 +343,12 @@ class HTMLReportGenerator:
             logo_html = f'<img src="{favicon_url}" alt="Logo" style="width: 32px; height: 32px; margin-right: 0.75rem; vertical-align: middle; border-radius: 0.25rem;" onerror="this.style.display=\'none\'">'
 
         return f"""
-        <div class="report-header" style="display: flex; align-items: center; border-bottom: 1px solid #e5e7eb; padding-bottom: 1rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; align-items: center; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.6rem; margin-bottom: 0.75rem;">
             {logo_html}
             <div>
-                <h2 style="font-size: 1.25rem; font-weight: 700; color: #111827; margin: 0;">{domain_name}</h2>
-                <p style="font-size: 0.875rem; color: #6b7280; margin: 0.25rem 0 0 0;">{template_name}</p>
-                <p style="font-size: 0.875rem; color: #6b7280; margin: 0.25rem 0 0 0;">Report Period: {date_range}</p>
+                <h2 style="font-size: 1.1rem; font-weight: 700; color: #111827; margin: 0;">{domain_name}</h2>
+                <p style="font-size: 0.75rem; color: #6b7280; margin: 0.15rem 0 0 0;">{template_name}</p>
+                <p style="font-size: 0.75rem; color: #6b7280; margin: 0.15rem 0 0 0;">Report Period: {date_range}</p>
             </div>
         </div>
 """
@@ -416,7 +358,7 @@ class HTMLReportGenerator:
         grid_type = row.get('type', 'single')
         slots = row.get('slots', [])
 
-        html_parts = [f'<div class="grid-row grid-{grid_type}">']
+        html_parts = [f'<div class="grid-row grid-{grid_type}" style="break-inside: avoid; page-break-inside: avoid;">']
 
         for slot in slots:
             if not slot:
@@ -433,6 +375,8 @@ class HTMLReportGenerator:
                 html_parts.append(self._generate_chart_widget(widget_id, data))
             elif widget_type == 'table':
                 html_parts.append(self._generate_table_widget(widget_id, data))
+            elif widget_type == 'text':
+                html_parts.append(self._generate_text_widget(widget_id, data))
 
         html_parts.append('</div>')
 
@@ -464,7 +408,7 @@ class HTMLReportGenerator:
             except (ValueError, TypeError):
                 formatted_value = str(value)
 
-        # Growth indicator with icon and "from last month"
+        # Growth indicator
         growth_html = ''
         if growth is not None and growth != 0:
             try:
@@ -472,48 +416,30 @@ class HTMLReportGenerator:
                 arrow = '↗' if growth_val > 0 else '↘'
                 growth_color = '#16a34a' if growth_val > 0 else '#dc2626'
                 growth_text = f"{'+' if growth_val > 0 else ''}{growth_val:.1f}%"
-
-                growth_html = f'''
-                <p style="font-size: 0.875rem; margin: 0.5rem 0 0 0; display: flex; align-items: center; gap: 0.25rem;">
-                    <span style="color: {growth_color};">{arrow}</span>
-                    <span style="color: {growth_color}; font-weight: 600;">{growth_text}</span>
-                    <span style="color: #6b7280;">from last month</span>
-                </p>
-                '''
+                growth_html = f'<p class="growth"><span style="color: {growth_color};">{arrow} {growth_text}</span> <span style="color: #6b7280;">from last month</span></p>'
             except (ValueError, TypeError):
                 pass
 
-        # Status text based on widget type and value
+        # Status text (only show if no growth)
         status_html = ''
         status_text = self._get_status_text(widget_id, data)
-        if status_text and not growth_html:  # Only show status if no growth
+        if status_text and not growth_html:
             status_color = colors.get('status_text', colors['text'])
-            status_html = f'''
-            <p style="font-size: 0.875rem; margin: 0.5rem 0 0 0; color: {status_color};">
-                ↗ {status_text}
-            </p>
-            '''
+            status_html = f'<p class="status" style="color: {status_color};">↗ {status_text}</p>'
 
         # Subtitle
         subtitle_html = ''
         if subtitle:
-            display_subtitle = subtitle if len(str(subtitle)) <= 35 else str(subtitle)[:32] + '...'
-            subtitle_html = f'''
-            <p style="font-size: 0.875rem; color: #6b7280; margin: 0.5rem 0 0 0;">{display_subtitle}</p>
-            '''
+            display_subtitle = subtitle if len(str(subtitle)) <= 30 else str(subtitle)[:27] + '...'
+            subtitle_html = f'<p class="subtitle">{display_subtitle}</p>'
 
         return f'''
-        <div style="
+        <div class="metric-widget" style="
             background: linear-gradient(to bottom right, {colors['gradient_start']}, {colors['gradient_end']});
-            border: 1px solid {colors['border']};
-            border-radius: 0.75rem;
-            padding: 1.25rem;
-            height: auto !important;
-            min-height: 0 !important;
-            align-self: start;
+            border-color: {colors['border']};
         ">
-            <p style="font-size: 0.875rem; color: #6b7280; margin: 0 0 0.5rem 0;">{label}</p>
-            <p style="font-size: 2.25rem; font-weight: 700; color: {colors['text']}; margin: 0; line-height: 1.2;">{formatted_value}</p>
+            <p class="label">{label}</p>
+            <p class="value" style="color: {colors['text']};">{formatted_value}</p>
             {growth_html}
             {status_html}
             {subtitle_html}
@@ -643,6 +569,37 @@ class HTMLReportGenerator:
         ">
             <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 1rem; color: #111827;">{label}</h3>
             {''.join(table_html)}
+        </div>
+        '''
+
+    def _generate_text_widget(self, widget_id: str, data: Dict[str, Any]) -> str:
+        """Generate a text/summary widget"""
+        label = data.get('label', 'Summary')
+        value = data.get('value', '')
+
+        if not value:
+            return f'''
+            <div style="padding: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; background: white;">
+                <h3 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem; color: #111827;">{label}</h3>
+                <p style="font-size: 0.8rem; color: #6b7280;">No summary data available</p>
+            </div>
+            '''
+
+        # Split into paragraphs if there are multiple sentences
+        paragraphs = value.split('. ')
+        paragraphs_html = ''
+        for i, p in enumerate(paragraphs):
+            text = p.strip()
+            if not text:
+                continue
+            if not text.endswith('.'):
+                text += '.'
+            paragraphs_html += f'<p style="font-size: 0.8rem; color: #374151; margin: 0 0 0.5rem 0; line-height: 1.5;">{text}</p>'
+
+        return f'''
+        <div style="padding: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; background: white;">
+            <h3 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 0.75rem; color: #111827;">{label}</h3>
+            {paragraphs_html}
         </div>
         '''
 

@@ -123,6 +123,12 @@ class ScheduledReportViewSet(viewsets.ModelViewSet):
             return ScheduledReportUpdateSerializer
         return ScheduledReportSerializer
 
+    def perform_create(self, serializer):
+        """Set next_run_at when creating a scheduled report"""
+        instance = serializer.save()
+        instance.next_run_at = self._calculate_next_run(instance)
+        instance.save(update_fields=['next_run_at'])
+
     @action(detail=True, methods=['post'])
     def pause(self, request, pk=None):
         """Pause a scheduled report"""
@@ -137,7 +143,6 @@ class ScheduledReportViewSet(viewsets.ModelViewSet):
         """Resume a paused report"""
         scheduled_report = self.get_object()
         scheduled_report.status = 'active'
-        # Set next run time
         scheduled_report.next_run_at = self._calculate_next_run(scheduled_report)
         scheduled_report.save()
         serializer = self.get_serializer(scheduled_report)
@@ -145,12 +150,12 @@ class ScheduledReportViewSet(viewsets.ModelViewSet):
 
     def _calculate_next_run(self, scheduled_report):
         """Calculate next run time based on frequency"""
+        import calendar
         now = timezone.now()
 
         if scheduled_report.frequency == 'once':
             return None
         elif scheduled_report.frequency == 'daily':
-            # Next day at schedule_time
             next_run = now.replace(
                 hour=scheduled_report.schedule_time.hour,
                 minute=scheduled_report.schedule_time.minute,
@@ -161,9 +166,8 @@ class ScheduledReportViewSet(viewsets.ModelViewSet):
                 next_run += timedelta(days=1)
             return next_run
         elif scheduled_report.frequency == 'weekly':
-            # Next occurrence of schedule_day (0=Monday, 6=Sunday)
             days_ahead = scheduled_report.schedule_day - now.weekday()
-            if days_ahead <= 0:
+            if days_ahead < 0:
                 days_ahead += 7
             next_run = now + timedelta(days=days_ahead)
             next_run = next_run.replace(
@@ -172,20 +176,25 @@ class ScheduledReportViewSet(viewsets.ModelViewSet):
                 second=0,
                 microsecond=0
             )
+            if next_run <= now:
+                next_run += timedelta(days=7)
             return next_run
         elif scheduled_report.frequency == 'monthly':
-            # Next month on schedule_day
-            if now.day < scheduled_report.schedule_day:
-                next_month = now.month
-                next_year = now.year
-            else:
+            next_month = now.month
+            next_year = now.year
+            schedule_day = scheduled_report.schedule_day
+
+            if now.day >= schedule_day:
                 next_month = now.month + 1 if now.month < 12 else 1
                 next_year = now.year if now.month < 12 else now.year + 1
+
+            max_day = calendar.monthrange(next_year, next_month)[1]
+            day = min(schedule_day, max_day)
 
             next_run = now.replace(
                 year=next_year,
                 month=next_month,
-                day=min(scheduled_report.schedule_day, 28),  # Avoid invalid dates
+                day=day,
                 hour=scheduled_report.schedule_time.hour,
                 minute=scheduled_report.schedule_time.minute,
                 second=0,
@@ -193,14 +202,10 @@ class ScheduledReportViewSet(viewsets.ModelViewSet):
             )
             return next_run
         elif scheduled_report.frequency == 'quarterly':
-            # Next quarter
             current_quarter = (now.month - 1) // 3
-            next_quarter_month = (current_quarter + 1) * 3 + 1
-            if next_quarter_month > 12:
-                next_quarter_month = 1
-                next_year = now.year + 1
-            else:
-                next_year = now.year
+            next_quarter = (current_quarter + 1) % 4
+            next_quarter_month = next_quarter * 3 + 1
+            next_year = now.year + 1 if next_quarter == 0 else now.year
 
             next_run = now.replace(
                 year=next_year,

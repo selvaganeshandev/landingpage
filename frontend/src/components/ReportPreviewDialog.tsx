@@ -7,7 +7,7 @@ import { FileText, Download, Share2, Loader2, TrendingUp, Smile, Meh, Frown, Lin
 import { useToast } from "@/hooks/use-toast";
 import { useDomainStore } from "@/stores/domainStore";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
-import { apiClient } from "@/services/api";
+import { apiClient, API_BASE_URL } from "@/services/api";
 import { useQuery } from "@tanstack/react-query";
 import { ExecutiveDashboardTemplate } from "@/components/report-templates/ExecutiveDashboardTemplate";
 import { DetailedAnalyticsTemplate } from "@/components/report-templates/DetailedAnalyticsTemplate";
@@ -46,6 +46,8 @@ interface ReportPreviewDialogProps {
     data_period_end?: string;
     template_type?: string;
     grid_rows?: any[];
+    html_template?: string;
+    css_template?: string;
   } | null;
 }
 
@@ -78,6 +80,7 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
   const [reportData, setReportData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [customPreviewHtml, setCustomPreviewHtml] = useState<string>('');
   const reportContentRef = useRef<HTMLDivElement>(null);
 
   // Fetch domain statistics - same as ReportBuilder
@@ -124,13 +127,43 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
   });
 
   useEffect(() => {
+    if (!open) {
+      setCustomPreviewHtml('');
+      return;
+    }
     if (open && report) {
       console.log('[ReportPreviewDialog] Report object:', report);
 
-      // Skip data fetching for custom templates - they use grid_rows
-      if (report.template_type === 'custom') {
+      // For any template with grid_rows, fetch real HTML preview from backend
+      if (report.grid_rows && report.grid_rows.length > 0 && selectedDomain?.id) {
         setReportData(null);
-        setLoading(false);
+        setLoading(true);
+        const fetchHtmlPreview = async () => {
+          try {
+            const token = localStorage.getItem('access_token');
+            const response = await fetch(`${API_BASE_URL}/reports/preview-html/`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                domain_id: selectedDomain.id,
+                template_name: report.name,
+                grid_rows: report.grid_rows,
+              }),
+            });
+            if (response.ok) {
+              const html = await response.text();
+              setCustomPreviewHtml(html);
+            }
+          } catch (error) {
+            console.error('[ReportPreviewDialog] Failed to fetch preview:', error);
+          } finally {
+            setLoading(false);
+          }
+        };
+        fetchHtmlPreview();
         return;
       }
 
@@ -169,7 +202,7 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
         setLoading(true);
         try {
           const token = localStorage.getItem('access_token');
-          const url = `http://localhost:8000/reports/preview-data/?domain_id=${domainId}&report_type=${encodeURIComponent(reportType)}&days=30`;
+          const url = `${API_BASE_URL}/reports/preview-data/?domain_id=${domainId}&report_type=${encodeURIComponent(reportType)}&days=30`;
           console.log('[ReportPreviewDialog] Fetching from:', url);
 
           const response = await fetch(url, {
@@ -255,7 +288,7 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
         end_date: endDate.toISOString().split('T')[0],
       };
 
-      const response = await fetch('http://localhost:8000/reports/generate-custom-pdf/', {
+      const response = await fetch(`${API_BASE_URL}/reports/generate-custom-pdf/`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -385,11 +418,72 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
     }
   };
 
-  const handleShare = () => {
-    toast({
-      title: "Share Report",
-      description: "Opening sharing options...",
-    });
+  const handleShare = async () => {
+    if (!report) return;
+
+    // Try Web Share API with PDF file
+    if (report.template_type === 'custom' && report.grid_rows && selectedDomain) {
+      try {
+        toast({ title: "Preparing Share", description: "Generating PDF for sharing..." });
+
+        const token = localStorage.getItem('access_token');
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30);
+
+        const response = await fetch(`${API_BASE_URL}/reports/generate-custom-pdf/`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            domain_id: selectedDomain.id,
+            template_name: report.name,
+            grid_rows: report.grid_rows,
+            html_template: report.html_template,
+            css_template: report.css_template,
+            start_date: startDate.toISOString().split('T')[0],
+            end_date: endDate.toISOString().split('T')[0],
+          }),
+        });
+
+        if (!response.ok) throw new Error('Failed to generate PDF');
+
+        const blob = await response.blob();
+        const file = new File([blob], `${report.name}.pdf`, { type: 'application/pdf' });
+
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+          await navigator.share({
+            title: report.name,
+            text: `${report.name} - Report`,
+            files: [file],
+          });
+          return;
+        }
+
+        // Fallback: download the PDF
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${report.name}.pdf`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+        toast({ title: "Downloaded", description: "PDF downloaded. You can share it manually." });
+        return;
+      } catch (error: any) {
+        if (error.name === 'AbortError') return; // User cancelled share
+        console.error('Share error:', error);
+      }
+    }
+
+    // Fallback: copy report name to clipboard
+    try {
+      await navigator.clipboard.writeText(`${report.name} - ${selectedDomain?.name || 'Report'}`);
+      toast({ title: "Copied", description: "Report info copied to clipboard." });
+    } catch {
+      toast({ title: "Share", description: "Unable to share. Please download the PDF and share manually." });
+    }
   };
 
   // Render widget preview - matching ReportBuilder
@@ -1802,61 +1896,29 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
       );
     }
 
-    const getGridCols = (type: string) => {
-      switch (type) {
-        case 'single': return 'grid-cols-1';
-        case 'double': return 'grid-cols-2';
-        case 'triple': return 'grid-cols-3';
-        case 'quad': return 'grid-cols-4';
-        default: return 'grid-cols-1';
-      }
-    };
+    // Show the real HTML preview (same as PDF output)
+    if (customPreviewHtml) {
+      return (
+        <iframe
+          srcDoc={customPreviewHtml}
+          className="w-full border-0"
+          style={{ minHeight: '80vh' }}
+          title="Report Preview"
+          onLoad={(e) => {
+            const iframe = e.target as HTMLIFrameElement;
+            if (iframe.contentDocument) {
+              iframe.style.height = iframe.contentDocument.documentElement.scrollHeight + 'px';
+            }
+          }}
+        />
+      );
+    }
 
+    // Fallback if HTML not loaded yet
     return (
-      <div className="space-y-6 p-8">
-        {/* Brand Header */}
-        {selectedDomain && (
-          <div className="flex items-center gap-4 pb-6 border-b">
-            <div className="w-16 h-16 rounded-lg overflow-hidden bg-primary/10 flex items-center justify-center">
-              <img
-                src={getFaviconUrl(selectedDomain.url, 64)}
-                alt={selectedDomain.name}
-                className="w-full h-full object-cover"
-                onError={(e) => handleFaviconError(e, selectedDomain.url, selectedDomain.name, 64)}
-              />
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold">{selectedDomain.name}</h2>
-              <p className="text-sm text-muted-foreground">{selectedDomain.url}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Template Header */}
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold mb-2">{report.name}</h2>
-          <p className="text-muted-foreground">{report.description}</p>
-          <p className="text-sm text-muted-foreground mt-2">
-            Generated on {new Date().toLocaleDateString()}
-          </p>
-        </div>
-
-        {/* Grid Rows with Widgets */}
-        {report.grid_rows.map((row: any, rowIndex: number) => (
-          <div key={row.id || rowIndex} className={`grid ${getGridCols(row.type)} gap-4`}>
-            {row.slots.map((widget: any, slotIndex: number) => (
-              <div key={slotIndex}>
-                {widget ? (
-                  renderWidgetPreview(widget)
-                ) : (
-                  <div className="p-6 rounded-lg border border-dashed border-muted-foreground/20">
-                    <p className="text-sm text-muted-foreground text-center">Empty slot</p>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        ))}
+      <div className="flex flex-col items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+        <p className="text-muted-foreground">Loading preview...</p>
       </div>
     );
   };
@@ -1872,66 +1934,16 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
       );
     }
 
-    // Check if it's a custom template
-    if (report.template_type === 'custom') {
+    // If we have HTML preview from backend, use it (matches PDF exactly)
+    if (customPreviewHtml) {
       return renderCustomTemplate();
     }
 
-    const reportNameLower = report.name.toLowerCase();
-    const templateNameLower = ((report as any).template_name || '').toLowerCase();
-
-    console.log('[ReportPreviewDialog] Report name:', reportNameLower);
-    console.log('[ReportPreviewDialog] Template name:', templateNameLower);
-
-    // Check both report name and template name
-    if (reportNameLower.includes('executive') || templateNameLower.includes('executive')) {
-      return <ExecutiveDashboardTemplate data={reportData} />;
-    } else if (reportNameLower.includes('detailed') || reportNameLower.includes('analytics') ||
-               templateNameLower.includes('detailed') || templateNameLower.includes('analytics')) {
-      return <DetailedAnalyticsTemplate data={reportData} />;
-    } else if (reportNameLower.includes('competitor') || templateNameLower.includes('competitor')) {
-      return <CompetitorFocusTemplate data={reportData} />;
-    } else if (reportNameLower.includes('content') || reportNameLower.includes('strategy') ||
-               templateNameLower.includes('content') || templateNameLower.includes('strategy')) {
-      return <ContentStrategyTemplate data={reportData} />;
-    }
-
-    // Default generic template for other reports
+    // Fallback for templates without grid_rows
     return (
-      <div className="space-y-8 p-8">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold mb-2">{report.name}</h2>
-          <p className="text-muted-foreground">Generated on {new Date().toLocaleDateString()}</p>
-        </div>
-        <div>
-          <h3 className="text-xl font-semibold mb-4 flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            Executive Summary
-          </h3>
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div className="p-4 rounded-lg border bg-card">
-              <p className="text-sm text-muted-foreground mb-1">Visibility Score</p>
-              <p className="text-2xl font-bold">87.5%</p>
-              <Badge variant="default" className="mt-2">+5.2%</Badge>
-            </div>
-            <div className="p-4 rounded-lg border bg-card">
-              <p className="text-sm text-muted-foreground mb-1">Total Mentions</p>
-              <p className="text-2xl font-bold">1,247</p>
-              <Badge variant="default" className="mt-2">+12.3%</Badge>
-            </div>
-            <div className="p-4 rounded-lg border bg-card">
-              <p className="text-sm text-muted-foreground mb-1">Sentiment</p>
-              <p className="text-2xl font-bold">Positive</p>
-              <Badge variant="default" className="mt-2">92% positive</Badge>
-            </div>
-          </div>
-        </div>
-        <div>
-          <h3 className="text-xl font-semibold mb-4">Performance Trends</h3>
-          <div className="aspect-video rounded-lg border bg-muted/30 flex items-center justify-center">
-            <p className="text-muted-foreground">Chart Preview</p>
-          </div>
-        </div>
+      <div className="flex flex-col items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+        <p className="text-muted-foreground">Loading preview...</p>
       </div>
     );
   };
@@ -1940,12 +1952,12 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
         <DialogHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between pr-8">
             <div>
               <DialogTitle>{report.name}</DialogTitle>
               <p className="text-sm text-muted-foreground mt-1">{report.description}</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-shrink-0">
               {Array.isArray(report.format) ? (
                 report.format.map((fmt) => (
                   <Button
@@ -1978,10 +1990,7 @@ export const ReportPreviewDialog = ({ open, onOpenChange, report }: ReportPrevie
                   {report.format}
                 </Button>
               )}
-              <Button size="sm" variant="outline" onClick={handleShare}>
-                <Share2 className="h-3 w-3 mr-1" />
-                Share
-              </Button>
+              {/* Share removed - PDF download covers sharing */}
             </div>
           </div>
         </DialogHeader>

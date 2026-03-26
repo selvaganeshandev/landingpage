@@ -603,7 +603,7 @@ class WidgetDataFetcher:
         # Count keywords that are associated with at least one topic
         keywords_in_topics = Keyword.objects.filter(
             domain=self.domain,
-            topics__isnull=False
+            topic_keywords__isnull=False
         ).distinct().count()
 
         coverage = (keywords_in_topics / total_keywords * 100) if total_keywords > 0 else 0

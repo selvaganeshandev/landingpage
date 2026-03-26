@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { X, Calendar, Clock } from "lucide-react";
 interface ScheduleReportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSchedule?: (data: any) => void;
 }
 
 export const ScheduleReportDialog = ({ open, onOpenChange }: ScheduleReportDialogProps) => {
@@ -25,7 +26,7 @@ export const ScheduleReportDialog = ({ open, onOpenChange }: ScheduleReportDialo
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [template, setTemplate] = useState("1");
+  const [template, setTemplate] = useState("");
   const [schedule, setSchedule] = useState("weekly");
   const [scheduleTime, setScheduleTime] = useState("09:00");
   const [scheduleDay, setScheduleDay] = useState("0"); // Monday for weekly, 1st for monthly
@@ -36,8 +37,15 @@ export const ScheduleReportDialog = ({ open, onOpenChange }: ScheduleReportDialo
   // Fetch report templates
   const { data: templates = [] } = useQuery({
     queryKey: ['reportTemplates'],
-    queryFn: () => apiClient.getReportTemplates(),
+    queryFn: () => apiClient.getReportTemplates() as Promise<any[]>,
   });
+
+  // Auto-select first template when loaded
+  useEffect(() => {
+    if (templates.length > 0 && !template) {
+      setTemplate(String(templates[0].id));
+    }
+  }, [templates, template]);
 
   // Create scheduled report mutation
   const createMutation = useMutation({
@@ -63,7 +71,7 @@ export const ScheduleReportDialog = ({ open, onOpenChange }: ScheduleReportDialo
   const resetForm = () => {
     setName("");
     setDescription("");
-    setTemplate("1");
+    setTemplate(templates.length > 0 ? String(templates[0].id) : "");
     setSchedule("weekly");
     setScheduleTime("09:00");
     setScheduleDay("0");
@@ -85,6 +93,15 @@ export const ScheduleReportDialog = ({ open, onOpenChange }: ScheduleReportDialo
       toast({
         title: "Missing Report Name",
         description: "Please provide a name for your report.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!template) {
+      toast({
+        title: "Missing Template",
+        description: "Please select a report template.",
         variant: "destructive",
       });
       return;
