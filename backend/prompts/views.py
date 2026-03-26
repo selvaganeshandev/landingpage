@@ -1566,10 +1566,10 @@ def prompt_group_detail(request, group_id):
                     # Use all analytics for this prompt
                     prompt_analytics = list(all_prompt_analytics)
                 
-                # Sum total_mentions from analytics records, not just count records
-                # This matches how group.total_mentions is calculated (Sum of total_mentions field)
-                mention_analytics = [a for a in prompt_analytics if a.is_mention and a.is_published]
-                prompt_mentions = sum(analytic.total_mentions or 1 for analytic in mention_analytics)
+                # Sum total_mentions from all published analytics (consistent with snapshot aggregation)
+                published_analytics = [a for a in prompt_analytics if a.is_published]
+                mention_analytics = [a for a in published_analytics if a.is_mention]
+                prompt_mentions = sum(analytic.total_mentions or 0 for analytic in published_analytics)
                 
                 # Calculate citations count
                 total_citations = 0
@@ -1695,12 +1695,12 @@ def prompt_group_detail(request, group_id):
                     'avg_position': float(avg_pos)
                 })
 
-            # Fallback: if no snapshot data, calculate from analytics directly
-            if not platform_dist:
-                # Get all analytics for the group
+            # Fallback: if no snapshot data or all zeros, calculate from analytics directly
+            if not platform_dist or all(p['count'] == 0 for p in platform_dist):
+                platform_dist = []
+                # Get all published analytics for the group
                 all_analytics = PromptAnalytics.objects.filter(
                     prompt__group=group,
-                    is_mention=True,
                     is_published=True
                 ).exclude(platform__isnull=True).exclude(platform='')
 

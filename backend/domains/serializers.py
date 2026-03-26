@@ -2,6 +2,14 @@ from rest_framework import serializers
 from .models import Domain, DomainAccess, InternalLinkMap, ReferenceDocument
 
 
+class DomainMinimalSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for domain lists (popups, dropdowns)."""
+    class Meta:
+        model = Domain
+        fields = ['id', 'name', 'url']
+        read_only_fields = ['id']
+
+
 class DomainSerializer(serializers.ModelSerializer):
     """Serializer for Domain model"""
     organisation_name = serializers.CharField(source='organisation.name', read_only=True)

@@ -165,16 +165,28 @@ class SVGChartGenerator:
                         f'font-weight="600" fill="{text_color}">{value:.0f}</text>'
                     )
 
-        # X-axis labels
+        # X-axis labels — skip labels to avoid overlap, rotate if many
+        total = len(x_labels)
+        step = max(1, total // 8)  # Show at most ~8 labels
+        rotate = total > 6
         for i, label in enumerate(x_labels):
-            if len(x_labels) > 1:
-                x = (i / (len(x_labels) - 1)) * self.chart_width
+            if i % step != 0 and i != total - 1:
+                continue
+            if total > 1:
+                x = (i / (total - 1)) * self.chart_width
             else:
                 x = self.chart_width / 2
-            svg_parts.append(
-                f'<text x="{x}" y="{self.chart_height + 20}" text-anchor="middle" font-size="10" fill="{text_color}">'
-                f'{label}</text>'
-            )
+            short_label = label[-5:] if len(label) > 5 else label  # e.g. "03-24" from "2026-03-24"
+            if rotate:
+                svg_parts.append(
+                    f'<text x="{x}" y="{self.chart_height + 18}" text-anchor="end" font-size="9" fill="{text_color}" '
+                    f'transform="rotate(-45, {x}, {self.chart_height + 18})">{short_label}</text>'
+                )
+            else:
+                svg_parts.append(
+                    f'<text x="{x}" y="{self.chart_height + 20}" text-anchor="middle" font-size="10" fill="{text_color}">'
+                    f'{short_label}</text>'
+                )
 
         svg_parts.extend(['</g>', '</svg>'])
 
@@ -294,13 +306,21 @@ class SVGChartGenerator:
                 f'fill="{text_color}" font-weight="bold">{value:.0f}</text>'
             )
 
-        # X-axis labels
+        # X-axis labels — rotate if many labels
+        rotate = len(labels) > 5
         for i, label in enumerate(labels):
             x = i * bar_spacing + bar_spacing / 2
-            svg_parts.append(
-                f'<text x="{x}" y="{self.chart_height + 20}" text-anchor="middle" font-size="10" fill="{text_color}">'
-                f'{label}</text>'
-            )
+            short_label = label[:12] if len(label) > 12 else label
+            if rotate:
+                svg_parts.append(
+                    f'<text x="{x}" y="{self.chart_height + 18}" text-anchor="end" font-size="9" fill="{text_color}" '
+                    f'transform="rotate(-45, {x}, {self.chart_height + 18})">{short_label}</text>'
+                )
+            else:
+                svg_parts.append(
+                    f'<text x="{x}" y="{self.chart_height + 20}" text-anchor="middle" font-size="10" fill="{text_color}">'
+                    f'{short_label}</text>'
+                )
 
         svg_parts.extend(['</g>', '</svg>'])
 

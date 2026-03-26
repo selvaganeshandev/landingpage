@@ -18,6 +18,16 @@ from .serializers import (
 )
 
 
+def _has_team_management(user):
+    """Check if a 'user' role has team_management permission."""
+    if user.role in ['admin', 'super_admin']:
+        return True
+    return UserPermission.objects.filter(
+        user=user, module='team_management'
+    ).exists()
+
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login(request):
@@ -156,7 +166,7 @@ def logout(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def send_invitation(request):
-    if request.user.role not in ['admin', 'super_admin']:
+    if not _has_team_management(request.user):
         return Response({'error': 'Only organisation administrators can send invitations'}, status=status.HTTP_403_FORBIDDEN)
     serializer = TeamInvitationCreateSerializer(data=request.data, context={'organisation': request.user.organisation})
     if serializer.is_valid():
@@ -574,7 +584,7 @@ def delete_invitation(request, invitation_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def team_members(request):
-    if request.user.role not in ['admin', 'super_admin']:
+    if not _has_team_management(request.user):
         return Response({'error': 'Only organisation administrators can view team members'}, status=status.HTTP_403_FORBIDDEN)
     members = Account.objects.filter(organisation=request.user.organisation).exclude(role='super_admin')
     members_data = []

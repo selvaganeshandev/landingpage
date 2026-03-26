@@ -1597,7 +1597,7 @@ export default function OrganizationSettings() {
                 Add Domain
               </Button>
             )}
-            {selectedTab === "team" && !isTeamMember && (
+            {selectedTab === "team" && (!isTeamMember || hasTeamManagement) && (
               <Button onClick={() => setInviteDialogOpen(true)}>
                 <Plus className="h-4 w-4 mr-2" />
                 Invite Member

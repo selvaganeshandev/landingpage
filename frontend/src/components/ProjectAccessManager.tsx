@@ -78,9 +78,14 @@ export const ProjectAccessManager = ({
   const [userAccess, setUserAccess] = useState<{[domainId: number]: DomainAccess}>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isUpdating, setIsUpdating] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [visibleCount, setVisibleCount] = useState(10);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     if (open) {
+      setSearchQuery('');
+      setVisibleCount(PAGE_SIZE);
       loadData();
     }
   }, [open, userId]);
@@ -88,29 +93,15 @@ export const ProjectAccessManager = ({
   const loadData = async () => {
     try {
       setIsLoading(true);
-      
-      // Load all domains (admin management scope)
-      const domainsResponse = await apiClient.getDomains({ manage: true });
+
+      // Load domains and user access in parallel (single call each)
+      const [domainsResponse, accessResponse] = await Promise.all([
+        apiClient.getDomains({ manage: true, fields: 'minimal' }),
+        apiClient.getUserDomainAccess(userId),
+      ]);
       setDomains(domainsResponse.domains);
-      
-      // Load user's access for each domain
-      const accessMap: {[domainId: number]: DomainAccess} = {};
-      for (const domain of domainsResponse.domains) {
-        try {
-          const accessResponse = await apiClient.getDomainAccess(domain.id);
-          const userAccessItem = accessResponse.access_list.find(
-            (access: any) => access.user === userId || access.user?.id === userId
-          );
-          if (userAccessItem) {
-            accessMap[domain.id] = userAccessItem;
-          }
-        } catch (error) {
-          // User doesn't have access to this domain
-          console.log(`User ${userId} doesn't have access to domain ${domain.id}`);
-        }
-      }
-      setUserAccess(accessMap);
-      
+      setUserAccess(accessResponse.access_map || {});
+
     } catch (error: any) {
       toast({
         title: "Error loading data",
@@ -229,51 +220,95 @@ export const ProjectAccessManager = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
+        <div className="space-y-4 py-4">
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
           ) : (
-            <div className="space-y-4">
-              {domains.map((domain) => {
-                const hasAccess = userAccess[domain.id];
-                const isUpdatingThis = isUpdating === domain.id;
-                
-                return (
-                  <div key={domain.id} className="border rounded-lg p-4 space-y-3">
-                    {/* Project Name and Toggle */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Globe className="h-5 w-5 text-muted-foreground" />
-                        <div>
-                          <h3 className="font-semibold">{domain.name}</h3>
-                          <p className="text-sm text-muted-foreground">{domain.url}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={!!hasAccess}
-                          onCheckedChange={(enabled) => handleToggleAccess(domain.id, enabled)}
-                          disabled={isUpdatingThis}
-                        />
-                        {isUpdatingThis && (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        )}
-                      </div>
-                    </div>
+            <>
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search domains..."
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setVisibleCount(PAGE_SIZE); }}
+                  className="pl-9"
+                />
+              </div>
 
-                    {/* Access levels UI removed */}
+              {/* Domain count */}
+              {(() => {
+                const query = searchQuery.toLowerCase();
+                // Sort: domains with access first, then alphabetical
+                const sorted = [...domains].sort((a, b) => {
+                  const aHas = userAccess[a.id] ? 1 : 0;
+                  const bHas = userAccess[b.id] ? 1 : 0;
+                  if (aHas !== bHas) return bHas - aHas;
+                  return (a.name || '').localeCompare(b.name || '');
+                });
+                const filtered = query
+                  ? sorted.filter(d => d.name?.toLowerCase().includes(query) || d.url?.toLowerCase().includes(query))
+                  : sorted;
+                const visible = filtered.slice(0, visibleCount);
+                const hasMore = visibleCount < filtered.length;
+
+                return (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      Showing {visible.length} of {filtered.length} domains
+                      {Object.keys(userAccess).length > 0 && ` (${Object.keys(userAccess).length} with access)`}
+                    </p>
+
+                    {visible.map((domain) => {
+                      const hasAccess = userAccess[domain.id];
+                      const isUpdatingThis = isUpdating === domain.id;
+
+                      return (
+                        <div key={domain.id} className="border rounded-lg p-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <Globe className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                              <div className="min-w-0">
+                                <h3 className="font-medium text-sm truncate">{domain.name}</h3>
+                                <p className="text-xs text-muted-foreground truncate">{domain.url}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <Switch
+                                checked={!!hasAccess}
+                                onCheckedChange={(enabled) => handleToggleAccess(domain.id, enabled)}
+                                disabled={isUpdatingThis}
+                              />
+                              {isUpdatingThis && (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {hasMore && (
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => setVisibleCount(prev => prev + PAGE_SIZE)}
+                      >
+                        Load More ({filtered.length - visibleCount} remaining)
+                      </Button>
+                    )}
+
+                    {filtered.length === 0 && (
+                      <div className="text-center py-6 text-muted-foreground text-sm">
+                        {searchQuery ? 'No domains match your search.' : 'No projects available.'}
+                      </div>
+                    )}
                   </div>
                 );
-              })}
-              
-              {domains.length === 0 && (
-                <div className="text-center py-8 text-muted-foreground">
-                  No projects available for access management.
-                </div>
-              )}
-            </div>
+              })()}
+            </>
           )}
         </div>
 

@@ -7,6 +7,7 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 from .models import ReportTemplate, ScheduledReport, GeneratedReport
 from .serializers import (
+    ReportTemplateListSerializer,
     ReportTemplateSerializer,
     ScheduledReportSerializer,
     ScheduledReportCreateSerializer,
@@ -33,13 +34,18 @@ class ReportTemplateViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = None  # Disable pagination
 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return ReportTemplateListSerializer
+        return ReportTemplateSerializer
+
     def get_queryset(self):
         """
         Return:
         - All active predefined templates
         - Custom templates belonging to user's organisation
         """
-        queryset = ReportTemplate.objects.filter(is_active=True)
+        queryset = ReportTemplate.objects.filter(is_active=True).select_related('created_by', 'organisation')
 
         # Filter: predefined OR custom templates from user's org
         from django.db.models import Q
