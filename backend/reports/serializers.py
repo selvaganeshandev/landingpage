@@ -2,6 +2,20 @@ from rest_framework import serializers
 from .models import ReportTemplate, ScheduledReport, GeneratedReport
 
 
+class ReportTemplateListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for template list — excludes large JSON fields."""
+    created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
+
+    class Meta:
+        model = ReportTemplate
+        fields = [
+            'id', 'name', 'description', 'template_type',
+            'created_by', 'created_by_email',
+            'is_active', 'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at']
+
+
 class ReportTemplateSerializer(serializers.ModelSerializer):
     created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
     organisation_name = serializers.CharField(source='organisation.name', read_only=True)
@@ -11,7 +25,7 @@ class ReportTemplateSerializer(serializers.ModelSerializer):
         model = ReportTemplate
         fields = [
             'id', 'name', 'description', 'template_type', 'sections', 'grid_rows',
-            'html_template', 'css_template',  # NEW: Include HTML/CSS template fields
+            'html_template', 'css_template',
             'organisation', 'organisation_name', 'created_by', 'created_by_email',
             'is_active', 'created_at', 'modified_at'
         ]

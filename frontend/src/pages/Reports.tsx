@@ -204,8 +204,18 @@ const Reports = () => {
     });
   };
 
-  const handlePreview = (report: any) => {
-    setSelectedReport(report);
+  const handlePreview = async (report: any) => {
+    // For custom templates, fetch full detail to get grid_rows
+    if (report.template_type === 'custom' && !report.grid_rows && report.id) {
+      try {
+        const fullTemplate = await apiClient.getReportTemplate(report.id);
+        setSelectedReport({ ...report, grid_rows: fullTemplate.grid_rows });
+      } catch {
+        setSelectedReport(report);
+      }
+    } else {
+      setSelectedReport(report);
+    }
     setPreviewDialogOpen(true);
   };
 
@@ -261,9 +271,16 @@ const Reports = () => {
         description: "Generating HTML preview...",
       });
 
-      // Fetch the template to get grid_rows
-      const template = templates.find((t: any) => t.id === report.template);
-      const gridRows = template?.grid_rows || [];
+      // Fetch the full template to get grid_rows
+      let gridRows: any[] = [];
+      if (report.template) {
+        try {
+          const fullTemplate = await apiClient.getReportTemplate(report.template);
+          gridRows = fullTemplate?.grid_rows || [];
+        } catch {
+          console.error('[Reports] Failed to fetch template for preview');
+        }
+      }
 
       const response = await fetch(`${API_BASE_URL}/reports/preview-html/`, {
         method: 'POST',
@@ -828,15 +845,8 @@ const Reports = () => {
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground line-clamp-2">{template.description}</p>
-                  {template.template_type === 'custom' && template.grid_rows && (
-                    <span className="text-xs text-muted-foreground">
-                      {template.grid_rows.length} {template.grid_rows.length === 1 ? 'row' : 'rows'}
-                    </span>
-                  )}
-                  {template.template_type === 'predefined' && template.sections && (
-                    <span className="text-xs text-muted-foreground">
-                      {template.sections.length} {template.sections.length === 1 ? 'section' : 'sections'}
-                    </span>
+                  {template.template_type === 'custom' && (
+                    <span className="text-xs text-muted-foreground">Custom template</span>
                   )}
                 </div>
                 <div className="mt-4 flex gap-2">
@@ -854,7 +864,6 @@ const Reports = () => {
                       recipients: [],
                       status: "active",
                       template_type: template.template_type,
-                      grid_rows: template.grid_rows
                     })}
                   >
                     <Eye className="h-3 w-3 mr-1" />

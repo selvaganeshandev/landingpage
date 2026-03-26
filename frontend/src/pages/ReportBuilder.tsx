@@ -1162,7 +1162,7 @@ const ReportBuilder = () => {
             <ResponsiveContainer width="100%" height={200}>
               <RechartsLineChart data={dummyLineData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis />
                 <Tooltip />
                 <Line type="monotone" dataKey="mentions" stroke="#3b82f6" strokeWidth={2} />
@@ -1204,7 +1204,7 @@ const ReportBuilder = () => {
             <ResponsiveContainer width="100%" height={200}>
               <RechartsBarChart data={dummyBarData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="platform" />
+                <XAxis dataKey="platform" tick={{ fontSize: 10 }} interval={0} />
                 <YAxis />
                 <Tooltip />
                 <Bar dataKey="mentions" fill="#8b5cf6" />
@@ -1822,7 +1822,7 @@ const ReportBuilder = () => {
                 { platform: 'Grok', citations: 65 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="platform" />
+                <XAxis dataKey="platform" tick={{ fontSize: 10 }} interval={0} />
                 <YAxis />
                 <Tooltip />
                 <Bar dataKey="citations" fill="#3b82f6" />
@@ -1843,7 +1843,7 @@ const ReportBuilder = () => {
                 { month: 'Apr', ChatGPT: 182, Claude: 125, Gemini: 108, Perplexity: 65, Grok: 38 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis />
                 <Tooltip />
                 <Line type="monotone" dataKey="ChatGPT" stroke="#10b981" strokeWidth={2} />
@@ -1870,7 +1870,7 @@ const ReportBuilder = () => {
                 { platform: 'Grok', position: 3.2 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="platform" />
+                <XAxis dataKey="platform" tick={{ fontSize: 10 }} interval={0} />
                 <YAxis reversed />
                 <Tooltip />
                 <Bar dataKey="position" fill="#f59e0b" />
@@ -1900,7 +1900,7 @@ const ReportBuilder = () => {
                 { month: 'Apr', ChatGPT: 1.8, Claude: 2.1, Gemini: 2.4, Perplexity: 2.8, Grok: 3.2 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis reversed />
                 <Tooltip />
                 <Line type="monotone" dataKey="ChatGPT" stroke="#10b981" strokeWidth={2} />
@@ -1927,7 +1927,7 @@ const ReportBuilder = () => {
                 { platform: 'Grok', Positive: 62, Neutral: 28, Negative: 10 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="platform" />
+                <XAxis dataKey="platform" tick={{ fontSize: 10 }} interval={0} />
                 <YAxis />
                 <Tooltip />
                 <Bar dataKey="Positive" stackId="a" fill="#10b981" />
@@ -1959,7 +1959,7 @@ const ReportBuilder = () => {
                 { month: 'Apr', ChatGPT: 72, Claude: 68, Gemini: 65, Perplexity: 70, Grok: 62 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis />
                 <Tooltip />
                 <Line type="monotone" dataKey="ChatGPT" stroke="#10b981" strokeWidth={2} />
@@ -1998,7 +1998,7 @@ const ReportBuilder = () => {
                 { platform: 'Grok', rate: 58 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="platform" />
+                <XAxis dataKey="platform" tick={{ fontSize: 10 }} interval={0} />
                 <YAxis />
                 <Tooltip />
                 <Bar dataKey="rate" fill="#8b5cf6" />
@@ -2019,7 +2019,7 @@ const ReportBuilder = () => {
                 { month: 'Apr', ChatGPT: 10.3, Claude: 13.6, Gemini: 13.7, Perplexity: 12.1, Grok: 18.8 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis />
                 <Tooltip />
                 <Line type="monotone" dataKey="ChatGPT" stroke="#10b981" strokeWidth={2} />
@@ -2046,7 +2046,7 @@ const ReportBuilder = () => {
                 { platform: 'Grok', share: 8 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="platform" />
+                <XAxis dataKey="platform" tick={{ fontSize: 10 }} interval={0} />
                 <YAxis />
                 <Tooltip />
                 <Bar dataKey="share" fill="#f97316" />
@@ -2119,7 +2119,7 @@ const ReportBuilder = () => {
                 { platform: 'Grok', density: 0.08 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="platform" />
+                <XAxis dataKey="platform" tick={{ fontSize: 10 }} interval={0} />
                 <YAxis />
                 <Tooltip />
                 <Bar dataKey="density" fill="#3b82f6" />
@@ -2142,7 +2142,7 @@ const ReportBuilder = () => {
                 { platform: 'Grok', health: 78 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="platform" />
+                <XAxis dataKey="platform" tick={{ fontSize: 10 }} interval={0} />
                 <YAxis />
                 <Tooltip />
                 <Bar dataKey="health" fill="#14b8a6" />
@@ -2226,7 +2226,7 @@ const ReportBuilder = () => {
                 { name: 'Competitor D', sentiment: 0.55 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
+                <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis />
                 <Tooltip />
                 <Bar dataKey="sentiment" fill="#8b5cf6" />
@@ -2282,7 +2282,7 @@ const ReportBuilder = () => {
                 { month: 'Apr', 'AI Integration': 35, 'Product Features': 28, 'Pricing': 18 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis />
                 <Tooltip />
                 <Line type="monotone" dataKey="AI Integration" stroke="#3b82f6" strokeWidth={2} />
@@ -2338,7 +2338,7 @@ const ReportBuilder = () => {
                 { month: 'Jun', share: 42 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis />
                 <Tooltip />
                 <Line type="monotone" dataKey="share" stroke="#8b5cf6" strokeWidth={2} />
@@ -2407,7 +2407,7 @@ const ReportBuilder = () => {
                 { month: 'Jun', visibility: 87.5 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis />
                 <Tooltip />
                 <Area type="monotone" dataKey="visibility" stroke="#10b981" fill="#10b981" fillOpacity={0.3} />
@@ -2430,7 +2430,7 @@ const ReportBuilder = () => {
                 { month: 'Jun', growth: 18.2 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis />
                 <Tooltip />
                 <Line type="monotone" dataKey="growth" stroke="#3b82f6" strokeWidth={2} />
@@ -2453,7 +2453,7 @@ const ReportBuilder = () => {
                 { month: 'Jun', position: 2.4 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis reversed />
                 <Tooltip />
                 <Line type="monotone" dataKey="position" stroke="#f97316" strokeWidth={2} />
@@ -2476,7 +2476,7 @@ const ReportBuilder = () => {
                 { month: 'Jun', share: 42 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis />
                 <Tooltip />
                 <Area type="monotone" dataKey="share" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
@@ -2499,7 +2499,7 @@ const ReportBuilder = () => {
                 { month: 'Jun', score: 87.5 },
               ]}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} interval="preserveStartEnd" />
                 <YAxis />
                 <Tooltip />
                 <Line type="monotone" dataKey="score" stroke="#10b981" strokeWidth={2} />

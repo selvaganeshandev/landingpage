@@ -13,6 +13,7 @@ urlpatterns = [
     path('<int:domain_id>/health-check/history/', views.domain_health_check_history, name='domain_health_check_history'),
 
     # Domain Access Management
+    path('user-access/<int:user_id>/', views.user_domain_access_list, name='user_domain_access_list'),
     path('<int:domain_id>/access/', views.domain_access_list, name='domain_access_list'),
     path('<int:domain_id>/access/<int:user_id>/', views.domain_access_detail, name='domain_access_detail'),
     path('<int:domain_id>/access/available-users/', views.available_users_for_domain, name='available_users_for_domain'),

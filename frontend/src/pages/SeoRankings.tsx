@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
 import { useSidebar } from "@/contexts/SidebarContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -262,6 +263,8 @@ const SeoRankings = () => {
   } | null>(null);
 
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isTeamMember = user?.role === 'user';
 
   // Use the domain store (same source as the sidebar DomainSelector)
   const { isOpen: sidebarOpen } = useSidebar();
@@ -1421,6 +1424,7 @@ const SeoRankings = () => {
                   <TooltipContent>{selectedKeywords.length > 0 ? "Manage tags for selected keywords" : "Select keywords to add tags"}</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+              {!isTeamMember && (
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1431,6 +1435,7 @@ const SeoRankings = () => {
                   <TooltipContent>Refresh rankings</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+              )}
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>

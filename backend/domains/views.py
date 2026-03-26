@@ -10,8 +10,9 @@ from django.db.utils import ProgrammingError
 from django.conf import settings
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from .models import Domain, DomainAccess, InternalLinkMap, ReferenceDocument
+from authentication.models import UserPermission
 from .serializers import (
-    DomainSerializer, DomainDetailSerializer,
+    DomainMinimalSerializer, DomainSerializer, DomainDetailSerializer,
     DomainAccessSerializer, DomainAccessCreateSerializer,
     InternalLinkMapSerializer, InternalLinkMapCreateSerializer,
     ReferenceDocumentSerializer
@@ -70,7 +71,10 @@ def domain_list(request):
             domains = Domain.objects.filter(id__in=domain_ids)
 
         # Optimize queries: select_related for FK, prefetch_related for reverse FK
-        domains = domains.select_related('organisation').prefetch_related('health_checks')
+        if request.query_params.get('fields') == 'minimal':
+            domains = domains.only('id', 'name', 'url')
+        else:
+            domains = domains.select_related('organisation').prefetch_related('health_checks')
 
         # Search support
         search = request.query_params.get('search', '').strip()
@@ -94,7 +98,11 @@ def domain_list(request):
             except (ValueError, TypeError):
                 pass
 
-        serializer = DomainSerializer(domains, many=True)
+        # Use minimal serializer for lightweight requests (popups, dropdowns)
+        if request.query_params.get('fields') == 'minimal':
+            serializer = DomainMinimalSerializer(domains, many=True)
+        else:
+            serializer = DomainSerializer(domains, many=True)
         return Response({
             'domains': serializer.data,
             'total_count': total_count,
@@ -370,12 +378,18 @@ def domain_keywords(request, pk):
 @permission_classes([IsAuthenticated])
 def domain_access_list(request, domain_id):
     """List or grant domain access (no access levels)."""
-    if request.user.role not in ['admin', 'super_admin']:
+    is_admin = request.user.role in ['admin', 'super_admin']
+    has_team_mgmt = UserPermission.objects.filter(user=request.user, module='team_management').exists()
+    if not is_admin and not has_team_mgmt:
         return Response({'error': 'Only organization administrators can manage domain access'}, status=status.HTTP_403_FORBIDDEN)
     try:
         domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
     except Domain.DoesNotExist:
         return Response({'error': 'Domain not found or not in your organization'}, status=status.HTTP_404_NOT_FOUND)
+    # Team members can only manage access for domains they themselves have access to
+    if not is_admin:
+        if not DomainAccess.objects.filter(user=request.user, domain=domain).exists():
+            return Response({'error': 'You do not have access to this domain'}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
         access_list = DomainAccess.objects.filter(domain=domain)
@@ -409,8 +423,14 @@ def domain_access_list(request, domain_id):
 @api_view(['PUT', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def domain_access_detail(request, domain_id, user_id):
-    if request.user.role not in ['admin', 'super_admin']:
+    is_admin = request.user.role in ['admin', 'super_admin']
+    has_team_mgmt = UserPermission.objects.filter(user=request.user, module='team_management').exists()
+    if not is_admin and not has_team_mgmt:
         return Response({'error': 'Only organization administrators can manage domain access'}, status=status.HTTP_403_FORBIDDEN)
+    # Team members can only manage access for domains they themselves have access to
+    if not is_admin:
+        if not DomainAccess.objects.filter(user=request.user, domain_id=domain_id).exists():
+            return Response({'error': 'You do not have access to this domain'}, status=status.HTTP_403_FORBIDDEN)
     try:
         domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
         access = DomainAccess.objects.get(domain=domain, user_id=user_id)
@@ -425,6 +445,22 @@ def domain_access_detail(request, domain_id, user_id):
 
     access.delete()
     return Response({'message': 'Access revoked successfully'})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_domain_access_list(request, user_id):
+    """Get all domain access for a specific user in one call (optimization)."""
+    is_admin = request.user.role in ['admin', 'super_admin']
+    has_team_mgmt = UserPermission.objects.filter(user=request.user, module='team_management').exists()
+    if not is_admin and not has_team_mgmt:
+        return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+    access_list = DomainAccess.objects.filter(
+        user_id=user_id,
+        domain__organisation=request.user.organisation
+    ).select_related('domain')
+    access_data = {a.domain_id: DomainAccessSerializer(a).data for a in access_list}
+    return Response({'access_map': access_data})
 
 
 @api_view(['GET'])

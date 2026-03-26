@@ -475,7 +475,10 @@ export const apiClient = {
     }),
 
   // ===== Domain Access =====
-  getDomainAccess: (domainId: number) => 
+  getUserDomainAccess: (userId: number) =>
+    apiRequest(`/domains/user-access/${userId}/`),
+
+  getDomainAccess: (domainId: number) =>
     apiRequest(`/domains/${domainId}/access/`),
 
   grantDomainAccess: (domainId: number, data: any) => 
