@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/services/api";
+import { PageLoader } from "@/components/PageLoader";
 import {
   ArrowLeft,
   User,
@@ -134,11 +135,17 @@ export default function TeamMemberPermissions() {
   const loadMemberData = async () => {
     try {
       setIsLoading(true);
-      
-      // Load team members to find the specific member
-      const teamData: any = await apiClient.getTeamMembers();
-      const foundMember = teamData.members.find((m: any) => m.id === parseInt(memberId!));
-      
+
+      const memberIdNum = parseInt(memberId!);
+
+      // Fetch team members and permissions in parallel
+      const [teamData, permissionsData]: any[] = await Promise.all([
+        apiClient.getTeamMembers(),
+        apiClient.listUserPermissions(memberIdNum),
+      ]);
+
+      const foundMember = teamData.members.find((m: any) => m.id === memberIdNum);
+
       if (!foundMember) {
         toast({
           title: "Member not found",
@@ -148,16 +155,11 @@ export default function TeamMemberPermissions() {
         navigate("/organization-settings");
         return;
       }
-      
-      setMember(foundMember);
-      
-      // Load user permissions
-      const permissionsData: any = await apiClient.listUserPermissions(foundMember.id);
-      setUserPermissions(permissionsData.permissions);
 
-      // Initialize permissions state
+      setMember(foundMember);
+      setUserPermissions(permissionsData.permissions);
       initializePermissions(permissionsData.permissions);
-      
+
     } catch (error: any) {
       toast({
         title: "Error loading member data",
@@ -184,6 +186,10 @@ export default function TeamMemberPermissions() {
     
     setPermissions(permissionsMap);
   };
+
+  if (isLoading) {
+    return <PageLoader />;
+  }
 
   if (!member) {
     return (
@@ -330,30 +336,6 @@ export default function TeamMemberPermissions() {
       setIsSaving(false);
     }
   };
-
-  if (isLoading) {
-    return (
-      <div className="p-8 flex items-center justify-center min-h-[400px]">
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-6 w-6 animate-spin" />
-          <span>Loading member permissions...</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!member) {
-    return (
-      <div className="p-8">
-        <div className="max-w-2xl mx-auto text-center">
-          <h1 className="text-2xl font-bold mb-4">Team Member Not Found</h1>
-          <Button onClick={() => navigate("/organization-settings")}>
-            Back to Organization Settings
-          </Button>
-        </div>
-      </div>
-    );
-  }
 
   const memberName = `${member.first_name} ${member.last_name}`.trim() || member.email.split('@')[0];
   const enabledCount = Object.values(permissions).filter(Boolean).length;

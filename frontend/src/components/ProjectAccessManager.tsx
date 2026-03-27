@@ -292,11 +292,11 @@ export const ProjectAccessManager = ({
 
                     {hasMore && (
                       <Button
-                        variant="outline"
+                        variant="default"
                         className="w-full"
                         onClick={() => setVisibleCount(prev => prev + PAGE_SIZE)}
                       >
-                        Load More ({filtered.length - visibleCount} remaining)
+                        Load More
                       </Button>
                     )}
 

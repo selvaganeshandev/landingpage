@@ -30,6 +30,7 @@ urlpatterns = [
     # Engine trigger & refresh status
     path('trigger/', views.seo_trigger_ranking, name='seo-trigger-ranking'),
     path('refresh-status/', views.seo_refresh_status, name='seo-refresh-status'),
+    path('force-rescrape/', views.seo_force_rescrape, name='seo-force-rescrape'),
 
     # PDF export (WeasyPrint — Rankmaxx-style report)
     path('keywords/pdf-export/', views.seo_pdf_export, name='seo-pdf-export'),

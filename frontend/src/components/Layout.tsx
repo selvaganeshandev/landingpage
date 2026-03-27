@@ -43,6 +43,7 @@ export const Layout = () => {
     '/insights',
     '/mentions',
     '/prompts',
+    '/citations',
     '/sentiment',
     '/topics',
     '/share-of-voice',
@@ -52,6 +53,7 @@ export const Layout = () => {
     '/reports',
     '/traffic',
     '/multilingual',
+    '/content-calendar',
   ];
 
   // Pages that specifically need competitor analysis

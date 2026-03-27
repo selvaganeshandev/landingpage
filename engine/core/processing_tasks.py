@@ -577,18 +577,48 @@ def process_seo_domain_task(self, domain_id: int):
     except Exception as e:
         logger.error(f"[SEO] Error processing domain {domain_id}: {e}", exc_info=True)
     finally:
-        # Always clean up stuck keywords — runs even on SoftTimeLimitExceeded,
-        # worker restart, or any other failure mode
+        # Clean up keywords stuck in 'busy' (worker crashed mid-processing).
+        # Do NOT mark 'avail' as 'fail' — they should remain available for the next run.
         try:
             from shared_models.seo_models import SeoKeywordRank
             stuck = SeoKeywordRank.objects.filter(
                 domain_id=domain_id,
-                auto_call_status__in=['avail', 'busy']
-            ).update(auto_call_status='fail')
+                auto_call_status='busy'
+            ).update(auto_call_status='avail')
             if stuck > 0:
-                logger.warning(f"[SEO] Cleaned up {stuck} stuck keywords for domain {domain_id}")
+                logger.warning(f"[SEO] Reset {stuck} stuck 'busy' keywords back to 'avail' for domain {domain_id}")
         except Exception:
             pass
+
+
+@shared_task(bind=True, ignore_result=True)
+def seo_rankings_daily_scheduler(self):
+    """
+    Daily scheduler: resets all 'done'/'fail'/'busy' keywords back to 'avail'
+    for every domain that has SEO keywords, then dispatches processing tasks.
+    """
+    from shared_models.seo_models import SeoKeywordRank
+    try:
+        # Find all domains that have SEO keywords
+        domain_ids = list(
+            SeoKeywordRank.objects.values_list('domain_id', flat=True).distinct()
+        )
+        logger.info(f"[SEO Scheduler] Found {len(domain_ids)} domains with SEO keywords")
+
+        for domain_id in domain_ids:
+            # Reset all keyword statuses to 'avail'
+            reset_count = SeoKeywordRank.objects.filter(
+                domain_id=domain_id,
+                auto_call_status__in=['done', 'fail', 'busy']
+            ).update(auto_call_status='avail')
+
+            if reset_count > 0:
+                logger.info(f"[SEO Scheduler] Domain {domain_id}: reset {reset_count} keywords to 'avail'")
+                # Dispatch processing task for this domain
+                process_seo_domain_task.delay(domain_id)
+
+    except Exception as e:
+        logger.error(f"[SEO Scheduler] Error: {e}", exc_info=True)
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)

@@ -251,10 +251,26 @@ const App = () => (
               } />
 
               {/* Other routes */}
-              <Route path="/content-calendar" element={<ContentCalendar />} />
-              <Route path="/content-editor/:id" element={<ContentEditor />} />
-              <Route path="/bulk-upload" element={<BulkContentUpload />} />
-              <Route path="/automation" element={<AutomationSettings />} />
+              <Route path="/content-calendar" element={
+                <ProtectedRoute requiredPermission={MODULES.CONTENT_PLANNER}>
+                  <ContentCalendar />
+                </ProtectedRoute>
+              } />
+              <Route path="/content-editor/:id" element={
+                <ProtectedRoute requiredPermission={MODULES.CONTENT_PLANNER}>
+                  <ContentEditor />
+                </ProtectedRoute>
+              } />
+              <Route path="/bulk-upload" element={
+                <ProtectedRoute requiredPermission={MODULES.CONTENT_PLANNER}>
+                  <BulkContentUpload />
+                </ProtectedRoute>
+              } />
+              <Route path="/automation" element={
+                <ProtectedRoute requiredPermission={MODULES.DASHBOARD}>
+                  <AutomationSettings />
+                </ProtectedRoute>
+              } />
               <Route 
                 path="/settings" 
                 element={

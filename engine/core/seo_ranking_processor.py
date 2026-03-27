@@ -566,7 +566,7 @@ class SeoRankingProcessor:
         except SoftTimeLimitExceeded:
             logger.warning(
                 f"[SEO] Domain {domain_id} hit time limit at {processed_count}/{total}. "
-                f"Remaining keywords will be marked as fail."
+                f"Remaining keywords will stay 'avail' for next run."
             )
             # Cancel pending futures
             for f in futures:

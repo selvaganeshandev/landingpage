@@ -180,6 +180,8 @@ export default function OrganizationSettings() {
 
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
+  const [isTabLoading, setIsTabLoading] = useState(false);
+  const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set(["domains"]));
   const [isUpdatingOrg, setIsUpdatingOrg] = useState(false);
   const [isAddingDomain, setIsAddingDomain] = useState(false);
   const [isUpdatingMember, setIsUpdatingMember] = useState<number | null>(null);
@@ -236,13 +238,56 @@ export default function OrganizationSettings() {
   const [selectedDomainForIntegration, setSelectedDomainForIntegration] = useState("");
   const [integrationType, setIntegrationType] = useState<"google_analytics" | "search_console">("google_analytics");
 
-  // Load data on component mount
+  // Load only organization + default tab (domains) on mount
   useEffect(() => {
-    loadData();
+    const loadInitialData = async () => {
+      try {
+        setIsLoading(true);
+        await Promise.all([
+          loadOrganization(),
+          loadDomains(),
+        ]);
+      } catch (error) {
+        toast({
+          title: "Error loading data",
+          description: "Failed to load organization data. Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadInitialData();
   }, []);
+
+  // Lazy-load tab data on first switch
+  const handleTabChange = async (tab: string) => {
+    setSelectedTab(tab);
+    if (loadedTabs.has(tab)) return;
+
+    setIsTabLoading(true);
+    try {
+      if (tab === "team") {
+        await loadTeamMembers();
+      } else if (tab === "profile") {
+        // Profile uses organization (already loaded) + user (from auth context)
+      }
+      setLoadedTabs(prev => new Set(prev).add(tab));
+    } catch (error) {
+      toast({
+        title: "Error loading data",
+        description: "Failed to load tab data. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsTabLoading(false);
+    }
+  };
 
   // Poll for domain updates when there are processing domains
   useEffect(() => {
+    if (selectedTab !== "domains") return;
+
     const hasProcessingDomains = domains.some(d =>
       d.processing_status && ['INIT', 'SCHD', 'PROC'].includes(d.processing_status)
     );
@@ -250,7 +295,6 @@ export default function OrganizationSettings() {
     if (!hasProcessingDomains) return;
 
     const interval = setInterval(async () => {
-      // Reload all currently loaded pages during polling
       try {
         const totalPages = domainPage;
         const params: any = { page: '1', page_size: String(totalPages * DOMAINS_PAGE_SIZE) };
@@ -261,10 +305,10 @@ export default function OrganizationSettings() {
       } catch (error) {
         console.error("Error polling domains:", error);
       }
-    }, 10000); // Poll every 10 seconds
+    }, 10000);
 
     return () => clearInterval(interval);
-  }, [domains]);
+  }, [domains, selectedTab]);
 
   // Cycle through progress messages during automated onboarding
   useEffect(() => {
@@ -292,25 +336,6 @@ export default function OrganizationSettings() {
       });
     }
   }, [user]);
-
-  const loadData = async () => {
-    try {
-      setIsLoading(true);
-      await Promise.all([
-        loadOrganization(),
-        loadDomains(),
-        loadTeamMembers(),
-      ]);
-    } catch (error) {
-      toast({
-        title: "Error loading data",
-        description: "Failed to load organization data. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const loadOrganization = async () => {
     try {
@@ -1578,15 +1603,12 @@ export default function OrganizationSettings() {
         </div>
       </div>
 
-      <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-6">
+      <Tabs value={selectedTab} onValueChange={handleTabChange} className="space-y-6">
         <div className="flex items-center justify-between">
           <TabsList className="bg-muted/50 p-1 border border-border">
             <TabsTrigger value="domains" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">All Domains</TabsTrigger>
             {(!isTeamMember || hasTeamManagement) && (
               <TabsTrigger value="team" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Team Members</TabsTrigger>
-            )}
-            {!isTeamMember && (
-              <TabsTrigger value="profile" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Profile</TabsTrigger>
             )}
           </TabsList>
 
@@ -1767,6 +1789,14 @@ export default function OrganizationSettings() {
         </TabsContent>
 
         <TabsContent value="team" className="space-y-6">
+          {isTabLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <span className="text-muted-foreground">Loading team members...</span>
+              </div>
+            </div>
+          ) : (
           <Card className="border border-border">
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -1951,76 +1981,9 @@ export default function OrganizationSettings() {
           })()}
           </CardContent>
           </Card>
+          )}
         </TabsContent>
 
-        <TabsContent value="profile" className="space-y-6">
-          <Card className="border border-border">
-            <CardHeader>
-              <CardTitle>Profile Settings</CardTitle>
-              <CardDescription>
-                Update your personal information and organization details
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Personal Information</h3>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="first-name">First Name</Label>
-                    <Input
-                      id="first-name"
-                      value={profileData.first_name}
-                      onChange={(e) => setProfileData({ ...profileData, first_name: e.target.value })}
-                      placeholder="Enter your first name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="last-name">Last Name</Label>
-                    <Input
-                      id="last-name"
-                      value={profileData.last_name}
-                      onChange={(e) => setProfileData({ ...profileData, last_name: e.target.value })}
-                      placeholder="Enter your last name"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    value={user?.email || ""}
-                    disabled
-                    className="bg-muted"
-                  />
-                  <p className="text-xs text-muted-foreground">Email cannot be changed</p>
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Organization</h3>
-                <div className="space-y-2">
-                  <Label htmlFor="org-name">Organization Name</Label>
-                  <Input
-                    id="org-name"
-                    value={organization.name}
-                    onChange={(e) => setOrganization({ ...organization, name: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="flex justify-end">
-                <Button onClick={handleSaveAllProfile} disabled={isUpdatingProfile || isUpdatingOrg}>
-                  {(isUpdatingProfile || isUpdatingOrg) ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                  Save Changes
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
 
       <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
