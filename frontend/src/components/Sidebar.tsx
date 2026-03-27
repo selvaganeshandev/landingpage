@@ -184,6 +184,22 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
           {group.items.map((item: any) => {
             const Icon = (item.icon as any) || LayoutDashboard;
             const isActive = location.pathname === item.path;
+            const isItemDisabled = isDomainProcessing && !['/chat', '/', '/organization-settings'].includes(item.path);
+
+            if (isItemDisabled) {
+              return (
+                <div
+                  key={item.path}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium opacity-50 cursor-not-allowed",
+                    "text-muted-foreground"
+                  )}
+                >
+                  <Icon className="h-5 w-5 text-muted-foreground" />
+                  {item.name}
+                </div>
+              );
+            }
 
             return (
               <Link
@@ -603,79 +619,40 @@ export const Sidebar = () => {
                   </Link>
                 )
               )}
-              {user.role === 'admin' && (
-                !isOpen ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Link
-                        to="/profile"
-                        className={cn(
-                          "flex items-center",
-                          location.pathname === "/profile"
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                          "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
-                        )}
-                      >
-                        <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
-                      </Link>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      <p>Profile</p>
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Link
-                    to="/profile"
-                    className={cn(
-                      "flex items-center",
-                      location.pathname === "/profile"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-                    )}
-                  >
-                    <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
-                    <span>Profile</span>
-                  </Link>
-                )
-              )}
-              {user.role === 'user' && (
-                !isOpen ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Link
-                        to="/profile"
-                        className={cn(
-                          "flex items-center",
-                          location.pathname === "/profile"
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                          "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
-                        )}
-                      >
-                        <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
-                      </Link>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      <p>Profile</p>
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Link
-                    to="/profile"
-                    className={cn(
-                      "flex items-center",
-                      location.pathname === "/profile"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-                    )}
-                  >
-                    <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
-                    <span>Profile</span>
-                  </Link>
-                )
+              {!isOpen ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Link
+                      to="/profile"
+                      className={cn(
+                        "flex items-center",
+                        location.pathname === "/profile"
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                        "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
+                      )}
+                    >
+                      <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    <p>Profile</p>
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <Link
+                  to="/profile"
+                  className={cn(
+                    "flex items-center",
+                    location.pathname === "/profile"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                    "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
+                  )}
+                >
+                  <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
+                  <span>Profile</span>
+                </Link>
               )}
             </div>
           )}

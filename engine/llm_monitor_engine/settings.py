@@ -250,4 +250,9 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'core.processing_tasks.process_cmsmanager_scheduler',
         'schedule': config('CELERY_BEAT_SCHEDULE_CMSMANAGER', default=60.0, cast=float),
     },
+    # Daily SEO keyword ranking refresh at 2:00 AM
+    'seo-rankings-daily-refresh': {
+        'task': 'core.processing_tasks.seo_rankings_daily_scheduler',
+        'schedule': crontab(hour=2, minute=0),
+    },
 }

@@ -768,10 +768,11 @@ def seo_trigger_ranking(request):
                 seeded_count = len(seo_kw_objects)
                 logger.info(f"Auto-seeded {seeded_count} keywords for domain {domain_id}")
 
-        # Reset keyword statuses to avail
+        # Reset ALL keyword statuses to avail — no keyword is skipped
         SeoKeywordRank.objects.filter(
             domain_id=domain_id,
-            auto_call_status__in=['done', 'fail']
+        ).exclude(
+            auto_call_status='avail',
         ).update(auto_call_status='avail')
 
         import requests as http_requests
@@ -3036,4 +3037,180 @@ def seo_keyword_competitors(request, seo_kw_id):
         'competitors': competitors,
         'ads': ads,
         'type': comp_type,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Force Reset & Re-scrape All Keywords
+# ---------------------------------------------------------------------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_force_rescrape(request):
+    """
+    Force reset keywords to 'avail' and trigger scraping.
+
+    Body:
+        { "domain_id": 123 }   — single domain
+        {}                     — all domains the user has access to
+
+    Resets every status (busy, done, fail, load, read) back to 'avail'.
+
+    Usage:
+        # Single domain
+        curl -X POST http://localhost:8000/api/seo/force-rescrape/ \
+            -H "Authorization: Bearer <token>" \
+            -H "Content-Type: application/json" \
+            -d '{"domain_id": 123}'
+
+        # All domains
+        curl -X POST http://localhost:8000/api/seo/force-rescrape/ \
+            -H "Authorization: Bearer <token>" \
+            -H "Content-Type: application/json"
+    """
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response(
+            {'error': 'Only admins can force re-scrape'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    import requests as http_requests
+    engine_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001')
+    allowed_ids = list(_get_user_domain_ids(request.user))
+
+    domain_id = request.data.get('domain_id')
+
+    # Build list of domains to process
+    if domain_id:
+        if int(domain_id) not in allowed_ids:
+            return Response(
+                {'error': 'Domain not found'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        target_domain_ids = [int(domain_id)]
+    else:
+        # All domains that have SEO keywords
+        target_domain_ids = list(
+            SeoKeywordRank.objects.filter(
+                domain_id__in=allowed_ids,
+            ).values_list('domain_id', flat=True).distinct()
+        )
+
+    if not target_domain_ids:
+        return Response({
+            'status': 'success',
+            'message': 'No domains with SEO keywords found',
+            'domains_processed': 0,
+            'results': [],
+        })
+
+    results = []
+    for did in target_domain_ids:
+        total = SeoKeywordRank.objects.filter(domain_id=did).count()
+        reset = SeoKeywordRank.objects.filter(
+            domain_id=did,
+        ).exclude(
+            auto_call_status='avail',
+        ).update(auto_call_status='avail')
+
+        triggered = False
+        try:
+            resp = http_requests.post(
+                f'{engine_url}/api/seo/process-domain/',
+                json={'domain_id': did},
+                timeout=10,
+            )
+            triggered = resp.status_code == 200
+        except http_requests.RequestException:
+            pass
+
+        results.append({
+            'domain_id': did,
+            'total_keywords': total,
+            'reset_count': reset,
+            'triggered': triggered,
+        })
+
+        logger.info(
+            f"[SEO Force Rescrape] Domain {did}: "
+            f"reset {reset}/{total} keywords, triggered={triggered}"
+        )
+
+    total_kw = sum(r['total_keywords'] for r in results)
+    return Response({
+        'status': 'success',
+        'message': f'Force re-scrape triggered for {total_kw} keywords across {len(results)} domain(s)',
+        'domains_processed': len(results),
+        'results': results,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([])
+def seo_force_rescrape_all(request):
+    """
+    Force reset & re-scrape ALL keywords across ALL domains.
+    Protected by a secret token (for cron jobs / scripts).
+
+    Body: { token: "<SEO_RESCRAPE_TOKEN>" }
+
+    Usage:
+        curl -X POST http://localhost:8000/api/seo/force-rescrape-all/ \
+            -H "Content-Type: application/json" \
+            -d '{"token": "your-secret-token"}'
+    """
+    token = request.data.get('token', '')
+    expected_token = getattr(settings, 'SEO_RESCRAPE_TOKEN', None)
+
+    if not expected_token or token != expected_token:
+        return Response(
+            {'error': 'Invalid or missing token'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Get all domains with SEO keywords
+    domain_ids = list(
+        SeoKeywordRank.objects.values_list('domain_id', flat=True).distinct()
+    )
+
+    results = []
+    import requests as http_requests
+    engine_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001')
+
+    for domain_id in domain_ids:
+        # Reset ALL keywords for this domain
+        total = SeoKeywordRank.objects.filter(domain_id=domain_id).count()
+        reset = SeoKeywordRank.objects.filter(
+            domain_id=domain_id,
+        ).exclude(
+            auto_call_status='avail',
+        ).update(auto_call_status='avail')
+
+        # Trigger engine
+        triggered = False
+        try:
+            resp = http_requests.post(
+                f'{engine_url}/api/seo/process-domain/',
+                json={'domain_id': domain_id},
+                timeout=10,
+            )
+            triggered = resp.status_code == 200
+        except http_requests.RequestException:
+            pass
+
+        results.append({
+            'domain_id': domain_id,
+            'total_keywords': total,
+            'reset_count': reset,
+            'triggered': triggered,
+        })
+
+    logger.info(
+        f"[SEO Force Rescrape All] Processed {len(domain_ids)} domains"
+    )
+
+    return Response({
+        'status': 'success',
+        'domains_processed': len(domain_ids),
+        'results': results,
     })

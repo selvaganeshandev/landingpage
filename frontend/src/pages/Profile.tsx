@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,17 +7,29 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { User, Mail, Building, Shield, Calendar, Lock } from "lucide-react";
+import { apiClient } from "@/services/api";
+import { User, Mail, Building, Shield, Calendar, Lock, Loader2, Pencil, Check, X } from "lucide-react";
 
 export default function Profile() {
   const { user, updateProfile } = useAuth();
   const { toast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
+  const [isEditingOrg, setIsEditingOrg] = useState(false);
+  const [isSavingOrg, setIsSavingOrg] = useState(false);
+  const [orgName, setOrgName] = useState(user?.organisation_name || "");
   const [formData, setFormData] = useState({
     first_name: user?.first_name || "",
     last_name: user?.last_name || "",
     email: user?.email || "",
   });
+
+  const canEditOrg = user?.role === 'super_admin' || user?.role === 'admin';
+
+  useEffect(() => {
+    if (user) {
+      setOrgName(user.organisation_name || "");
+    }
+  }, [user]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -152,9 +164,47 @@ export default function Profile() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="flex items-center gap-3">
                 <Building className="h-4 w-4 text-muted-foreground" />
-                <div>
+                <div className="flex-1">
                   <p className="text-sm font-medium">Organization</p>
-                  <p className="text-sm text-muted-foreground">{user.organisation_name}</p>
+                  {isEditingOrg ? (
+                    <div className="flex items-center gap-2 mt-1">
+                      <Input
+                        value={orgName}
+                        onChange={(e) => setOrgName(e.target.value)}
+                        className="h-8 text-sm"
+                      />
+                      <button
+                        disabled={isSavingOrg || !orgName.trim()}
+                        className="text-green-600 hover:text-green-700 disabled:opacity-50"
+                        onClick={async () => {
+                          try {
+                            setIsSavingOrg(true);
+                            await apiClient.updateOrganization({ name: orgName.trim() });
+                            toast({ title: "Organization updated", description: "Organization name has been updated." });
+                            setIsEditingOrg(false);
+                          } catch (error: any) {
+                            toast({ title: "Update failed", description: error.message || "Failed to update organization name.", variant: "destructive" });
+                          } finally {
+                            setIsSavingOrg(false);
+                          }
+                        }}
+                      >
+                        {isSavingOrg ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                      </button>
+                      <button onClick={() => { setOrgName(user.organisation_name); setIsEditingOrg(false); }} className="text-red-500 hover:text-red-600">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-muted-foreground">{user.organisation_name}</p>
+                      {canEditOrg && (
+                        <button onClick={() => setIsEditingOrg(true)} className="text-muted-foreground hover:text-foreground">
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               
@@ -162,8 +212,8 @@ export default function Profile() {
                 <Shield className="h-4 w-4 text-muted-foreground" />
                 <div>
                   <p className="text-sm font-medium">Role</p>
-                  <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                    {user.role === 'admin' ? 'Administrator' : 'User'}
+                  <Badge variant={user.role === 'super_admin' || user.role === 'admin' ? 'default' : 'secondary'}>
+                    {user.role === 'super_admin' ? 'Super Admin' : user.role === 'admin' ? 'Administrator' : 'User'}
                   </Badge>
                 </div>
               </div>
