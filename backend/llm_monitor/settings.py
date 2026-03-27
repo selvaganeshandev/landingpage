@@ -244,9 +244,6 @@ EMAIL_TIMEOUT = config('EMAIL_TIMEOUT', default=30, cast=int)
 # Engine (processing) service configuration
 ENGINE_API_URL = config('ENGINE_API_URL', default='http://localhost:8001')
 
-# Secret token for unauthenticated SEO force-rescrape endpoint (cron/scripts)
-SEO_RESCRAPE_TOKEN = config('SEO_RESCRAPE_TOKEN', default='change-me-in-production')
-
 # OpenAI API Configuration
 OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 
