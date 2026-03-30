@@ -173,23 +173,43 @@ export const Chat = () => {
   };
 
   // Typewriter effect for streaming text
+  // Uses requestAnimationFrame instead of setInterval to prevent pausing
+  // when the user switches tabs (Issue 14: chat pauses on tab switch)
   const typeWriterEffect = (text: string, speed: number = 15) => {
     return new Promise<void>((resolve) => {
       setIsStreaming(true);
       setStreamingText("");
       let currentIndex = 0;
+      let lastTime = performance.now();
 
-      const intervalId = setInterval(() => {
-        if (currentIndex <= text.length) {
-          setStreamingText(text.slice(0, currentIndex));
-          currentIndex++;
-        } else {
-          clearInterval(intervalId);
+      const animate = (now: number) => {
+        // Check if tab was hidden (large time gap) — catch up instantly
+        const elapsed = now - lastTime;
+        if (elapsed > 500) {
+          // Tab was in background — show full text immediately
+          setStreamingText(text);
           setIsStreaming(false);
           setStreamingText("");
           resolve();
+          return;
         }
-      }, speed);
+
+        if (now - lastTime >= speed) {
+          lastTime = now;
+          if (currentIndex <= text.length) {
+            setStreamingText(text.slice(0, currentIndex));
+            currentIndex++;
+          } else {
+            setIsStreaming(false);
+            setStreamingText("");
+            resolve();
+            return;
+          }
+        }
+        requestAnimationFrame(animate);
+      };
+
+      requestAnimationFrame(animate);
     });
   };
 
@@ -231,7 +251,21 @@ export const Chat = () => {
       console.error('ChatBot error:', error);
       setIsLoading(false);
 
-      const errorMessage = error.response?.data?.error || "Sorry, I encountered an error. Please try again.";
+      // Provide helpful error messages based on status code (Issue 16)
+      let errorMessage = "Sorry, I encountered an error. Please try again.";
+      const status = error.response?.status;
+      const serverError = error.response?.data?.error;
+
+      if (status === 403 || (serverError && serverError.toLowerCase().includes('access denied'))) {
+        errorMessage = "You don't have access to the chat feature for this domain. Please contact your organization administrator to enable chat access.";
+      } else if (status === 503) {
+        errorMessage = "Chat service is temporarily unavailable. Please try again in a few moments.";
+      } else if (status === 401) {
+        errorMessage = "Your session has expired. Please refresh the page and log in again.";
+      } else if (serverError) {
+        errorMessage = serverError;
+      }
+
       await typeWriterEffect(errorMessage);
 
       setMessages(prev => [...prev, {
