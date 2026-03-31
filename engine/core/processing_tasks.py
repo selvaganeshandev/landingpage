@@ -529,10 +529,15 @@ def process_single_report_email_task(self, scheduled_report_id: int):
 
 # ==================== SEO RANKING PROCESSING ====================
 
-@shared_task(bind=True, ignore_result=True, max_retries=3)
+@shared_task(bind=True, ignore_result=True, max_retries=1)
 def process_seo_keyword_task(self, seo_keyword_rank_id: int):
     """
     Process a single SEO keyword: fetch SERP data via ScrapingDog, parse, save rank.
+
+    max_retries=1 (not 3) because process_single_keyword already handles retries
+    internally via fetch_serp_data (2 retries per page × 3 pages). A Celery-level
+    retry would re-run the entire fetch, burning 3-9 extra ScrapingDog credits
+    per retry. One Celery retry covers transient infra issues (DB connection, OOM).
 
     Args:
         seo_keyword_rank_id: ID of SeoKeywordRank to process
@@ -557,28 +562,34 @@ def process_seo_keyword_task(self, seo_keyword_rank_id: int):
     acks_late=True,         # Re-deliver task if worker crashes before completion
     reject_on_worker_lost=True,  # Reject task if worker is killed (prevents re-queue loop)
 )
-def process_seo_domain_task(self, domain_id: int):
+def process_seo_domain_task(self, domain_id: int, batch_num: int = 1):
     """
-    Process all SEO keywords for a domain: fetch SERP, parse, save, recalculate metrics.
+    Process SEO keywords for a domain in batches of 500.
 
-    This task never retries because process_domain_rankings handles all errors
-    internally (per-keyword try/except). Retrying would re-process already-done
-    keywords, wasting API credits.
+    If unprocessed ('avail') keywords remain after a batch, a follow-up task is
+    automatically scheduled for the next batch. Failed keywords are NOT retried
+    within the same run — they are left as 'fail' and retried by the daily scheduler
+    next day to avoid wasting ScrapingDog API credits on persistent failures.
+
+    Max 20 chained batches per run (20 × 500 = 10,000 keywords) as a safety cap.
 
     Args:
-        domain_id: ID of Domain to process all SEO keywords for
+        domain_id: ID of Domain to process SEO keywords for
+        batch_num: Current batch number (1-based), used to enforce max chain limit
     """
+    MAX_BATCHES = 20  # Safety cap: 20 × 500 = 10,000 keywords max per run
+
+    result = None
     try:
         from core.seo_ranking_processor import SeoRankingProcessor
         processor = SeoRankingProcessor()
-        result = processor.process_domain_rankings(domain_id)
-        logger.info(f"[SEO] Domain {domain_id} processing complete: {result}")
+        result = processor.process_domain_rankings(domain_id, batch_size=500)
+        logger.info(f"[SEO] Domain {domain_id} batch {batch_num} complete: {result}")
         return result
     except Exception as e:
         logger.error(f"[SEO] Error processing domain {domain_id}: {e}", exc_info=True)
     finally:
         # Clean up keywords stuck in 'busy' (worker crashed mid-processing).
-        # Do NOT mark 'avail' as 'fail' — they should remain available for the next run.
         try:
             from shared_models.seo_models import SeoKeywordRank
             stuck = SeoKeywordRank.objects.filter(
@@ -590,14 +601,57 @@ def process_seo_domain_task(self, domain_id: int):
         except Exception:
             pass
 
+        # Auto-schedule follow-up task for remaining unprocessed keywords.
+        # Only check 'avail' (not 'fail') to avoid retrying already-failed keywords
+        # which would waste ScrapingDog credits on the same errors.
+        remaining = 0
+        try:
+            from shared_models.seo_models import SeoKeywordRank
+            remaining = SeoKeywordRank.objects.filter(
+                domain_id=domain_id,
+                auto_call_status='avail'
+            ).count()
+        except Exception:
+            pass
+
+        if remaining > 0 and batch_num < MAX_BATCHES:
+            logger.info(
+                f"[SEO] Domain {domain_id}: {remaining} keywords remaining, "
+                f"scheduling batch {batch_num + 1}/{MAX_BATCHES} in 10s"
+            )
+            try:
+                process_seo_domain_task.apply_async(
+                    args=[domain_id],
+                    kwargs={'batch_num': batch_num + 1},
+                    countdown=10,
+                )
+            except Exception as e:
+                logger.error(f"[SEO] Failed to schedule follow-up for domain {domain_id}: {e}")
+        elif remaining > 0:
+            logger.warning(
+                f"[SEO] Domain {domain_id}: {remaining} keywords still pending but "
+                f"hit max batch limit ({MAX_BATCHES}). Will be processed on next scheduled run."
+            )
+
 
 @shared_task(bind=True, ignore_result=True)
 def seo_rankings_daily_scheduler(self):
     """
-    Daily scheduler: resets all 'done'/'fail'/'busy' keywords back to 'avail'
-    for every domain that has SEO keywords, then dispatches processing tasks.
+    Daily scheduler: resets keywords back to 'avail' for processing.
+
+    Only resets keywords that were NOT already ranked today (to avoid
+    re-processing keywords that completed in an earlier batch today).
+    Keywords still in 'avail' from a prior incomplete run are left as-is
+    so they get picked up naturally.
     """
     from shared_models.seo_models import SeoKeywordRank
+    from datetime import date
+    from django.utils import timezone
+
+    today_start = timezone.make_aware(
+        timezone.datetime.combine(date.today(), timezone.datetime.min.time())
+    )
+
     try:
         # Find all domains that have SEO keywords
         domain_ids = list(
@@ -606,16 +660,30 @@ def seo_rankings_daily_scheduler(self):
         logger.info(f"[SEO Scheduler] Found {len(domain_ids)} domains with SEO keywords")
 
         for domain_id in domain_ids:
-            # Reset all keyword statuses to 'avail'
+            # Reset keywords that haven't been ranked today
+            # (skip keywords already processed today to avoid wasting API credits)
             reset_count = SeoKeywordRank.objects.filter(
                 domain_id=domain_id,
                 auto_call_status__in=['done', 'fail', 'busy']
+            ).exclude(
+                auto_call_status='done',
+                last_ranked_date__gte=today_start
             ).update(auto_call_status='avail')
 
-            if reset_count > 0:
-                logger.info(f"[SEO Scheduler] Domain {domain_id}: reset {reset_count} keywords to 'avail'")
-                # Dispatch processing task for this domain
+            # Count total pending (including any already in 'avail' from prior runs)
+            pending = SeoKeywordRank.objects.filter(
+                domain_id=domain_id,
+                auto_call_status='avail'
+            ).count()
+
+            if pending > 0:
+                logger.info(
+                    f"[SEO Scheduler] Domain {domain_id}: reset {reset_count}, "
+                    f"{pending} total pending — dispatching task"
+                )
                 process_seo_domain_task.delay(domain_id)
+            else:
+                logger.info(f"[SEO Scheduler] Domain {domain_id}: all keywords already processed today")
 
     except Exception as e:
         logger.error(f"[SEO Scheduler] Error: {e}", exc_info=True)

@@ -481,38 +481,50 @@ class SeoRankingProcessor:
             SeoKeywordRank.objects.filter(id=seo_kw.id).update(auto_call_status='fail')
             return False
 
-    def process_domain_rankings(self, domain_id):
-        """Process all keywords for a domain, then recalculate metrics.
+    def process_domain_rankings(self, domain_id, batch_size=500):
+        """Process all keywords for a domain in batches, then recalculate metrics.
 
         Designed to never crash: every keyword is wrapped in its own
         try/except so a single bad keyword can never kill the batch.
         DB connections are kept short-lived to survive long runs (3000+ kw).
+
+        Processes in batches of `batch_size` to avoid Celery time limits.
+        Returns remaining_count > 0 if there are still unprocessed keywords,
+        signalling the caller to schedule a follow-up task.
         """
         from shared_models.seo_models import SeoKeywordRank, SeoDomainDailyMetrics
         from django.db import connection
 
-        # Fetch IDs upfront to avoid long-lived DB cursor that can drop mid-iteration
+        # Only pick up 'avail' keywords (unprocessed). Do NOT retry 'fail' keywords
+        # here — they already consumed API credits and will be retried by the daily
+        # scheduler next day. Retrying within the same run wastes ScrapingDog credits.
         keyword_ids = list(
             SeoKeywordRank.objects.filter(
                 domain_id=domain_id,
-                auto_call_status__in=['avail', 'fail']
-            ).values_list('id', flat=True)
+                auto_call_status='avail'
+            ).values_list('id', flat=True)[:batch_size]
         )
+
+        total_pending = SeoKeywordRank.objects.filter(
+            domain_id=domain_id,
+            auto_call_status='avail'
+        ).count()
 
         total = len(keyword_ids)
         if total == 0:
             logger.info(f"No SEO keywords to process for domain {domain_id}")
-            return {'processed': 0, 'success': 0, 'failed': 0}
+            return {'processed': 0, 'success': 0, 'failed': 0, 'remaining': 0}
 
         concurrency = SCRAPINGDOG_CONCURRENCY
         logger.info(
             f"Starting SEO rank check for domain {domain_id}: "
-            f"{total} keywords, concurrency={concurrency}"
+            f"batch={total}/{total_pending} pending, concurrency={concurrency}"
         )
 
         success_count = 0
         fail_count = 0
         processed_count = 0
+        timed_out = False
 
         def _safe_process(kw_id):
             """Wrapper that never raises — returns (kw_id, True/False).
@@ -564,9 +576,10 @@ class SeoRankingProcessor:
                         connection.close_if_unusable_or_obsolete()
 
         except SoftTimeLimitExceeded:
+            timed_out = True
             logger.warning(
                 f"[SEO] Domain {domain_id} hit time limit at {processed_count}/{total}. "
-                f"Remaining keywords will stay 'avail' for next run."
+                f"Will schedule follow-up task for remaining keywords."
             )
             # Cancel pending futures
             for f in futures:
@@ -579,16 +592,25 @@ class SeoRankingProcessor:
         except Exception as e:
             logger.error(f"[SEO] Error calculating metrics for domain {domain_id}: {e}", exc_info=True)
 
+        # Count how many unprocessed keywords remain (only 'avail', not 'fail')
+        remaining = SeoKeywordRank.objects.filter(
+            domain_id=domain_id,
+            auto_call_status='avail'
+        ).count()
+
         logger.info(
-            f"Domain {domain_id} SEO check complete: "
-            f"{success_count} success, {fail_count} failed"
+            f"Domain {domain_id} SEO batch complete: "
+            f"{success_count} success, {fail_count} failed, {remaining} remaining"
             f"{f', score={metrics.score_meter}' if metrics else ''}"
+            f"{' (timed out)' if timed_out else ''}"
         )
 
         return {
-            'processed': total,
+            'processed': processed_count,
             'success': success_count,
             'failed': fail_count,
+            'remaining': remaining,
+            'timed_out': timed_out,
             'score': float(metrics.score_meter) if metrics else None,
         }
 

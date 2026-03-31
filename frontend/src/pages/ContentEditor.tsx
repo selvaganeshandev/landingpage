@@ -221,6 +221,12 @@ const ContentEditor = () => {
   const [contentData, setContentData] = useState<any>(null);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
 
+  // Auto-save: track dirty state and debounce saves (Issue 3: content not saving)
+  const [isDirty, setIsDirty] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSavedContentRef = useRef<string>("");
+
   // Undo/Redo history - using refs to avoid stale closure issues
   const historyRef = useRef<string[]>([]);
   const historyIndexRef = useRef(-1);
@@ -788,6 +794,7 @@ const ContentEditor = () => {
         if (editorRef.current) {
           editorRef.current.innerHTML = content;
           originalContentRef.current = content; // Store original content for keyword highlighting
+          lastSavedContentRef.current = content; // Track last saved state for auto-save
           // Initialize undo/redo history with the loaded content
           historyRef.current = [content];
           historyIndexRef.current = 0;
@@ -1036,6 +1043,37 @@ const ContentEditor = () => {
       // Update original content ref when user edits (only if no keyword is selected)
       if (!selectedKeyword) {
         originalContentRef.current = html;
+      }
+
+      // Auto-save: mark dirty and schedule save after 5 seconds of inactivity
+      // (Issue 3: content not saving / auto-undoing)
+      if (html !== lastSavedContentRef.current && !isUndoRedoAction.current) {
+        setIsDirty(true);
+        setAutoSaveStatus('unsaved');
+
+        // Clear existing timer
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+        }
+
+        // Schedule auto-save after 5 seconds of no edits
+        autoSaveTimerRef.current = setTimeout(async () => {
+          if (id && editorRef.current) {
+            try {
+              setAutoSaveStatus('saving');
+              await apiClient.updateGeneratedContent(parseInt(id), {
+                title,
+                content_html: editorRef.current.innerHTML
+              });
+              lastSavedContentRef.current = editorRef.current.innerHTML;
+              setIsDirty(false);
+              setAutoSaveStatus('saved');
+            } catch (err) {
+              console.error("Auto-save failed:", err);
+              setAutoSaveStatus('unsaved');
+            }
+          }
+        }, 5000);
       }
 
       // Reset humanise status when user manually edits content (not programmatic)
@@ -1880,6 +1918,15 @@ const ContentEditor = () => {
 
       // Update the content state with the saved content
       setContent(currentContent);
+      lastSavedContentRef.current = currentContent;
+      setIsDirty(false);
+      setAutoSaveStatus('saved');
+
+      // Cancel any pending auto-save
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
 
       toast({
         title: "Success",
@@ -1994,6 +2041,72 @@ const ContentEditor = () => {
     URL.revokeObjectURL(url);
   };
 
+  // Export as HTML file (Issue 6: download options)
+  const handleExportHtml = () => {
+    const htmlContent = editorRef.current?.innerHTML || content;
+    if (!htmlContent) {
+      toast({ title: "Nothing to export", description: "Editor content is empty." });
+      return;
+    }
+    const titleHtml = title ? `<h1>${title}</h1>` : "";
+    const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title || "Content"}</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;line-height:1.6}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;text-align:left}th{background-color:#f2f2f2}img{max-width:100%}</style></head><body>${titleHtml}${htmlContent}</body></html>`;
+    const blob = new Blob([fullHtml], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const filename = (title || "content").replace(/[^a-zA-Z0-9\s-]/g, "").trim().replace(/\s+/g, "_");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${filename}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export as plain text (Issue 6: no background when pasting)
+  const handleExportTxt = () => {
+    const htmlContent = editorRef.current?.innerHTML || content;
+    if (!htmlContent) {
+      toast({ title: "Nothing to export", description: "Editor content is empty." });
+      return;
+    }
+    const titleText = title ? `${title}\n${"=".repeat(title.length)}\n\n` : "";
+    const plainText = titleText + htmlContent.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+    const blob = new Blob([plainText], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const filename = (title || "content").replace(/[^a-zA-Z0-9\s-]/g, "").trim().replace(/\s+/g, "_");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${filename}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Copy content without background styling (Issue 6: background pasting)
+  const handleCopyClean = async () => {
+    const htmlContent = editorRef.current?.innerHTML || content;
+    if (!htmlContent) {
+      toast({ title: "Nothing to copy", description: "Editor content is empty." });
+      return;
+    }
+    // Strip background-color styles to prevent colored background when pasting
+    const cleanHtml = htmlContent.replace(/background-color\s*:\s*[^;}"']+;?/gi, '');
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([cleanHtml], { type: 'text/html' }),
+          'text/plain': new Blob([htmlContent.replace(/<[^>]*>/g, '')], { type: 'text/plain' })
+        })
+      ]);
+      toast({ title: "Copied", description: "Content copied without background styling" });
+    } catch {
+      // Fallback to plain text copy
+      await navigator.clipboard.writeText(htmlContent.replace(/<[^>]*>/g, ''));
+      toast({ title: "Copied", description: "Content copied as plain text" });
+    }
+  };
+
   const handlePublishClick = async () => {
     if (!id) return;
 
@@ -2050,6 +2163,16 @@ const ContentEditor = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Auto-save status indicator */}
+            {autoSaveStatus === 'saving' && (
+              <span className="text-xs text-muted-foreground animate-pulse">Auto-saving...</span>
+            )}
+            {autoSaveStatus === 'saved' && !isDirty && (
+              <span className="text-xs text-green-600">Saved</span>
+            )}
+            {autoSaveStatus === 'unsaved' && isDirty && (
+              <span className="text-xs text-orange-500">Unsaved changes</span>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -2079,10 +2202,28 @@ const ContentEditor = () => {
                 Publish
               </Button>
             )}
-            <Button variant="default" size="sm" onClick={handleExportDocx}>
-              <Share2 className="h-4 w-4 mr-2" />
-              Export
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="default" size="sm">
+                  <Share2 className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleExportDocx}>
+                  Export as Word (.doc)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleExportHtml}>
+                  Export as HTML
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleExportTxt}>
+                  Export as Plain Text
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleCopyClean}>
+                  Copy (no background)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>

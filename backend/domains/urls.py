@@ -26,4 +26,5 @@ urlpatterns = [
     # Reference Repository Management
     path('<int:domain_id>/reference-repository/', views.reference_document_list, name='reference_document_list'),
     path('<int:domain_id>/reference-repository/<int:doc_id>/', views.reference_document_detail, name='reference_document_detail'),
+    path('<int:domain_id>/reference-repository/<int:doc_id>/extraction-status/', views.reference_document_extraction_status, name='reference_document_extraction_status'),
 ]

@@ -2750,8 +2750,15 @@ def _extract_text_from_file(file_obj, file_type):
     """
     Extract plain text from uploaded file.
     Returns extracted text string.
+    Handles large files (up to 25MB) with batched processing to avoid
+    memory issues.
     """
     import io
+
+    MAX_PDF_PAGES = 300  # Safety limit for very large PDFs
+    PDF_BATCH_SIZE = 50  # Process pages in batches to manage memory
+    OCR_BATCH_SIZE = 20  # Smaller batches for memory-heavy OCR
+    OCR_MAX_PAGES = 100  # OCR is expensive — limit pages for scanned PDFs
 
     file_obj.seek(0)
     file_bytes = file_obj.read()
@@ -2759,31 +2766,92 @@ def _extract_text_from_file(file_obj, file_type):
 
     if file_type == 'pdf':
         # Step 1: Try pdfplumber (fast, works for text-based PDFs)
+        # Process in batches to manage memory for large documents
         try:
             import pdfplumber
             with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                total_pages = len(pdf.pages)
+                pages_to_process = min(total_pages, MAX_PDF_PAGES)
+                if total_pages > MAX_PDF_PAGES:
+                    logger.warning(
+                        f"PDF has {total_pages} pages, processing only "
+                        f"first {MAX_PDF_PAGES} to avoid excessive memory usage"
+                    )
+
                 pages_text = []
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if text:
-                        pages_text.append(text)
+                # Process in batches to avoid holding all page objects in memory
+                for batch_start in range(0, pages_to_process, PDF_BATCH_SIZE):
+                    batch_end = min(batch_start + PDF_BATCH_SIZE, pages_to_process)
+                    for i in range(batch_start, batch_end):
+                        try:
+                            text = pdf.pages[i].extract_text()
+                            if text:
+                                pages_text.append(text)
+                        except Exception as page_err:
+                            logger.warning(f"Failed to extract page {i+1}: {page_err}")
+                            continue
+
                 if pages_text:
+                    logger.info(
+                        f"PDF text extraction: {len(pages_text)}/{pages_to_process} "
+                        f"pages extracted successfully"
+                    )
                     return '\n\n'.join(pages_text)
         except Exception as e:
             logger.warning(f"PDF pdfplumber extraction failed: {e}")
 
         # Step 2: Fallback to OCR for scanned/image PDFs
+        # Process in small batches to avoid loading all images into memory at once
         try:
             from pdf2image import convert_from_bytes
             import pytesseract
 
-            logger.info(f"PDF text extraction empty, attempting OCR fallback")
-            images = convert_from_bytes(file_bytes, dpi=200)
+            logger.info("PDF text extraction empty, attempting OCR fallback")
+
+            # Get total page count first without converting
+            try:
+                from pdf2image import pdfinfo_from_bytes
+                info = pdfinfo_from_bytes(file_bytes)
+                total_pages = info.get('Pages', 0)
+            except Exception:
+                total_pages = OCR_MAX_PAGES  # Assume max if we can't determine
+
+            pages_to_ocr = min(total_pages, OCR_MAX_PAGES)
+            if total_pages > OCR_MAX_PAGES:
+                logger.warning(
+                    f"Scanned PDF has {total_pages} pages, OCR limited to "
+                    f"first {OCR_MAX_PAGES} pages"
+                )
+
             ocr_pages = []
-            for i, image in enumerate(images):
-                text = pytesseract.image_to_string(image)
-                if text and text.strip():
-                    ocr_pages.append(text)
+            # Process OCR in small batches to limit memory usage
+            for batch_start in range(0, pages_to_ocr, OCR_BATCH_SIZE):
+                batch_end = min(batch_start + OCR_BATCH_SIZE, pages_to_ocr)
+                try:
+                    # Convert only the current batch of pages to images
+                    batch_images = convert_from_bytes(
+                        file_bytes,
+                        dpi=150,  # Reduced from 200 to save memory
+                        first_page=batch_start + 1,  # 1-indexed
+                        last_page=batch_end
+                    )
+                    for image in batch_images:
+                        try:
+                            text = pytesseract.image_to_string(image)
+                            if text and text.strip():
+                                ocr_pages.append(text)
+                        except Exception as ocr_err:
+                            logger.warning(f"OCR failed for a page: {ocr_err}")
+                        finally:
+                            # Explicitly free image memory
+                            image.close()
+                    del batch_images
+                except Exception as batch_err:
+                    logger.warning(
+                        f"OCR batch {batch_start+1}-{batch_end} failed: {batch_err}"
+                    )
+                    continue
+
             if ocr_pages:
                 logger.info(f"OCR extracted text from {len(ocr_pages)} pages")
                 return '\n\n'.join(ocr_pages)
@@ -2931,6 +2999,9 @@ def _create_document_chunks(document):
     """
     Split a ReferenceDocument's extracted_text into chunks and store them.
     Deletes any existing chunks first (for re-chunking on update).
+
+    For large documents (>100K chars), uses larger chunk size (10K) to reduce
+    chunk count and improve keyword filtering performance.
     """
     from domains.models import ReferenceDocumentChunk
 
@@ -2941,8 +3012,15 @@ def _create_document_chunks(document):
     if not text.strip():
         return
 
-    chunk_size = ReferenceDocumentChunk.CHUNK_SIZE
-    overlap = ReferenceDocumentChunk.CHUNK_OVERLAP
+    # Adaptive chunk size: larger chunks for large documents
+    LARGE_DOC_THRESHOLD = 100000  # 100K characters
+    if len(text) > LARGE_DOC_THRESHOLD:
+        chunk_size = 10000  # 10K chars per chunk for large docs
+        overlap = 400       # Proportionally larger overlap
+    else:
+        chunk_size = ReferenceDocumentChunk.CHUNK_SIZE   # 5K default
+        overlap = ReferenceDocumentChunk.CHUNK_OVERLAP   # 200 default
+
     chunks = []
     start = 0
     chunk_index = 0
@@ -2963,12 +3041,77 @@ def _create_document_chunks(document):
         start += chunk_size - overlap
 
     if chunks:
-        ReferenceDocumentChunk.objects.bulk_create(chunks)
+        # Bulk create in batches to avoid memory issues with very large docs
+        BATCH_SIZE = 100
+        for i in range(0, len(chunks), BATCH_SIZE):
+            ReferenceDocumentChunk.objects.bulk_create(chunks[i:i + BATCH_SIZE])
 
     logger.info(
         f"[CHUNKING] Document '{document.file_name}' (ID: {document.id}): "
-        f"{len(text)} chars -> {len(chunks)} chunks"
+        f"{len(text)} chars -> {len(chunks)} chunks "
+        f"(chunk_size={chunk_size}, overlap={overlap})"
     )
+
+
+def _async_extract_and_chunk(document_id, file_type):
+    """
+    Background thread function to extract text from large files and create chunks.
+    Updates the document's extraction_status when done.
+    Runs outside the HTTP request lifecycle for files >5MB.
+    """
+    import django
+    django.setup()
+    from domains.models import ReferenceDocument
+
+    try:
+        doc = ReferenceDocument.objects.get(id=document_id)
+        logger.info(
+            f"[ASYNC-EXTRACT] Starting background extraction for "
+            f"'{doc.file_name}' (ID: {doc.id}, size: {doc.file_size} bytes)"
+        )
+
+        # Extract text from the saved file on disk
+        extracted_text = ''
+        if doc.file:
+            try:
+                with doc.file.open('rb') as f:
+                    extracted_text = _extract_text_from_file(f, file_type)
+            except Exception as e:
+                logger.error(f"[ASYNC-EXTRACT] File read failed for doc {doc.id}: {e}")
+                doc.extraction_status = 'failed'
+                doc.extraction_error = f"Failed to read file: {str(e)}"
+                doc.save(update_fields=['extraction_status', 'extraction_error'])
+                return
+
+        if not extracted_text:
+            logger.warning(
+                f"[ASYNC-EXTRACT] No text extracted from '{doc.file_name}' ({file_type})"
+            )
+
+        # Update the document with extracted text
+        doc.extracted_text = extracted_text
+        doc.extraction_status = 'completed'
+        doc.extraction_error = ''
+        doc.save(update_fields=['extracted_text', 'extraction_status', 'extraction_error'])
+
+        # Create chunks
+        _create_document_chunks(doc)
+
+        logger.info(
+            f"[ASYNC-EXTRACT] Completed extraction for '{doc.file_name}' "
+            f"(ID: {doc.id}): {len(extracted_text)} chars extracted"
+        )
+    except ReferenceDocument.DoesNotExist:
+        logger.error(f"[ASYNC-EXTRACT] Document {document_id} not found (may have been deleted)")
+    except Exception as e:
+        logger.error(f"[ASYNC-EXTRACT] Unexpected error for doc {document_id}: {e}")
+        try:
+            doc = ReferenceDocument.objects.get(id=document_id)
+            doc.extraction_status = 'failed'
+            doc.extraction_error = str(e)[:500]
+            doc.save(update_fields=['extraction_status', 'extraction_error'])
+        except Exception:
+            pass
 
 
 @api_view(['GET', 'POST'])
@@ -3065,30 +3208,65 @@ def reference_document_list(request, domain_id):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Extract text from file
-    extracted_text = _extract_text_from_file(uploaded_file, file_type)
-    if not extracted_text:
-        logger.warning(f"No text extracted from {uploaded_file.name} ({file_type})")
-
     description = request.data.get('description', '').strip()
 
-    doc = ReferenceDocument.objects.create(
-        domain=domain,
-        file=uploaded_file,
-        file_name=uploaded_file.name,
-        file_type=file_type,
-        file_size=uploaded_file.size,
-        extracted_text=extracted_text,
-        description=description,
-        uploaded_by=request.user,
-    )
-    _create_document_chunks(doc)
+    # For large files (>5MB), process extraction asynchronously in background
+    ASYNC_THRESHOLD = 5 * 1024 * 1024  # 5MB
 
-    serializer = ReferenceDocumentSerializer(doc, context={'request': request})
-    return Response({
-        'message': 'File uploaded successfully',
-        'reference_document': serializer.data
-    }, status=status.HTTP_201_CREATED)
+    if uploaded_file.size > ASYNC_THRESHOLD:
+        # Save document immediately with 'processing' status
+        doc = ReferenceDocument.objects.create(
+            domain=domain,
+            file=uploaded_file,
+            file_name=uploaded_file.name,
+            file_type=file_type,
+            file_size=uploaded_file.size,
+            extracted_text='',
+            extraction_status='processing',
+            description=description,
+            uploaded_by=request.user,
+        )
+
+        # Run extraction in background thread
+        import threading
+        thread = threading.Thread(
+            target=_async_extract_and_chunk,
+            args=(doc.id, file_type),
+            daemon=True
+        )
+        thread.start()
+
+        serializer = ReferenceDocumentSerializer(doc, context={'request': request})
+        return Response({
+            'message': 'File uploaded successfully. Text extraction is processing in the background for this large file.',
+            'reference_document': serializer.data,
+            'extraction_status': 'processing'
+        }, status=status.HTTP_201_CREATED)
+    else:
+        # Small files — extract synchronously (fast, no delay)
+        extracted_text = _extract_text_from_file(uploaded_file, file_type)
+        if not extracted_text:
+            logger.warning(f"No text extracted from {uploaded_file.name} ({file_type})")
+
+        doc = ReferenceDocument.objects.create(
+            domain=domain,
+            file=uploaded_file,
+            file_name=uploaded_file.name,
+            file_type=file_type,
+            file_size=uploaded_file.size,
+            extracted_text=extracted_text,
+            extraction_status='completed',
+            description=description,
+            uploaded_by=request.user,
+        )
+        _create_document_chunks(doc)
+
+        serializer = ReferenceDocumentSerializer(doc, context={'request': request})
+        return Response({
+            'message': 'File uploaded successfully',
+            'reference_document': serializer.data,
+            'extraction_status': 'completed'
+        }, status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET', 'DELETE', 'PATCH'])
@@ -3157,3 +3335,35 @@ def reference_document_detail(request, domain_id, doc_id):
             'message': 'Reference document updated successfully',
             'reference_document': serializer.data
         })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def reference_document_extraction_status(request, domain_id, doc_id):
+    """
+    GET: Check the extraction status of a reference document.
+    Used by frontend to poll for completion of async extraction on large files.
+    """
+    try:
+        domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
+        doc = ReferenceDocument.objects.get(id=doc_id, domain=domain)
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': 'Domain not found or not in your organization'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except ReferenceDocument.DoesNotExist:
+        return Response(
+            {'error': 'Reference document not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    extracted_chars = len(doc.extracted_text) if doc.extracted_text else 0
+    chunk_count = doc.chunks.count()
+
+    return Response({
+        'extraction_status': doc.extraction_status,
+        'extraction_error': doc.extraction_error,
+        'extracted_chars': extracted_chars,
+        'chunk_count': chunk_count,
+    })

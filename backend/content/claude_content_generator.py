@@ -6,9 +6,12 @@ This module handles content generation using the Claude API
 import os
 import re
 import time
+import logging
 from anthropic import Anthropic
 from django.conf import settings
 from decouple import config
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeContentGenerator:
@@ -28,14 +31,198 @@ class ClaudeContentGenerator:
         """Calculate dynamic max_tokens based on requested word count.
         HTML content uses ~2 tokens per word (tags + text).
         Adds buffer for overhead (HTML structure, formatting).
+
+        Note: max_tokens is a ceiling, not a target. Claude only uses what it
+        needs, so raising the cap does NOT increase cost for normal articles.
+        It only prevents truncation for longer content.
         """
         if is_section:
             # For single section regeneration, smaller buffer needed
             return max(4096, int(word_count * 2.5) + 500)
-        # Full article: word_count * 2 tokens/word + 1500 buffer for HTML overhead
-        tokens = int(word_count * 2.0) + 1500
-        # Minimum 4096, maximum 16384 (Claude's output limit)
-        return max(4096, min(tokens, 16384))
+        # Tighter multiplier for shorter articles to prevent over-generation
+        # (Issue 9: 800-word articles extending to 1500 words)
+        if word_count <= 1000:
+            tokens = int(word_count * 1.6) + 800
+        else:
+            tokens = int(word_count * 2.0) + 1500
+        # Minimum 4096, maximum 20480 (raised from 16384 to prevent truncation
+        # on longer articles — this is a safety ceiling, not a cost driver)
+        return max(4096, min(tokens, 20480))
+
+    def _continue_truncated_content(self, truncated_html):
+        """
+        When content generation is truncated (stop_reason='max_tokens'),
+        make a small follow-up API call to complete the last incomplete
+        sentence/paragraph and close any open HTML tags.
+
+        This is a lightweight call (~500-1000 tokens) that only finishes
+        what was cut off — it does NOT regenerate or add new sections.
+
+        Args:
+            truncated_html: The incomplete HTML content
+
+        Returns:
+            tuple: (complete_html, extra_completion_tokens)
+        """
+        # Send only the last 2000 chars as context — enough for Claude to
+        # understand what needs to be completed
+        context_tail = truncated_html[-2000:] if len(truncated_html) > 2000 else truncated_html
+
+        try:
+            continuation_response = self.client.messages.create(
+                model=self.model,
+                max_tokens=1024,
+                temperature=0.7,
+                system=(
+                    "You are completing an HTML article that was cut off mid-generation. "
+                    "Your job is to ONLY finish the last incomplete sentence or paragraph "
+                    "and close any open HTML tags properly. "
+                    "Do NOT add new sections, headings, or content beyond completing "
+                    "what was already started. Keep it brief and natural. "
+                    "Return ONLY the continuation HTML (not the full article)."
+                ),
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "The following HTML article was cut off. "
+                            "Complete ONLY the last incomplete part and close "
+                            "any open tags:\n\n"
+                            f"...{context_tail}"
+                        )
+                    }
+                ]
+            )
+
+            continuation_text = continuation_response.content[0].text.strip()
+            extra_tokens = continuation_response.usage.output_tokens
+
+            # Merge: append continuation to truncated content
+            complete_html = truncated_html + continuation_text
+
+            logger.info(
+                f"Auto-continuation successful: added {len(continuation_text)} chars, "
+                f"{extra_tokens} extra tokens"
+            )
+            return complete_html, extra_tokens
+
+        except Exception as e:
+            logger.warning(f"Auto-continuation failed (non-fatal): {e}")
+            # Return original truncated content if continuation fails —
+            # better to have truncated content than no content
+            return truncated_html, 0
+
+    @staticmethod
+    def _deduplicate_internal_links(html_content):
+        """
+        Remove duplicate internal link URLs from generated content.
+        Keeps only the FIRST occurrence of each URL and converts subsequent
+        duplicates to plain text (anchor text preserved, link removed).
+        This is important for SEO — repeated identical links hurt rankings.
+        """
+        seen_urls = set()
+
+        def replace_duplicate(match):
+            full_tag = match.group(0)
+            url = match.group(1)
+            anchor_text = match.group(2)
+
+            # Normalize URL for comparison (lowercase, strip trailing slash)
+            normalized_url = url.lower().rstrip('/')
+
+            if normalized_url in seen_urls:
+                # Duplicate — return just the anchor text without the link
+                return anchor_text
+            else:
+                seen_urls.add(normalized_url)
+                return full_tag
+
+        # Match <a href="...">text</a> patterns
+        import re
+        deduped = re.sub(
+            r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+            replace_duplicate,
+            html_content,
+            flags=re.IGNORECASE | re.DOTALL
+        )
+        return deduped
+
+    @staticmethod
+    def _convert_markdown_to_html(content):
+        """
+        Convert any remaining markdown syntax in the generated content to proper HTML.
+        Handles: headings (# ## ###), tables (| pipe syntax |), bold (**), italic (*).
+        This ensures the editor always receives clean HTML regardless of LLM output format.
+        """
+        import re
+
+        # Convert markdown headings to HTML headings
+        # Must process ### before ## before # to avoid partial matches
+        content = re.sub(r'^###\s+(.+?)$', r'<h3>\1</h3>', content, flags=re.MULTILINE)
+        content = re.sub(r'^##\s+(.+?)$', r'<h2>\1</h2>', content, flags=re.MULTILINE)
+        content = re.sub(r'^#\s+(.+?)$', r'<h1>\1</h1>', content, flags=re.MULTILINE)
+
+        # Convert markdown bold **text** to <strong>text</strong>
+        # (but not inside already-converted HTML tags)
+        content = re.sub(r'\*\*([^*]+?)\*\*', r'<strong>\1</strong>', content)
+
+        # Convert markdown tables to HTML tables
+        lines = content.split('\n')
+        result_lines = []
+        table_lines = []
+        in_table = False
+
+        for line in lines:
+            stripped = line.strip()
+            # Detect table row: starts and ends with |
+            if stripped.startswith('|') and stripped.endswith('|'):
+                # Skip separator rows like |---|---|
+                if re.match(r'^\|[\s\-:|]+\|$', stripped):
+                    if not in_table:
+                        in_table = True
+                    continue
+                table_lines.append(stripped)
+                if not in_table:
+                    in_table = True
+            else:
+                # End of table — convert collected rows
+                if in_table and table_lines:
+                    result_lines.append(ClaudeContentGenerator._table_lines_to_html(table_lines))
+                    table_lines = []
+                    in_table = False
+                result_lines.append(line)
+
+        # Handle table at end of content
+        if in_table and table_lines:
+            result_lines.append(ClaudeContentGenerator._table_lines_to_html(table_lines))
+
+        return '\n'.join(result_lines)
+
+    @staticmethod
+    def _table_lines_to_html(table_lines):
+        """Convert a list of markdown table rows to an HTML table."""
+        if not table_lines:
+            return ''
+
+        html = '<table><thead><tr>'
+        # First row is header
+        header_cells = [cell.strip() for cell in table_lines[0].split('|')[1:-1]]
+        for cell in header_cells:
+            # Remove bold markdown from headers
+            cell = re.sub(r'\*\*(.+?)\*\*', r'\1', cell)
+            html += f'<th>{cell}</th>'
+        html += '</tr></thead><tbody>'
+
+        # Remaining rows are data
+        for row in table_lines[1:]:
+            cells = [cell.strip() for cell in row.split('|')[1:-1]]
+            html += '<tr>'
+            for cell in cells:
+                html += f'<td>{cell}</td>'
+            html += '</tr>'
+
+        html += '</tbody></table>'
+        return html
 
     def _filter_chunks_by_keywords(self, title, keywords, reference_docs):
         """
@@ -45,9 +232,18 @@ class ClaudeContentGenerator:
         """
         from domains.models import ReferenceDocumentChunk
 
+        # Skip documents still being processed (async extraction not yet complete)
+        reference_docs = [
+            doc for doc in reference_docs
+            if getattr(doc, 'extraction_status', 'completed') == 'completed'
+        ]
+
         # Build search terms from title and keywords
+        # Include both exact phrases and individual words for broader matching
         search_terms = []
         if title:
+            # Add full title as a phrase match (lowered)
+            search_terms.append(title.lower().strip())
             # Extract meaningful words from title (skip short/common words)
             search_terms.extend([
                 word.lower() for word in title.split()
@@ -63,6 +259,16 @@ class ClaudeContentGenerator:
                         word for word in kw.split()
                         if len(word) > 3
                     ])
+
+        # Always include high-value generic terms that capture brand context
+        # These ensure brand voice, guidelines, and differentiators are not missed
+        brand_context_terms = [
+            'brand', 'guideline', 'tone of voice', 'voice', 'style guide',
+            'usp', 'unique selling', 'differentiator', 'value proposition',
+            'tagline', 'mission', 'vision', 'about us', 'why choose',
+            'testimonial', 'review', 'customer feedback',
+        ]
+        search_terms.extend(brand_context_terms)
 
         # Remove duplicates
         search_terms = list(set(search_terms))
@@ -86,15 +292,40 @@ class ClaudeContentGenerator:
 
         # Sort by score (highest first) and limit to top chunks
         scored_chunks.sort(key=lambda x: x[0], reverse=True)
-        # Cap at ~50,000 chars total to keep API cost reasonable
+
+        # Dynamic cap: scale with total document size for large reference sets
+        # Base: 50K chars. For large docs, allow up to 80K to capture more relevant content.
+        # This adds marginal API cost (~$0.02) but significantly improves quality
+        # for large reference documents.
+        total_doc_chars = sum(len(c.chunk_text) for _, c in scored_chunks)
+        max_chars = min(80000, max(50000, total_doc_chars // 10))
+
         selected_chunks = []
         total_chars = 0
-        max_chars = 50000
         for score, chunk in scored_chunks:
             if total_chars + len(chunk.chunk_text) > max_chars:
                 break
             selected_chunks.append(chunk)
             total_chars += len(chunk.chunk_text)
+
+        # Guarantee: Always include the FIRST chunk of each document
+        # (often contains intro, brand overview, key messaging — valuable context
+        # that keyword matching might miss)
+        first_chunk_ids = set(c.id for c in selected_chunks)
+        for doc in reference_docs:
+            try:
+                from domains.models import ReferenceDocumentChunk
+                first_chunk = ReferenceDocumentChunk.objects.filter(
+                    document=doc, chunk_index=0
+                ).first()
+                if first_chunk and first_chunk.id not in first_chunk_ids:
+                    # Add first chunk if we have room (use 10K extra budget for this)
+                    if total_chars + len(first_chunk.chunk_text) <= max_chars + 10000:
+                        selected_chunks.append(first_chunk)
+                        total_chars += len(first_chunk.chunk_text)
+                        first_chunk_ids.add(first_chunk.id)
+            except Exception:
+                continue
 
         return selected_chunks
 
@@ -113,8 +344,6 @@ class ClaudeContentGenerator:
         Returns:
             str: Relevant excerpts from matched documents, or empty string
         """
-        import logging
-        logger = logging.getLogger(__name__)
 
         # Step 1: Try keyword-based chunk filtering (covers entire document)
         filtered_chunks = self._filter_chunks_by_keywords(title, keywords, reference_docs)
@@ -159,29 +388,32 @@ class ClaudeContentGenerator:
 INSTRUCTIONS:
 1. Read each reference document carefully
 2. For each document, check if it contains information relevant to the given article title and keywords
-3. If relevant content is found, extract ONLY the relevant paragraphs/sections
+3. Extract TWO types of content:
+   a) DIRECTLY relevant content: paragraphs about the article topic (product info, stats, facts, pricing, features)
+   b) BRAND CONTEXT content: brand voice guidelines, tone instructions, USPs, taglines, differentiators, customer testimonials that should inform how the article is written
 4. Preserve exact brand names, product names, statistics, facts, and specific terminology
-5. Keep total extracted content under 2000 words
-6. Tag each excerpt with its source document name
+5. Keep total extracted content under 4000 words
+6. Tag each excerpt with its source document name and category (DIRECT or BRAND_CONTEXT)
 
 OUTPUT FORMAT:
 If relevant content is found:
 ---
-[Source: {document_name}]
+[Source: {document_name}] [DIRECT]
 {extracted relevant paragraph or section}
 
-[Source: {document_name}]
-{extracted relevant paragraph or section}
+[Source: {document_name}] [BRAND_CONTEXT]
+{brand voice, USP, or style information}
 ---
 
 If NO document contains relevant content:
 NO_RELEVANT_CONTENT
 
 IMPORTANT:
-- Only extract content that is DIRECTLY useful for writing the given article
-- Do NOT extract generic/unrelated sections even if they are interesting
+- Extract BOTH topic-specific content AND brand personality/voice content
+- Only extract content that is useful for writing the given article
 - Do NOT summarize - preserve the original wording for brand accuracy
-- Do NOT add your own commentary"""
+- Do NOT add your own commentary
+- Brand guidelines, tone of voice, and USPs are ALWAYS relevant regardless of article topic"""
 
         user_prompt = f"""I am about to write an article. Check if any of the brand's reference documents contain content relevant to this topic:
 
@@ -197,7 +429,7 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=2048,
+                max_tokens=4096,  # Increased from 2048 to allow richer reference extraction
                 temperature=0.2,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}]
@@ -262,15 +494,25 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
 
             # Extract content from response
             content_html = response.content[0].text
+            total_prompt_tokens = response.usage.input_tokens
+            total_completion_tokens = response.usage.output_tokens
 
             # Detect truncation: if Claude stopped due to token limit, content is incomplete
+            # Auto-continue with a small follow-up call to finish the last paragraph
             if response.stop_reason == 'max_tokens':
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.warning(
                     f"Content truncated for word_count={word_count}: "
-                    f"stop_reason=max_tokens, max_tokens={max_tokens}"
+                    f"stop_reason=max_tokens, max_tokens={max_tokens}. "
+                    f"Attempting auto-continuation..."
                 )
+                content_html, extra_tokens = self._continue_truncated_content(content_html)
+                total_completion_tokens += extra_tokens
+
+            # Post-processing: convert any remaining markdown to HTML
+            content_html = self._convert_markdown_to_html(content_html)
+
+            # Post-processing: deduplicate internal links (SEO best practice)
+            content_html = self._deduplicate_internal_links(content_html)
 
             # Calculate generation time
             generation_time = time.time() - start_time
@@ -282,8 +524,8 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
             return {
                 'content_html': content_html,
                 'generation_time_seconds': round(generation_time, 2),
-                'prompt_tokens': response.usage.input_tokens,
-                'completion_tokens': response.usage.output_tokens,
+                'prompt_tokens': total_prompt_tokens,
+                'completion_tokens': total_completion_tokens,
                 'actual_word_count': actual_word_count,
                 'model_used': self.model
             }
@@ -445,7 +687,7 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
 - Goal: {goal}
 - Target Audience: {audience}
 - Content Depth: {depth}
-- Target Word Count: ~{word_count} words
+- Target Word Count: {word_count} words (STRICT: stay within ±10% of this count. Do NOT exceed {int(word_count * 1.1)} words)
 
 **IMPORTANT - Language & Spelling:** Write the entire content in {language_display}.
 - Use spelling, grammar, and vocabulary conventions specific to {language_display}
@@ -622,6 +864,9 @@ Reference Content:
 """
 
         user_prompt += """
+**IMPORTANT - Content Completion Rule:**
+Always complete every sentence and paragraph fully. If you are approaching your output limit, wrap up the current section with a proper conclusion rather than starting a new section. Never end mid-sentence or leave content incomplete. Every article must end with a proper closing paragraph and valid closing HTML tags.
+
 Begin writing the content now. Return ONLY the HTML content."""
 
         return system_prompt, user_prompt
@@ -1024,15 +1269,22 @@ IMPORTANT:
             )
 
             content_html = response.content[0].text
+            total_prompt_tokens = response.usage.input_tokens
+            total_completion_tokens = response.usage.output_tokens
 
-            # Log truncation warning
+            # Auto-continue on truncation
             if response.stop_reason == 'max_tokens':
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.warning(
                     f"Outline content truncated: target={target_word_count} words, "
-                    f"max_tokens={max_tokens}, stop_reason=max_tokens"
+                    f"max_tokens={max_tokens}. Attempting auto-continuation..."
                 )
+                content_html, extra_tokens = self._continue_truncated_content(content_html)
+                total_completion_tokens += extra_tokens
+
+            # Post-processing: convert any remaining markdown to HTML
+            content_html = self._convert_markdown_to_html(content_html)
+            # Post-processing: deduplicate internal links
+            content_html = self._deduplicate_internal_links(content_html)
 
             generation_time = time.time() - start_time
             plain_text = re.sub(r'<[^>]+>', ' ', content_html)
@@ -1041,8 +1293,8 @@ IMPORTANT:
             return {
                 'content_html': content_html,
                 'generation_time_seconds': round(generation_time, 2),
-                'prompt_tokens': response.usage.input_tokens,
-                'completion_tokens': response.usage.output_tokens,
+                'prompt_tokens': total_prompt_tokens,
+                'completion_tokens': total_completion_tokens,
                 'actual_word_count': actual_word_count,
                 'model_used': self.model
             }
@@ -1068,7 +1320,9 @@ Guidelines:
 - Maintain the core meaning and information unless explicitly asked to change it
 - Match the approximate length of the original text unless asked to make it longer or shorter
 - Return ONLY the rewritten text, no explanations or comments
-- Do not add any HTML tags unless the original text contains them
+- If the original text contains HTML tags, output HTML. Use <h2>, <h3> tags for headings — NEVER use markdown hashtag syntax (# or ##)
+- Use <table>, <thead>, <tbody>, <tr>, <th>, <td> for tables — NEVER use markdown pipe (|) table syntax
+- Preserve the heading hierarchy (H1, H2, H3) from the original text. Do not remove or flatten headings
 - Preserve any formatting style from the original text"""
 
         user_prompt = f"""Please rewrite the following text according to these instructions:
@@ -1097,6 +1351,12 @@ Rewritten text:"""
                 )
 
                 rewritten_text = response.content[0].text.strip()
+
+                # Post-processing: convert any markdown to HTML
+                # (fixes Issue 4: hashtag headings, Issue 5: pipe tables)
+                rewritten_text = self._convert_markdown_to_html(rewritten_text)
+                rewritten_text = self._deduplicate_internal_links(rewritten_text)
+
                 return rewritten_text
 
             except Exception as e:
@@ -1254,6 +1514,9 @@ Return ONLY the transformed HTML content. Do not add any explanations, comments,
                     if humanised_content.startswith('html'):
                         humanised_content = humanised_content[4:]
                     humanised_content = humanised_content.strip()
+
+                # Post-processing: fix any markdown that slipped through
+                humanised_content = self._convert_markdown_to_html(humanised_content)
 
                 return humanised_content
 

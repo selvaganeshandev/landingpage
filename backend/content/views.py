@@ -763,8 +763,13 @@ def get_generated_contents(request):
             pending_comments=Count('comments', filter=Q(comments__status='pending')),
         )
 
-        # Order by created_at descending
-        queryset = queryset.order_by('-created_at')
+        # Order by modified_at descending so recently edited docs appear first
+        # (Issue 13: Recent docs not showing in list view)
+        ordering = request.GET.get('ordering', '-modified_at')
+        allowed_orderings = ['-modified_at', '-created_at', 'title', '-title', 'status']
+        if ordering not in allowed_orderings:
+            ordering = '-modified_at'
+        queryset = queryset.order_by(ordering)
 
         # Apply pagination
         total_count = queryset.count()
@@ -2044,9 +2049,25 @@ def _run_bulk_generation_queue(batch_id):
                     'brand_values': '',
                 }
 
-                # Generate content (same ClaudeContentGenerator call)
-                logger.info(f"Bulk item {item.id} (row {item.row_number}): generating '{item.title}'")
-                generation_result = generator.generate_content(generation_params)
+                # Generate content using 2-step process for better structure:
+                # Step 1: Generate outline, Step 2: Generate from outline
+                # This ensures the content follows a logical flow (Issue 11)
+                logger.info(f"Bulk item {item.id} (row {item.row_number}): generating outline for '{item.title}'")
+                try:
+                    outline_result = generator.generate_outline(generation_params)
+                    outline = outline_result.get('outline', [])
+                    if outline:
+                        logger.info(f"Bulk item {item.id}: generating content from {len(outline)}-section outline")
+                        generation_result = generator.generate_content_from_outline(generation_params, outline)
+                    else:
+                        logger.info(f"Bulk item {item.id}: outline empty, falling back to direct generation")
+                        generation_result = generator.generate_content(generation_params)
+                except Exception as outline_err:
+                    logger.warning(
+                        f"Bulk item {item.id}: outline generation failed ({outline_err}), "
+                        f"falling back to direct generation"
+                    )
+                    generation_result = generator.generate_content(generation_params)
 
                 # Generate SEO meta tags (separate lightweight call)
                 meta_result = generator.generate_meta_tags(

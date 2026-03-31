@@ -681,21 +681,35 @@ def seo_refresh_status(request):
         domain_id=domain_id,
         auto_call_status__in=['done', 'fail'],
     ).count()
+    # Only count actively processing keywords (not 'avail' which is the idle/default state)
     running_count = SeoKeywordRank.objects.filter(
         domain_id=domain_id,
-        auto_call_status__in=['avail', 'busy', 'load', 'read'],
+        auto_call_status__in=['busy', 'load', 'read'],
+    ).count()
+    # Keywords waiting to be picked up by the next batch
+    pending_count = SeoKeywordRank.objects.filter(
+        domain_id=domain_id,
+        auto_call_status='avail',
     ).count()
 
-    is_refreshing = running_count > 0
+    is_refreshing = running_count > 0 or pending_count > 0
     progress = int((done_count / total) * 100) if total > 0 else 0
+
+    if running_count > 0:
+        current_status = 'running'
+    elif pending_count > 0:
+        current_status = 'queued'
+    else:
+        current_status = 'done'
 
     return Response({
         'refreshing': is_refreshing,
         'total': total,
         'completed': done_count,
         'running': running_count,
+        'pending': pending_count,
         'progress': progress,
-        'status': 'running' if is_refreshing else 'done',
+        'status': current_status,
     })
 
 
@@ -750,6 +764,8 @@ def seo_trigger_ranking(request):
         if int(domain_id) not in allowed_ids:
             return Response({'error': 'Domain not found'}, status=status.HTTP_403_FORBIDDEN)
 
+        retry_only = str(request.data.get('retry_only', '')).lower() in ('true', '1', 'yes')
+
         # Auto-seed: if no SEO keywords exist for this domain, create them from existing keywords
         seeded_count = 0
         if not SeoKeywordRank.objects.filter(domain_id=domain_id).exists():
@@ -768,12 +784,25 @@ def seo_trigger_ranking(request):
                 seeded_count = len(seo_kw_objects)
                 logger.info(f"Auto-seeded {seeded_count} keywords for domain {domain_id}")
 
-        # Reset ALL keyword statuses to avail — no keyword is skipped
-        SeoKeywordRank.objects.filter(
-            domain_id=domain_id,
-        ).exclude(
-            auto_call_status='avail',
-        ).update(auto_call_status='avail')
+        if retry_only:
+            # Only process keywords still in 'avail' (stuck/unprocessed).
+            # Reset 'fail' back to 'avail' so they get a fresh attempt.
+            fail_reset = SeoKeywordRank.objects.filter(
+                domain_id=domain_id,
+                auto_call_status='fail',
+            ).update(auto_call_status='avail')
+            remaining = SeoKeywordRank.objects.filter(
+                domain_id=domain_id,
+                auto_call_status='avail',
+            ).count()
+            logger.info(f"Retry-only mode: {remaining} keywords pending ({fail_reset} reset from fail) for domain {domain_id}")
+        else:
+            # Reset ALL keyword statuses to avail — full refresh
+            SeoKeywordRank.objects.filter(
+                domain_id=domain_id,
+            ).exclude(
+                auto_call_status='avail',
+            ).update(auto_call_status='avail')
 
         import requests as http_requests
         engine_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001')
@@ -784,7 +813,9 @@ def seo_trigger_ranking(request):
                 timeout=10,
             )
             msg = 'Domain ranking triggered'
-            if seeded_count:
+            if retry_only:
+                msg = f'Retrying {remaining} remaining keywords'
+            elif seeded_count:
                 msg = f'{seeded_count} keywords auto-added and ranking triggered'
             return Response({'message': msg, 'engine_status': resp.status_code, 'seeded': seeded_count})
         except http_requests.RequestException as e:

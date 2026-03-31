@@ -145,10 +145,11 @@ class ReferenceDocumentSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'domain', 'file_name', 'file_type', 'file_size',
             'description', 'extracted_text',
+            'extraction_status', 'extraction_error',
             'uploaded_by', 'uploaded_by_email', 'uploaded_by_name',
             'file_url', 'created_at', 'modified_at'
         ]
-        read_only_fields = ['id', 'created_at', 'modified_at', 'uploaded_by']
+        read_only_fields = ['id', 'created_at', 'modified_at', 'uploaded_by', 'extraction_status', 'extraction_error']
 
     def get_uploaded_by_name(self, obj):
         if obj.uploaded_by:
