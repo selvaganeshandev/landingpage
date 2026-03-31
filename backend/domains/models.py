@@ -353,6 +353,22 @@ class ReferenceDocument(models.Model):
         default='',
         help_text="Text content extracted from the uploaded file or user-entered text"
     )
+    extraction_status = models.CharField(
+        max_length=20,
+        default='completed',
+        choices=[
+            ('pending', 'Pending'),
+            ('processing', 'Processing'),
+            ('completed', 'Completed'),
+            ('failed', 'Failed'),
+        ],
+        help_text="Status of text extraction from uploaded file"
+    )
+    extraction_error = models.TextField(
+        blank=True,
+        default='',
+        help_text="Error message if text extraction failed"
+    )
     description = models.TextField(
         blank=True,
         default='',

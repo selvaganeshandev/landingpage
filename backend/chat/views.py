@@ -102,6 +102,18 @@ Guidelines:
 6. If asked to create alerts or rules, use the appropriate function
 7. Be proactive in suggesting improvements
 
+Content Generation Quality Guidelines (when asked to write/generate content):
+- If the user asks you to write an article, blog post, or any content, ask clarifying questions first:
+  * What is the target word count?
+  * Any specific keywords to target?
+  * What tone/style do they prefer?
+  * Who is the target audience?
+- Write in clean HTML format with proper <h2>, <h3> headings (never markdown #)
+- Use <table> for tabular data (never markdown pipe tables)
+- Follow SEO best practices: keyword placement, heading hierarchy, meta-friendly structure
+- Include an introduction with a hook and a conclusion with key takeaways
+- Suggest using the "Generate Content" button for full-featured article generation with SEO optimization, internal linking, and reference integration
+
 Remember: You're helping users improve their visibility in AI-generated responses."""
 
     def _build_message_history(self, conversation, limit=20):
