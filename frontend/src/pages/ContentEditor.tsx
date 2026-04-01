@@ -247,6 +247,10 @@ const ContentEditor = () => {
   const [contentScore, setContentScore] = useState(0);
   const [scoreInfoOpen, setScoreInfoOpen] = useState(false);
 
+  // Section word counts (Issue 10)
+  const [sectionWordCounts, setSectionWordCounts] = useState<Array<{ heading: string; wordCount: number }>>([]);
+  const [showSectionCounts, setShowSectionCounts] = useState(false);
+
   // Keywords tracking
   const [keywords, setKeywords] = useState<Array<{
     term: string;
@@ -342,6 +346,14 @@ const ContentEditor = () => {
     resolved_by_name: string | null;
     resolved_at: string | null;
   } | null>(null);
+
+  // Refurbish state (Issue 8D)
+  const [refurbishDialogOpen, setRefurbishDialogOpen] = useState(false);
+  const [isRefurbishing, setIsRefurbishing] = useState(false);
+  const [refurbishType, setRefurbishType] = useState<'refresh_stats' | 'improve_seo' | 'expand' | 'repurpose'>('refresh_stats');
+  const [refurbishNewType, setRefurbishNewType] = useState('listicle');
+  const [refurbishNewKeywords, setRefurbishNewKeywords] = useState('');
+  const [refurbishInstructions, setRefurbishInstructions] = useState('');
 
   // Humanise state
   const [humaniseStatus, setHumaniseStatus] = useState<'idle' | 'processing' | 'completed' | 'failed'>('idle');
@@ -929,6 +941,37 @@ const ContentEditor = () => {
     const imgCount = (html.match(/<img/gi) || []).length;
     setImagesCount(imgCount);
 
+    // Section word counts (Issue 10)
+    const sections: Array<{ heading: string; wordCount: number }> = [];
+    const h2Regex = /<h2[^>]*>(.*?)<\/h2>/gi;
+    let h2Match;
+    const h2Positions: Array<{ heading: string; index: number }> = [];
+    while ((h2Match = h2Regex.exec(html)) !== null) {
+      const headingText = h2Match[1].replace(/<[^>]+>/g, '').trim();
+      h2Positions.push({ heading: headingText, index: h2Match.index });
+    }
+
+    for (let i = 0; i < h2Positions.length; i++) {
+      const start = h2Positions[i].index;
+      const end = i + 1 < h2Positions.length ? h2Positions[i + 1].index : html.length;
+      const sectionHtml = html.substring(start, end);
+      const sectionText = sectionHtml.replace(/<[^>]+>/g, ' ').trim();
+      const sectionWords = sectionText.split(/\s+/).filter((w: string) => w.length > 0).length;
+      sections.push({ heading: h2Positions[i].heading, wordCount: sectionWords });
+    }
+
+    // Add intro section (content before first h2)
+    if (h2Positions.length > 0) {
+      const introHtml = html.substring(0, h2Positions[0].index);
+      const introText = introHtml.replace(/<[^>]+>/g, ' ').trim();
+      const introWords = introText.split(/\s+/).filter((w: string) => w.length > 0).length;
+      if (introWords > 0) {
+        sections.unshift({ heading: 'Introduction', wordCount: introWords });
+      }
+    }
+
+    setSectionWordCounts(sections);
+
     // Calculate content score (0-100)
     let score = 0;
 
@@ -1497,6 +1540,47 @@ const ContentEditor = () => {
         description: error.message || "Failed to undo humanisation",
         variant: "destructive"
       });
+    }
+  };
+
+  // Refurbish handler (Issue 8D)
+  const handleRefurbish = async () => {
+    if (!id) return;
+
+    setIsRefurbishing(true);
+    try {
+      const response: any = await apiClient.refurbishContent({
+        content_id: parseInt(id),
+        refurbish_type: refurbishType,
+        new_article_type: refurbishType === 'repurpose' ? refurbishNewType : undefined,
+        new_keywords: refurbishType === 'improve_seo' ? refurbishNewKeywords : undefined,
+        additional_instructions: refurbishInstructions || undefined,
+      });
+
+      if (response.status === 'success' && response.data) {
+        toast({
+          title: "Content Refurbished",
+          description: "A new version has been created. Redirecting...",
+        });
+        setRefurbishDialogOpen(false);
+        // Navigate to the new refurbished content
+        navigate(`/content-editor/${response.data.id}`);
+      } else {
+        toast({
+          title: "Error",
+          description: response.message || "Failed to refurbish content",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      console.error("Refurbish error:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to refurbish content",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRefurbishing(false);
     }
   };
 
@@ -2844,6 +2928,20 @@ const ContentEditor = () => {
               </p>
             )}
 
+            {/* Refurbish (Issue 8D) */}
+            <div className="flex items-center gap-2 mt-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 h-8 text-xs"
+                onClick={() => setRefurbishDialogOpen(true)}
+                disabled={!content || content.length < 50}
+              >
+                <RefreshCw className="h-3 w-3 mr-1.5" />
+                Refurbish
+              </Button>
+            </div>
+
             <Separator />
 
             {/* AI Detection */}
@@ -2983,6 +3081,60 @@ const ContentEditor = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Section Word Counts (Issue 10) */}
+              {sectionWordCounts.length > 0 && (
+                <div className="mt-3">
+                  <button
+                    onClick={() => setShowSectionCounts(!showSectionCounts)}
+                    className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors w-full"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    <span>Section Breakdown</span>
+                    <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0 h-4">
+                      {sectionWordCounts.length}
+                    </Badge>
+                    <ChevronDown className={`h-3 w-3 transition-transform ${showSectionCounts ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showSectionCounts && (
+                    <div className="mt-2 space-y-2">
+                      {(() => {
+                        const maxWords = Math.max(...sectionWordCounts.map(s => s.wordCount), 1);
+                        return sectionWordCounts.map((section, idx) => (
+                          <div key={idx} className="space-y-0.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] text-muted-foreground truncate flex-1 pr-2" title={section.heading}>
+                                {section.heading}
+                              </span>
+                              <span className={`text-[11px] font-mono font-medium flex-shrink-0 ${
+                                section.wordCount < 100 ? 'text-amber-500' :
+                                section.wordCount >= 100 && section.wordCount <= 500 ? 'text-green-600' :
+                                'text-blue-500'
+                              }`}>
+                                {section.wordCount}
+                              </span>
+                            </div>
+                            <div className="h-1.5 bg-muted/50 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  section.wordCount < 100 ? 'bg-amber-400' :
+                                  section.wordCount >= 100 && section.wordCount <= 500 ? 'bg-green-500' :
+                                  'bg-blue-500'
+                                }`}
+                                style={{ width: `${Math.min((section.wordCount / maxWords) * 100, 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        ));
+                      })()}
+                      <div className="flex items-center justify-between text-xs pt-2 border-t mt-2">
+                        <span className="font-medium">Total Words</span>
+                        <span className="font-mono font-bold">{sectionWordCounts.reduce((sum, s) => sum + s.wordCount, 0)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <Separator />
@@ -3532,6 +3684,98 @@ const ContentEditor = () => {
           contentTitle={title}
         />
       )}
+
+      {/* Refurbish Content Dialog (Issue 8D) */}
+      <Dialog open={refurbishDialogOpen} onOpenChange={setRefurbishDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Refurbish Content</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Create an improved version of this content. The original will be preserved.
+            </p>
+
+            <div>
+              <Label className="text-sm font-medium">Refurbish Type</Label>
+              <Select value={refurbishType} onValueChange={(v: any) => setRefurbishType(v)}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="refresh_stats">Refresh Stats & Facts</SelectItem>
+                  <SelectItem value="improve_seo">Improve SEO</SelectItem>
+                  <SelectItem value="expand">Expand Content</SelectItem>
+                  <SelectItem value="repurpose">Repurpose Format</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                {refurbishType === 'refresh_stats' && 'Update outdated statistics, facts, and references'}
+                {refurbishType === 'improve_seo' && 'Optimize keyword placement, headings, and SEO structure'}
+                {refurbishType === 'expand' && 'Add more depth, examples, and new subsections (~50% more content)'}
+                {refurbishType === 'repurpose' && 'Convert to a different content format while keeping core insights'}
+              </p>
+            </div>
+
+            {refurbishType === 'repurpose' && (
+              <div>
+                <Label className="text-sm font-medium">New Content Type</Label>
+                <Select value={refurbishNewType} onValueChange={setRefurbishNewType}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="blog">Blog Post</SelectItem>
+                    <SelectItem value="guide">How-to Guide</SelectItem>
+                    <SelectItem value="listicle">Listicle</SelectItem>
+                    <SelectItem value="comparison">Comparison</SelectItem>
+                    <SelectItem value="technical">Technical Article</SelectItem>
+                    <SelectItem value="newsletter_snippet">Newsletter</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {refurbishType === 'improve_seo' && (
+              <div>
+                <Label className="text-sm font-medium">New Target Keywords (optional)</Label>
+                <Textarea
+                  className="mt-1"
+                  value={refurbishNewKeywords}
+                  onChange={(e) => setRefurbishNewKeywords(e.target.value)}
+                  placeholder="Leave empty to keep existing keywords"
+                  rows={2}
+                />
+              </div>
+            )}
+
+            <div>
+              <Label className="text-sm font-medium">Additional Instructions (optional)</Label>
+              <Textarea
+                className="mt-1"
+                value={refurbishInstructions}
+                onChange={(e) => setRefurbishInstructions(e.target.value)}
+                placeholder="Any specific instructions for the refurbish..."
+                rows={2}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRefurbishDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleRefurbish} disabled={isRefurbishing}>
+              {isRefurbishing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Refurbishing...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refurbish
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Content Score Info Dialog */}
       <Dialog open={scoreInfoOpen} onOpenChange={setScoreInfoOpen}>

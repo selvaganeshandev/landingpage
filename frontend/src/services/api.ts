@@ -1617,6 +1617,73 @@ export const apiClient = {
       body: JSON.stringify({ status: newStatus }),
     }),
 
+  // ===== URL Reading (Issue 8A) =====
+  readUrl: (url: string) => apiRequest('/content/read-url/', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  }),
+
+  // ===== Keyword Suggestions (Issue 8B) =====
+  suggestKeywords: (data: { title: string; article_type?: string; domain_url?: string; existing_keywords?: string }) =>
+    apiRequest('/content/suggest-keywords/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // ===== Content Planning (Issue 8C) =====
+  planContent: (data: {
+    domain_id: number;
+    title: string;
+    keywords?: string;
+    article_type?: string;
+    scheduled_date?: string;
+    priority?: string;
+    word_count?: number;
+  }) => apiRequest('/content/plan/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  rescheduleContent: (contentId: number, scheduledDate: string | null) =>
+    apiRequest(`/content/${contentId}/reschedule/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ scheduled_date: scheduledDate }),
+    }),
+
+  // ===== Content Refurbishing (Issue 8D) =====
+  refurbishContent: (data: {
+    content_id: number;
+    refurbish_type: 'refresh_stats' | 'improve_seo' | 'expand' | 'repurpose';
+    new_article_type?: string;
+    new_keywords?: string;
+    additional_instructions?: string;
+  }) => apiRequest('/content/refurbish/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+    timeout: 300000, // 5 minutes
+  }),
+
+  // ===== File Text Extraction (Issue 12) =====
+  extractFileText: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/content/extract-file-text/`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw { response: data, status: response.status };
+    }
+    return data;
+  },
+
   // ===== SEO Rankings =====
   getSeoKeywords: (params: { domain_id: string; platform?: string; search?: string; status?: string }) => {
     const searchParams = new URLSearchParams({ domain_id: params.domain_id });

@@ -27,6 +27,7 @@ class GeneratedContentSerializer(serializers.ModelSerializer):
             'ai_detection_score', 'human_detection_score', 'ai_detection_label', 'ai_detection_checked_at',
             'humanise_status', 'pre_humanise_content', 'humanise_started_at',
             'humanise_completed_at', 'humanise_error',
+            'refurbished_from',
             'total_comments', 'pending_comments',
             'created_at', 'modified_at'
         ]
