@@ -3042,3 +3042,646 @@ def update_bulk_upload_item_status(request, item_id):
             'status': 'error',
             'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =============================================
+# Issue 8A: URL Reading endpoint
+# =============================================
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def read_url(request):
+    """
+    Fetch and extract readable text content from a URL.
+    Used in the wizard References step to auto-populate reference descriptions.
+
+    Expected request body:
+    {
+        "url": str
+    }
+    """
+    try:
+        url = request.data.get('url', '').strip()
+        if not url:
+            return Response({
+                'status': 'error',
+                'message': 'URL is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; PromptmaxxBot/1.0)',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+
+        try:
+            resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            return Response({
+                'status': 'error',
+                'message': f'Failed to fetch URL: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        html_content = resp.text
+
+        # Try trafilatura for clean text extraction
+        try:
+            import trafilatura
+            extracted = trafilatura.extract(html_content, include_comments=False, include_tables=True)
+            if extracted and len(extracted.strip()) > 50:
+                # Also extract metadata
+                metadata = trafilatura.extract_metadata(html_content)
+                title = metadata.title if metadata and metadata.title else ''
+                description = metadata.description if metadata and metadata.description else ''
+                return Response({
+                    'status': 'success',
+                    'data': {
+                        'title': title,
+                        'description': description,
+                        'text_content': extracted[:10000],  # Cap at 10k chars
+                        'word_count': len(extracted.split()),
+                        'url': url
+                    }
+                })
+        except ImportError:
+            logger.warning("trafilatura not installed, falling back to basic extraction")
+
+        # Fallback: basic HTML parsing with BeautifulSoup
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, 'html.parser')
+
+            title = ''
+            title_tag = soup.find('title')
+            if title_tag:
+                title = title_tag.get_text(strip=True)
+
+            description = ''
+            meta_desc = soup.find('meta', attrs={'name': 'description'})
+            if meta_desc:
+                description = meta_desc.get('content', '')
+
+            # Remove noise elements
+            for element in soup(['script', 'style', 'nav', 'footer', 'header',
+                                 'aside', 'form', 'iframe', 'noscript']):
+                element.decompose()
+
+            # Try to find main content container first
+            main_content = (
+                soup.find('article') or
+                soup.find('main') or
+                soup.find('div', {'role': 'main'}) or
+                soup.find('div', class_=lambda c: c and any(
+                    x in str(c).lower() for x in ['content', 'article', 'post-body', 'entry-content']
+                ))
+            )
+
+            content_source = main_content if main_content else soup.body or soup
+
+            # Extract text and deduplicate repeated lines
+            text = content_source.get_text(separator='\n', strip=True)
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+            # Remove duplicate consecutive lines and near-duplicate repeated blocks
+            seen = set()
+            unique_lines = []
+            for line in lines:
+                # Skip very short lines that are likely navigation/button text
+                if len(line) < 10:
+                    continue
+                # Deduplicate by normalized text
+                normalized = line.lower().strip()[:100]
+                if normalized not in seen:
+                    seen.add(normalized)
+                    unique_lines.append(line)
+
+            text_content = '\n'.join(unique_lines)
+
+            return Response({
+                'status': 'success',
+                'data': {
+                    'title': title,
+                    'description': description,
+                    'text_content': text_content[:10000],
+                    'word_count': len(text_content.split()),
+                    'url': url
+                }
+            })
+        except ImportError:
+            # Last resort: regex-based extraction
+            import re
+            clean = re.sub(r'<[^>]+>', ' ', html_content)
+            clean = re.sub(r'\s+', ' ', clean).strip()
+            return Response({
+                'status': 'success',
+                'data': {
+                    'title': '',
+                    'description': '',
+                    'text_content': clean[:10000],
+                    'word_count': len(clean.split()),
+                    'url': url
+                }
+            })
+
+    except Exception as e:
+        logger.error(f"Error reading URL: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error reading URL: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =============================================
+# Issue 8B: Keyword Suggestions endpoint
+# =============================================
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def suggest_keywords(request):
+    """
+    AI-powered keyword suggestions based on title and article type.
+
+    Expected request body:
+    {
+        "title": str,
+        "article_type": str (optional),
+        "domain_url": str (optional),
+        "existing_keywords": str (optional)
+    }
+    """
+    try:
+        title = request.data.get('title', '').strip()
+        if not title:
+            return Response({
+                'status': 'error',
+                'message': 'Title is required for keyword suggestions'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        article_type = request.data.get('article_type', 'blog')
+        domain_url = request.data.get('domain_url', '')
+        existing_keywords = request.data.get('existing_keywords', '')
+
+        generator = ClaudeContentGenerator()
+
+        system_prompt = """You are an expert SEO keyword researcher. Suggest highly relevant keywords for content optimization.
+Return a JSON array of keyword objects. Each object must have:
+- "keyword": the keyword phrase
+- "intent": one of "informational", "transactional", "navigational", "commercial"
+- "relevance": "high", "medium", or "low"
+
+Return ONLY valid JSON array, no markdown, no explanation."""
+
+        user_prompt = f"""Suggest 12-15 SEO keywords for the following content:
+
+Title: {title}
+Content Type: {article_type}
+"""
+        if domain_url:
+            user_prompt += f"Website: {domain_url}\n"
+        if existing_keywords:
+            user_prompt += f"Already selected keywords (suggest different ones): {existing_keywords}\n"
+
+        user_prompt += """
+Focus on:
+- Primary keywords (high search volume, directly relevant)
+- Long-tail keywords (specific phrases with clear intent)
+- Related/semantic keywords
+- Question-based keywords (what, how, why)
+
+Return ONLY a JSON array."""
+
+        try:
+            response = generator.client.messages.create(
+                model=generator.model,
+                max_tokens=1000,
+                temperature=0.7,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+
+            import json
+            response_text = response.content[0].text.strip()
+            # Handle potential markdown wrapping
+            if response_text.startswith('```'):
+                response_text = response_text.split('\n', 1)[1] if '\n' in response_text else response_text[3:]
+                if response_text.endswith('```'):
+                    response_text = response_text[:-3]
+                response_text = response_text.strip()
+
+            keywords = json.loads(response_text)
+
+            return Response({
+                'status': 'success',
+                'data': {
+                    'suggestions': keywords
+                }
+            })
+
+        except json.JSONDecodeError:
+            # If JSON parsing fails, try to extract keywords as plain text
+            raw_text = response.content[0].text.strip()
+            simple_keywords = [
+                {'keyword': line.strip().strip('-•*').strip(), 'intent': 'informational', 'relevance': 'medium'}
+                for line in raw_text.split('\n')
+                if line.strip() and not line.strip().startswith(('[', '{', ']', '}'))
+            ][:15]
+            return Response({
+                'status': 'success',
+                'data': {
+                    'suggestions': simple_keywords
+                }
+            })
+
+    except Exception as e:
+        logger.error(f"Error suggesting keywords: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error suggesting keywords: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =============================================
+# Issue 8C: Reschedule / Plan content endpoint
+# =============================================
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def plan_content(request):
+    """
+    Create a planned content entry (title + keywords + type only, no generation).
+    Used from the calendar to plan future blog posts.
+
+    Expected request body:
+    {
+        "domain_id": int,
+        "title": str,
+        "keywords": str,
+        "article_type": str,
+        "scheduled_date": str (ISO datetime),
+        "priority": str (optional)
+    }
+    """
+    try:
+        domain_id = request.data.get('domain_id')
+        title = request.data.get('title', '').strip()
+        keywords = request.data.get('keywords', '').strip()
+
+        if not domain_id or not title:
+            return Response({
+                'status': 'error',
+                'message': 'domain_id and title are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            domain = Domain.objects.get(
+                id=domain_id,
+                organisation=request.user.organisation
+            )
+        except Domain.DoesNotExist:
+            return Response({
+                'status': 'error',
+                'message': 'Domain not found or access denied'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        scheduled_date = request.data.get('scheduled_date')
+        if scheduled_date:
+            from django.utils.dateparse import parse_datetime
+            scheduled_date = parse_datetime(scheduled_date)
+
+        content = GeneratedContent.objects.create(
+            domain=domain,
+            title=title,
+            content_html='',
+            keywords=keywords or '',
+            article_type=request.data.get('article_type', 'blog'),
+            status='planned',
+            priority=request.data.get('priority', 'medium'),
+            scheduled_date=scheduled_date,
+            source_type='manual',
+            tone=request.data.get('tone', 'professional'),
+            style=request.data.get('style', 'informative'),
+            goal=request.data.get('goal', 'educate'),
+            audience=request.data.get('audience', 'general'),
+            depth=request.data.get('depth', 'comprehensive'),
+            word_count=request.data.get('word_count', 1500),
+        )
+
+        serializer = GeneratedContentSerializer(content)
+        return Response({
+            'status': 'success',
+            'message': 'Content planned successfully',
+            'data': serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        logger.error(f"Error planning content: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def reschedule_content(request, content_id):
+    """
+    Reschedule content to a new date.
+
+    Expected request body:
+    {
+        "scheduled_date": str (ISO datetime)
+    }
+    """
+    try:
+        content = get_object_or_404(
+            GeneratedContent,
+            id=content_id,
+            domain__organisation=request.user.organisation
+        )
+
+        scheduled_date = request.data.get('scheduled_date')
+        if scheduled_date:
+            from django.utils.dateparse import parse_datetime
+            content.scheduled_date = parse_datetime(scheduled_date)
+        else:
+            content.scheduled_date = None
+
+        content.save(update_fields=['scheduled_date', 'modified_at'])
+
+        serializer = GeneratedContentSerializer(content)
+        return Response({
+            'status': 'success',
+            'message': 'Content rescheduled successfully',
+            'data': serializer.data
+        })
+
+    except Exception as e:
+        logger.error(f"Error rescheduling content: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =============================================
+# Issue 8D: Refurbish content endpoint
+# =============================================
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def refurbish_content(request):
+    """
+    Refurbish/repurpose existing content.
+
+    Expected request body:
+    {
+        "content_id": int,
+        "refurbish_type": str ("refresh_stats", "improve_seo", "expand", "repurpose"),
+        "new_article_type": str (required if refurbish_type is "repurpose"),
+        "new_keywords": str (optional, for improve_seo),
+        "additional_instructions": str (optional)
+    }
+    """
+    try:
+        content_id = request.data.get('content_id')
+        refurbish_type = request.data.get('refurbish_type', 'refresh_stats')
+
+        if not content_id:
+            return Response({
+                'status': 'error',
+                'message': 'content_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        original = get_object_or_404(
+            GeneratedContent,
+            id=content_id,
+            domain__organisation=request.user.organisation
+        )
+
+        if not original.content_html or len(original.content_html.strip()) < 50:
+            return Response({
+                'status': 'error',
+                'message': 'Original content is too short to refurbish'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        generator = ClaudeContentGenerator()
+
+        refurbish_instructions = {
+            'refresh_stats': """Refresh this content by:
+- Updating any outdated statistics, facts, or references
+- Ensuring all claims are current and accurate
+- Improving any sections that could be more detailed
+- Keeping the same structure and tone
+- Return the complete updated HTML content""",
+
+            'improve_seo': f"""Optimize this content for better SEO by:
+- Improving keyword placement and density for: {request.data.get('new_keywords', original.keywords)}
+- Enhancing headings for better search visibility
+- Adding relevant internal linking opportunities (as placeholder text)
+- Improving meta-relevant content in introduction and conclusion
+- Ensuring proper use of H2/H3 heading hierarchy
+- Return the complete optimized HTML content""",
+
+            'expand': """Expand this content by:
+- Adding more depth to existing sections
+- Including additional examples and case studies
+- Adding new relevant subsections where appropriate
+- Expanding the introduction and conclusion
+- Target approximately 50% more content than the original
+- Return the complete expanded HTML content""",
+
+            'repurpose': f"""Repurpose this content as a {request.data.get('new_article_type', 'listicle')} by:
+- Restructuring the content for the new format
+- Adapting the tone and style appropriately
+- Maintaining the core information and insights
+- Adding format-specific elements (e.g., numbered items for listicle, step-by-step for guide)
+- Return the complete repurposed HTML content""",
+        }
+
+        instructions = refurbish_instructions.get(refurbish_type, refurbish_instructions['refresh_stats'])
+        additional = request.data.get('additional_instructions', '')
+        if additional:
+            instructions += f"\n\nAdditional instructions: {additional}"
+
+        system_prompt = """You are an expert content editor and SEO specialist. Refurbish the provided content according to the instructions.
+- Maintain proper HTML formatting with semantic tags (h2, h3, p, ul, ol, strong, em)
+- Keep the content factually accurate and up-to-date
+- Ensure SEO optimization
+- Return ONLY the HTML content (no markdown, no code blocks)"""
+
+        user_prompt = f"""Original content title: {original.title}
+Original keywords: {original.keywords}
+
+Original HTML content:
+{original.content_html}
+
+Instructions:
+{instructions}
+
+Return ONLY the refurbished HTML content."""
+
+        max_tokens = ClaudeContentGenerator._calculate_max_tokens(
+            int(original.word_count * 1.5) if refurbish_type == 'expand' else original.word_count
+        )
+
+        import time
+        start_time = time.time()
+
+        response = generator.client.messages.create(
+            model=generator.model,
+            max_tokens=max_tokens,
+            temperature=0.7,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}]
+        )
+
+        generation_time = time.time() - start_time
+        refurbished_html = response.content[0].text.strip()
+
+        # Clean up markdown artifacts
+        refurbished_html = generator.post_process_content(refurbished_html)
+
+        # Calculate actual word count
+        import re
+        text_only = re.sub(r'<[^>]+>', ' ', refurbished_html)
+        actual_word_count = len(text_only.split())
+
+        # Generate new meta tags
+        meta_result = generator.generate_meta_tags(
+            title=original.title,
+            content_html=refurbished_html,
+            keywords=request.data.get('new_keywords', original.keywords),
+        )
+
+        # Determine new article type
+        new_article_type = original.article_type
+        if refurbish_type == 'repurpose' and request.data.get('new_article_type'):
+            new_article_type = request.data.get('new_article_type')
+
+        # Create new content entry (preserves original)
+        new_content = GeneratedContent.objects.create(
+            domain=original.domain,
+            title=original.title if refurbish_type != 'repurpose' else f"{original.title} ({new_article_type})",
+            content_html=refurbished_html,
+            meta_title=meta_result['meta_title'],
+            meta_description=meta_result['meta_description'],
+            source_type=original.source_type,
+            source_id=original.source_id,
+            source_reference=original.source_reference,
+            article_type=new_article_type,
+            keywords=request.data.get('new_keywords', original.keywords),
+            tone=original.tone,
+            style=original.style,
+            goal=original.goal,
+            audience=original.audience,
+            depth=original.depth,
+            word_count=original.word_count,
+            actual_word_count=actual_word_count,
+            status='generated',
+            priority=original.priority,
+            scheduled_date=original.scheduled_date,
+            model_used=generator.model,
+            generation_time_seconds=round(generation_time, 2),
+            prompt_tokens=response.usage.input_tokens,
+            completion_tokens=response.usage.output_tokens,
+            refurbished_from=original,
+        )
+
+        serializer = GeneratedContentSerializer(new_content)
+        return Response({
+            'status': 'success',
+            'message': f'Content refurbished successfully ({refurbish_type})',
+            'data': serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        logger.error(f"Error refurbishing content: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error refurbishing content: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =============================================
+# Issue 12: Extract text from uploaded file
+# =============================================
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def extract_file_text(request):
+    """
+    Extract text content from an uploaded file (PDF, DOCX, PPTX, CSV, XLSX).
+    Used in the wizard References step for file-based references.
+    The file is NOT stored permanently — text is extracted and returned.
+
+    Expected: multipart form with 'file' field
+    """
+    try:
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({
+                'status': 'error',
+                'message': 'No file provided'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check file size (10MB max for reference extraction)
+        if uploaded_file.size > 10 * 1024 * 1024:
+            return Response({
+                'status': 'error',
+                'message': 'File size exceeds 10MB limit'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        filename = uploaded_file.name.lower()
+        ext = filename.rsplit('.', 1)[-1] if '.' in filename else ''
+
+        ext_to_type = {
+            'pdf': 'pdf',
+            'docx': 'docx',
+            'doc': 'docx',
+            'pptx': 'pptx',
+            'ppt': 'pptx',
+            'csv': 'csv',
+            'xlsx': 'xlsx',
+            'xls': 'xlsx',
+            'txt': 'txt',
+        }
+
+        file_type = ext_to_type.get(ext)
+        if not file_type:
+            return Response({
+                'status': 'error',
+                'message': f'Unsupported file type: .{ext}. Supported: PDF, DOCX, PPTX, CSV, XLSX, TXT'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Reuse the extraction function from domains app
+        from domains.views import _extract_text_from_file
+
+        if file_type == 'txt':
+            extracted_text = uploaded_file.read().decode('utf-8', errors='replace')
+        else:
+            extracted_text = _extract_text_from_file(uploaded_file, file_type)
+
+        if not extracted_text or not extracted_text.strip():
+            return Response({
+                'status': 'error',
+                'message': 'Could not extract text from the file. The file may be empty or contain only images.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Cap extracted text at 15k chars for reference use
+        extracted_text = extracted_text[:15000]
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'filename': uploaded_file.name,
+                'extracted_text': extracted_text,
+                'word_count': len(extracted_text.split()),
+                'file_type': file_type
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Error extracting file text: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Error extracting file text: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

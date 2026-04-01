@@ -9,6 +9,7 @@ class GeneratedContent(models.Model):
     GeneratedContent model for storing AI-generated articles and content
     """
     STATUS_CHOICES = [
+        ('planned', 'Planned'),
         ('draft', 'Draft'),
         ('generated', 'Generated'),
         ('scheduled', 'Scheduled'),
@@ -239,6 +240,16 @@ class GeneratedContent(models.Model):
         null=True,
         blank=True,
         help_text="Error message if humanisation failed"
+    )
+
+    # Refurbish tracking
+    refurbished_from = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='refurbished_versions',
+        help_text="Original content this was refurbished from"
     )
 
     # Timestamps

@@ -40,8 +40,33 @@ import {
   Mail,
   MessageSquare,
   Upload,
+  PenLine,
+  ChevronDown,
   type LucideIcon
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,7 +85,7 @@ interface ContentItem {
   id: string;
   title: string;
   type: string;
-  status: "scheduled" | "draft" | "generated" | "published";
+  status: "planned" | "scheduled" | "draft" | "generated" | "published";
   priority: "high" | "medium" | "low";
   scheduledDate: Date;
   targetKeywords: string[];
@@ -111,6 +136,17 @@ const ContentCalendar = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<ContentItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Plan content dialog state (Issue 8C)
+  const [planDialogOpen, setPlanDialogOpen] = useState(false);
+  const [isPlanning, setIsPlanning] = useState(false);
+  const [planForm, setPlanForm] = useState({
+    title: '',
+    keywords: '',
+    article_type: 'blog',
+    priority: 'medium',
+    word_count: 1500,
+  });
   // Fetch generated content from API
   useEffect(() => {
     const fetchContent = async () => {
@@ -194,6 +230,58 @@ const ContentCalendar = () => {
     }
   };
 
+  // Plan content handler (Issue 8C)
+  const handlePlanContent = async () => {
+    if (!selectedDomain || !planForm.title.trim()) return;
+
+    setIsPlanning(true);
+    try {
+      const response = await apiClient.planContent({
+        domain_id: selectedDomain.id,
+        title: planForm.title,
+        keywords: planForm.keywords,
+        article_type: planForm.article_type,
+        priority: planForm.priority,
+        word_count: planForm.word_count,
+        scheduled_date: selectedDate?.toISOString(),
+      });
+
+      if (response.status === 'success' && response.data) {
+        const item = response.data;
+        const newItem: ContentItem = {
+          id: item.id.toString(),
+          title: item.title,
+          type: item.article_type || 'blog',
+          status: 'planned',
+          priority: item.priority || 'medium',
+          scheduledDate: item.scheduled_date ? new Date(item.scheduled_date) : new Date(),
+          targetKeywords: item.keywords ? item.keywords.split(',').map((k: string) => k.trim()) : [],
+          opportunitySource: 'Manual',
+          estimatedImpact: 0,
+          wordCount: item.word_count || 1500,
+          totalComments: 0,
+          pendingComments: 0,
+        };
+        setContentItems(prev => [newItem, ...prev]);
+        setPlanDialogOpen(false);
+        setPlanForm({ title: '', keywords: '', article_type: 'blog', priority: 'medium', word_count: 1500 });
+        toast({
+          title: "Content Planned",
+          description: `"${planForm.title}" has been added to your content plan.`,
+        });
+      }
+    } catch (error) {
+      console.error("Error planning content:", error);
+      toast({
+        title: "Error",
+        description: "Failed to plan content. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsPlanning(false);
+    }
+  };
+
   // Listen for content generation requests from other pages
   useEffect(() => {
     const handleOpenGeneration = (event: CustomEvent) => {
@@ -235,6 +323,7 @@ const ContentCalendar = () => {
       case "published": return "bg-success/10 text-success";
       case "generated": return "bg-primary/10 text-primary";
       case "draft": return "bg-warning/10 text-warning";
+      case "planned": return "bg-violet-500/10 text-violet-600";
       default: return "bg-muted text-muted-foreground";
     }
   };
@@ -267,6 +356,7 @@ const ContentCalendar = () => {
   );
 
   // Calculate dynamic summary stats
+  const plannedCount = contentItems.filter(item => item.status === "planned").length;
   const scheduledCount = contentItems.filter(item => item.status === "scheduled").length;
   const draftCount = contentItems.filter(item => item.status === "draft").length;
   const generatedCount = contentItems.filter(item => item.status === "generated" || item.status === "published").length;
@@ -284,9 +374,10 @@ const ContentCalendar = () => {
             AI-powered content generation prioritized by opportunity
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-2">
           <Button
             variant="outline"
+            size="sm"
             onClick={() => navigate('/automation')}
             className="border-border/50"
           >
@@ -295,16 +386,48 @@ const ContentCalendar = () => {
           </Button>
           <Button
             variant="outline"
+            size="sm"
             onClick={() => navigate('/bulk-upload')}
             className="border-border/50"
           >
             <Upload className="h-4 w-4 mr-2" />
             Bulk Upload
           </Button>
-          <Button onClick={handleGenerateContent} className="gradient-primary shadow-md shadow-primary/20">
-            <Sparkles className="h-4 w-4 mr-2" />
-            Generate Content
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="gradient-primary shadow-md shadow-primary/20 gap-2">
+                <Sparkles className="h-4 w-4" />
+                Create Content
+                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 p-1.5">
+              <DropdownMenuItem
+                onClick={handleGenerateContent}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer"
+              >
+                <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="h-4 w-4 text-white" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm">Generate with AI</p>
+                  <p className="text-xs text-muted-foreground">Create content using AI wizard</p>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setPlanDialogOpen(true)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer"
+              >
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+                  <PenLine className="h-4 w-4 text-white" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm">Plan Content</p>
+                  <p className="text-xs text-muted-foreground">Schedule an idea for later</p>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -313,19 +436,19 @@ const ContentCalendar = () => {
         <Card className="p-4 border border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Scheduled</p>
-              <p className="text-2xl font-bold font-inter">{loading ? "-" : scheduledCount}</p>
+              <p className="text-sm text-muted-foreground">Planned</p>
+              <p className="text-2xl font-bold font-inter">{loading ? "-" : plannedCount}</p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-              <Clock className="h-5 w-5 text-primary" />
+            <div className="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center">
+              <PenLine className="h-5 w-5 text-violet-500" />
             </div>
           </div>
         </Card>
         <Card className="p-4 border border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Drafts</p>
-              <p className="text-2xl font-bold font-inter">{loading ? "-" : draftCount}</p>
+              <p className="text-sm text-muted-foreground">Drafts / Scheduled</p>
+              <p className="text-2xl font-bold font-inter">{loading ? "-" : draftCount + scheduledCount}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-destructive/10 flex items-center justify-center">
               <FileText className="h-5 w-5 text-destructive" />
@@ -569,8 +692,16 @@ const ContentCalendar = () => {
                 ) : (
                   <div className="text-center py-12 text-muted-foreground">
                     <CalendarIcon className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                    <p className="text-lg font-medium">Coming Soon</p>
-                    <p className="text-sm mt-1">Calendar scheduling feature is under development</p>
+                    <p className="text-lg font-medium">No content for this date</p>
+                    <p className="text-sm mt-1 mb-3">Plan content for this date or generate new content</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPlanDialogOpen(true)}
+                    >
+                      <PenLine className="h-4 w-4 mr-2" />
+                      Plan Content for This Date
+                    </Button>
                   </div>
                 )}
               </Card>
@@ -600,7 +731,72 @@ const ContentCalendar = () => {
               </div>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+              {/* Planned Column */}
+              <Card className="p-4 border border-border">
+                <div className="flex items-center gap-2 mb-4">
+                  <PenLine className="h-5 w-5 text-violet-500" />
+                  <h3 className="font-semibold">Planned</h3>
+                  <Badge variant="secondary" className="ml-auto">
+                    {contentItems.filter(i => i.status === "planned").length}
+                  </Badge>
+                </div>
+                <div className="space-y-3">
+                  {contentItems.filter(i => i.status === "planned").length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setPlanDialogOpen(true)}
+                        className="text-muted-foreground"
+                      >
+                        <Plus className="h-4 w-4 mr-1" />
+                        Plan content
+                      </Button>
+                    </div>
+                  ) : (
+                    contentItems.filter(i => i.status === "planned").map(item => (
+                      <Card key={item.id} className="p-3 hover:shadow-md transition-all">
+                        <p className="font-medium text-sm mb-2 line-clamp-2">{item.title}</p>
+                        <div className="flex items-center justify-between text-xs mb-2">
+                          <Badge variant="outline" className={getPriorityColor(item.priority)}>
+                            {item.priority}
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            {item.scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </span>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full h-7 text-xs"
+                          onClick={() => {
+                            setSelectedContent({
+                              id: item.id,
+                              title: item.title,
+                              type: item.type,
+                              status: "draft",
+                              priority: item.priority,
+                              scheduledDate: item.scheduledDate,
+                              targetKeywords: item.targetKeywords,
+                              opportunitySource: item.opportunitySource,
+                              estimatedImpact: 0,
+                              wordCount: item.wordCount,
+                              totalComments: 0,
+                              pendingComments: 0,
+                            });
+                            setGenerateDialogOpen(true);
+                          }}
+                        >
+                          <Sparkles className="h-3 w-3 mr-1" />
+                          Generate Now
+                        </Button>
+                      </Card>
+                    ))
+                  )}
+                </div>
+              </Card>
+
               {/* Scheduled Column */}
               <Card className="p-4 border border-border">
                 <div className="flex items-center gap-2 mb-4">
@@ -738,6 +934,124 @@ const ContentCalendar = () => {
         onOpenChange={setGenerateDialogOpen}
         existingContent={selectedContent}
       />
+
+      {/* Plan Content Dialog (Issue 8C) */}
+      <Dialog open={planDialogOpen} onOpenChange={setPlanDialogOpen}>
+        <DialogContent className="sm:max-w-lg p-0 overflow-hidden">
+          {/* Header with gradient */}
+          <div className="px-6 pt-6 pb-4 bg-gradient-to-br from-violet-50 to-purple-50 dark:from-violet-950/30 dark:to-purple-950/30 border-b">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-md">
+                <PenLine className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <DialogHeader className="p-0 space-y-0">
+                  <DialogTitle className="text-lg">Plan New Content</DialogTitle>
+                </DialogHeader>
+                <p className="text-sm text-muted-foreground">Schedule a content idea for future generation</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-6 py-4 space-y-4">
+            {/* Scheduled Date Highlight */}
+            {selectedDate && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-primary/5 rounded-lg border border-primary/10">
+                <CalendarIcon className="h-4 w-4 text-primary" />
+                <span className="text-sm font-medium">
+                  {selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                </span>
+              </div>
+            )}
+
+            <div>
+              <Label className="text-sm font-medium">Title <span className="text-destructive">*</span></Label>
+              <Input
+                className="mt-1"
+                value={planForm.title}
+                onChange={(e) => setPlanForm({ ...planForm, title: e.target.value })}
+                placeholder="e.g. 10 Best SEO Tools for Small Business in 2025"
+              />
+            </div>
+
+            <div>
+              <Label className="text-sm font-medium">Target Keywords</Label>
+              <Textarea
+                className="mt-1"
+                value={planForm.keywords}
+                onChange={(e) => setPlanForm({ ...planForm, keywords: e.target.value })}
+                placeholder="seo tools, best seo software, keyword tracking"
+                rows={2}
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label className="text-sm font-medium">Type</Label>
+                <Select value={planForm.article_type} onValueChange={(v) => setPlanForm({ ...planForm, article_type: v })}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="blog">Blog Post</SelectItem>
+                    <SelectItem value="guide">How-to Guide</SelectItem>
+                    <SelectItem value="comparison">Comparison</SelectItem>
+                    <SelectItem value="listicle">Listicle</SelectItem>
+                    <SelectItem value="technical">Technical</SelectItem>
+                    <SelectItem value="landing_page">Landing Page</SelectItem>
+                    <SelectItem value="services_page">Services Page</SelectItem>
+                    <SelectItem value="product_page">Product Page</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-sm font-medium">Priority</Label>
+                <Select value={planForm.priority} onValueChange={(v) => setPlanForm({ ...planForm, priority: v })}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-sm font-medium">Words</Label>
+                <Select value={String(planForm.word_count)} onValueChange={(v) => setPlanForm({ ...planForm, word_count: parseInt(v) })}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="500">500</SelectItem>
+                    <SelectItem value="800">800</SelectItem>
+                    <SelectItem value="1500">1,500</SelectItem>
+                    <SelectItem value="2000">2,000</SelectItem>
+                    <SelectItem value="2500">2,500</SelectItem>
+                    <SelectItem value="3500">3,500</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="px-6 py-4 border-t bg-muted/30">
+            <Button variant="outline" onClick={() => setPlanDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handlePlanContent}
+              disabled={isPlanning || !planForm.title.trim()}
+              className="bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white shadow-md"
+            >
+              {isPlanning ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Planning...
+                </>
+              ) : (
+                <>
+                  <PenLine className="h-4 w-4 mr-2" />
+                  Add to Plan
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

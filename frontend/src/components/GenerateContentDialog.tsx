@@ -66,7 +66,9 @@ import {
   HelpCircle,
   MessagesSquare,
   Mail,
-  Users
+  Users,
+  Paperclip,
+  Search,
 } from "lucide-react";
 import mammoth from "mammoth";
 import { GSCKeywordsModal } from "./GSCKeywordsModal";
@@ -103,6 +105,18 @@ export const GenerateContentDialog = ({
     position: number;
   }>>([]);
 
+  // AI keyword suggestions state (Issue 8B)
+  const [isLoadingKeywordSuggestions, setIsLoadingKeywordSuggestions] = useState(false);
+  const [keywordSuggestions, setKeywordSuggestions] = useState<Array<{ keyword: string; intent: string; relevance: string }>>([]);
+  const [showKeywordSuggestions, setShowKeywordSuggestions] = useState(false);
+
+  // URL fetching state (Issue 8A)
+  const [fetchingUrlIndex, setFetchingUrlIndex] = useState<number | null>(null);
+
+  // File upload ref for references (Issue 12)
+  const referenceFileInputRef = useRef<HTMLInputElement>(null);
+  const [isExtractingFile, setIsExtractingFile] = useState(false);
+
   // Outline state
   const [outline, setOutline] = useState<Array<{
     id: string;
@@ -123,7 +137,7 @@ export const GenerateContentDialog = ({
     keywords: existingContent?.targetKeywords?.join(", ") || "",
     targetCountry: "united_states",
     targetLanguage: "us_english",
-    references: [] as Array<{ type: 'article' | 'video' | 'image' | 'text'; url: string; description: string }>,
+    references: [] as Array<{ type: 'article' | 'video' | 'image' | 'text' | 'file'; url: string; description: string }>,
     additionalInstructions: "",
     tone: "",
     style: "",
@@ -1006,6 +1020,131 @@ export const GenerateContentDialog = ({
     .map(k => k.trim())
     .filter(k => k);
 
+  // Issue 8B: AI Keyword Suggestions handler
+  const handleSuggestKeywords = async () => {
+    if (!formData.title.trim()) {
+      toast({
+        title: "Title Required",
+        description: "Please enter a title first to get keyword suggestions",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsLoadingKeywordSuggestions(true);
+    try {
+      const response = await apiClient.suggestKeywords({
+        title: formData.title,
+        article_type: formData.articleType,
+        domain_url: selectedDomain?.url || '',
+        existing_keywords: formData.keywords,
+      });
+
+      if (response.status === 'success' && response.data?.suggestions?.length > 0) {
+        setKeywordSuggestions(response.data.suggestions);
+        setShowKeywordSuggestions(true);
+      } else {
+        toast({
+          title: "No Suggestions",
+          description: "Could not generate keyword suggestions. Try adjusting your title.",
+        });
+      }
+    } catch (err: any) {
+      console.error('Error suggesting keywords:', err);
+      toast({
+        title: "Error",
+        description: "Failed to generate keyword suggestions",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingKeywordSuggestions(false);
+    }
+  };
+
+  const handleAddSuggestedKeyword = (keyword: string) => {
+    const current = formData.keywords.split(',').map(k => k.trim()).filter(k => k);
+    if (current.includes(keyword)) return;
+    const updated = formData.keywords ? `${formData.keywords}, ${keyword}` : keyword;
+    setFormData({ ...formData, keywords: updated });
+  };
+
+  // Issue 8A: URL Reading handler
+  const handleFetchUrl = async (index: number) => {
+    const ref = formData.references[index];
+    if (!ref?.url?.trim()) {
+      toast({ title: "Error", description: "Please enter a URL first", variant: "destructive" });
+      return;
+    }
+
+    setFetchingUrlIndex(index);
+    try {
+      const response = await apiClient.readUrl(ref.url);
+      if (response.status === 'success' && response.data) {
+        const updated = [...formData.references];
+        const pageTitle = response.data.title || '';
+        const metaDesc = response.data.description || '';
+        const textContent = response.data.text_content || '';
+
+        // Build a clean, structured description
+        let description = '';
+        if (pageTitle) description += `Title: ${pageTitle}\n`;
+        if (metaDesc) description += `Summary: ${metaDesc}\n`;
+        if (description) description += '\n';
+        description += textContent.substring(0, 2500);
+
+        updated[index] = { ...updated[index], description: description.trim() };
+        setFormData({ ...formData, references: updated });
+        toast({ title: "URL Content Fetched", description: `Extracted ${response.data.word_count} words from URL` });
+      }
+    } catch (err: any) {
+      console.error('Error fetching URL:', err);
+      toast({ title: "Error", description: "Failed to fetch URL content", variant: "destructive" });
+    } finally {
+      setFetchingUrlIndex(null);
+    }
+  };
+
+  // Issue 12: File upload handler for references
+  const handleReferenceFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input
+    if (referenceFileInputRef.current) referenceFileInputRef.current.value = '';
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast({ title: "Error", description: "File size must be under 10MB", variant: "destructive" });
+      return;
+    }
+
+    setIsExtractingFile(true);
+    try {
+      const response = await apiClient.extractFileText(file);
+      if (response.status === 'success' && response.data) {
+        setFormData({
+          ...formData,
+          references: [
+            ...formData.references,
+            {
+              type: 'file' as const,
+              url: file.name,
+              description: response.data.extracted_text.substring(0, 3000),
+            }
+          ]
+        });
+        toast({
+          title: "File Processed",
+          description: `Extracted ${response.data.word_count} words from ${file.name}`,
+        });
+      }
+    } catch (err: any) {
+      console.error('Error extracting file:', err);
+      toast({ title: "Error", description: "Failed to extract text from file", variant: "destructive" });
+    } finally {
+      setIsExtractingFile(false);
+    }
+  };
+
   const renderStepContent = () => {
     switch (step) {
       case 1:
@@ -1211,26 +1350,48 @@ export const GenerateContentDialog = ({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <Label>{isSocialMedia ? 'Hashtags/Keywords' : isCommunity ? 'Topics/Tags' : 'Target Keywords'} (comma-separated)</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handlePullFromGSC}
-                    disabled={isLoadingGSCKeywords}
-                    className="h-7 text-xs"
-                  >
-                    {isLoadingGSCKeywords ? (
-                      <>
-                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                        Loading...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="h-3 w-3 mr-1" />
-                        Pull from GSC
-                      </>
-                    )}
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSuggestKeywords}
+                      disabled={isLoadingKeywordSuggestions}
+                      className="h-7 text-xs"
+                    >
+                      {isLoadingKeywordSuggestions ? (
+                        <>
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          Suggesting...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-3 w-3 mr-1" />
+                          AI Suggest
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handlePullFromGSC}
+                      disabled={isLoadingGSCKeywords}
+                      className="h-7 text-xs"
+                    >
+                      {isLoadingGSCKeywords ? (
+                        <>
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          Loading...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="h-3 w-3 mr-1" />
+                          Pull from GSC
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
                 <Textarea
                   value={formData.keywords}
@@ -1243,6 +1404,47 @@ export const GenerateContentDialog = ({
                   }
                   rows={3}
                 />
+                {/* AI Keyword Suggestions Panel */}
+                {showKeywordSuggestions && keywordSuggestions.length > 0 && (
+                  <div className="mt-2 p-3 bg-muted/50 rounded-lg border">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-medium">AI Suggested Keywords</p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 w-5 p-0"
+                        onClick={() => setShowKeywordSuggestions(false)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {keywordSuggestions.map((suggestion, idx) => {
+                        const isAdded = existingKeywordsArray.some(
+                          k => k.toLowerCase() === suggestion.keyword.toLowerCase()
+                        );
+                        return (
+                          <Badge
+                            key={idx}
+                            variant={isAdded ? "default" : "outline"}
+                            className={`cursor-pointer text-xs ${
+                              isAdded ? 'opacity-60' : 'hover:bg-primary/10'
+                            } ${
+                              suggestion.relevance === 'high' ? 'border-green-500/50' :
+                              suggestion.relevance === 'medium' ? 'border-amber-500/50' : ''
+                            }`}
+                            onClick={() => !isAdded && handleAddSuggestedKeyword(suggestion.keyword)}
+                            title={`Intent: ${suggestion.intent} | Relevance: ${suggestion.relevance}${isAdded ? ' (already added)' : ''}`}
+                          >
+                            {isAdded ? '✓ ' : '+ '}{suggestion.keyword}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-2">Click to add keywords. Green border = high relevance.</p>
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground mt-1">
                   {isSocialMedia ? 'Hashtags and keywords to include in your post'
                    : isCommunity ? 'Topics and tags relevant to the community'
@@ -1300,7 +1502,7 @@ export const GenerateContentDialog = ({
         );
 
       case 3:
-        const addReference = (type: 'article' | 'video' | 'image' | 'text') => {
+        const addReference = (type: 'article' | 'video' | 'image' | 'text' | 'file') => {
           setFormData({
             ...formData,
             references: [...formData.references, { type, url: '', description: '' }]
@@ -1371,6 +1573,33 @@ export const GenerateContentDialog = ({
                 <FileText className="h-4 w-4" />
                 Add Text
               </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => referenceFileInputRef.current?.click()}
+                disabled={isExtractingFile}
+                className="flex items-center gap-2"
+              >
+                {isExtractingFile ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Extracting...
+                  </>
+                ) : (
+                  <>
+                    <Paperclip className="h-4 w-4" />
+                    Upload File
+                  </>
+                )}
+              </Button>
+              <input
+                ref={referenceFileInputRef}
+                type="file"
+                accept=".pdf,.docx,.doc,.pptx,.ppt,.csv,.xlsx,.xls,.txt"
+                className="hidden"
+                onChange={handleReferenceFileUpload}
+              />
             </div>
 
             {/* References List */}
@@ -1389,16 +1618,18 @@ export const GenerateContentDialog = ({
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
                         ref.type === 'article' ? 'bg-blue-500/10' :
                         ref.type === 'video' ? 'bg-red-500/10' :
-                        ref.type === 'text' ? 'bg-purple-500/10' : 'bg-green-500/10'
+                        ref.type === 'text' ? 'bg-purple-500/10' :
+                        ref.type === 'file' ? 'bg-orange-500/10' : 'bg-green-500/10'
                       }`}>
                         {ref.type === 'article' && <Globe className="h-5 w-5 text-blue-500" />}
                         {ref.type === 'video' && <Video className="h-5 w-5 text-red-500" />}
                         {ref.type === 'image' && <Image className="h-5 w-5 text-green-500" />}
                         {ref.type === 'text' && <FileText className="h-5 w-5 text-purple-500" />}
+                        {ref.type === 'file' && <Paperclip className="h-5 w-5 text-orange-500" />}
                       </div>
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center justify-between">
-                          <Badge variant="secondary" className="capitalize">{ref.type}</Badge>
+                          <Badge variant="secondary" className="capitalize">{ref.type === 'file' ? `File: ${ref.url}` : ref.type}</Badge>
                           <Button
                             type="button"
                             variant="ghost"
@@ -1409,24 +1640,43 @@ export const GenerateContentDialog = ({
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
-                        {ref.type === 'text' ? (
+                        {ref.type === 'text' || ref.type === 'file' ? (
                           <Textarea
-                            placeholder="Paste or type your reference text here..."
+                            placeholder={ref.type === 'file' ? "Extracted text from file..." : "Paste or type your reference text here..."}
                             value={ref.description}
                             onChange={(e) => updateReference(index, 'description', e.target.value)}
                             rows={4}
                           />
                         ) : (
                           <>
-                            <Input
-                              placeholder={`Enter ${ref.type} URL...`}
-                              value={ref.url}
-                              onChange={(e) => updateReference(index, 'url', e.target.value)}
-                            />
-                            <Input
-                              placeholder="Brief description (optional)"
+                            <div className="flex gap-2">
+                              <Input
+                                className="flex-1"
+                                placeholder={`Enter ${ref.type} URL...`}
+                                value={ref.url}
+                                onChange={(e) => updateReference(index, 'url', e.target.value)}
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleFetchUrl(index)}
+                                disabled={fetchingUrlIndex === index || !ref.url.trim()}
+                                className="h-9 px-3 flex-shrink-0"
+                                title="Fetch and extract content from this URL"
+                              >
+                                {fetchingUrlIndex === index ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Search className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
+                            <Textarea
+                              placeholder={ref.description ? "" : "Brief description (optional) — or click the fetch button to auto-extract"}
                               value={ref.description}
                               onChange={(e) => updateReference(index, 'description', e.target.value)}
+                              rows={ref.description ? 3 : 1}
                             />
                           </>
                         )}

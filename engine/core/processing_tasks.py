@@ -571,13 +571,14 @@ def process_seo_domain_task(self, domain_id: int, batch_num: int = 1):
     within the same run — they are left as 'fail' and retried by the daily scheduler
     next day to avoid wasting ScrapingDog API credits on persistent failures.
 
-    Max 20 chained batches per run (20 × 500 = 10,000 keywords) as a safety cap.
+    Chains batches until all keywords are processed. No infinite loop risk because
+    each batch only picks up 'avail' keywords (not 'fail'), so the remaining count
+    strictly decreases with every batch.
 
     Args:
         domain_id: ID of Domain to process SEO keywords for
-        batch_num: Current batch number (1-based), used to enforce max chain limit
+        batch_num: Current batch number (1-based), used for logging
     """
-    MAX_BATCHES = 20  # Safety cap: 20 × 500 = 10,000 keywords max per run
 
     result = None
     try:
@@ -614,10 +615,10 @@ def process_seo_domain_task(self, domain_id: int, batch_num: int = 1):
         except Exception:
             pass
 
-        if remaining > 0 and batch_num < MAX_BATCHES:
+        if remaining > 0:
             logger.info(
                 f"[SEO] Domain {domain_id}: {remaining} keywords remaining, "
-                f"scheduling batch {batch_num + 1}/{MAX_BATCHES} in 10s"
+                f"scheduling batch {batch_num + 1} in 10s"
             )
             try:
                 process_seo_domain_task.apply_async(
@@ -627,11 +628,6 @@ def process_seo_domain_task(self, domain_id: int, batch_num: int = 1):
                 )
             except Exception as e:
                 logger.error(f"[SEO] Failed to schedule follow-up for domain {domain_id}: {e}")
-        elif remaining > 0:
-            logger.warning(
-                f"[SEO] Domain {domain_id}: {remaining} keywords still pending but "
-                f"hit max batch limit ({MAX_BATCHES}). Will be processed on next scheduled run."
-            )
 
 
 @shared_task(bind=True, ignore_result=True)

@@ -692,13 +692,14 @@ def seo_refresh_status(request):
         auto_call_status='avail',
     ).count()
 
-    is_refreshing = running_count > 0 or pending_count > 0
+    # refreshing = true ONLY when keywords are actively being processed (busy/load/read).
+    # pending (avail) keywords with running=0 means the task has finished or no task is
+    # running — don't keep the frontend spinner going for stuck/idle keywords.
+    is_refreshing = running_count > 0
     progress = int((done_count / total) * 100) if total > 0 else 0
 
     if running_count > 0:
         current_status = 'running'
-    elif pending_count > 0:
-        current_status = 'queued'
     else:
         current_status = 'done'
 
