@@ -1434,6 +1434,9 @@ export default function OrganizationSettings() {
         title: "Invitation sent",
         description: `An invitation has been sent to ${inviteEmail.trim()}`,
       });
+
+      // Refresh team members and invitations list
+      await loadTeamMembers();
     } catch (error: any) {
       toast({
         title: "Error sending invitation",
