@@ -39,6 +39,7 @@ import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
 import { PageLoader } from "@/components/PageLoader";
+import { useDomainStore } from "@/stores/domainStore";
 
 type SovRow = { domain: number; competitor: number | null; platform?: string | null; share_percentage: number; mention_count: number; market_position?: number | null; timestamp: string };
 type LatestSov = { domain_id: number; timestamp: string; platform: string; players: Array<{ competitor: any | null; share_percentage: number; mention_count: number; market_position: number | null }>; };
@@ -48,6 +49,7 @@ type LatestSov = { domain_id: number; timestamp: string; platform: string; playe
 const ShareOfVoice = () => {
   const { toast } = useToast();
   const { user } = useAuth();
+  const { selectedDomain } = useDomainStore();
   const [domainId, setDomainId] = useState<string | null>(null);
   const [days, setDays] = useState<number>(30);
 
@@ -57,12 +59,23 @@ const ShareOfVoice = () => {
   const [competitors, setCompetitors] = useState<any[]>([]);
   const [isLoadingCompetitors, setIsLoadingCompetitors] = useState(true);
 
+  // Sync domainId from selectedDomain (Zustand store) or localStorage when domain changes
   useEffect(() => {
     if (!user) return;
-    // Use unified helper to get active domain ID (from localStorage, synced with server)
+
+    // Priority 1: Use selectedDomain from Zustand store (most up-to-date when user changes domain)
+    if (selectedDomain?.id) {
+      const newDomainId = String(selectedDomain.id);
+      if (newDomainId !== domainId) {
+        setDomainId(newDomainId);
+        return;
+      }
+    }
+
+    // Priority 2: Fallback to localStorage (synced with server)
     const id = getActiveDomainId(user);
-    if (id) setDomainId(id);
-  }, [user]);
+    if (id && id !== domainId) setDomainId(id);
+  }, [user, selectedDomain?.id, domainId]);
 
   // Load competitors first to check if any exist
   useEffect(() => {

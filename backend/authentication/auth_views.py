@@ -234,7 +234,7 @@ def accept_invitation(request, invitation_id):
         invitation.status = 'accepted'
         invitation.accepted_at = timezone.now()
         invitation.save()
-        default_permissions = [('dashboard', 'read'), ('mentions', 'read'), ('prompts', 'read')]
+        default_permissions = [('dashboard', 'read'), ('mentions', 'read'), ('prompts', 'read'), ('ai_copilot', 'read')]
         for module, permission_level in default_permissions:
             UserPermission.objects.create(user=user, module=module, permission_level=permission_level, granted_by=invitation.invited_by)
 

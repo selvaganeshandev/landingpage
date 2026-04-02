@@ -1637,6 +1637,25 @@ def prompt_group_detail(request, group_id):
                 if latest_all_analytic and latest_all_analytic.platform and latest_all_analytic.platform not in all_platforms:
                     all_platforms.append(latest_all_analytic.platform)
                 
+                # Get full_ai_response for this prompt (from latest analytics with context_summary)
+                # If platform_filter, get response for that platform; otherwise latest available
+                prompt_full_ai_response = ''
+                if platform_filter:
+                    platform_analytics = [a for a in prompt_analytics if a.platform == platform_filter and a.context_summary]
+                else:
+                    platform_analytics = [a for a in all_prompt_analytics if a.context_summary]
+
+                if platform_analytics:
+                    # Prefer published mention analytics, then published, then any
+                    best = next((a for a in sorted(platform_analytics, key=lambda x: x.created_at, reverse=True)
+                                if a.is_mention and a.is_published), None)
+                    if not best:
+                        best = next((a for a in sorted(platform_analytics, key=lambda x: x.created_at, reverse=True)
+                                    if a.is_published), None)
+                    if not best:
+                        best = sorted(platform_analytics, key=lambda x: x.created_at, reverse=True)[0]
+                    prompt_full_ai_response = best.context_summary or ''
+
                 prompts_data.append({
                     'id': prompt.id,
                     'prompt_text': prompt.prompt,
@@ -1653,7 +1672,8 @@ def prompt_group_detail(request, group_id):
                     'sentiment': sentiment_percentages,
                     'platform': latest_analytic.platform if latest_analytic else None,
                     'platforms': all_platforms,  # All platforms for this prompt
-                    'latest_mention_id': latest_mention_id
+                    'latest_mention_id': latest_mention_id,
+                    'full_ai_response': prompt_full_ai_response,
                 })
 
             # Platform distribution for the group - use PromptGroupMetricSnapshot

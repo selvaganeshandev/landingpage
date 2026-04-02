@@ -70,14 +70,14 @@ const App = () => (
             <Route path="/accept-invitation/:invitationId" element={<AcceptInvitation />} />
             <Route path="/session-expired" element={<SessionExpired />} />
             <Route element={<Layout />}>
-              {/* Chat - Landing Page */}
+              {/* Chat - Landing Page (accessible to all authenticated users) */}
               <Route path="/" element={
-                <ProtectedRoute requiredPermission={MODULES.DASHBOARD}>
+                <ProtectedRoute>
                   <Chat />
                 </ProtectedRoute>
               } />
               <Route path="/chat" element={
-                <ProtectedRoute requiredPermission={MODULES.DASHBOARD}>
+                <ProtectedRoute>
                   <Chat />
                 </ProtectedRoute>
               } />
