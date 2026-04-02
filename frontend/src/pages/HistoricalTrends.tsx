@@ -38,21 +38,33 @@ import { useEffect, useState, useMemo } from "react";
 import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
+import { downloadCsv } from "@/utils/exportCsv";
+import { useDomainStore } from "@/stores/domainStore";
 
 const HistoricalTrends = () => {
   const { toast } = useToast();
   const { user } = useAuth();
+  const { selectedDomain } = useDomainStore();
   const [domainId, setDomainId] = useState<string | null>(null);
   const [months, setMonths] = useState<number>(12);
   const [trendsData, setTrendsData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Sync domainId from selectedDomain (Zustand store) or localStorage when domain changes
   useEffect(() => {
     if (!user) return;
-    // Use unified helper to get active domain ID (from localStorage, synced with server)
+
+    if (selectedDomain?.id) {
+      const newDomainId = String(selectedDomain.id);
+      if (newDomainId !== domainId) {
+        setDomainId(newDomainId);
+        return;
+      }
+    }
+
     const id = getActiveDomainId(user);
-    if (id) setDomainId(id);
-  }, [user]);
+    if (id && id !== domainId) setDomainId(id);
+  }, [user, selectedDomain?.id, domainId]);
 
   useEffect(() => {
     const load = async () => {
@@ -117,9 +129,73 @@ const HistoricalTrends = () => {
   const milestones = useMemo(() => trendsData?.milestones || [], [trendsData]);
 
   const handleExportReport = () => {
+    const exportRows: Record<string, string | number>[] = [];
+
+    // Visibility trend rows
+    visibilityTrend.forEach((v: any) => {
+      exportRows.push({
+        section: 'Visibility Trend',
+        month: v.month,
+        visibility_score: v.score,
+        mentions: v.mentions,
+        avg_position: v.avgPosition,
+        sentiment: v.sentiment,
+        chatgpt: '',
+        claude: '',
+        perplexity: '',
+        gemini: '',
+      });
+    });
+
+    // Platform growth rows
+    platformGrowth.forEach((p: any) => {
+      exportRows.push({
+        section: 'Platform Growth',
+        month: p.month,
+        visibility_score: '',
+        mentions: '',
+        avg_position: '',
+        sentiment: '',
+        chatgpt: p.chatgpt || 0,
+        claude: p.claude || 0,
+        perplexity: p.perplexity || 0,
+        gemini: p.gemini || 0,
+      });
+    });
+
+    // Summary row
+    exportRows.push({
+      section: 'Summary',
+      month: '',
+      visibility_score: `${summary.visibility_growth}%`,
+      mentions: `${summary.mention_growth}%`,
+      avg_position: `${summary.position_improvement}%`,
+      sentiment: `${summary.market_share_gain}%`,
+      chatgpt: '',
+      claude: '',
+      perplexity: '',
+      gemini: '',
+    });
+
+    const headers = [
+      { key: 'section', label: 'Section' },
+      { key: 'month', label: 'Month' },
+      { key: 'visibility_score', label: 'Visibility Score' },
+      { key: 'mentions', label: 'Mentions' },
+      { key: 'avg_position', label: 'Avg Position' },
+      { key: 'sentiment', label: 'Sentiment' },
+      { key: 'chatgpt', label: 'ChatGPT' },
+      { key: 'claude', label: 'Claude' },
+      { key: 'perplexity', label: 'Perplexity' },
+      { key: 'gemini', label: 'Gemini' },
+    ];
+
+    const today = new Date().toISOString().split('T')[0];
+    downloadCsv(exportRows, headers, `historical_trends_${today}.csv`);
+
     toast({
-      title: "Exporting Report",
-      description: "Your historical trends report is being generated...",
+      title: "Report Exported",
+      description: "Your historical trends report has been downloaded.",
     });
   };
 

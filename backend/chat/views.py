@@ -56,11 +56,11 @@ class ChatViewSet(viewsets.ViewSet):
         except Domain.DoesNotExist:
             raise PermissionDenied("Domain not found or access denied")
 
-        # Super admins have access to all domains in their org
-        if user.role == 'super_admin':
+        # Super admins and admins have access to all domains in their org
+        if user.role in ('super_admin', 'admin'):
             return domain
 
-        # Check if user has explicit access
+        # Regular users need explicit access
         has_access = DomainAccess.objects.filter(
             user=user,
             domain=domain

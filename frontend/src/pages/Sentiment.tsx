@@ -35,6 +35,7 @@ import { apiClient } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
 import { useDomainStore } from "@/stores/domainStore";
+import { downloadCsv } from "@/utils/exportCsv";
 
 type SentimentRow = { theme: string; positive_percentage: number; neutral_percentage: number; negative_percentage: number; mention_count: number; platform?: string | null; timestamp: string };
 
@@ -123,9 +124,75 @@ const Sentiment = () => {
   }, [domainId]);
 
   const handleExportReport = () => {
+    // Build rows from overview + thematic + platform data
+    const exportRows: Record<string, string | number>[] = [];
+
+    // Overview row
+    exportRows.push({
+      section: 'Overview',
+      theme: '',
+      platform: '',
+      positive: sentimentOverview.positive,
+      neutral: sentimentOverview.neutral,
+      negative: sentimentOverview.negative,
+      mentions: sentimentOverview.total_mentions,
+    });
+
+    // Thematic rows
+    thematicSentiment.forEach(t => {
+      exportRows.push({
+        section: 'Theme',
+        theme: t.theme,
+        platform: '',
+        positive: t.positive,
+        neutral: t.neutral,
+        negative: t.negative,
+        mentions: t.mentions,
+      });
+    });
+
+    // Platform rows
+    platformSentiment.forEach(p => {
+      exportRows.push({
+        section: 'Platform',
+        theme: '',
+        platform: p.platform,
+        positive: p.positive,
+        neutral: p.neutral,
+        negative: p.negative,
+        mentions: 0,
+      });
+    });
+
+    // Competitor rows
+    competitorSentiment.forEach(c => {
+      exportRows.push({
+        section: 'Competitor',
+        theme: '',
+        platform: c.name,
+        positive: c.positive,
+        neutral: c.neutral,
+        negative: c.negative,
+        mentions: 0,
+      });
+    });
+
+    const headers = [
+      { key: 'section', label: 'Section' },
+      { key: 'theme', label: 'Theme' },
+      { key: 'platform', label: 'Platform / Competitor' },
+      { key: 'positive', label: 'Positive %' },
+      { key: 'neutral', label: 'Neutral %' },
+      { key: 'negative', label: 'Negative %' },
+      { key: 'mentions', label: 'Mentions' },
+    ];
+
+    const today = new Date().toISOString().split('T')[0];
+    downloadCsv(exportRows, headers, `sentiment_report_${today}.csv`);
+
     toast({
-      title: "Exporting Report",
-      description: "Your sentiment report is being generated...",
+      title: "Report Exported",
+      description: "Your sentiment report has been downloaded.",
     });
   };
 
