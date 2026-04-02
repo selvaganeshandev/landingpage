@@ -3047,12 +3047,101 @@ def update_bulk_upload_item_status(request, item_id):
 # =============================================
 # Issue 8A: URL Reading endpoint
 # =============================================
+def _fetch_youtube_metadata(url):
+    """Fetch YouTube video metadata using oEmbed API (no API key needed)."""
+    import re as _re
+    # Extract video ID from various YouTube URL formats
+    patterns = [
+        r'(?:v=|/v/|youtu\.be/|/embed/)([a-zA-Z0-9_-]{11})',
+    ]
+    video_id = None
+    for pattern in patterns:
+        match = _re.search(pattern, url)
+        if match:
+            video_id = match.group(1)
+            break
+
+    if not video_id:
+        return None
+
+    try:
+        oembed_url = f'https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json'
+        resp = requests.get(oembed_url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        title = data.get('title', '')
+        author = data.get('author_name', '')
+        description = f"Video by {author}" if author else ''
+        thumbnail = data.get('thumbnail_url', '')
+        text_content = f"Title: {title}\nAuthor: {author}\nThumbnail: {thumbnail}"
+        return {
+            'title': title,
+            'description': description,
+            'text_content': text_content,
+            'word_count': len(text_content.split()),
+            'url': url,
+            'thumbnail': thumbnail,
+        }
+    except Exception as e:
+        logger.warning(f"YouTube oEmbed failed for {url}: {e}")
+        return None
+
+
+def _fetch_vimeo_metadata(url):
+    """Fetch Vimeo video metadata using oEmbed API."""
+    try:
+        oembed_url = f'https://vimeo.com/api/oembed.json?url={url}'
+        resp = requests.get(oembed_url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        title = data.get('title', '')
+        author = data.get('author_name', '')
+        description = data.get('description', '') or f"Video by {author}"
+        thumbnail = data.get('thumbnail_url', '')
+        text_content = f"Title: {title}\nAuthor: {author}\nDescription: {description}"
+        return {
+            'title': title,
+            'description': description,
+            'text_content': text_content,
+            'word_count': len(text_content.split()),
+            'url': url,
+            'thumbnail': thumbnail,
+        }
+    except Exception as e:
+        logger.warning(f"Vimeo oEmbed failed for {url}: {e}")
+        return None
+
+
+def _fetch_image_metadata(url):
+    """Fetch basic metadata for image URLs."""
+    try:
+        resp = requests.head(url, timeout=10, allow_redirects=True)
+        content_type = resp.headers.get('Content-Type', '')
+        content_length = resp.headers.get('Content-Length', '')
+        # Extract filename from URL
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        filename = parsed.path.split('/')[-1] if parsed.path else url
+        size_kb = f"{int(content_length) // 1024}KB" if content_length else 'unknown size'
+        return {
+            'title': filename,
+            'description': f"Image ({content_type.split(';')[0]}, {size_kb})",
+            'text_content': f"Image: {filename}\nType: {content_type}\nSize: {size_kb}\nURL: {url}",
+            'word_count': 0,
+            'url': url,
+        }
+    except Exception as e:
+        logger.warning(f"Image metadata fetch failed for {url}: {e}")
+        return None
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def read_url(request):
     """
     Fetch and extract readable text content from a URL.
     Used in the wizard References step to auto-populate reference descriptions.
+    Supports: YouTube, Vimeo, image URLs, and general web pages.
 
     Expected request body:
     {
@@ -3070,6 +3159,27 @@ def read_url(request):
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
 
+        url_lower = url.lower()
+
+        # YouTube URLs - use oEmbed API
+        if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
+            result = _fetch_youtube_metadata(url)
+            if result:
+                return Response({'status': 'success', 'data': result})
+
+        # Vimeo URLs - use oEmbed API
+        if 'vimeo.com' in url_lower:
+            result = _fetch_vimeo_metadata(url)
+            if result:
+                return Response({'status': 'success', 'data': result})
+
+        # Image URLs - fetch HEAD metadata
+        image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico')
+        if any(url_lower.split('?')[0].endswith(ext) for ext in image_extensions):
+            result = _fetch_image_metadata(url)
+            if result:
+                return Response({'status': 'success', 'data': result})
+
         headers = {
             'User-Agent': 'Mozilla/5.0 (compatible; PromptmaxxBot/1.0)',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -3083,6 +3193,13 @@ def read_url(request):
                 'status': 'error',
                 'message': f'Failed to fetch URL: {str(e)}'
             }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if response is actually an image (content-type check)
+        content_type = resp.headers.get('Content-Type', '')
+        if content_type.startswith('image/'):
+            result = _fetch_image_metadata(url)
+            if result:
+                return Response({'status': 'success', 'data': result})
 
         html_content = resp.text
 

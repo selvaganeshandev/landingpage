@@ -87,17 +87,23 @@ const Citations = () => {
 
   // Fetch citations list
   const { data: citationsData, isLoading: citationsLoading, isFetching: citationsFetching, refetch: refetchCitations } = useQuery({
-    queryKey: ["citations", domainId, statusFilter, sourceTypeFilter, platformFilter, searchQuery, currentPage],
-    queryFn: () =>
-      apiClient.getCitations({
+    queryKey: ["citations", domainId, statusFilter, sourceTypeFilter, platformFilter, searchQuery, currentPage, activeTab],
+    queryFn: () => {
+      // Map activeTab to server-side source_type filter
+      let effectiveSourceType = sourceTypeFilter !== "all" ? sourceTypeFilter : undefined;
+      if (activeTab === "your_domain") effectiveSourceType = "your_domain";
+      else if (activeTab === "third_party") effectiveSourceType = "third_party";
+
+      return apiClient.getCitations({
         domain_id: domainId,
         status: statusFilter !== "all" ? statusFilter : undefined,
-        source_type: sourceTypeFilter !== "all" ? sourceTypeFilter : undefined,
+        source_type: effectiveSourceType,
         platform: platformFilter !== "all" ? platformFilter : undefined,
         search: searchQuery || undefined,
         page: currentPage,
         page_size: pageSize,
-      }),
+      });
+    },
     enabled: !!domainId,
     staleTime: 2 * 60 * 1000, // Cache for 2 minutes
     refetchOnWindowFocus: false, // Prevent refetch on window focus
@@ -216,11 +222,8 @@ const Citations = () => {
     return url.substring(0, maxLength) + "...";
   };
 
-  const filteredCitations = citations.filter((c: any) => {
-    if (activeTab === "your_domain") return c.is_your_domain;
-    if (activeTab === "third_party") return !c.is_your_domain;
-    return true;
-  });
+  // Server-side filtering via activeTab → source_type param (no client-side filter needed)
+  const filteredCitations = citations;
 
   return (
     <div className="p-8 space-y-8 bg-background animate-fade-in">
@@ -434,7 +437,7 @@ const Citations = () => {
 
       {/* Citations Table */}
       <Card className="p-6 border border-border">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setCurrentPage(1); }} className="w-full">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
             <TabsList className="bg-muted/50 p-1 border border-border">
               <TabsTrigger value="all" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
