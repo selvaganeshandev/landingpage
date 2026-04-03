@@ -2123,17 +2123,28 @@ const SeoRankings = () => {
                         >
                           <ChevronLeft className="h-3 w-3" />
                         </Button>
-                        {Array.from({ length: tagTotalPages }, (_, i) => i + 1).map(p => (
-                          <Button
-                            key={p}
-                            variant={tagPage === p ? "default" : "outline"}
-                            size="sm"
-                            className="h-6 w-6 px-0 text-xs"
-                            onClick={() => setTagPage(p)}
-                          >
-                            {p}
-                          </Button>
-                        ))}
+                        {Array.from({ length: tagTotalPages }, (_, i) => i + 1)
+                          .filter(page => page === 1 || page === tagTotalPages || Math.abs(page - tagPage) <= 1)
+                          .reduce<(number | string)[]>((acc, page, idx, arr) => {
+                            if (idx > 0 && page - (arr[idx - 1] as number) > 1) acc.push('...');
+                            acc.push(page);
+                            return acc;
+                          }, [])
+                          .map((item, idx) =>
+                            item === '...' ? (
+                              <span key={`ellipsis-${idx}`} className="px-1 text-muted-foreground text-xs">...</span>
+                            ) : (
+                              <Button
+                                key={item}
+                                variant={tagPage === item ? "default" : "outline"}
+                                size="sm"
+                                className="h-6 w-6 px-0 text-xs"
+                                onClick={() => setTagPage(item as number)}
+                              >
+                                {item}
+                              </Button>
+                            )
+                          )}
                         <Button
                           variant="outline"
                           size="sm"
