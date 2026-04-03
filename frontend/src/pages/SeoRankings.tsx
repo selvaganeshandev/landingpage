@@ -2094,14 +2094,21 @@ const SeoRankings = () => {
                             )}
                           </TableCell>
                           <TableCell className="py-1.5 w-8">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5"
-                              onClick={() => handleToggleFavourite(keyword.id, keyword.favour)}
-                            >
-                              <Star className={`h-3 w-3 ${keyword.favour ? 'text-purple-500 fill-purple-500' : 'text-muted-foreground'}`} />
-                            </Button>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6"
+                                    onClick={() => handleToggleFavourite(keyword.id, keyword.favour)}
+                                  >
+                                    <Star className={`h-3.5 w-3.5 ${keyword.favour ? 'text-purple-500 fill-purple-500' : 'text-muted-foreground'}`} />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>{keyword.favour ? 'Mark as unfavourite' : 'Mark as favourite'}</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                           </TableCell>
                         </TableRow>
                       ))}

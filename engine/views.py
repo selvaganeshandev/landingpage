@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import openai
 import requests
@@ -1259,76 +1260,100 @@ def delete_prompts(request):
 
 
 def get_openai_client():
-    """
-    Initialize and return OpenAI client using settings from database.
-    """
+    """Initialize and return OpenAI client using settings from database or environment."""
     try:
-        from serp.models import Settings
-        
-        # Get settings from database
-        settings_obj = Settings.objects.first()
-        if not settings_obj:
-            raise Exception("Settings not found in database")
-        
-        if not settings_obj.chatgpt_enabled:
-            raise Exception("ChatGPT is disabled in settings")
-        
-        if not settings_obj.chatgpt_api_key:
-            raise Exception("ChatGPT API key is not configured in settings")
-        
-        return openai.OpenAI(
-            api_key=settings_obj.chatgpt_api_key,
-            timeout=60  # 1 minute timeout for OpenAI requests
-        )
+        # Try database settings first
+        try:
+            from serp.models import Settings
+            settings_obj = Settings.objects.first()
+            if settings_obj and hasattr(settings_obj, 'chatgpt_enabled') and hasattr(settings_obj, 'chatgpt_api_key'):
+                if not settings_obj.chatgpt_enabled:
+                    raise Exception("ChatGPT is disabled in settings")
+                if not settings_obj.chatgpt_api_key:
+                    raise Exception("ChatGPT API key is not configured in settings")
+                return openai.OpenAI(
+                    api_key=settings_obj.chatgpt_api_key,
+                    timeout=60,
+                )
+        except (ImportError, Exception) as db_err:
+            logger.info(f"DB settings unavailable for OpenAI, trying env: {db_err}")
+
+        # Fallback to environment variable
+        from django.conf import settings as django_settings
+        api_key = getattr(django_settings, 'OPENAI_API_KEY', None) or os.environ.get('OPENAI_API_KEY')
+        if not api_key:
+            raise Exception("OpenAI API key not found in database or environment")
+
+        return openai.OpenAI(api_key=api_key, timeout=60)
     except Exception as e:
         raise Exception(f"Failed to initialize OpenAI client: {str(e)}")
 
 
 def get_gemini_client():
-    """Initialize and return Gemini client using settings from database."""
+    """Initialize and return Gemini client using settings from database or environment."""
     try:
-        from serp.models import Settings
-        
-        # Get settings from database
-        settings_obj = Settings.objects.first()
-        if not settings_obj:
-            raise Exception("Settings not found in database")
-        
-        if not settings_obj.gemini_enabled:
-            raise Exception("Gemini is disabled in settings")
-        
-        if not settings_obj.gemini_api_key:
-            raise Exception("Gemini API key is not configured in settings")
-        
+        # Try database settings first (serp.Settings may have gemini fields on some setups)
+        try:
+            from serp.models import Settings
+            settings_obj = Settings.objects.first()
+            if settings_obj and hasattr(settings_obj, 'gemini_enabled') and hasattr(settings_obj, 'gemini_api_key'):
+                if not settings_obj.gemini_enabled:
+                    raise Exception("Gemini is disabled in settings")
+                if not settings_obj.gemini_api_key:
+                    raise Exception("Gemini API key is not configured in settings")
+                return {
+                    'api_key': settings_obj.gemini_api_key,
+                    'base_url': 'https://generativelanguage.googleapis.com/v1beta',
+                    'timeout': 60,
+                }
+        except (ImportError, Exception) as db_err:
+            logger.info(f"DB settings unavailable for Gemini, trying env: {db_err}")
+
+        # Fallback to environment variable
+        from django.conf import settings as django_settings
+        api_key = getattr(django_settings, 'GEMINI_API_KEY', None) or os.environ.get('GEMINI_API_KEY')
+        if not api_key:
+            raise Exception("Gemini API key not found in database or environment")
+
         return {
-            'api_key': settings_obj.gemini_api_key,
+            'api_key': api_key,
             'base_url': 'https://generativelanguage.googleapis.com/v1beta',
-            'timeout': 60  # 1 minute timeout for Gemini requests
+            'timeout': 60,
         }
     except Exception as e:
         raise Exception(f"Failed to initialize Gemini client: {str(e)}")
 
 
 def get_perplexity_client():
-    """Initialize and return Perplexity client using settings from database."""
+    """Initialize and return Perplexity client using settings from database or environment."""
     try:
-        from serp.models import Settings
-        
-        # Get settings from database
-        settings_obj = Settings.objects.first()
-        if not settings_obj:
-            raise Exception("Settings not found in database")
-        
-        if not settings_obj.perplexity_enabled:
-            raise Exception("Perplexity is disabled in settings")
-        
-        if not settings_obj.perplexity_api_key:
-            raise Exception("Perplexity API key is not configured in settings")
-        
+        # Try database settings first
+        try:
+            from serp.models import Settings
+            settings_obj = Settings.objects.first()
+            if settings_obj and hasattr(settings_obj, 'perplexity_enabled') and hasattr(settings_obj, 'perplexity_api_key'):
+                if not settings_obj.perplexity_enabled:
+                    raise Exception("Perplexity is disabled in settings")
+                if not settings_obj.perplexity_api_key:
+                    raise Exception("Perplexity API key is not configured in settings")
+                return {
+                    'api_key': settings_obj.perplexity_api_key,
+                    'base_url': 'https://api.perplexity.ai/chat/completions',
+                    'timeout': 60,
+                }
+        except (ImportError, Exception) as db_err:
+            logger.info(f"DB settings unavailable for Perplexity, trying env: {db_err}")
+
+        # Fallback to environment variable
+        from django.conf import settings as django_settings
+        api_key = getattr(django_settings, 'PERPLEXITY_API_KEY', None) or os.environ.get('PERPLEXITY_API_KEY')
+        if not api_key:
+            raise Exception("Perplexity API key not found in database or environment")
+
         return {
-            'api_key': settings_obj.perplexity_api_key,
+            'api_key': api_key,
             'base_url': 'https://api.perplexity.ai/chat/completions',
-            'timeout': 60  # 1 minute timeout for Perplexity requests
+            'timeout': 60,
         }
     except Exception as e:
         raise Exception(f"Failed to initialize Perplexity client: {str(e)}")
