@@ -549,6 +549,38 @@ export const apiClient = {
       body: JSON.stringify(data),
     }),
 
+  getReferenceDocumentDetail: (domainId: number, docId: number) =>
+    apiRequest(`/domains/${domainId}/reference-repository/${docId}/`),
+
+  // ===== Brand Links =====
+  getBrandLinks: (domainId: number) =>
+    apiRequest(`/domains/${domainId}/brand-links/`),
+
+  addBrandLink: (domainId: number, data: { platform: string; url: string; label?: string }) =>
+    apiRequest(`/domains/${domainId}/brand-links/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getBrandLinkDetail: (domainId: number, linkId: number) =>
+    apiRequest(`/domains/${domainId}/brand-links/${linkId}/`),
+
+  updateBrandLink: (domainId: number, linkId: number, data: any) =>
+    apiRequest(`/domains/${domainId}/brand-links/${linkId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  deleteBrandLink: (domainId: number, linkId: number) =>
+    apiRequest(`/domains/${domainId}/brand-links/${linkId}/`, {
+      method: 'DELETE',
+    }),
+
+  recrawlBrandLink: (domainId: number, linkId: number) =>
+    apiRequest(`/domains/${domainId}/brand-links/${linkId}/recrawl/`, {
+      method: 'POST',
+    }),
+
   // ===== Keywords =====
   getKeywords: (params?: any) => {
     const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';

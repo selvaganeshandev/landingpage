@@ -27,4 +27,9 @@ urlpatterns = [
     path('<int:domain_id>/reference-repository/', views.reference_document_list, name='reference_document_list'),
     path('<int:domain_id>/reference-repository/<int:doc_id>/', views.reference_document_detail, name='reference_document_detail'),
     path('<int:domain_id>/reference-repository/<int:doc_id>/extraction-status/', views.reference_document_extraction_status, name='reference_document_extraction_status'),
+
+    # Brand Links Management
+    path('<int:domain_id>/brand-links/', views.brand_link_list, name='brand_link_list'),
+    path('<int:domain_id>/brand-links/<int:link_id>/', views.brand_link_detail, name='brand_link_detail'),
+    path('<int:domain_id>/brand-links/<int:link_id>/recrawl/', views.brand_link_recrawl, name='brand_link_recrawl'),
 ]
