@@ -415,6 +415,135 @@ class ReferenceDocument(models.Model):
         return f"{self.domain.name} - {self.file_name} ({self.file_type})"
 
 
+class BrandLink(models.Model):
+    """
+    Stores brand digital asset links (social media, microsites, blogs, etc.)
+    for a domain's Reference Repository. These URLs are crawled and their
+    extracted content is used during content generation alongside reference documents.
+    """
+    PLATFORM_CHOICES = [
+        ('facebook', 'Facebook'),
+        ('instagram', 'Instagram'),
+        ('twitter', 'Twitter / X'),
+        ('youtube', 'YouTube'),
+        ('linkedin', 'LinkedIn'),
+        ('microsite', 'Microsite'),
+        ('blog', 'Blog'),
+        ('other', 'Other'),
+    ]
+
+    EXTRACTION_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
+
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='brand_links',
+        help_text="Domain this brand link belongs to"
+    )
+    platform = models.CharField(
+        max_length=20,
+        choices=PLATFORM_CHOICES,
+        help_text="Platform type for the link"
+    )
+    url = models.URLField(
+        max_length=500,
+        help_text="URL of the brand digital asset"
+    )
+    label = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Optional custom label for the link"
+    )
+    extracted_text = models.TextField(
+        blank=True,
+        default='',
+        help_text="Text content extracted from crawling the URL"
+    )
+    extraction_status = models.CharField(
+        max_length=20,
+        choices=EXTRACTION_STATUS_CHOICES,
+        default='pending',
+        help_text="Status of text extraction from the URL"
+    )
+    extraction_error = models.TextField(
+        blank=True,
+        default='',
+        help_text="Error message if text extraction failed"
+    )
+    added_by = models.ForeignKey(
+        'authentication.Account',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='added_brand_links',
+        help_text="User who added this link"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Timestamp when the link was added"
+    )
+    modified_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Timestamp when the link was last modified"
+    )
+
+    MAX_LINKS_PER_DOMAIN = 20
+
+    class Meta:
+        db_table = 'brand_links'
+        verbose_name = 'Brand Link'
+        verbose_name_plural = 'Brand Links'
+        unique_together = ['domain', 'url']
+        ordering = ['platform', '-created_at']
+        indexes = [
+            models.Index(fields=['domain', '-created_at']),
+            models.Index(fields=['domain', 'platform']),
+        ]
+
+    def __str__(self):
+        return f"{self.domain.name} - {self.get_platform_display()} ({self.url})"
+
+
+class BrandLinkChunk(models.Model):
+    """
+    Stores chunked text from BrandLink for efficient keyword-based
+    matching during content generation — same approach as ReferenceDocumentChunk.
+    """
+    CHUNK_SIZE = 5000
+    CHUNK_OVERLAP = 200
+
+    brand_link = models.ForeignKey(
+        'BrandLink',
+        on_delete=models.CASCADE,
+        related_name='chunks',
+        help_text="Parent brand link"
+    )
+    chunk_index = models.PositiveIntegerField(
+        help_text="Order of this chunk within the brand link content (0-based)"
+    )
+    chunk_text = models.TextField(
+        help_text="The text content of this chunk"
+    )
+
+    class Meta:
+        db_table = 'brand_link_chunks'
+        verbose_name = 'Brand Link Chunk'
+        verbose_name_plural = 'Brand Link Chunks'
+        ordering = ['brand_link', 'chunk_index']
+        unique_together = ['brand_link', 'chunk_index']
+        indexes = [
+            models.Index(fields=['brand_link', 'chunk_index']),
+        ]
+
+    def __str__(self):
+        return f"{self.brand_link.url} - Chunk {self.chunk_index}"
+
+
 class ReferenceDocumentChunk(models.Model):
     """
     Stores chunked text from ReferenceDocument for efficient keyword-based

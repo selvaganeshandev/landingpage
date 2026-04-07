@@ -47,6 +47,9 @@ import {
   FileSpreadsheet,
   Presentation,
   MessageSquare,
+  Globe,
+  RefreshCw,
+  Eye,
 } from "lucide-react";
 import {
   Table,
@@ -174,6 +177,23 @@ export default function DomainSettings() {
   const [textNoteDescription, setTextNoteDescription] = useState("");
   const [isSavingTextNote, setIsSavingTextNote] = useState(false);
 
+  // Brand Links state
+  const [brandLinks, setBrandLinks] = useState<any[]>([]);
+  const [isLoadingBrandLinks, setIsLoadingBrandLinks] = useState(false);
+  const [showAddBrandLinkDialog, setShowAddBrandLinkDialog] = useState(false);
+  const [brandLinkPlatform, setBrandLinkPlatform] = useState("");
+  const [brandLinkUrl, setBrandLinkUrl] = useState("");
+  const [brandLinkLabel, setBrandLinkLabel] = useState("");
+  const [isSavingBrandLink, setIsSavingBrandLink] = useState(false);
+  const [isDeletingBrandLink, setIsDeletingBrandLink] = useState(false);
+  const [brandLinkTotalLinks, setBrandLinkTotalLinks] = useState(0);
+  const [brandLinkMaxLinks, setBrandLinkMaxLinks] = useState(20);
+
+  // Content Viewer state (for both documents and brand links)
+  const [showContentViewer, setShowContentViewer] = useState(false);
+  const [contentViewerTitle, setContentViewerTitle] = useState("");
+  const [contentViewerText, setContentViewerText] = useState("");
+  const [isLoadingContent, setIsLoadingContent] = useState(false);
 
   const initialTab = isTeamMember ? "integrations" : (searchParams.get("tab") || "basic-info");
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -204,10 +224,13 @@ export default function DomainSettings() {
     }
   }, [activeTab, domainId]);
 
-  // Fetch reference documents when reference-repository tab is active
+  // Fetch reference documents and brand links when reference-repository tab is active
   useEffect(() => {
     if (activeTab === 'reference-repository' && domainId && referenceDocuments.length === 0) {
       fetchReferenceDocuments();
+    }
+    if (activeTab === 'reference-repository' && domainId && brandLinks.length === 0) {
+      fetchBrandLinks();
     }
   }, [activeTab, domainId]);
 
@@ -674,6 +697,166 @@ export default function DomainSettings() {
       });
     } finally {
       setIsDeletingRefDoc(false);
+    }
+  };
+
+  // ===== Brand Links Functions =====
+  const fetchBrandLinks = async () => {
+    if (!domainId) return;
+    setIsLoadingBrandLinks(true);
+    try {
+      const response: any = await apiClient.getBrandLinks(parseInt(domainId));
+      setBrandLinks(response.brand_links || []);
+      setBrandLinkTotalLinks(response.total_links || 0);
+      setBrandLinkMaxLinks(response.max_links || 20);
+    } catch (error: any) {
+      console.error('Error fetching brand links:', error);
+    } finally {
+      setIsLoadingBrandLinks(false);
+    }
+  };
+
+  const handleAddBrandLink = async () => {
+    if (!domain || !brandLinkUrl.trim() || !brandLinkPlatform) {
+      toast({
+        title: "Validation Error",
+        description: "Please select a platform and enter a URL.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSavingBrandLink(true);
+    try {
+      const response: any = await apiClient.addBrandLink(domain.id, {
+        platform: brandLinkPlatform,
+        url: brandLinkUrl.trim(),
+        label: brandLinkLabel.trim(),
+      });
+
+      toast({
+        title: "Brand Link Added",
+        description: response.message || "Brand link added successfully.",
+      });
+
+      setBrandLinkPlatform("");
+      setBrandLinkUrl("");
+      setBrandLinkLabel("");
+      setShowAddBrandLinkDialog(false);
+      fetchBrandLinks();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add brand link.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingBrandLink(false);
+    }
+  };
+
+  const handleDeleteBrandLink = async (linkId: number) => {
+    if (!domain) return;
+    setIsDeletingBrandLink(true);
+    try {
+      await apiClient.deleteBrandLink(domain.id, linkId);
+      toast({
+        title: "Brand Link Deleted",
+        description: "Brand link removed successfully.",
+      });
+      fetchBrandLinks();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete brand link.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingBrandLink(false);
+    }
+  };
+
+  const handleRecrawlBrandLink = async (linkId: number) => {
+    if (!domain) return;
+    try {
+      const response: any = await apiClient.recrawlBrandLink(domain.id, linkId);
+      toast({
+        title: "Re-crawling",
+        description: response.message || "Re-crawling brand link in the background.",
+      });
+      fetchBrandLinks();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to re-crawl brand link.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // ===== Content Viewer Functions =====
+  const handleViewDocumentContent = async (doc: any) => {
+    if (!domain) return;
+    setContentViewerTitle(doc.file_name || 'Document Content');
+    setShowContentViewer(true);
+    setIsLoadingContent(true);
+    try {
+      const response: any = await apiClient.getReferenceDocumentDetail(domain.id, doc.id);
+      setContentViewerText(response.reference_document?.extracted_text || 'No content extracted.');
+    } catch (error: any) {
+      setContentViewerText('Failed to load content.');
+    } finally {
+      setIsLoadingContent(false);
+    }
+  };
+
+  const handleViewBrandLinkContent = async (link: any) => {
+    if (!domain) return;
+    setContentViewerTitle(`${link.platform_display} — ${link.url}`);
+    setShowContentViewer(true);
+    setIsLoadingContent(true);
+    try {
+      const response: any = await apiClient.getBrandLinkDetail(domain.id, link.id);
+      const brandLink = response.brand_link;
+      if (brandLink?.extraction_status === 'failed') {
+        setContentViewerText(`Extraction failed: ${brandLink.extraction_error || 'Unknown error'}\n\nSome platforms (like Twitter/X) block automated crawling. You can try the Re-crawl button or add the content manually using a Text Note in the Reference Documents section below.`);
+      } else if (brandLink?.extraction_status === 'processing') {
+        setContentViewerText('Content extraction is still in progress. Please check back in a few moments.');
+      } else if (brandLink?.extraction_status === 'pending') {
+        setContentViewerText('Content extraction has not started yet. It will begin shortly.');
+      } else {
+        setContentViewerText(brandLink?.extracted_text || 'No content was extracted from this URL.');
+      }
+    } catch (error: any) {
+      setContentViewerText('Failed to load content.');
+    } finally {
+      setIsLoadingContent(false);
+    }
+  };
+
+  const getPlatformIcon = (platform: string) => {
+    switch (platform) {
+      case 'facebook': return <Globe className="h-4 w-4 text-blue-600" />;
+      case 'instagram': return <Globe className="h-4 w-4 text-pink-500" />;
+      case 'twitter': return <Globe className="h-4 w-4 text-sky-500" />;
+      case 'youtube': return <Globe className="h-4 w-4 text-red-500" />;
+      case 'linkedin': return <Globe className="h-4 w-4 text-blue-700" />;
+      case 'microsite': return <Globe className="h-4 w-4 text-emerald-500" />;
+      case 'blog': return <Globe className="h-4 w-4 text-orange-500" />;
+      default: return <Globe className="h-4 w-4 text-gray-500" />;
+    }
+  };
+
+  const getExtractionStatusBadge = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return <Badge variant="outline" className="text-xs text-green-600 border-green-300"><CheckCircle2 className="h-3 w-3 mr-1" />Extracted</Badge>;
+      case 'processing':
+        return <Badge variant="outline" className="text-xs text-blue-600 border-blue-300"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Processing</Badge>;
+      case 'failed':
+        return <Badge variant="outline" className="text-xs text-red-600 border-red-300"><XCircle className="h-3 w-3 mr-1" />Failed</Badge>;
+      default:
+        return <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-300"><AlertCircle className="h-3 w-3 mr-1" />Pending</Badge>;
     }
   };
 
@@ -2332,10 +2515,126 @@ export default function DomainSettings() {
 
         {/* Reference Repository Tab */}
         <TabsContent value="reference-repository" className="space-y-4 mt-6">
+          {/* Brand Links Section */}
           <Card className="border border-border">
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>Reference Repository</CardTitle>
+                <CardTitle>Brand Digital Assets</CardTitle>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs whitespace-nowrap">
+                    {brandLinkTotalLinks}/{brandLinkMaxLinks} links
+                  </Badge>
+                  <Button
+                    size="sm"
+                    onClick={() => setShowAddBrandLinkDialog(true)}
+                    disabled={brandLinkTotalLinks >= brandLinkMaxLinks}
+                    className="gap-1"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add Link
+                  </Button>
+                </div>
+              </div>
+              <CardDescription>
+                Add your brand's social media profiles, microsites, blogs, and other digital assets. These URLs are crawled and their content is used during AI content generation — just like uploaded documents.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {isLoadingBrandLinks ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                  <span>Loading brand links...</span>
+                </div>
+              ) : brandLinks.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Globe className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                  <p className="text-base font-medium">No brand links yet</p>
+                  <p className="text-sm mt-1">Add your social media profiles, microsites, or blog URLs for better brand context.</p>
+                </div>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">Platform</TableHead>
+                        <TableHead>URL</TableHead>
+                        <TableHead className="hidden md:table-cell">Label</TableHead>
+                        <TableHead className="w-28">Status</TableHead>
+                        <TableHead className="w-36 hidden sm:table-cell">Added</TableHead>
+                        <TableHead className="w-28 text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {brandLinks.map((link: any) => (
+                        <TableRow key={link.id}>
+                          <TableCell>
+                            <div className="flex items-center justify-center">
+                              {getPlatformIcon(link.platform)}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium text-sm truncate max-w-[250px]">
+                              <a href={link.url} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1">
+                                {link.url}
+                                <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                              </a>
+                            </div>
+                            <div className="text-xs text-muted-foreground">{link.platform_display}</div>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            <span className="text-sm text-muted-foreground">{link.label || '—'}</span>
+                          </TableCell>
+                          <TableCell>
+                            {getExtractionStatusBadge(link.extraction_status)}
+                          </TableCell>
+                          <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
+                            {new Date(link.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleViewBrandLinkContent(link)}
+                                className="h-8 w-8"
+                                title="View extracted content"
+                              >
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleRecrawlBrandLink(link.id)}
+                                className="h-8 w-8"
+                                title="Re-crawl URL"
+                              >
+                                <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeleteBrandLink(link.id)}
+                                disabled={isDeletingBrandLink}
+                                className="h-8 w-8"
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Reference Documents Section */}
+          <Card className="border border-border">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Reference Documents</CardTitle>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="text-xs whitespace-nowrap">
                     {refDocTotalFiles}/{refDocMaxFiles} files
@@ -2398,7 +2697,7 @@ export default function DomainSettings() {
                 <div className="flex items-start gap-2">
                   <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
                   <span>
-                    Uploaded documents are automatically analyzed during content generation. When your article topic matches content in these references, the AI will use brand-specific terminology, facts, and context to produce more accurate content.
+                    Both uploaded documents and brand links are automatically analyzed during content generation. When your article topic matches content in these references, the AI will use brand-specific terminology, facts, and context to produce more accurate content.
                   </span>
                 </div>
               </div>
@@ -2425,7 +2724,7 @@ export default function DomainSettings() {
                         <TableHead className="hidden md:table-cell">Description</TableHead>
                         <TableHead className="w-24 text-right">Size</TableHead>
                         <TableHead className="w-36 hidden sm:table-cell">Uploaded</TableHead>
-                        <TableHead className="w-16 text-right">Actions</TableHead>
+                        <TableHead className="w-28 text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -2452,15 +2751,26 @@ export default function DomainSettings() {
                             {new Date(doc.created_at).toLocaleDateString()}
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDeleteReferenceDoc(doc.id)}
-                              disabled={isDeletingRefDoc}
-                              className="h-8 w-8"
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleViewDocumentContent(doc)}
+                                className="h-8 w-8"
+                                title="View extracted content"
+                              >
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeleteReferenceDoc(doc.id)}
+                                disabled={isDeletingRefDoc}
+                                className="h-8 w-8"
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -2852,6 +3162,108 @@ export default function DomainSettings() {
               ) : (
                 `Connect ${selectedIntegration?.type === 'google_analytics' ? 'Property' : 'Site'}`
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Brand Link Dialog */}
+      <Dialog open={showAddBrandLinkDialog} onOpenChange={setShowAddBrandLinkDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Add Brand Link</DialogTitle>
+            <DialogDescription>
+              Add a social media profile, microsite, blog, or other digital asset URL. The content will be crawled and used for AI content generation.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="brand-link-platform">Platform *</Label>
+              <Select value={brandLinkPlatform} onValueChange={setBrandLinkPlatform}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select platform..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="facebook">Facebook</SelectItem>
+                  <SelectItem value="instagram">Instagram</SelectItem>
+                  <SelectItem value="twitter">Twitter / X</SelectItem>
+                  <SelectItem value="youtube">YouTube</SelectItem>
+                  <SelectItem value="linkedin">LinkedIn</SelectItem>
+                  <SelectItem value="microsite">Microsite</SelectItem>
+                  <SelectItem value="blog">Blog</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="brand-link-url">URL *</Label>
+              <Input
+                id="brand-link-url"
+                value={brandLinkUrl}
+                onChange={(e) => setBrandLinkUrl(e.target.value)}
+                placeholder="https://www.facebook.com/yourbrand"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="brand-link-label">Label (optional)</Label>
+              <Input
+                id="brand-link-label"
+                value={brandLinkLabel}
+                onChange={(e) => setBrandLinkLabel(e.target.value)}
+                placeholder="e.g., Main Facebook Page, Product Blog..."
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddBrandLinkDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddBrandLink} disabled={isSavingBrandLink || !brandLinkUrl.trim() || !brandLinkPlatform}>
+              {isSavingBrandLink ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Link
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Content Viewer Dialog */}
+      <Dialog open={showContentViewer} onOpenChange={setShowContentViewer}>
+        <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader className="min-w-0">
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5 flex-shrink-0" />
+              Extracted Content
+            </DialogTitle>
+            <DialogDescription className="truncate min-w-0">
+              {contentViewerTitle}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 min-w-0 flex-1 overflow-hidden">
+            {isLoadingContent ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                <span>Loading content...</span>
+              </div>
+            ) : (
+              <div className="border rounded-lg bg-muted/20 p-4 max-h-[55vh] overflow-y-auto overflow-x-hidden">
+                <pre className="whitespace-pre-wrap break-words text-sm font-mono leading-relaxed max-w-full">
+                  {contentViewerText || 'No content available.'}
+                </pre>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowContentViewer(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

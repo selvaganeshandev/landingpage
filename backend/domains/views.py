@@ -9,13 +9,14 @@ from django.db import IntegrityError
 from django.db.utils import ProgrammingError
 from django.conf import settings
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from .models import Domain, DomainAccess, InternalLinkMap, ReferenceDocument
+from .models import Domain, DomainAccess, InternalLinkMap, ReferenceDocument, BrandLink, BrandLinkChunk
 from authentication.models import UserPermission
 from .serializers import (
     DomainMinimalSerializer, DomainSerializer, DomainDetailSerializer,
     DomainAccessSerializer, DomainAccessCreateSerializer,
     InternalLinkMapSerializer, InternalLinkMapCreateSerializer,
-    ReferenceDocumentSerializer
+    ReferenceDocumentSerializer,
+    BrandLinkSerializer
 )
 from authentication.serializers import AccountSerializer
 from authentication.models import Account
@@ -3376,4 +3377,761 @@ def reference_document_extraction_status(request, domain_id, doc_id):
         'extraction_error': doc.extraction_error,
         'extracted_chars': extracted_chars,
         'chunk_count': chunk_count,
+    })
+
+
+# ===== Brand Links =====
+
+def _create_brand_link_chunks(brand_link):
+    """
+    Split a BrandLink's extracted_text into chunks and store them.
+    Same chunking strategy as reference documents.
+    """
+    brand_link.chunks.all().delete()
+
+    text = brand_link.extracted_text or ''
+    if not text.strip():
+        return
+
+    LARGE_DOC_THRESHOLD = 100000
+    if len(text) > LARGE_DOC_THRESHOLD:
+        chunk_size = 10000
+        overlap = 400
+    else:
+        chunk_size = BrandLinkChunk.CHUNK_SIZE
+        overlap = BrandLinkChunk.CHUNK_OVERLAP
+
+    chunks = []
+    start = 0
+    chunk_index = 0
+
+    while start < len(text):
+        end = start + chunk_size
+        chunk_text = text[start:end]
+
+        if chunk_text.strip():
+            chunks.append(BrandLinkChunk(
+                brand_link=brand_link,
+                chunk_index=chunk_index,
+                chunk_text=chunk_text
+            ))
+            chunk_index += 1
+
+        start += chunk_size - overlap
+
+    if chunks:
+        BATCH_SIZE = 100
+        for i in range(0, len(chunks), BATCH_SIZE):
+            BrandLinkChunk.objects.bulk_create(chunks[i:i + BATCH_SIZE])
+
+    logger.info(
+        f"[CHUNKING] BrandLink '{brand_link.url}' (ID: {brand_link.id}): "
+        f"{len(text)} chars -> {len(chunks)} chunks "
+        f"(chunk_size={chunk_size}, overlap={overlap})"
+    )
+
+
+# Real browser User-Agent — sites block "bot" UAs
+_BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
+# Facebook's external scraper UA — whitelisted by Facebook, Instagram,
+# LinkedIn and most major sites for OG metadata extraction.
+_FB_EXTERNAL_UA = 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)'
+
+# Slackbot UA — whitelisted by Medium, Substack, and many publications
+# that block other scrapers but allow link unfurling.
+_SLACKBOT_UA = 'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)'
+
+# Twitterbot UA — also whitelisted by many sites for OG metadata
+_TWITTERBOT_UA = 'Twitterbot/1.0'
+
+# Minimum content length below which we consider extraction to have produced
+# insufficient content and trigger a fallback strategy.
+_MIN_USEFUL_CONTENT = 200
+
+
+def _build_browser_headers(ua=None):
+    """Real browser headers that minimize bot blocking."""
+    return {
+        'User-Agent': ua or _BROWSER_UA,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+    }
+
+
+def _extract_meta_from_html(html):
+    """
+    Extract Open Graph and standard meta tags from HTML.
+    Returns a dict with title, description, site_name, keywords, etc.
+    Works for almost every website since OG tags are universal for sharing.
+    """
+    from bs4 import BeautifulSoup
+
+    info = {}
+    try:
+        soup = BeautifulSoup(html, 'html.parser')
+
+        if soup.title and soup.title.string:
+            info['title'] = soup.title.string.strip()
+
+        for meta in soup.find_all('meta'):
+            prop = meta.get('property') or meta.get('name')
+            content = meta.get('content')
+            if not prop or not content:
+                continue
+            prop = prop.lower().strip()
+            content = content.strip()
+
+            if prop == 'description':
+                info.setdefault('description', content)
+            elif prop == 'keywords':
+                info['keywords'] = content
+            elif prop == 'author':
+                info['author'] = content
+            elif prop == 'og:title':
+                info['og_title'] = content
+            elif prop == 'og:description':
+                info['og_description'] = content
+            elif prop == 'og:site_name':
+                info['site_name'] = content
+            elif prop == 'og:type':
+                info['og_type'] = content
+            elif prop == 'og:url':
+                info['og_url'] = content
+            elif prop == 'twitter:title':
+                info['twitter_title'] = content
+            elif prop == 'twitter:description':
+                info['twitter_description'] = content
+            elif prop == 'twitter:creator':
+                info['twitter_creator'] = content
+
+        # Also pull JSON-LD structured data (YouTube, blogs, etc. expose it here)
+        jsonld_texts = []
+        for script in soup.find_all('script', {'type': 'application/ld+json'}):
+            try:
+                import json as _json
+                data = _json.loads(script.string or '{}')
+                items = data if isinstance(data, list) else [data]
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    for key in ('name', 'headline', 'description', 'about', 'articleBody'):
+                        val = item.get(key)
+                        if isinstance(val, str) and val.strip():
+                            jsonld_texts.append(f"{key}: {val.strip()}")
+            except Exception:
+                continue
+        if jsonld_texts:
+            info['jsonld'] = '\n'.join(jsonld_texts)
+
+    except Exception as e:
+        logger.warning(f"[BRAND-LINK-CRAWL] Meta extraction failed: {e}")
+
+    return info
+
+
+def _format_meta_section(meta):
+    """Format meta info dict into a readable text section."""
+    lines = []
+    if meta.get('title'):
+        lines.append(f"Title: {meta['title']}")
+    if meta.get('og_title') and meta.get('og_title') != meta.get('title'):
+        lines.append(f"OG Title: {meta['og_title']}")
+    if meta.get('site_name'):
+        lines.append(f"Site: {meta['site_name']}")
+    if meta.get('author'):
+        lines.append(f"Author: {meta['author']}")
+    if meta.get('twitter_creator'):
+        lines.append(f"Twitter: {meta['twitter_creator']}")
+
+    # Pick the longest description — Instagram, Facebook etc. sometimes
+    # have a richer bio in the standard meta description than in og:description.
+    descriptions = [
+        meta.get('og_description', ''),
+        meta.get('description', ''),
+        meta.get('twitter_description', ''),
+    ]
+    description = max(descriptions, key=len) if any(descriptions) else ''
+    if description:
+        lines.append(f"Description: {description}")
+
+    if meta.get('keywords'):
+        lines.append(f"Keywords: {meta['keywords']}")
+
+    if meta.get('jsonld'):
+        lines.append(f"\nStructured Data:\n{meta['jsonld']}")
+
+    return '\n'.join(lines)
+
+
+def _extract_main_text_from_html(html):
+    """
+    Extract main content text from HTML using trafilatura with BeautifulSoup fallback.
+    """
+    main_text = None
+
+    # Strategy 1: trafilatura (better at finding main article/content)
+    try:
+        import trafilatura
+        main_text = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=True,
+            favor_recall=True,
+        )
+    except Exception as e:
+        logger.warning(f"[BRAND-LINK-CRAWL] trafilatura extraction failed: {e}")
+
+    # Strategy 2: BeautifulSoup fallback
+    if not main_text or len(main_text.strip()) < 50:
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
+            for element in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'form', 'iframe', 'noscript']):
+                element.decompose()
+            main_text = soup.get_text(separator='\n', strip=True)
+            import re
+            main_text = re.sub(r'\n{3,}', '\n\n', main_text).strip()
+        except Exception as e:
+            logger.warning(f"[BRAND-LINK-CRAWL] BeautifulSoup fallback failed: {e}")
+
+    return main_text or ''
+
+
+def _fetch_with_browser(url, timeout=20, ua=None):
+    """Direct fetch with browser headers. Returns HTML or None on failure."""
+    import requests
+    try:
+        resp = requests.get(url, headers=_build_browser_headers(ua=ua), timeout=timeout, allow_redirects=True)
+        resp.raise_for_status()
+        return resp.text
+    except Exception as e:
+        logger.info(f"[BRAND-LINK-CRAWL] Direct fetch failed for {url}: {e}")
+        return None
+
+
+def _fetch_with_scrapingdog(url, dynamic=True):
+    """
+    Fallback fetch using ScrapingDog API for sites that block direct scrapers.
+    Required for Twitter/X, Instagram, Facebook which use heavy JS or block bots.
+    Returns HTML or None on failure.
+    """
+    try:
+        from misinformation.services.crawler import WebCrawler
+        crawler = WebCrawler(use_dynamic=dynamic)
+        if not crawler.api_key:
+            logger.warning("[BRAND-LINK-CRAWL] SCRAPINGDOG_API_KEY not configured — cannot use fallback")
+            return None
+        html, status_code, error = crawler.crawl(url, dynamic=dynamic)
+        if html:
+            logger.info(f"[BRAND-LINK-CRAWL] ScrapingDog succeeded for {url} ({len(html)} chars)")
+            return html
+        logger.info(f"[BRAND-LINK-CRAWL] ScrapingDog failed for {url}: status={status_code}, error={error}")
+    except Exception as e:
+        logger.warning(f"[BRAND-LINK-CRAWL] ScrapingDog fallback error for {url}: {e}")
+    return None
+
+
+def _extract_youtube_content(url):
+    """
+    YouTube content extraction:
+    1. Use public oEmbed API (no auth, always works) — title, channel
+    2. Fetch the watch page for description, keywords, and metadata
+    """
+    import requests
+    parts = []
+
+    # 1. oEmbed API — works without authentication
+    try:
+        oembed_url = f'https://www.youtube.com/oembed?url={url}&format=json'
+        resp = requests.get(oembed_url, headers=_build_browser_headers(), timeout=15)
+        if resp.ok:
+            data = resp.json()
+            if data.get('title'):
+                parts.append(f"Video Title: {data['title']}")
+            if data.get('author_name'):
+                parts.append(f"Channel: {data['author_name']}")
+            if data.get('author_url'):
+                parts.append(f"Channel URL: {data['author_url']}")
+            if data.get('provider_name'):
+                parts.append(f"Provider: {data['provider_name']}")
+    except Exception as e:
+        logger.warning(f"[BRAND-LINK-CRAWL] YouTube oEmbed failed: {e}")
+
+    # 2. Fetch the watch page for full metadata (description, keywords, etc.)
+    html = _fetch_with_browser(url, timeout=20)
+    if html:
+        meta = _extract_meta_from_html(html)
+        meta_text = _format_meta_section(meta)
+        if meta_text:
+            parts.append("")
+            parts.append("--- Page Metadata ---")
+            parts.append(meta_text)
+
+    if not parts:
+        # Last-resort fallback via ScrapingDog
+        html = _fetch_with_scrapingdog(url, dynamic=True)
+        if html:
+            meta = _extract_meta_from_html(html)
+            meta_text = _format_meta_section(meta)
+            if meta_text:
+                parts.append(meta_text)
+
+    return '\n'.join(parts).strip()
+
+
+def _extract_twitter_content(url):
+    """
+    Twitter/X content extraction.
+    Strategy:
+    1. Use community fxtwitter API for profiles (free, no auth) — returns JSON
+       with name, description, location, follower counts, etc.
+    2. For tweet URLs, fxtwitter also returns tweet text and metadata.
+    3. Fall back to direct browser fetch + OG tags if fxtwitter fails.
+    """
+    import requests
+    import re
+
+    parts = []
+
+    # Parse username and optional tweet ID from URL
+    # Supports both twitter.com and x.com
+    username = None
+    tweet_id = None
+    m = re.match(r'https?://(?:www\.)?(?:twitter|x)\.com/([^/?#]+)(?:/status/(\d+))?', url)
+    if m:
+        username = m.group(1)
+        tweet_id = m.group(2)
+
+    # 1. Try fxtwitter API
+    if username:
+        try:
+            api_url = f'https://api.fxtwitter.com/{username}'
+            if tweet_id:
+                api_url = f'https://api.fxtwitter.com/{username}/status/{tweet_id}'
+            r = requests.get(api_url, headers={'User-Agent': _BROWSER_UA}, timeout=15)
+            if r.ok:
+                data = r.json()
+                if tweet_id and data.get('tweet'):
+                    tw = data['tweet']
+                    if tw.get('author', {}).get('name'):
+                        parts.append(f"Author: {tw['author']['name']} (@{tw['author'].get('screen_name', username)})")
+                    if tw.get('author', {}).get('description'):
+                        parts.append(f"Author Bio: {tw['author']['description']}")
+                    if tw.get('text'):
+                        parts.append(f"\nTweet: {tw['text']}")
+                    if tw.get('created_at'):
+                        parts.append(f"Posted: {tw['created_at']}")
+                    if tw.get('likes') is not None:
+                        parts.append(f"Likes: {tw['likes']}, Retweets: {tw.get('retweets', 0)}, Replies: {tw.get('replies', 0)}")
+                elif data.get('user'):
+                    user = data['user']
+                    if user.get('name'):
+                        parts.append(f"Name: {user['name']}")
+                    if user.get('screen_name'):
+                        parts.append(f"Handle: @{user['screen_name']}")
+                    if user.get('description'):
+                        parts.append(f"Bio: {user['description']}")
+                    if user.get('location'):
+                        parts.append(f"Location: {user['location']}")
+                    if user.get('followers') is not None:
+                        parts.append(f"Followers: {user['followers']}, Following: {user.get('following', 0)}, Tweets: {user.get('tweets', 0)}")
+                    if user.get('url'):
+                        parts.append(f"Profile URL: {user['url']}")
+        except Exception as e:
+            logger.warning(f"[BRAND-LINK-CRAWL] fxtwitter API failed for {url}: {e}")
+
+    # 2. Fall back to vxtwitter if fxtwitter returned nothing
+    if not parts and username:
+        try:
+            api_url = f'https://api.vxtwitter.com/{username}'
+            r = requests.get(api_url, headers={'User-Agent': _BROWSER_UA}, timeout=15)
+            if r.ok:
+                data = r.json()
+                if data.get('name'):
+                    parts.append(f"Name: {data['name']}")
+                if data.get('screen_name'):
+                    parts.append(f"Handle: @{data['screen_name']}")
+                if data.get('description'):
+                    parts.append(f"Bio: {data['description']}")
+                if data.get('location'):
+                    parts.append(f"Location: {data['location']}")
+                if data.get('followers_count') is not None:
+                    parts.append(f"Followers: {data['followers_count']}, Following: {data.get('following_count', 0)}")
+                if data.get('tweet_count') is not None:
+                    parts.append(f"Tweets: {data['tweet_count']}")
+        except Exception as e:
+            logger.warning(f"[BRAND-LINK-CRAWL] vxtwitter API failed for {url}: {e}")
+
+    # 3. Final fallback: direct fetch for whatever OG tags we can get
+    if not parts:
+        html = _fetch_with_browser(url, timeout=15)
+        if html:
+            meta = _extract_meta_from_html(html)
+            meta_text = _format_meta_section(meta)
+            if meta_text:
+                parts.append(meta_text)
+
+    return '\n'.join(parts).strip()
+
+
+def _extract_meta_social_content(url):
+    """
+    Extract content from Facebook, Instagram, and LinkedIn.
+    Strategy: Use facebookexternalhit/1.1 user agent — these sites whitelist
+    Facebook's crawler bot for OG metadata sharing previews.
+    """
+    parts = []
+
+    # 1. Fetch with facebookexternalhit UA (works for FB, IG, LinkedIn)
+    html = _fetch_with_browser(url, timeout=20, ua=_FB_EXTERNAL_UA)
+
+    # 2. Fall back to standard browser UA if FB UA failed
+    if not html:
+        html = _fetch_with_browser(url, timeout=20)
+
+    if html:
+        meta = _extract_meta_from_html(html)
+        meta_text = _format_meta_section(meta)
+        if meta_text:
+            parts.append(meta_text)
+
+        # Also try to extract any visible page text
+        main_text = _extract_main_text_from_html(html)
+        if main_text and len(main_text.strip()) >= 50:
+            # Trim very long pages — social pages often have lots of boilerplate
+            if len(main_text) > 8000:
+                main_text = main_text[:8000] + '\n...[content truncated]...'
+            parts.append("")
+            parts.append("--- Page Content ---")
+            parts.append(main_text)
+
+    return '\n'.join(parts).strip()
+
+
+def _extract_general_content(url):
+    """
+    Extract content from general websites (blogs, microsites, other).
+    Tries multiple user agents in order — sites like Medium, Substack and
+    many publications block standard scrapers but whitelist link-unfurling
+    bots like Slackbot, Twitterbot, and facebookexternalhit.
+    """
+    parts = []
+
+    # Try a series of UAs that are commonly whitelisted
+    ua_strategies = [
+        (None, 'browser'),               # Default Chrome UA
+        (_SLACKBOT_UA, 'slackbot'),      # Works for Medium, Substack
+        (_FB_EXTERNAL_UA, 'fb-external'),# Works for Facebook, IG, many publishers
+        (_TWITTERBOT_UA, 'twitterbot'),  # Works for many news sites
+    ]
+
+    html = None
+    for ua, label in ua_strategies:
+        html = _fetch_with_browser(url, timeout=20, ua=ua)
+        if html and len(html) > 1000:
+            logger.info(f"[BRAND-LINK-CRAWL] Got content via {label} UA for {url}")
+            break
+
+    # Fallback to ScrapingDog if all UAs failed
+    if not html:
+        html = _fetch_with_scrapingdog(url, dynamic=False)
+
+    # Try with dynamic rendering as last resort
+    if not html:
+        html = _fetch_with_scrapingdog(url, dynamic=True)
+
+    if not html:
+        return ''
+
+    # Extract meta info first
+    meta = _extract_meta_from_html(html)
+    meta_text = _format_meta_section(meta)
+    if meta_text:
+        parts.append(meta_text)
+
+    # Then extract main page content
+    main_text = _extract_main_text_from_html(html)
+    if main_text:
+        parts.append("")
+        parts.append("--- Page Content ---")
+        parts.append(main_text)
+
+    return '\n'.join(parts).strip()
+
+
+def _extract_brand_link_content(url, platform):
+    """
+    Dispatch to platform-specific extractor for best results.
+    Returns the extracted text or empty string.
+    """
+    platform = (platform or '').lower()
+
+    if platform == 'youtube':
+        return _extract_youtube_content(url)
+    if platform == 'twitter':
+        return _extract_twitter_content(url)
+    if platform in ('facebook', 'instagram', 'linkedin'):
+        return _extract_meta_social_content(url)
+    # blog, microsite, other
+    return _extract_general_content(url)
+
+
+def _async_crawl_and_chunk_brand_link(brand_link_id):
+    """
+    Background thread function to crawl a brand link URL, extract text,
+    and create chunks. Uses a platform-aware extractor with multiple
+    fallback strategies (direct fetch, ScrapingDog, oEmbed for YouTube).
+    """
+    import django
+    django.setup()
+    from domains.models import BrandLink as BrandLinkModel
+
+    try:
+        link = BrandLinkModel.objects.get(id=brand_link_id)
+        logger.info(
+            f"[BRAND-LINK-CRAWL] Starting crawl for '{link.url}' "
+            f"(ID: {link.id}, platform: {link.platform})"
+        )
+
+        link.extraction_status = 'processing'
+        link.save(update_fields=['extraction_status'])
+
+        try:
+            extracted_text = _extract_brand_link_content(link.url, link.platform)
+        except Exception as e:
+            logger.error(f"[BRAND-LINK-CRAWL] Extractor crashed for '{link.url}': {e}")
+            link.extraction_status = 'failed'
+            link.extraction_error = f"Extraction error: {str(e)[:300]}"
+            link.save(update_fields=['extraction_status', 'extraction_error'])
+            return
+
+        if not extracted_text or not extracted_text.strip():
+            link.extraction_status = 'failed'
+            link.extraction_error = (
+                'Could not extract any content from this URL. The site may be '
+                'blocking automated access or require login. Try adding the '
+                'content manually as a Text Note in Reference Documents.'
+            )
+            link.save(update_fields=['extraction_status', 'extraction_error'])
+            return
+
+        link.extracted_text = extracted_text
+        link.extraction_status = 'completed'
+        link.extraction_error = ''
+        link.save(update_fields=['extracted_text', 'extraction_status', 'extraction_error'])
+
+        _create_brand_link_chunks(link)
+
+        logger.info(
+            f"[BRAND-LINK-CRAWL] Completed crawl for '{link.url}' "
+            f"(ID: {link.id}): {len(extracted_text)} chars extracted"
+        )
+
+    except BrandLinkModel.DoesNotExist:
+        logger.error(f"[BRAND-LINK-CRAWL] BrandLink {brand_link_id} not found")
+    except Exception as e:
+        logger.error(f"[BRAND-LINK-CRAWL] Unexpected error for brand link {brand_link_id}: {e}")
+        try:
+            link = BrandLinkModel.objects.get(id=brand_link_id)
+            link.extraction_status = 'failed'
+            link.extraction_error = str(e)[:500]
+            link.save(update_fields=['extraction_status', 'extraction_error'])
+        except Exception:
+            pass
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def brand_link_list(request, domain_id):
+    """
+    GET: List all brand links for a domain
+    POST: Add a new brand link
+    """
+    try:
+        domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': 'Domain not found or not in your organization'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if request.method == 'GET':
+        links = BrandLink.objects.filter(domain=domain)
+        serializer = BrandLinkSerializer(links, many=True, context={'request': request})
+        return Response({
+            'brand_links': serializer.data,
+            'total_links': links.count(),
+            'max_links': BrandLink.MAX_LINKS_PER_DOMAIN,
+        })
+
+    # POST - Add new brand link
+    current_count = BrandLink.objects.filter(domain=domain).count()
+    if current_count >= BrandLink.MAX_LINKS_PER_DOMAIN:
+        return Response(
+            {'error': f'Maximum {BrandLink.MAX_LINKS_PER_DOMAIN} brand links per domain'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    platform = request.data.get('platform', '').strip()
+    url = request.data.get('url', '').strip()
+    label = request.data.get('label', '').strip()
+
+    if not platform:
+        return Response(
+            {'error': 'Platform is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    valid_platforms = [c[0] for c in BrandLink.PLATFORM_CHOICES]
+    if platform not in valid_platforms:
+        return Response(
+            {'error': f'Invalid platform. Choose from: {", ".join(valid_platforms)}'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if not url:
+        return Response(
+            {'error': 'URL is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if not url.startswith(('http://', 'https://')):
+        return Response(
+            {'error': 'URL must start with http:// or https://'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Check for duplicate URL within domain
+    if BrandLink.objects.filter(domain=domain, url=url).exists():
+        return Response(
+            {'error': 'This URL is already added for this domain'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    link = BrandLink.objects.create(
+        domain=domain,
+        platform=platform,
+        url=url,
+        label=label,
+        extraction_status='pending',
+        added_by=request.user,
+    )
+
+    # Start background crawl
+    import threading
+    thread = threading.Thread(
+        target=_async_crawl_and_chunk_brand_link,
+        args=(link.id,),
+        daemon=True
+    )
+    thread.start()
+
+    serializer = BrandLinkSerializer(link, context={'request': request})
+    return Response({
+        'message': 'Brand link added successfully. Content extraction is processing in the background.',
+        'brand_link': serializer.data
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'DELETE', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def brand_link_detail(request, domain_id, link_id):
+    """
+    GET: Get single brand link details (including extracted content)
+    DELETE: Remove a brand link
+    PATCH: Update a brand link
+    """
+    try:
+        domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
+        link = BrandLink.objects.get(id=link_id, domain=domain)
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': 'Domain not found or not in your organization'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except BrandLink.DoesNotExist:
+        return Response(
+            {'error': 'Brand link not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if request.method == 'GET':
+        serializer = BrandLinkSerializer(link, context={'request': request})
+        return Response({'brand_link': serializer.data})
+
+    if request.method == 'DELETE':
+        link.delete()
+        return Response({'message': 'Brand link deleted successfully'})
+
+    # PATCH - Update brand link
+    if request.method == 'PATCH':
+        label = request.data.get('label')
+        if label is not None:
+            link.label = label.strip()
+
+        platform = request.data.get('platform')
+        if platform is not None:
+            valid_platforms = [c[0] for c in BrandLink.PLATFORM_CHOICES]
+            if platform not in valid_platforms:
+                return Response(
+                    {'error': f'Invalid platform. Choose from: {", ".join(valid_platforms)}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            link.platform = platform
+
+        link.save()
+        serializer = BrandLinkSerializer(link, context={'request': request})
+        return Response({
+            'message': 'Brand link updated successfully',
+            'brand_link': serializer.data
+        })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def brand_link_recrawl(request, domain_id, link_id):
+    """
+    POST: Re-crawl a brand link to refresh extracted content
+    """
+    try:
+        domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
+        link = BrandLink.objects.get(id=link_id, domain=domain)
+    except Domain.DoesNotExist:
+        return Response(
+            {'error': 'Domain not found or not in your organization'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except BrandLink.DoesNotExist:
+        return Response(
+            {'error': 'Brand link not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if link.extraction_status == 'processing':
+        return Response(
+            {'error': 'Extraction is already in progress'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    link.extraction_status = 'pending'
+    link.extraction_error = ''
+    link.save(update_fields=['extraction_status', 'extraction_error'])
+
+    import threading
+    thread = threading.Thread(
+        target=_async_crawl_and_chunk_brand_link,
+        args=(link.id,),
+        daemon=True
+    )
+    thread.start()
+
+    serializer = BrandLinkSerializer(link, context={'request': request})
+    return Response({
+        'message': 'Re-crawling brand link in the background.',
+        'brand_link': serializer.data
     })

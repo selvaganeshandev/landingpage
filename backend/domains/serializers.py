@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Domain, DomainAccess, InternalLinkMap, ReferenceDocument
+from .models import Domain, DomainAccess, InternalLinkMap, ReferenceDocument, BrandLink
 
 
 class DomainMinimalSerializer(serializers.ModelSerializer):
@@ -163,3 +163,29 @@ class ReferenceDocumentSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.file.url)
             return obj.file.url
         return None
+
+
+class BrandLinkSerializer(serializers.ModelSerializer):
+    """Serializer for BrandLink model"""
+    added_by_email = serializers.CharField(source='added_by.email', read_only=True, default='')
+    added_by_name = serializers.SerializerMethodField()
+    platform_display = serializers.CharField(source='get_platform_display', read_only=True)
+    chunk_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BrandLink
+        fields = [
+            'id', 'domain', 'platform', 'platform_display', 'url', 'label',
+            'extracted_text', 'extraction_status', 'extraction_error',
+            'added_by', 'added_by_email', 'added_by_name',
+            'chunk_count', 'created_at', 'modified_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'modified_at', 'added_by', 'extraction_status', 'extraction_error']
+
+    def get_added_by_name(self, obj):
+        if obj.added_by:
+            return f"{obj.added_by.first_name} {obj.added_by.last_name}".strip() or obj.added_by.email
+        return ''
+
+    def get_chunk_count(self, obj):
+        return obj.chunks.count()
