@@ -312,6 +312,44 @@ class WidgetDataFetcher:
         elif widget_id == 'platform-consistency-score-metric':
             return self._get_platform_consistency_score()
 
+        # ==================== GSC ORGANIC WIDGETS ====================
+        elif widget_id == 'gsc-overview-table':
+            return self._get_gsc_overview_table()
+        elif widget_id == 'gsc-clicks-metric':
+            return self._get_gsc_clicks()
+        elif widget_id == 'gsc-impressions-metric':
+            return self._get_gsc_impressions()
+        elif widget_id == 'gsc-ctr-metric':
+            return self._get_gsc_ctr()
+        elif widget_id == 'gsc-avg-position-metric':
+            return self._get_gsc_avg_position()
+        elif widget_id == 'gsc-top-queries-table':
+            return self._get_gsc_top_queries()
+        elif widget_id == 'gsc-top-pages-table':
+            return self._get_gsc_top_pages()
+
+        # ==================== GA ORGANIC WIDGETS ====================
+        elif widget_id == 'ga-overview-table':
+            return self._get_ga_overview_table()
+        elif widget_id == 'ga-sessions-metric':
+            return self._get_ga_sessions()
+        elif widget_id == 'ga-users-metric':
+            return self._get_ga_users()
+        elif widget_id == 'ga-pageviews-metric':
+            return self._get_ga_pageviews()
+        elif widget_id == 'ga-conversions-metric':
+            return self._get_ga_conversions()
+        elif widget_id == 'ga-revenue-metric':
+            return self._get_ga_revenue()
+        elif widget_id == 'ga-bounce-rate-metric':
+            return self._get_ga_bounce_rate()
+        elif widget_id == 'ga-avg-session-duration-metric':
+            return self._get_ga_avg_session_duration()
+        elif widget_id == 'ga-top-landing-pages-table':
+            return self._get_ga_top_landing_pages()
+        elif widget_id == 'ga-platform-breakdown-chart':
+            return self._get_ga_platform_breakdown()
+
         return None  # Unknown widget
 
     # ==================== PROMPTS WIDGETS ====================
@@ -3275,4 +3313,376 @@ class WidgetDataFetcher:
             'label': 'Consistency Score',
             'format': 'decimal',
             'subtitle': 'Out of 100'
+        }
+
+    # ==================== GSC ORGANIC WIDGETS ====================
+
+    def _fetch_gsc_insights_pair(self):
+        """Return (current_insight, prev_insight) for the configured date range."""
+        from integrations.models import GSCTrafficInsight
+        current = (
+            GSCTrafficInsight.objects
+            .filter(domain=self.domain, track_status='COMP', end_date__lte=self.end_date)
+            .order_by('-end_date', '-created_at')
+            .first()
+        )
+        prev = (
+            GSCTrafficInsight.objects
+            .filter(domain=self.domain, track_status='COMP', end_date__lte=self.prev_end_date)
+            .order_by('-end_date', '-created_at')
+            .first()
+        )
+        return current, prev
+
+    def _prorate_gsc(self, insight):
+        """Apply prorate to a GSCTrafficInsight and return a dict."""
+        from integrations.utils.prorate import apply_prorate_gsc
+        raw = {
+            'total_clicks': insight.total_clicks,
+            'total_impressions': insight.total_impressions,
+            'avg_ctr': float(insight.avg_ctr),
+            'avg_position': float(insight.avg_position),
+        }
+        return apply_prorate_gsc(raw, insight.start_date, insight.end_date)
+
+    def _growth(self, current_val, prev_val):
+        """Return percentage growth, None if prev is zero."""
+        if prev_val and prev_val != 0:
+            return round((current_val - prev_val) / prev_val * 100, 1)
+        return None
+
+    def _get_gsc_overview_table(self):
+        """
+        Table widget matching the 'checks / GSC Overview' layout:
+        Metric | Previous period | Current period
+        """
+        current, prev = self._fetch_gsc_insights_pair()
+        if not current:
+            return {'type': 'table', 'columns': ['Metric', 'Previous Period', 'Current Period'], 'rows': []}
+
+        cur_data = self._prorate_gsc(current)
+        prev_data = self._prorate_gsc(prev) if prev else None
+
+        def fmt_period(insight):
+            return f"{insight.start_date.strftime('%d %b')}–{insight.end_date.strftime('%d %b')}"
+
+        prev_label = fmt_period(prev) if prev else 'Previous Period'
+        cur_label = fmt_period(current)
+
+        def prev_val(key):
+            return prev_data[key] if prev_data else 'N/A'
+
+        rows = [
+            {'Metric': 'Clicks',       prev_label: prev_val('total_clicks'),      cur_label: cur_data['total_clicks']},
+            {'Metric': 'Impressions',  prev_label: prev_val('total_impressions'),  cur_label: cur_data['total_impressions']},
+            {'Metric': 'CTR',          prev_label: f"{prev_val('avg_ctr')}%" if prev_data else 'N/A',   cur_label: f"{cur_data['avg_ctr']}%"},
+            {'Metric': 'Avg Position', prev_label: prev_val('avg_position') if prev_data else 'N/A',    cur_label: cur_data['avg_position']},
+        ]
+
+        return {
+            'type': 'table',
+            'columns': ['Metric', prev_label, cur_label],
+            'rows': rows,
+            'is_prorated': cur_data.get('is_prorated', False),
+            'days_elapsed': cur_data.get('days_elapsed'),
+            'total_days': cur_data.get('total_days'),
+        }
+
+    def _get_gsc_clicks(self):
+        current, prev = self._fetch_gsc_insights_pair()
+        if not current:
+            return {'type': 'metric', 'value': 0, 'label': 'Organic Clicks', 'format': 'number'}
+        cur = self._prorate_gsc(current)
+        prv = self._prorate_gsc(prev) if prev else None
+        growth = self._growth(cur['total_clicks'], prv['total_clicks'] if prv else None)
+        result = {
+            'type': 'metric',
+            'value': cur['total_clicks'],
+            'label': 'Organic Clicks',
+            'format': 'number',
+            'is_prorated': cur.get('is_prorated', False),
+        }
+        if growth is not None:
+            result['growth'] = growth
+            result['trend'] = 'up' if growth > 0 else 'down' if growth < 0 else 'neutral'
+        return result
+
+    def _get_gsc_impressions(self):
+        current, prev = self._fetch_gsc_insights_pair()
+        if not current:
+            return {'type': 'metric', 'value': 0, 'label': 'Impressions', 'format': 'number'}
+        cur = self._prorate_gsc(current)
+        prv = self._prorate_gsc(prev) if prev else None
+        growth = self._growth(cur['total_impressions'], prv['total_impressions'] if prv else None)
+        result = {
+            'type': 'metric',
+            'value': cur['total_impressions'],
+            'label': 'Impressions',
+            'format': 'number',
+            'is_prorated': cur.get('is_prorated', False),
+        }
+        if growth is not None:
+            result['growth'] = growth
+            result['trend'] = 'up' if growth > 0 else 'down' if growth < 0 else 'neutral'
+        return result
+
+    def _get_gsc_ctr(self):
+        current, _ = self._fetch_gsc_insights_pair()
+        if not current:
+            return {'type': 'metric', 'value': 0, 'label': 'CTR', 'format': 'percentage'}
+        return {
+            'type': 'metric',
+            'value': float(current.avg_ctr),
+            'label': 'CTR',
+            'format': 'percentage',
+        }
+
+    def _get_gsc_avg_position(self):
+        current, _ = self._fetch_gsc_insights_pair()
+        if not current:
+            return {'type': 'metric', 'value': 0, 'label': 'Avg Position', 'format': 'decimal'}
+        return {
+            'type': 'metric',
+            'value': float(current.avg_position),
+            'label': 'Avg Position',
+            'format': 'decimal',
+            'subtitle': 'Lower is better',
+        }
+
+    def _get_gsc_top_queries(self):
+        current, _ = self._fetch_gsc_insights_pair()
+        if not current or not current.top_queries:
+            return {'type': 'table', 'columns': ['Query', 'Clicks', 'Impressions', 'CTR', 'Position'], 'rows': []}
+        rows = [
+            {
+                'Query': q.get('query', ''),
+                'Clicks': q.get('clicks', 0),
+                'Impressions': q.get('impressions', 0),
+                'CTR': q.get('ctr', ''),
+                'Position': q.get('position', ''),
+            }
+            for q in (current.top_queries or [])
+        ]
+        return {
+            'type': 'table',
+            'columns': ['Query', 'Clicks', 'Impressions', 'CTR', 'Position'],
+            'rows': rows,
+        }
+
+    def _get_gsc_top_pages(self):
+        current, _ = self._fetch_gsc_insights_pair()
+        if not current or not current.top_pages:
+            return {'type': 'table', 'columns': ['Page', 'Clicks', 'Impressions', 'CTR', 'Position'], 'rows': []}
+        rows = [
+            {
+                'Page': p.get('page', ''),
+                'Clicks': p.get('clicks', 0),
+                'Impressions': p.get('impressions', 0),
+                'CTR': p.get('ctr', ''),
+                'Position': p.get('position', ''),
+            }
+            for p in (current.top_pages or [])
+        ]
+        return {
+            'type': 'table',
+            'columns': ['Page', 'Clicks', 'Impressions', 'CTR', 'Position'],
+            'rows': rows,
+        }
+
+    # ==================== GA ORGANIC WIDGETS ====================
+
+    def _fetch_ga_insights_pair(self):
+        """Return (current_insight, prev_insight) for the configured date range."""
+        from integrations.models import GATrafficInsight
+        current = (
+            GATrafficInsight.objects
+            .filter(domain=self.domain, track_status='COMP', end_date__lte=self.end_date)
+            .order_by('-end_date', '-created_at')
+            .first()
+        )
+        prev = (
+            GATrafficInsight.objects
+            .filter(domain=self.domain, track_status='COMP', end_date__lte=self.prev_end_date)
+            .order_by('-end_date', '-created_at')
+            .first()
+        )
+        return current, prev
+
+    def _prorate_ga(self, insight):
+        """Apply prorate to a GATrafficInsight and return a dict."""
+        from integrations.utils.prorate import apply_prorate_ga
+        raw = {
+            'total_sessions': insight.total_sessions,
+            'total_users': insight.total_users,
+            'total_page_views': insight.total_page_views,
+            'total_conversions': insight.total_conversions,
+            'total_revenue': float(insight.total_revenue),
+            'bounce_rate': float(insight.bounce_rate),
+            'avg_session_duration': float(insight.avg_session_duration),
+        }
+        return apply_prorate_ga(raw, insight.start_date, insight.end_date)
+
+    def _get_ga_overview_table(self):
+        """Table widget with GA metrics across two periods."""
+        current, prev = self._fetch_ga_insights_pair()
+        if not current:
+            return {'type': 'table', 'columns': ['Metric', 'Previous Period', 'Current Period'], 'rows': []}
+
+        cur = self._prorate_ga(current)
+        prv = self._prorate_ga(prev) if prev else None
+
+        def fmt_period(insight):
+            return f"{insight.start_date.strftime('%d %b')}–{insight.end_date.strftime('%d %b')}"
+
+        prev_label = fmt_period(prev) if prev else 'Previous Period'
+        cur_label = fmt_period(current)
+
+        def pv(key, fmt=None):
+            if not prv:
+                return 'N/A'
+            val = prv[key]
+            return f"{val:,.0f}" if fmt == 'number' else val
+
+        rows = [
+            {'Metric': 'Sessions',             prev_label: pv('total_sessions', 'number'),    cur_label: f"{cur['total_sessions']:,}"},
+            {'Metric': 'Users',                prev_label: pv('total_users', 'number'),       cur_label: f"{cur['total_users']:,}"},
+            {'Metric': 'Page Views',           prev_label: pv('total_page_views', 'number'),  cur_label: f"{cur['total_page_views']:,}"},
+            {'Metric': 'Conversions',          prev_label: pv('total_conversions', 'number'), cur_label: f"{cur['total_conversions']:,}"},
+            {'Metric': 'Revenue',              prev_label: f"${prv['total_revenue']:,.2f}" if prv else 'N/A', cur_label: f"${cur['total_revenue']:,.2f}"},
+            {'Metric': 'Bounce Rate',          prev_label: f"{prv['bounce_rate']}%" if prv else 'N/A',        cur_label: f"{cur['bounce_rate']}%"},
+            {'Metric': 'Avg Session Duration', prev_label: f"{prv['avg_session_duration']}s" if prv else 'N/A', cur_label: f"{cur['avg_session_duration']}s"},
+        ]
+
+        return {
+            'type': 'table',
+            'columns': ['Metric', prev_label, cur_label],
+            'rows': rows,
+            'is_prorated': cur.get('is_prorated', False),
+            'days_elapsed': cur.get('days_elapsed'),
+            'total_days': cur.get('total_days'),
+        }
+
+    def _get_ga_sessions(self):
+        current, prev = self._fetch_ga_insights_pair()
+        if not current:
+            return {'type': 'metric', 'value': 0, 'label': 'Sessions', 'format': 'number'}
+        cur = self._prorate_ga(current)
+        prv = self._prorate_ga(prev) if prev else None
+        growth = self._growth(cur['total_sessions'], prv['total_sessions'] if prv else None)
+        result = {'type': 'metric', 'value': cur['total_sessions'], 'label': 'Sessions', 'format': 'number', 'is_prorated': cur.get('is_prorated', False)}
+        if growth is not None:
+            result['growth'] = growth
+            result['trend'] = 'up' if growth > 0 else 'down' if growth < 0 else 'neutral'
+        return result
+
+    def _get_ga_users(self):
+        current, prev = self._fetch_ga_insights_pair()
+        if not current:
+            return {'type': 'metric', 'value': 0, 'label': 'Users', 'format': 'number'}
+        cur = self._prorate_ga(current)
+        prv = self._prorate_ga(prev) if prev else None
+        growth = self._growth(cur['total_users'], prv['total_users'] if prv else None)
+        result = {'type': 'metric', 'value': cur['total_users'], 'label': 'Users', 'format': 'number', 'is_prorated': cur.get('is_prorated', False)}
+        if growth is not None:
+            result['growth'] = growth
+            result['trend'] = 'up' if growth > 0 else 'down' if growth < 0 else 'neutral'
+        return result
+
+    def _get_ga_pageviews(self):
+        current, prev = self._fetch_ga_insights_pair()
+        if not current:
+            return {'type': 'metric', 'value': 0, 'label': 'Page Views', 'format': 'number'}
+        cur = self._prorate_ga(current)
+        prv = self._prorate_ga(prev) if prev else None
+        growth = self._growth(cur['total_page_views'], prv['total_page_views'] if prv else None)
+        result = {'type': 'metric', 'value': cur['total_page_views'], 'label': 'Page Views', 'format': 'number', 'is_prorated': cur.get('is_prorated', False)}
+        if growth is not None:
+            result['growth'] = growth
+            result['trend'] = 'up' if growth > 0 else 'down' if growth < 0 else 'neutral'
+        return result
+
+    def _get_ga_conversions(self):
+        current, prev = self._fetch_ga_insights_pair()
+        if not current:
+            return {'type': 'metric', 'value': 0, 'label': 'Conversions', 'format': 'number'}
+        cur = self._prorate_ga(current)
+        prv = self._prorate_ga(prev) if prev else None
+        growth = self._growth(cur['total_conversions'], prv['total_conversions'] if prv else None)
+        result = {'type': 'metric', 'value': cur['total_conversions'], 'label': 'Conversions', 'format': 'number', 'is_prorated': cur.get('is_prorated', False)}
+        if growth is not None:
+            result['growth'] = growth
+            result['trend'] = 'up' if growth > 0 else 'down' if growth < 0 else 'neutral'
+        return result
+
+    def _get_ga_revenue(self):
+        current, prev = self._fetch_ga_insights_pair()
+        if not current:
+            return {'type': 'metric', 'value': 0, 'label': 'Revenue', 'format': 'decimal'}
+        cur = self._prorate_ga(current)
+        prv = self._prorate_ga(prev) if prev else None
+        growth = self._growth(cur['total_revenue'], prv['total_revenue'] if prv else None)
+        result = {'type': 'metric', 'value': cur['total_revenue'], 'label': 'Revenue', 'format': 'decimal', 'is_prorated': cur.get('is_prorated', False)}
+        if growth is not None:
+            result['growth'] = growth
+            result['trend'] = 'up' if growth > 0 else 'down' if growth < 0 else 'neutral'
+        return result
+
+    def _get_ga_bounce_rate(self):
+        current, _ = self._fetch_ga_insights_pair()
+        if not current:
+            return {'type': 'metric', 'value': 0, 'label': 'Bounce Rate', 'format': 'percentage'}
+        return {
+            'type': 'metric',
+            'value': float(current.bounce_rate),
+            'label': 'Bounce Rate',
+            'format': 'percentage',
+        }
+
+    def _get_ga_avg_session_duration(self):
+        current, _ = self._fetch_ga_insights_pair()
+        if not current:
+            return {'type': 'metric', 'value': 0, 'label': 'Avg Session Duration', 'format': 'decimal'}
+        return {
+            'type': 'metric',
+            'value': float(current.avg_session_duration),
+            'label': 'Avg Session Duration',
+            'format': 'decimal',
+            'subtitle': 'seconds',
+        }
+
+    def _get_ga_top_landing_pages(self):
+        current, _ = self._fetch_ga_insights_pair()
+        if not current or not current.landing_pages:
+            return {'type': 'table', 'columns': ['Page', 'Sessions', 'Bounce Rate', 'Avg Duration', 'Conversions'], 'rows': []}
+        rows = [
+            {
+                'Page': p.get('page', ''),
+                'Sessions': p.get('sessions', 0),
+                'Bounce Rate': p.get('bounce_rate', ''),
+                'Avg Duration': p.get('avg_duration', ''),
+                'Conversions': p.get('conversions', 0),
+            }
+            for p in (current.landing_pages or [])
+        ]
+        return {
+            'type': 'table',
+            'columns': ['Page', 'Sessions', 'Bounce Rate', 'Avg Duration', 'Conversions'],
+            'rows': rows,
+        }
+
+    def _get_ga_platform_breakdown(self):
+        current, _ = self._fetch_ga_insights_pair()
+        if not current or not current.platform_breakdown:
+            return {'type': 'chart', 'chart_type': 'bar', 'data': [], 'x_axis': 'platform', 'y_axis': 'sessions', 'label': 'GA Platform Breakdown'}
+        data = [
+            {'platform': platform, 'sessions': metrics.get('visits', 0), 'conversions': metrics.get('conversions', 0)}
+            for platform, metrics in (current.platform_breakdown or {}).items()
+        ]
+        return {
+            'type': 'chart',
+            'chart_type': 'bar',
+            'data': data,
+            'x_axis': 'platform',
+            'y_axis': 'sessions',
+            'label': 'GA Platform Breakdown',
         }

@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from .models import Integration, GATrafficInsight, GSCTrafficInsight
 from .serializers import IntegrationSerializer, IntegrationPublicSerializer
+from .utils.prorate import apply_prorate_gsc, apply_prorate_ga
 
 
 class IntegrationViewSet(viewsets.ModelViewSet):
@@ -377,7 +378,7 @@ def get_traffic_insights(request):
         }
         
         if ga_insight:
-            response_data['ga'] = {
+            raw_ga = {
                 'id': ga_insight.id,
                 'start_date': ga_insight.start_date.isoformat(),
                 'end_date': ga_insight.end_date.isoformat(),
@@ -395,9 +396,10 @@ def get_traffic_insights(request):
                 'conversion_paths': ga_insight.conversion_paths,
                 'updated_at': ga_insight.updated_at.isoformat(),
             }
-        
+            response_data['ga'] = apply_prorate_ga(raw_ga, ga_insight.start_date, ga_insight.end_date)
+
         if gsc_insight:
-            response_data['gsc'] = {
+            raw_gsc = {
                 'id': gsc_insight.id,
                 'start_date': gsc_insight.start_date.isoformat(),
                 'end_date': gsc_insight.end_date.isoformat(),
@@ -411,6 +413,7 @@ def get_traffic_insights(request):
                 'country_breakdown': gsc_insight.country_breakdown,
                 'updated_at': gsc_insight.updated_at.isoformat(),
             }
+            response_data['gsc'] = apply_prorate_gsc(raw_gsc, gsc_insight.start_date, gsc_insight.end_date)
         
         return Response(response_data)
         
