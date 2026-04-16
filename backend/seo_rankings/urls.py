@@ -49,6 +49,7 @@ urlpatterns = [
     path('report-sheets/<int:pk>/delete/', views.seo_report_sheet_delete, name='seo-report-sheet-delete'),
     path('report-sheets/<int:pk>/update/', views.seo_report_sheet_update, name='seo-report-sheet-update'),
     path('report-sheets/data/', views.seo_report_sheet_data, name='seo-report-sheet-data'),
+    path('report-sheets/export/', views.seo_report_export_xlsx, name='seo-report-sheet-export'),
 
     # Keyword Detail — Notes
     path('keywords/<int:seo_kw_id>/notes/', views.seo_keyword_notes_list, name='seo-keyword-notes-list'),

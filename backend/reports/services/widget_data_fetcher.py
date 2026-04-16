@@ -3334,6 +3334,18 @@ class WidgetDataFetcher:
         )
         return current, prev
 
+    def _fetch_gsc_monthly_trio(self):
+        """
+        Return (current_month, prev_month, yoy_month) GSCTrafficInsight records
+        using period_type classification. Falls back to None for missing periods.
+        """
+        from integrations.models import GSCTrafficInsight
+        qs = GSCTrafficInsight.objects.filter(domain=self.domain, track_status='COMP')
+        current = qs.filter(period_type='current_month').order_by('-end_date').first()
+        prev    = qs.filter(period_type='prev_month').order_by('-end_date').first()
+        yoy     = qs.filter(period_type='yoy_month').order_by('-end_date').first()
+        return current, prev, yoy
+
     def _prorate_gsc(self, insight):
         """Apply prorate to a GSCTrafficInsight and return a dict."""
         from integrations.utils.prorate import apply_prorate_gsc
@@ -3353,9 +3365,81 @@ class WidgetDataFetcher:
 
     def _get_gsc_overview_table(self):
         """
-        Table widget matching the 'checks / GSC Overview' layout:
-        Metric | Previous period | Current period
+        Table widget: Last Month | Current Month (Prorated) | MOM % | YOY %
+        Falls back to Previous Period | Current Period when monthly records are unavailable.
         """
+        cur_m, prev_m, yoy_m = self._fetch_gsc_monthly_trio()
+
+        if cur_m:
+            # Monthly MOM/YOY layout
+            cur_data  = self._prorate_gsc(cur_m)
+            prev_data = {
+                'total_clicks': prev_m.total_clicks if prev_m else None,
+                'total_impressions': prev_m.total_impressions if prev_m else None,
+                'avg_ctr': float(prev_m.avg_ctr) if prev_m else None,
+                'avg_position': float(prev_m.avg_position) if prev_m else None,
+            }
+            yoy_data = {
+                'total_clicks': yoy_m.total_clicks if yoy_m else None,
+                'total_impressions': yoy_m.total_impressions if yoy_m else None,
+                'avg_ctr': float(yoy_m.avg_ctr) if yoy_m else None,
+                'avg_position': float(yoy_m.avg_position) if yoy_m else None,
+            }
+
+            def pct(cur_val, base_val):
+                if base_val and base_val != 0 and cur_val is not None:
+                    return f"{round((cur_val - base_val) / base_val * 100, 1):+.1f}%"
+                return 'N/A'
+
+            def fmt_m(label, month_insight):
+                if month_insight:
+                    return f"{label} ({month_insight.start_date.strftime('%b %Y')})"
+                return label
+
+            last_month_label = fmt_m('Last Month', prev_m)
+            cur_month_label  = f"Current Month (Prorated)" if cur_data.get('is_prorated') else "Current Month"
+
+            rows = [
+                {
+                    'Metric': 'Clicks',
+                    last_month_label: prev_data['total_clicks'] if prev_data['total_clicks'] is not None else 'N/A',
+                    cur_month_label:  cur_data['total_clicks'],
+                    'MOM %': pct(cur_data['total_clicks'], prev_data['total_clicks']),
+                    'YOY %': pct(cur_data['total_clicks'], yoy_data['total_clicks']),
+                },
+                {
+                    'Metric': 'Impressions',
+                    last_month_label: prev_data['total_impressions'] if prev_data['total_impressions'] is not None else 'N/A',
+                    cur_month_label:  cur_data['total_impressions'],
+                    'MOM %': pct(cur_data['total_impressions'], prev_data['total_impressions']),
+                    'YOY %': pct(cur_data['total_impressions'], yoy_data['total_impressions']),
+                },
+                {
+                    'Metric': 'CTR',
+                    last_month_label: f"{prev_data['avg_ctr']:.1f}%" if prev_data['avg_ctr'] is not None else 'N/A',
+                    cur_month_label:  f"{cur_data['avg_ctr']}%",
+                    'MOM %': pct(cur_data['avg_ctr'], prev_data['avg_ctr']),
+                    'YOY %': pct(cur_data['avg_ctr'], yoy_data['avg_ctr']),
+                },
+                {
+                    'Metric': 'Avg Position',
+                    last_month_label: prev_data['avg_position'] if prev_data['avg_position'] is not None else 'N/A',
+                    cur_month_label:  cur_data['avg_position'],
+                    'MOM %': pct(cur_data['avg_position'], prev_data['avg_position']),
+                    'YOY %': pct(cur_data['avg_position'], yoy_data['avg_position']),
+                },
+            ]
+
+            return {
+                'type': 'table',
+                'columns': ['Metric', last_month_label, cur_month_label, 'MOM %', 'YOY %'],
+                'rows': rows,
+                'is_prorated': cur_data.get('is_prorated', False),
+                'days_elapsed': cur_data.get('days_elapsed'),
+                'total_days': cur_data.get('total_days'),
+            }
+
+        # Fallback: rolling-period comparison (existing behaviour)
         current, prev = self._fetch_gsc_insights_pair()
         if not current:
             return {'type': 'table', 'columns': ['Metric', 'Previous Period', 'Current Period'], 'rows': []}
@@ -3508,6 +3592,18 @@ class WidgetDataFetcher:
         )
         return current, prev
 
+    def _fetch_ga_monthly_trio(self):
+        """
+        Return (current_month, prev_month, yoy_month) GATrafficInsight records
+        using period_type classification. Falls back to None for missing periods.
+        """
+        from integrations.models import GATrafficInsight
+        qs = GATrafficInsight.objects.filter(domain=self.domain, track_status='COMP')
+        current = qs.filter(period_type='current_month').order_by('-end_date').first()
+        prev    = qs.filter(period_type='prev_month').order_by('-end_date').first()
+        yoy     = qs.filter(period_type='yoy_month').order_by('-end_date').first()
+        return current, prev, yoy
+
     def _prorate_ga(self, insight):
         """Apply prorate to a GATrafficInsight and return a dict."""
         from integrations.utils.prorate import apply_prorate_ga
@@ -3523,7 +3619,111 @@ class WidgetDataFetcher:
         return apply_prorate_ga(raw, insight.start_date, insight.end_date)
 
     def _get_ga_overview_table(self):
-        """Table widget with GA metrics across two periods."""
+        """Table widget: Last Month | Current Month (Prorated) | MOM % | YOY %
+        Falls back to Previous Period | Current Period when monthly records are unavailable.
+        """
+        cur_m, prev_m, yoy_m = self._fetch_ga_monthly_trio()
+
+        if cur_m:
+            # Monthly MOM/YOY layout
+            cur  = self._prorate_ga(cur_m)
+            prv  = {
+                'total_sessions':       prev_m.total_sessions if prev_m else None,
+                'total_users':          prev_m.total_users if prev_m else None,
+                'total_page_views':     prev_m.total_page_views if prev_m else None,
+                'total_conversions':    prev_m.total_conversions if prev_m else None,
+                'total_revenue':        float(prev_m.total_revenue) if prev_m else None,
+                'bounce_rate':          float(prev_m.bounce_rate) if prev_m else None,
+                'avg_session_duration': float(prev_m.avg_session_duration) if prev_m else None,
+            }
+            yoy  = {
+                'total_sessions':       yoy_m.total_sessions if yoy_m else None,
+                'total_users':          yoy_m.total_users if yoy_m else None,
+                'total_page_views':     yoy_m.total_page_views if yoy_m else None,
+                'total_conversions':    yoy_m.total_conversions if yoy_m else None,
+                'total_revenue':        float(yoy_m.total_revenue) if yoy_m else None,
+                'bounce_rate':          float(yoy_m.bounce_rate) if yoy_m else None,
+                'avg_session_duration': float(yoy_m.avg_session_duration) if yoy_m else None,
+            }
+
+            def pct(cur_val, base_val):
+                if base_val and base_val != 0 and cur_val is not None:
+                    return f"{round((cur_val - base_val) / base_val * 100, 1):+.1f}%"
+                return 'N/A'
+
+            def fmt_m(label, month_insight):
+                if month_insight:
+                    return f"{label} ({month_insight.start_date.strftime('%b %Y')})"
+                return label
+
+            last_month_label = fmt_m('Last Month', prev_m)
+            cur_month_label  = "Current Month (Prorated)" if cur.get('is_prorated') else "Current Month"
+
+            def fmtn(val):
+                return f"{val:,}" if val is not None else 'N/A'
+
+            rows = [
+                {
+                    'Metric': 'Sessions',
+                    last_month_label: fmtn(prv['total_sessions']),
+                    cur_month_label:  f"{cur['total_sessions']:,}",
+                    'MOM %': pct(cur['total_sessions'], prv['total_sessions']),
+                    'YOY %': pct(cur['total_sessions'], yoy['total_sessions']),
+                },
+                {
+                    'Metric': 'Users',
+                    last_month_label: fmtn(prv['total_users']),
+                    cur_month_label:  f"{cur['total_users']:,}",
+                    'MOM %': pct(cur['total_users'], prv['total_users']),
+                    'YOY %': pct(cur['total_users'], yoy['total_users']),
+                },
+                {
+                    'Metric': 'Page Views',
+                    last_month_label: fmtn(prv['total_page_views']),
+                    cur_month_label:  f"{cur['total_page_views']:,}",
+                    'MOM %': pct(cur['total_page_views'], prv['total_page_views']),
+                    'YOY %': pct(cur['total_page_views'], yoy['total_page_views']),
+                },
+                {
+                    'Metric': 'Conversions',
+                    last_month_label: fmtn(prv['total_conversions']),
+                    cur_month_label:  f"{cur['total_conversions']:,}",
+                    'MOM %': pct(cur['total_conversions'], prv['total_conversions']),
+                    'YOY %': pct(cur['total_conversions'], yoy['total_conversions']),
+                },
+                {
+                    'Metric': 'Revenue',
+                    last_month_label: f"${prv['total_revenue']:,.2f}" if prv['total_revenue'] is not None else 'N/A',
+                    cur_month_label:  f"${cur['total_revenue']:,.2f}",
+                    'MOM %': pct(cur['total_revenue'], prv['total_revenue']),
+                    'YOY %': pct(cur['total_revenue'], yoy['total_revenue']),
+                },
+                {
+                    'Metric': 'Bounce Rate',
+                    last_month_label: f"{prv['bounce_rate']}%" if prv['bounce_rate'] is not None else 'N/A',
+                    cur_month_label:  f"{cur['bounce_rate']}%",
+                    'MOM %': pct(cur['bounce_rate'], prv['bounce_rate']),
+                    'YOY %': pct(cur['bounce_rate'], yoy['bounce_rate']),
+                },
+                {
+                    'Metric': 'Avg Session Duration',
+                    last_month_label: f"{prv['avg_session_duration']}s" if prv['avg_session_duration'] is not None else 'N/A',
+                    cur_month_label:  f"{cur['avg_session_duration']}s",
+                    'MOM %': pct(cur['avg_session_duration'], prv['avg_session_duration']),
+                    'YOY %': pct(cur['avg_session_duration'], yoy['avg_session_duration']),
+                },
+            ]
+
+            return {
+                'type': 'table',
+                'columns': ['Metric', last_month_label, cur_month_label, 'MOM %', 'YOY %'],
+                'rows': rows,
+                'is_prorated': cur.get('is_prorated', False),
+                'days_elapsed': cur.get('days_elapsed'),
+                'total_days': cur.get('total_days'),
+            }
+
+        # Fallback: rolling-period comparison (existing behaviour)
         current, prev = self._fetch_ga_insights_pair()
         if not current:
             return {'type': 'table', 'columns': ['Metric', 'Previous Period', 'Current Period'], 'rows': []}

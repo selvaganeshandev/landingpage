@@ -24,6 +24,7 @@ import {
   ChevronsRight,
   Calendar,
   ArrowUpDown,
+  Download,
 } from "lucide-react";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
@@ -51,6 +52,7 @@ const SeoReports = () => {
   const { selectedDomain } = useDomainStore();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [sheetToDelete, setSheetToDelete] = useState<number | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const domainId = selectedDomain?.id;
 
@@ -126,6 +128,27 @@ const SeoReports = () => {
     }
   };
 
+  const handleExportXlsx = async () => {
+    if (!domainId) return;
+    setExporting(true);
+    try {
+      const blob = await apiClient.exportSeoReportXlsx(domainId);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `seo-report-${selectedDomain?.name || domainId}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast({ title: "Report exported successfully" });
+    } catch {
+      toast({ title: "Export failed", variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (!domainId) {
     return (
       <div className="p-8">
@@ -182,10 +205,20 @@ const SeoReports = () => {
         </div>
 
         {sheets.length > 0 && (
-          <Button onClick={() => navigate("/seo-reports/configure")}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Report
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleExportXlsx} disabled={exporting}>
+              {exporting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 mr-2" />
+              )}
+              {exporting ? "Exporting..." : "Export"}
+            </Button>
+            <Button onClick={() => navigate("/seo-reports/configure")}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Report
+            </Button>
+          </div>
         )}
       </div>
 
@@ -533,7 +566,7 @@ function ReportWidget({
                     >
                       {columns.map((col) => {
                         const value = row[col];
-                        const isChange = col.includes("Change");
+                        const isChange = col.includes("Change") || col.includes("MOM %") || col.includes("YOY %");
                         const isUrl =
                           typeof value === "string" &&
                           (value.startsWith("http://") ||

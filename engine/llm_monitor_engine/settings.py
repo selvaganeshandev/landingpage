@@ -255,4 +255,9 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'core.processing_tasks.seo_rankings_daily_scheduler',
         'schedule': crontab(hour=2, minute=0),
     },
+    # Daily GA + GSC monthly insight scheduling for MOM/YOY in reports (runs at 1:00 AM)
+    'monthly-insights-daily-schedule': {
+        'task': 'core.processing_tasks.schedule_all_monthly_insights_task',
+        'schedule': crontab(hour=1, minute=0),
+    },
 }

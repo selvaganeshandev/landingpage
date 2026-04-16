@@ -1961,6 +1961,11 @@ def _fetch_gsc_report_data(integration, sheet):
 
     order_asc = sheet.order_by == 'Ascending'
     date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+
+    # Monthly schedule → MOM / YOY mode
+    if sheet.schedule == 'monthly' and len(date_ranges) >= 2:
+        return _fetch_gsc_report_mom_yoy(integration, sheet, date_ranges)
+
     metrics_list = sheet.metrics or ['clicks', 'impressions', 'ctr', 'position']
     change_units = sheet.change_units or []
 
@@ -2078,6 +2083,13 @@ def _fetch_gsc_report_data(integration, sheet):
 
 def _fetch_ga_report_data(integration, sheet):
     """Fetch GA data for a report sheet configuration."""
+    order_asc   = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+
+    # Monthly schedule → MOM / YOY mode
+    if sheet.schedule == 'monthly' and len(date_ranges) >= 2:
+        return _fetch_ga_report_mom_yoy(integration, sheet, date_ranges)
+
     from integrations.google_oauth import get_credentials_from_integration
     from googleapiclient.discovery import build
 
@@ -2087,9 +2099,6 @@ def _fetch_ga_report_data(integration, sheet):
 
     service = build('analyticsdata', 'v1beta', credentials=credentials)
     property_id = integration.provider_id
-
-    order_asc = sheet.order_by == 'Ascending'
-    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
 
     if sheet.sheet_type == 'ga_landing_pages':
         ga_dimension = 'landingPage'
@@ -2181,9 +2190,69 @@ def _fetch_ga_report_data(integration, sheet):
 
 def _fetch_gsc_overview_data(integration, sheet):
     """
-    GSC Overview — aggregate clicks, impressions, CTR, position across date
-    ranges (no dimension breakdown).  Mirrors RankMaxx gsc_report overview.
+    GSC Overview — uses stored GSCTrafficInsight monthly records (current_month,
+    prev_month, yoy_month) to build a MOM / YOY comparison table with prorate
+    applied to the current (incomplete) month.
+    Falls back to live GSC API when monthly records are unavailable.
     """
+    from integrations.models import GSCTrafficInsight
+    from integrations.utils.prorate import apply_prorate_gsc
+
+    domain = integration.domain
+    qs = GSCTrafficInsight.objects.filter(domain=domain, track_status='COMP')
+    cur_m = qs.filter(period_type='current_month').order_by('-end_date').first()
+    prv_m = qs.filter(period_type='prev_month').order_by('-end_date').first()
+    yoy_m = qs.filter(period_type='yoy_month').order_by('-end_date').first()
+
+    if cur_m:
+        # Prorate current month
+        raw = {
+            'total_clicks': cur_m.total_clicks,
+            'total_impressions': cur_m.total_impressions,
+            'avg_ctr': float(cur_m.avg_ctr),
+            'avg_position': float(cur_m.avg_position),
+        }
+        cur = apply_prorate_gsc(raw, cur_m.start_date, cur_m.end_date)
+
+        prv_label = prv_m.start_date.strftime('%b %Y') if prv_m else 'Last Month'
+        cur_label = f"{cur_m.start_date.strftime('%b %Y')} (PR)" if cur.get('is_prorated') else cur_m.start_date.strftime('%b %Y')
+
+        def pct(cur_v, base_v):
+            if base_v and base_v != 0:
+                return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+            return 'N/A'
+
+        metrics_map = [
+            ('Clicks',       'total_clicks',       'total_clicks',  False),
+            ('Impressions',  'total_impressions',  'total_impressions', False),
+            ('CTR',          'avg_ctr',            'avg_ctr',       True),
+            ('Avg Position', 'avg_position',       'avg_position',  True),
+        ]
+
+        rows = []
+        for label, cur_key, model_key, is_rate in metrics_map:
+            cur_v  = cur.get(cur_key, 0)
+            prv_v  = float(getattr(prv_m, model_key, 0)) if prv_m else None
+            yoy_v  = float(getattr(yoy_m, model_key, 0)) if yoy_m else None
+            fmt    = lambda v: f"{float(v):.2f}%" if is_rate else (f"{int(v):,}" if v is not None else 'N/A')
+            rows.append({
+                'Metric':    label,
+                prv_label:   fmt(prv_v),
+                cur_label:   fmt(cur_v),
+                'MOM %':     pct(cur_v, prv_v),
+                'YOY %':     pct(cur_v, yoy_v),
+            })
+
+        return {
+            'columns': ['Metric', prv_label, cur_label, 'MOM %', 'YOY %'],
+            'rows': rows,
+            'total_rows': len(rows),
+            'is_prorated': cur.get('is_prorated', False),
+            'days_elapsed': cur.get('days_elapsed'),
+            'total_days': cur.get('total_days'),
+        }
+
+    # ── Fallback: live GSC API (original behaviour) ──────────────────────────
     from integrations.google_oauth import get_credentials_from_integration
     from googleapiclient.discovery import build
 
@@ -2198,36 +2267,27 @@ def _fetch_gsc_overview_data(integration, sheet):
     date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
     change_units = sheet.change_units or []
 
-    metrics_map = [
+    metrics_map_api = [
         ('Clicks', 'clicks'),
         ('Impressions', 'impressions'),
         ('CTR', 'ctr'),
         ('Avg Position', 'position'),
     ]
-
     range_labels = [r[2] for r in date_ranges]
-
-    # Fetch aggregate data for each date range
-    range_values = {}  # label -> {metric: value}
+    range_values = {}
     api_errors = []
     for start_dt, end_dt, label in date_ranges:
         try:
             response = service.searchanalytics().query(
                 siteUrl=site_url,
-                body={
-                    'startDate': start_dt.isoformat(),
-                    'endDate': end_dt.isoformat(),
-                    'rowLimit': 1,
-                }
+                body={'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat(), 'rowLimit': 1}
             ).execute()
-            rows = response.get('rows', [])
-            if rows:
-                r = rows[0]
+            rows_api = response.get('rows', [])
+            if rows_api:
+                r = rows_api[0]
                 range_values[label] = {
-                    'clicks': r.get('clicks', 0),
-                    'impressions': r.get('impressions', 0),
-                    'ctr': round(r.get('ctr', 0) * 100, 2),
-                    'position': round(r.get('position', 0), 1),
+                    'clicks': r.get('clicks', 0), 'impressions': r.get('impressions', 0),
+                    'ctr': round(r.get('ctr', 0) * 100, 2), 'position': round(r.get('position', 0), 1),
                 }
             else:
                 range_values[label] = {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
@@ -2239,17 +2299,14 @@ def _fetch_gsc_overview_data(integration, sheet):
     if len(api_errors) == len(date_ranges) and api_errors:
         return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GSC API error: {api_errors[0]}'}
 
-    # Build table: one row per metric, columns = date-range labels + change
-    columns = ['Metric']
-    for rl in range_labels:
-        columns.append(rl)
+    columns = ['Metric'] + range_labels
     if len(range_labels) >= 2 and 'number' in change_units:
         columns.append('Change')
     if len(range_labels) >= 2 and 'percentage' in change_units:
         columns.append('Change (%)')
 
     rows = []
-    for label, key in metrics_map:
+    for label, key in metrics_map_api:
         row = {'Metric': label}
         values = []
         for rl in range_labels:
@@ -2261,8 +2318,8 @@ def _fetch_gsc_overview_data(integration, sheet):
             if 'number' in change_units:
                 row['Change'] = diff
             if 'percentage' in change_units:
-                pct = round((diff / values[-2]) * 100, 2) if values[-2] != 0 else 0
-                row['Change (%)'] = f"{pct}%"
+                pct_val = round((diff / values[-2]) * 100, 2) if values[-2] != 0 else 0
+                row['Change (%)'] = f"{pct_val}%"
         rows.append(row)
 
     return {'columns': columns, 'rows': rows, 'total_rows': len(rows)}
@@ -2270,9 +2327,72 @@ def _fetch_gsc_overview_data(integration, sheet):
 
 def _fetch_ga_overview_data(integration, sheet):
     """
-    GA Overview — aggregate sessions, users, bounce rate, engagement rate
-    across date ranges (no dimension breakdown).
+    GA Overview — uses stored GATrafficInsight monthly records (current_month,
+    prev_month, yoy_month) to build a MOM / YOY comparison table with prorate
+    applied to the current (incomplete) month.
+    Falls back to live GA API when monthly records are unavailable.
     """
+    from integrations.models import GATrafficInsight
+    from integrations.utils.prorate import apply_prorate_ga
+
+    domain = integration.domain
+    qs = GATrafficInsight.objects.filter(domain=domain, track_status='COMP')
+    cur_m = qs.filter(period_type='current_month').order_by('-end_date').first()
+    prv_m = qs.filter(period_type='prev_month').order_by('-end_date').first()
+    yoy_m = qs.filter(period_type='yoy_month').order_by('-end_date').first()
+
+    if cur_m:
+        raw = {
+            'total_sessions':       cur_m.total_sessions,
+            'total_users':          cur_m.total_users,
+            'total_page_views':     cur_m.total_page_views,
+            'total_conversions':    cur_m.total_conversions,
+            'total_revenue':        float(cur_m.total_revenue),
+            'bounce_rate':          float(cur_m.bounce_rate),
+            'avg_session_duration': float(cur_m.avg_session_duration),
+        }
+        cur = apply_prorate_ga(raw, cur_m.start_date, cur_m.end_date)
+
+        prv_label = prv_m.start_date.strftime('%b %Y') if prv_m else 'Last Month'
+        cur_label = (f"{cur_m.start_date.strftime('%b %Y')} (PR)"
+                     if cur.get('is_prorated') else cur_m.start_date.strftime('%b %Y'))
+
+        def pct(cur_v, base_v):
+            if base_v and base_v != 0:
+                return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+            return 'N/A'
+
+        metrics_map = [
+            ('Sessions',    'total_sessions',    'total_sessions',    False),
+            ('Users',       'total_users',        'total_users',       False),
+            ('Page Views',  'total_page_views',   'total_page_views',  False),
+            ('Bounce Rate', 'bounce_rate',         'bounce_rate',       True),
+        ]
+
+        rows = []
+        for label, cur_key, model_key, is_rate in metrics_map:
+            cur_v = cur.get(cur_key, 0)
+            prv_v = float(getattr(prv_m, model_key, 0)) if prv_m else None
+            yoy_v = float(getattr(yoy_m, model_key, 0)) if yoy_m else None
+            fmt = lambda v, r=is_rate: (f"{float(v):.2f}%" if r else (f"{int(v):,}" if v is not None else 'N/A'))
+            rows.append({
+                'Metric':  label,
+                prv_label: fmt(prv_v),
+                cur_label: fmt(cur_v),
+                'MOM %':   pct(cur_v, prv_v),
+                'YOY %':   pct(cur_v, yoy_v),
+            })
+
+        return {
+            'columns': ['Metric', prv_label, cur_label, 'MOM %', 'YOY %'],
+            'rows': rows,
+            'total_rows': len(rows),
+            'is_prorated': cur.get('is_prorated', False),
+            'days_elapsed': cur.get('days_elapsed'),
+            'total_days': cur.get('total_days'),
+        }
+
+    # ── Fallback: live GA API (original behaviour) ────────────────────────────
     from integrations.google_oauth import get_credentials_from_integration
     from googleapiclient.discovery import build
 
@@ -2320,6 +2440,38 @@ def _fetch_ga_overview_data(integration, sheet):
     if len(api_errors) == len(date_ranges) and api_errors:
         return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GA API error: {api_errors[0]}'}
 
+    # ── Fetch GA4 leads by channel (all_leads_event_action) ─────────────────
+    KEY_EVENT_NAME = 'all_leads_event_action'
+    for start_dt, end_dt, label in date_ranges:
+        try:
+            ke_response = service.properties().runReport(
+                property=property_id,
+                body={
+                    'dateRanges': [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+                    'dimensions': [{'name': 'sessionDefaultChannelGroup'}],
+                    'metrics': [{'name': 'keyEvents'}],
+                    'dimensionFilter': {
+                        'filter': {
+                            'fieldName': 'eventName',
+                            'stringFilter': {'value': KEY_EVENT_NAME, 'matchType': 'EXACT'}
+                        }
+                    },
+                }
+            ).execute()
+            channel_map = {}
+            for r in ke_response.get('rows', []):
+                channel_map[r['dimensionValues'][0]['value']] = int(r['metricValues'][0]['value'])
+            org = channel_map.get('Organic Search', 0)
+            drc = channel_map.get('Direct', 0)
+        except Exception:
+            org, drc = 0, 0
+        rv = range_values.setdefault(label, {})
+        rv['GA4 Organic Leads'] = org
+        rv['GA4 Direct Leads']  = drc
+        rv['Total GA4 Leads']   = org + drc
+
+    metric_labels += ['GA4 Organic Leads', 'GA4 Direct Leads', 'Total GA4 Leads']
+
     columns = ['Metric']
     for rl in range_labels:
         columns.append(rl)
@@ -2341,11 +2493,360 @@ def _fetch_ga_overview_data(integration, sheet):
             if 'number' in change_units:
                 row['Change'] = diff
             if 'percentage' in change_units:
-                pct = round((diff / values[-2]) * 100, 2) if values[-2] != 0 else 0
-                row['Change (%)'] = f"{pct}%"
+                pct_val = round((diff / values[-2]) * 100, 2) if values[-2] != 0 else 0
+                row['Change (%)'] = f"{pct_val}%"
         rows.append(row)
 
     return {'columns': columns, 'rows': rows, 'total_rows': len(rows)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MOM / YOY helpers for GA and GSC report sheets (monthly schedule)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _fetch_ga_report_mom_yoy(integration, sheet, date_ranges):
+    """
+    Monthly MOM/YOY mode for ga_landing_pages and ga_other_sources.
+    Returns: prev month | current month (prorated) | MOM % | YOY %
+    Makes 3 GA API calls: prev_month, current_month, yoy_month.
+    """
+    import calendar as _cal
+    from datetime import date as _date
+    from integrations.utils.prorate import calculate_prorate_factor
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('analyticsdata', 'v1beta', credentials=credentials)
+    property_id = integration.provider_id
+
+    # date_ranges is ascending → last entry = current (incomplete) month
+    cur_start, cur_end_api, cur_label = date_ranges[-1]
+    prv_start, prv_end,    prv_label = date_ranges[-2]
+
+    # Full-month end date for prorate calculation
+    _, cur_full_last = _cal.monthrange(cur_start.year, cur_start.month)
+    cur_full_end = _date(cur_start.year, cur_start.month, cur_full_last)
+
+    # YOY range: same calendar month last year, capped at same relative day
+    yoy_start = _date(cur_start.year - 1, cur_start.month, 1)
+    yoy_end   = _date(cur_end_api.year - 1, cur_end_api.month, cur_end_api.day)
+
+    days_elapsed, total_days, factor = calculate_prorate_factor(cur_start, cur_full_end)
+    is_prorated = factor != 1.0
+    cur_col_label = f"{cur_label} (PR)" if is_prorated else cur_label
+
+    if sheet.sheet_type == 'ga_landing_pages':
+        ga_dimension    = 'landingPage'
+        dim_label       = 'Landing Pages'
+        ga_metrics      = ['sessions', 'totalUsers', 'screenPageViews', 'bounceRate']
+        metric_labels   = ['Sessions', 'Users', 'Page Views', 'Bounce Rate']
+        metric_is_rate  = [False, False, False, True]
+    else:
+        ga_dimension    = 'sessionDefaultChannelGroup'
+        dim_label       = 'Source'
+        ga_metrics      = ['sessions', 'totalUsers']
+        metric_labels   = ['Sessions', 'Users']
+        metric_is_rate  = [False, False]
+
+    all_keys   = set()
+    range_data = {'prev': {}, 'curr': {}, 'yoy': {}}
+    api_errors = []
+
+    for rkey, start_dt, end_dt in [
+        ('prev', prv_start, prv_end),
+        ('curr', cur_start, cur_end_api),
+        ('yoy',  yoy_start, yoy_end),
+    ]:
+        try:
+            body = {
+                'dateRanges': [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+                'dimensions': [{'name': ga_dimension}],
+                'metrics': [{'name': m} for m in ga_metrics],
+                'limit': 500,
+            }
+            response = service.properties().runReport(property=property_id, body=body).execute()
+            data_map = {}
+            for row in response.get('rows', []):
+                dim_key = row['dimensionValues'][0]['value']
+                all_keys.add(dim_key)
+                vals = {}
+                for i, ml in enumerate(metric_labels):
+                    raw = row['metricValues'][i]['value']
+                    vals[ml] = round(float(raw), 2) if '.' in raw else int(raw)
+                data_map[dim_key] = vals
+            range_data[rkey] = data_map
+        except Exception as e:
+            logger.error(f"GA MOM/YOY API error ({rkey}) for sheet {sheet.id}: {e}")
+            if rkey != 'yoy':   # YOY failure is non-fatal; show N/A
+                api_errors.append(str(e))
+
+    if not all_keys and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GA API error: {api_errors[0]}'}
+
+    # ── Fetch GA4 leads by channel (all_leads_event_action) ─────────────────
+    KEY_EVENT_NAME = 'all_leads_event_action'
+    # leads_data[rkey] = {'Organic Search': count, 'Direct': count, ...}
+    leads_data = {'prev': {}, 'curr': {}, 'yoy': {}}
+
+    for rkey, start_dt, end_dt in [
+        ('prev', prv_start, prv_end),
+        ('curr', cur_start, cur_end_api),
+        ('yoy',  yoy_start, yoy_end),
+    ]:
+        try:
+            body = {
+                'dateRanges': [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+                'dimensions': [{'name': 'sessionDefaultChannelGroup'}],
+                'metrics': [{'name': 'keyEvents'}],
+                'dimensionFilter': {
+                    'filter': {
+                        'fieldName': 'eventName',
+                        'stringFilter': {'value': KEY_EVENT_NAME, 'matchType': 'EXACT'}
+                    }
+                },
+                'limit': 500,
+            }
+            response = service.properties().runReport(property=property_id, body=body).execute()
+            channel_map = {}
+            for row in response.get('rows', []):
+                channel = row['dimensionValues'][0]['value']
+                channel_map[channel] = int(row['metricValues'][0]['value'])
+            leads_data[rkey] = channel_map
+        except Exception as e:
+            logger.error(f"GA Leads API error ({rkey}) for sheet {sheet.id}: {e}")
+
+    # Append GA4 leads metrics (Organic prorated, Direct prorated, Total = sum)
+    leads_metrics = [
+        ('GA4 Organic Leads', True),   # (label, is_prorated)
+        ('GA4 Direct Leads',  True),
+        ('Total GA4 Leads',   False),  # sum of prorated values, not prorated again
+    ]
+    for lm_label, _ in leads_metrics:
+        metric_labels.append(lm_label)
+        metric_is_rate.append(False)
+
+    def pct(cur_v, base_v):
+        if base_v and base_v != 0:
+            return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+        return 'N/A'
+
+    def _leads_vals(rkey):
+        """Return (organic, direct, total) for a given range key."""
+        ch = leads_data.get(rkey, {})
+        org = ch.get('Organic Search', 0)
+        drc = ch.get('Direct', 0)
+        return org, drc, org + drc
+
+    columns = ['Sr No', dim_label]
+    for ml, is_rate in zip(metric_labels, metric_is_rate):
+        col_label = cur_label if is_rate else cur_col_label
+        # Total GA4 Leads is not prorated → no (PR) label
+        if ml == 'Total GA4 Leads':
+            col_label = cur_label
+        columns += [f"{prv_label} {ml}", f"{col_label} {ml}", f"{ml} MOM %", f"{ml} YOY %"]
+
+    rows = []
+    for idx, dim_key in enumerate(sorted(all_keys), 1):
+        row = {'Sr No': idx, dim_label: dim_key}
+
+        # Pre-compute leads values for this row (leads are global, not per-dimension)
+        prv_org, prv_drc, prv_tot = _leads_vals('prev')
+        cur_org_raw, cur_drc_raw, _ = _leads_vals('curr')
+        yoy_org, yoy_drc, yoy_tot = _leads_vals('yoy')
+
+        # Prorate organic and direct leads
+        cur_org = round(cur_org_raw * factor) if factor != 1.0 else cur_org_raw
+        cur_drc = round(cur_drc_raw * factor) if factor != 1.0 else cur_drc_raw
+        cur_tot = cur_org + cur_drc  # sum of prorated
+
+        leads_values = {
+            'GA4 Organic Leads': (prv_org, cur_org_raw, cur_org, yoy_org, True),
+            'GA4 Direct Leads':  (prv_drc, cur_drc_raw, cur_drc, yoy_drc, True),
+            'Total GA4 Leads':   (prv_tot, cur_tot,     cur_tot, yoy_tot, False),
+        }
+
+        for ml, is_rate in zip(metric_labels, metric_is_rate):
+            if ml in leads_values:
+                lprv, lcur_raw, lcur, lyoy, l_prorated = leads_values[ml]
+                col_label = cur_label if ml == 'Total GA4 Leads' else cur_col_label
+                if l_prorated and factor != 1.0:
+                    display_v = f"{lcur_raw} ({lcur})"
+                else:
+                    display_v = lcur
+                row[f"{prv_label} {ml}"]  = lprv
+                row[f"{col_label} {ml}"]  = display_v
+                row[f"{ml} MOM %"]        = pct(lcur, lprv)
+                row[f"{ml} YOY %"]        = pct(lcur, lyoy)
+            else:
+                col_label = cur_label if is_rate else cur_col_label
+                prv_v   = range_data['prev'].get(dim_key, {}).get(ml, 0)
+                cur_raw = range_data['curr'].get(dim_key, {}).get(ml, 0)
+                yoy_v   = range_data['yoy'].get(dim_key, {}).get(ml, 0)
+                cur_v   = cur_raw if is_rate else (round(cur_raw * factor) if factor != 1.0 else cur_raw)
+                if not is_rate and factor != 1.0:
+                    display_v = f"{cur_raw} ({cur_v})"
+                else:
+                    display_v = cur_v
+                row[f"{prv_label} {ml}"]  = prv_v
+                row[f"{col_label} {ml}"]  = display_v
+                row[f"{ml} MOM %"]        = pct(cur_v, prv_v)
+                row[f"{ml} YOY %"]        = pct(cur_v, yoy_v)
+        rows.append(row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+        'metrics_headers': metric_labels,
+        'is_prorated': is_prorated,
+        'days_elapsed': days_elapsed,
+        'total_days': total_days,
+    }
+
+
+def _fetch_gsc_report_mom_yoy(integration, sheet, date_ranges):
+    """
+    Monthly MOM/YOY mode for gsc_pages, gsc_queries, gsc_branded_queries,
+    gsc_non_branded_queries.
+    Returns: prev month | current month (prorated) | MOM % | YOY %
+    Makes 3 GSC API calls: prev_month, current_month, yoy_month.
+    """
+    import calendar as _cal
+    from datetime import date as _date
+    from integrations.utils.prorate import calculate_prorate_factor
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('searchconsole', 'v1', credentials=credentials)
+    site_url = integration.provider_id
+
+    cur_start, cur_end_api, cur_label = date_ranges[-1]
+    prv_start, prv_end,    prv_label = date_ranges[-2]
+
+    _, cur_full_last = _cal.monthrange(cur_start.year, cur_start.month)
+    cur_full_end = _date(cur_start.year, cur_start.month, cur_full_last)
+
+    yoy_start = _date(cur_start.year - 1, cur_start.month, 1)
+    yoy_end   = _date(cur_end_api.year - 1, cur_end_api.month, cur_end_api.day)
+
+    days_elapsed, total_days, factor = calculate_prorate_factor(cur_start, cur_full_end)
+    is_prorated = factor != 1.0
+    cur_col_label = f"{cur_label} (PR)" if is_prorated else cur_label
+
+    if sheet.sheet_type in ('gsc_pages',):
+        dimension = 'page'
+        dim_label = 'Pages'
+    else:
+        dimension = 'query'
+        dim_label = 'Queries'
+
+    domain_name = (site_url
+                   .replace('sc-domain:', '')
+                   .replace('https://', '')
+                   .replace('http://', '')
+                   .split('/')[0].split('.')[0])
+
+    def _dim_filter():
+        if sheet.sheet_type == 'gsc_branded_queries':
+            return [{'dimension': 'query', 'operator': 'contains', 'expression': domain_name}]
+        if sheet.sheet_type == 'gsc_non_branded_queries':
+            return [{'dimension': 'query', 'operator': 'excludingRegex', 'expression': f'(?i){domain_name}'}]
+        return None
+
+    dim_filters  = _dim_filter()
+    metrics_list = sheet.metrics or ['clicks', 'impressions', 'ctr', 'position']
+    ml_map   = {'clicks': 'Clicks', 'impressions': 'Impressions', 'ctr': 'CTR', 'position': 'Avg Position'}
+    rate_map = {'clicks': False, 'impressions': False, 'ctr': True, 'position': True}
+
+    all_keys   = set()
+    range_data = {'prev': {}, 'curr': {}, 'yoy': {}}
+    api_errors = []
+
+    for rkey, start_dt, end_dt in [
+        ('prev', prv_start, prv_end),
+        ('curr', cur_start, cur_end_api),
+        ('yoy',  yoy_start, yoy_end),
+    ]:
+        try:
+            body = {
+                'startDate': start_dt.isoformat(),
+                'endDate':   end_dt.isoformat(),
+                'dimensions': [dimension],
+                'rowLimit': 500,
+            }
+            if dim_filters:
+                body['dimensionFilterGroups'] = [{'filters': dim_filters}]
+            response = service.searchanalytics().query(siteUrl=site_url, body=body).execute()
+            data_map = {}
+            for row in response.get('rows', []):
+                dim_key = row.get('keys', [''])[0]
+                all_keys.add(dim_key)
+                data_map[dim_key] = {
+                    'clicks':      row.get('clicks', 0),
+                    'impressions': row.get('impressions', 0),
+                    'ctr':         round(row.get('ctr', 0) * 100, 2),
+                    'position':    round(row.get('position', 0), 1),
+                }
+            range_data[rkey] = data_map
+        except Exception as e:
+            logger.error(f"GSC MOM/YOY API error ({rkey}) for sheet {sheet.id}: {e}")
+            if rkey != 'yoy':
+                api_errors.append(str(e))
+
+    if not all_keys and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GSC API error: {api_errors[0]}'}
+
+    def pct(cur_v, base_v):
+        if base_v and base_v != 0:
+            return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+        return 'N/A'
+
+    columns = ['Sr No', dim_label]
+    for m in metrics_list:
+        ml = ml_map.get(m, m.capitalize())
+        is_rate = rate_map.get(m, False)
+        col_label = cur_label if is_rate else cur_col_label
+        columns += [f"{prv_label} {ml}", f"{col_label} {ml}", f"{ml} MOM %", f"{ml} YOY %"]
+
+    rows = []
+    for idx, dim_key in enumerate(sorted(all_keys), 1):
+        row = {'Sr No': idx, dim_label: dim_key}
+        for m in metrics_list:
+            ml      = ml_map.get(m, m.capitalize())
+            is_rate = rate_map.get(m, False)
+            col_label = cur_label if is_rate else cur_col_label
+            prv_v   = range_data['prev'].get(dim_key, {}).get(m, 0)
+            cur_raw = range_data['curr'].get(dim_key, {}).get(m, 0)
+            yoy_v   = range_data['yoy'].get(dim_key, {}).get(m, 0)
+            cur_v   = cur_raw if is_rate else (round(cur_raw * factor) if factor != 1.0 else cur_raw)
+            # Show "actual (prorated)" for count metrics when prorated
+            if not is_rate and factor != 1.0:
+                display_v = f"{cur_raw} ({cur_v})"
+            else:
+                display_v = cur_v
+            row[f"{prv_label} {ml}"]  = prv_v
+            row[f"{col_label} {ml}"]  = display_v
+            row[f"{ml} MOM %"]        = pct(cur_v, prv_v)
+            row[f"{ml} YOY %"]        = pct(cur_v, yoy_v)
+        rows.append(row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+        'metrics_headers': [ml_map.get(m, m.capitalize()) for m in metrics_list],
+        'is_prorated': is_prorated,
+        'days_elapsed': days_elapsed,
+        'total_days': total_days,
+    }
 
 
 def _fetch_domain_metrics_data(domain_id, sheet):
@@ -2898,6 +3399,209 @@ def seo_report_sheet_data(request):
         reports.append(report_entry)
 
     return Response({'reports': reports, 'count': len(reports)})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def seo_report_export_xlsx(request):
+    """
+    Export all report sheets for a domain as a single .xlsx file.
+    RankMax-style formatting: gold headers, green/red change values,
+    metric group headers with merged cells.
+    """
+    from io import BytesIO
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill
+    from openpyxl.utils import get_column_letter
+    from django.http import HttpResponse
+    from integrations.models import Integration
+
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    if int(domain_id) not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    sheets = SeoReportSheet.objects.filter(
+        domain_id=domain_id, is_active=True
+    ).order_by('-created_at')
+
+    if not sheets.exists():
+        return Response({'error': 'No report sheets configured'}, status=status.HTTP_404_NOT_FOUND)
+
+    gsc_integration = Integration.objects.filter(
+        domain_id=domain_id, type='search_console', status='active'
+    ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+
+    ga_integration = Integration.objects.filter(
+        domain_id=domain_id, type='google_analytics', status='active'
+    ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+
+    # ── Styles ────────────────────────────────────────────────────────────
+    metric_header_fill = PatternFill(start_color="00B050", fill_type="solid")
+    metric_header_font = Font(bold=True, color="FFFFFF", size=11)
+    col_fill           = PatternFill(start_color="FFD966", fill_type="solid")
+    col_font           = Font(bold=True, color="000000", size=10)
+    change_col_fill    = PatternFill(start_color="FFFF00", fill_type="solid")
+    change_col_font    = Font(bold=True, color="009E4F", size=10)
+    pos_font           = Font(bold=True, color="009E4F")
+    neg_font           = Font(bold=True, color="FF0000")
+    center_align       = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left_align         = Alignment(horizontal='left', vertical='center')
+
+    def _is_change_col(col_name):
+        return ('Change' in col_name or 'MOM %' in col_name or 'YOY %' in col_name)
+
+    def _is_dim_col(col_name):
+        return col_name in ('Sr No', 'Metric', 'Pages', 'Queries', 'Landing Pages',
+                            'Source', 'Keywords', 'Avg. Volume', 'Base Ranking')
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    for sheet in sheets:
+        # ── Fetch data using the same dispatcher as seo_report_sheet_data ──
+        data = {'columns': [], 'rows': [], 'error': None}
+        try:
+            if sheet.category == 'gsc' and sheet.sheet_type in (
+                'gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries'
+            ):
+                if gsc_integration:
+                    data = _fetch_gsc_report_data(gsc_integration, sheet)
+            elif sheet.category == 'ga' and sheet.sheet_type in (
+                'ga_landing_pages', 'ga_other_sources'
+            ):
+                if ga_integration:
+                    data = _fetch_ga_report_data(ga_integration, sheet)
+            elif sheet.sheet_type == 'keyword_ranking':
+                if sheet.schedule == 'monthly':
+                    data = _fetch_keyword_ranking_monthly(domain_id, sheet)
+                else:
+                    data = _fetch_keyword_ranking_weekly(domain_id, sheet)
+            elif sheet.sheet_type == 'domain_metrics':
+                data = _fetch_domain_metrics_data(domain_id, sheet)
+            elif sheet.sheet_type == 'gsc_overview':
+                if gsc_integration:
+                    data = _fetch_gsc_overview_data(gsc_integration, sheet)
+            elif sheet.sheet_type == 'ga_overview':
+                if ga_integration:
+                    data = _fetch_ga_overview_data(ga_integration, sheet)
+            elif sheet.sheet_type == 'keyword_ranking_overview':
+                data = _fetch_keyword_ranking_overview(domain_id, sheet)
+        except Exception as e:
+            logger.error(f"Export: error fetching sheet {sheet.id}: {e}")
+            data['error'] = str(e)
+
+        columns = data.get('columns', [])
+        rows    = data.get('rows', [])
+        metrics_headers = data.get('metrics_headers', [])
+
+        if not columns:
+            continue
+
+        # ── Create worksheet ──────────────────────────────────────────────
+        ws_title = sheet.sheet_name[:31]  # Excel sheet name max 31 chars
+        ws = wb.create_sheet(title=ws_title)
+
+        # Row 1: empty (offset)
+        data_start_row = 2
+
+        # Row 2: metric group headers (merged) — if metrics_headers exist
+        if metrics_headers:
+            # Figure out which columns belong to each metric group
+            col_idx = 1
+            for c_name in columns:
+                if _is_dim_col(c_name):
+                    col_idx += 1
+                else:
+                    break
+            metric_start = col_idx  # first metric column (1-based)
+
+            cols_per_metric = 0
+            if len(metrics_headers) > 0:
+                non_dim_cols = [c for c in columns if not _is_dim_col(c)]
+                cols_per_metric = len(non_dim_cols) // len(metrics_headers) if len(metrics_headers) > 0 else 0
+
+            if cols_per_metric > 0:
+                for mi, mh in enumerate(metrics_headers):
+                    start_col = metric_start + mi * cols_per_metric
+                    end_col   = start_col + cols_per_metric - 1
+                    cell = ws.cell(row=2, column=start_col, value=mh.upper())
+                    cell.fill = metric_header_fill
+                    cell.font = metric_header_font
+                    cell.alignment = center_align
+                    if end_col > start_col:
+                        ws.merge_cells(
+                            start_row=2, start_column=start_col,
+                            end_row=2, end_column=end_col
+                        )
+                        for fill_col in range(start_col + 1, end_col + 1):
+                            ws.cell(row=2, column=fill_col).fill = metric_header_fill
+                data_start_row = 3
+
+        # Column headers row
+        header_row = data_start_row
+        for ci, col_name in enumerate(columns, 1):
+            cell = ws.cell(row=header_row, column=ci, value=col_name)
+            if _is_change_col(col_name):
+                cell.fill = change_col_fill
+                cell.font = change_col_font
+            else:
+                cell.fill = col_fill
+                cell.font = col_font
+            cell.alignment = center_align
+
+        # Data rows
+        for ri, row_data in enumerate(rows, header_row + 1):
+            for ci, col_name in enumerate(columns, 1):
+                val = row_data.get(col_name, '')
+                cell = ws.cell(row=ri, column=ci, value=val)
+
+                if _is_change_col(col_name):
+                    # Parse numeric value for color
+                    try:
+                        num = float(str(val).replace('%', '').replace('+', '').replace(',', ''))
+                        if num > 0:
+                            cell.font = pos_font
+                        elif num < 0:
+                            cell.font = neg_font
+                    except (ValueError, TypeError):
+                        pass
+                    cell.alignment = center_align
+                elif _is_dim_col(col_name) and col_name != 'Sr No':
+                    cell.alignment = left_align
+                else:
+                    cell.alignment = center_align
+
+        # Auto-size columns
+        for ci, col_name in enumerate(columns, 1):
+            col_letter = get_column_letter(ci)
+            max_len = len(str(col_name))
+            for ri in range(header_row + 1, header_row + 1 + min(len(rows), 50)):
+                cell_val = ws.cell(row=ri, column=ci).value
+                if cell_val is not None:
+                    max_len = max(max_len, len(str(cell_val)))
+            ws.column_dimensions[col_letter].width = min(max_len + 4, 40)
+
+    # ── Return the workbook ───────────────────────────────────────────────
+    if len(wb.sheetnames) == 0:
+        return Response({'error': 'No data to export'}, status=status.HTTP_404_NOT_FOUND)
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    domain_name = sheets[0].domain.name if sheets else 'report'
+    filename = f"seo-report-{domain_name.replace(' ', '_')}.xlsx"
+
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
 
 
 # ---------------------------------------------------------------------------

@@ -54,15 +54,27 @@ class GATrafficInsight(models.Model):
         ('COMP', 'Completed'),
         ('FAIL', 'Failed'),
     ]
-    
+
+    PERIOD_TYPE_CHOICES = [
+        ('rolling_30d', 'Rolling 30 Days'),
+        ('current_month', 'Current Month'),
+        ('prev_month', 'Previous Month'),
+        ('yoy_month', 'YoY Month'),
+    ]
+
     integration = models.ForeignKey(Integration, on_delete=models.CASCADE, related_name='ga_insights')
     domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='ga_traffic_insights')
     track_status = models.CharField(max_length=4, choices=TRACK_STATUS_CHOICES, default='INIT')
     track_message = models.TextField(null=True, blank=True)
-    
+
     # Date range for this insight
     start_date = models.DateField()
     end_date = models.DateField()
+
+    # Period classification for MoM/YoY (rolling_30d = legacy default)
+    period_type = models.CharField(
+        max_length=20, choices=PERIOD_TYPE_CHOICES, default='rolling_30d', db_index=True
+    )
     
     # Overall metrics
     total_sessions = models.IntegerField(default=0)
@@ -115,15 +127,27 @@ class GSCTrafficInsight(models.Model):
         ('COMP', 'Completed'),
         ('FAIL', 'Failed'),
     ]
-    
+
+    PERIOD_TYPE_CHOICES = [
+        ('rolling_30d', 'Rolling 30 Days'),
+        ('current_month', 'Current Month'),
+        ('prev_month', 'Previous Month'),
+        ('yoy_month', 'YoY Month'),
+    ]
+
     integration = models.ForeignKey(Integration, on_delete=models.CASCADE, related_name='gsc_insights')
     domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='gsc_traffic_insights')
     track_status = models.CharField(max_length=4, choices=TRACK_STATUS_CHOICES, default='INIT')
     track_message = models.TextField(null=True, blank=True)
-    
+
     # Date range for this insight
     start_date = models.DateField()
     end_date = models.DateField()
+
+    # Period classification for MoM/YoY (rolling_30d = legacy default)
+    period_type = models.CharField(
+        max_length=20, choices=PERIOD_TYPE_CHOICES, default='rolling_30d', db_index=True
+    )
     
     # Overall metrics
     total_impressions = models.IntegerField(default=0)
