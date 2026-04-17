@@ -136,7 +136,14 @@ const SeoReports = () => {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `seo-report-${selectedDomain?.name || domainId}.xlsx`);
+      const now = new Date();
+      const ts = now.getFullYear().toString()
+        + String(now.getMonth() + 1).padStart(2, "0")
+        + String(now.getDate()).padStart(2, "0")
+        + "_" + String(now.getHours()).padStart(2, "0")
+        + String(now.getMinutes()).padStart(2, "0")
+        + String(now.getSeconds()).padStart(2, "0");
+      link.setAttribute("download", `seo-report-${selectedDomain?.name || domainId}-${ts}.xlsx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
