@@ -1966,6 +1966,10 @@ def _fetch_gsc_report_data(integration, sheet):
     if sheet.schedule == 'monthly' and len(date_ranges) >= 2:
         return _fetch_gsc_report_mom_yoy(integration, sheet, date_ranges)
 
+    # Weekly schedule → WOW mode with prorate
+    if sheet.schedule == 'weekly' and len(date_ranges) >= 1:
+        return _fetch_gsc_report_wow(integration, sheet, date_ranges)
+
     metrics_list = sheet.metrics or ['clicks', 'impressions', 'ctr', 'position']
     change_units = sheet.change_units or []
 
@@ -2089,6 +2093,10 @@ def _fetch_ga_report_data(integration, sheet):
     # Monthly schedule → MOM / YOY mode
     if sheet.schedule == 'monthly' and len(date_ranges) >= 2:
         return _fetch_ga_report_mom_yoy(integration, sheet, date_ranges)
+
+    # Weekly schedule → WOW mode with prorate
+    if sheet.schedule == 'weekly' and len(date_ranges) >= 1:
+        return _fetch_ga_report_wow(integration, sheet, date_ranges)
 
     from integrations.google_oauth import get_credentials_from_integration
     from googleapiclient.discovery import build
@@ -2252,7 +2260,8 @@ def _fetch_gsc_overview_data(integration, sheet):
             'total_days': cur.get('total_days'),
         }
 
-    # ── Fallback: live GSC API (original behaviour) ──────────────────────────
+    # ── Weekly / Monthly: live API with prorate + MOM / YOY ─────────────────
+    from integrations.utils.prorate import calculate_prorate_factor as _cpf
     from integrations.google_oauth import get_credentials_from_integration
     from googleapiclient.discovery import build
 
@@ -2263,6 +2272,85 @@ def _fetch_gsc_overview_data(integration, sheet):
     service = build('searchconsole', 'v1', credentials=credentials)
     site_url = integration.provider_id
 
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+
+    if len(date_ranges) >= 1:
+        import calendar as _cal
+        from datetime import date as _date
+
+        if sheet.schedule == 'weekly':
+            (p_s, p_e, p_lbl, c_s, c_e_api, c_lbl, c_full,
+             y_s, y_e) = _get_weekly_ranges()
+        else:
+            # Monthly
+            c_s, c_e_api, c_lbl = date_ranges[-1]
+            p_s, p_e, p_lbl = date_ranges[-2] if len(date_ranges) >= 2 else (c_s, c_e_api, c_lbl)
+            _, c_full_last = _cal.monthrange(c_s.year, c_s.month)
+            c_full = _date(c_s.year, c_s.month, c_full_last)
+            y_s = _date(c_s.year - 1, c_s.month, 1)
+            y_e = _date(c_e_api.year - 1, c_e_api.month, c_e_api.day)
+
+        days_elapsed, total_days, factor = _cpf(c_s, c_full)
+        is_prorated = factor != 1.0
+        cur_col_label = f"{c_lbl} (PR)" if is_prorated else c_lbl
+
+        def _pct(cur_v, base_v):
+            if base_v and base_v != 0:
+                return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+            return 'N/A'
+
+        gsc_metrics = [
+            ('Clicks',       'clicks',      False),
+            ('Impressions',  'impressions', False),
+            ('CTR',          'ctr',         True),
+            ('Avg Position', 'position',    True),
+        ]
+
+        range_vals = {}
+        for rkey, s_dt, e_dt in [('prev', p_s, p_e), ('curr', c_s, c_e_api), ('yoy', y_s, y_e)]:
+            try:
+                resp = service.searchanalytics().query(
+                    siteUrl=site_url,
+                    body={'startDate': s_dt.isoformat(), 'endDate': e_dt.isoformat(), 'rowLimit': 1}
+                ).execute()
+                r = resp.get('rows', [{}])[0] if resp.get('rows') else {}
+                range_vals[rkey] = {
+                    'clicks': r.get('clicks', 0), 'impressions': r.get('impressions', 0),
+                    'ctr': round(r.get('ctr', 0) * 100, 2), 'position': round(r.get('position', 0), 1),
+                }
+            except Exception:
+                range_vals[rkey] = {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
+
+        rows = []
+        for label, key, is_rate in gsc_metrics:
+            prv_v   = range_vals['prev'].get(key, 0)
+            cur_raw = range_vals['curr'].get(key, 0)
+            yoy_v   = range_vals['yoy'].get(key, 0)
+            cur_v   = cur_raw if is_rate else (round(cur_raw * factor) if factor != 1.0 else cur_raw)
+            c_label = c_lbl if is_rate else cur_col_label
+            if not is_rate and factor != 1.0:
+                display_v = f"{cur_raw} ({cur_v})"
+            else:
+                display_v = cur_v
+            rows.append({
+                'Metric': label,
+                p_lbl:    prv_v,
+                c_label:  display_v,
+                'MOM %':  _pct(cur_v, prv_v),
+                'YOY %':  _pct(cur_v, yoy_v),
+            })
+
+        return {
+            'columns': ['Metric', p_lbl, cur_col_label, 'MOM %', 'YOY %'],
+            'rows': rows,
+            'total_rows': len(rows),
+            'is_prorated': is_prorated,
+            'days_elapsed': days_elapsed,
+            'total_days': total_days,
+        }
+
+    # ── Fallback: live GSC API (original behaviour) ──────────────────────────
     order_asc = sheet.order_by == 'Ascending'
     date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
     change_units = sheet.change_units or []
@@ -2392,7 +2480,8 @@ def _fetch_ga_overview_data(integration, sheet):
             'total_days': cur.get('total_days'),
         }
 
-    # ── Fallback: live GA API (original behaviour) ────────────────────────────
+    # ── Weekly / Monthly: live API with prorate + MOM / YOY ─────────────────
+    from integrations.utils.prorate import calculate_prorate_factor as _cpf_ga
     from integrations.google_oauth import get_credentials_from_integration
     from googleapiclient.discovery import build
 
@@ -2403,6 +2492,88 @@ def _fetch_ga_overview_data(integration, sheet):
     service = build('analyticsdata', 'v1beta', credentials=credentials)
     property_id = integration.provider_id
 
+    order_asc = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
+
+    if len(date_ranges) >= 1:
+        import calendar as _cal
+        from datetime import date as _date
+
+        if sheet.schedule == 'weekly':
+            (p_s, p_e, p_lbl, c_s, c_e_api, c_lbl, c_full,
+             y_s, y_e) = _get_weekly_ranges()
+        else:
+            c_s, c_e_api, c_lbl = date_ranges[-1]
+            p_s, p_e, p_lbl = date_ranges[-2] if len(date_ranges) >= 2 else (c_s, c_e_api, c_lbl)
+            _, c_full_last = _cal.monthrange(c_s.year, c_s.month)
+            c_full = _date(c_s.year, c_s.month, c_full_last)
+            y_s = _date(c_s.year - 1, c_s.month, 1)
+            y_e = _date(c_e_api.year - 1, c_e_api.month, c_e_api.day)
+
+        days_elapsed, total_days, factor = _cpf_ga(c_s, c_full)
+        is_prorated = factor != 1.0
+        cur_col_label = f"{c_lbl} (PR)" if is_prorated else c_lbl
+
+        def _pct_ga(cur_v, base_v):
+            if base_v and base_v != 0:
+                return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+            return 'N/A'
+
+        ga_ov_metrics = ['sessions', 'totalUsers', 'screenPageViews', 'bounceRate']
+        ga_ov_labels  = ['Sessions', 'Users', 'Page Views', 'Bounce Rate']
+        ga_ov_rate    = [False, False, False, True]
+
+        range_vals = {}
+        for rkey, s_dt, e_dt in [('prev', p_s, p_e), ('curr', c_s, c_e_api), ('yoy', y_s, y_e)]:
+            try:
+                resp = service.properties().runReport(
+                    property=property_id,
+                    body={
+                        'dateRanges': [{'startDate': s_dt.isoformat(), 'endDate': e_dt.isoformat()}],
+                        'metrics': [{'name': m} for m in ga_ov_metrics],
+                    }
+                ).execute()
+                r = resp.get('rows', [])
+                if r:
+                    vals = {}
+                    for i, ml in enumerate(ga_ov_labels):
+                        raw = r[0]['metricValues'][i]['value']
+                        vals[ml] = round(float(raw), 2) if '.' in raw else int(raw)
+                    range_vals[rkey] = vals
+                else:
+                    range_vals[rkey] = {ml: 0 for ml in ga_ov_labels}
+            except Exception:
+                range_vals[rkey] = {ml: 0 for ml in ga_ov_labels}
+
+        rows = []
+        for label, is_rate in zip(ga_ov_labels, ga_ov_rate):
+            prv_v   = range_vals['prev'].get(label, 0)
+            cur_raw = range_vals['curr'].get(label, 0)
+            yoy_v   = range_vals['yoy'].get(label, 0)
+            cur_v   = cur_raw if is_rate else (round(cur_raw * factor) if factor != 1.0 else cur_raw)
+            c_label = c_lbl if is_rate else cur_col_label
+            if not is_rate and factor != 1.0:
+                display_v = f"{cur_raw} ({cur_v})"
+            else:
+                display_v = cur_v
+            rows.append({
+                'Metric': label,
+                p_lbl:    prv_v,
+                c_label:  display_v,
+                'MOM %':  _pct_ga(cur_v, prv_v),
+                'YOY %':  _pct_ga(cur_v, yoy_v),
+            })
+
+        return {
+            'columns': ['Metric', p_lbl, cur_col_label, 'MOM %', 'YOY %'],
+            'rows': rows,
+            'total_rows': len(rows),
+            'is_prorated': is_prorated,
+            'days_elapsed': days_elapsed,
+            'total_days': total_days,
+        }
+
+    # ── Fallback: live GA API (original behaviour) ────────────────────────────
     order_asc = sheet.order_by == 'Ascending'
     date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc)
     change_units = sheet.change_units or []
@@ -2828,6 +2999,287 @@ def _fetch_gsc_report_mom_yoy(integration, sheet, date_ranges):
             yoy_v   = range_data['yoy'].get(dim_key, {}).get(m, 0)
             cur_v   = cur_raw if is_rate else (round(cur_raw * factor) if factor != 1.0 else cur_raw)
             # Show "actual (prorated)" for count metrics when prorated
+            if not is_rate and factor != 1.0:
+                display_v = f"{cur_raw} ({cur_v})"
+            else:
+                display_v = cur_v
+            row[f"{prv_label} {ml}"]  = prv_v
+            row[f"{col_label} {ml}"]  = display_v
+            row[f"{ml} MOM %"]        = pct(cur_v, prv_v)
+            row[f"{ml} YOY %"]        = pct(cur_v, yoy_v)
+        rows.append(row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+        'metrics_headers': [ml_map.get(m, m.capitalize()) for m in metrics_list],
+        'is_prorated': is_prorated,
+        'days_elapsed': days_elapsed,
+        'total_days': total_days,
+    }
+
+
+def _get_weekly_ranges():
+    """
+    Compute the current partial week and previous complete week.
+    Returns (prv_start, prv_end, prv_label, cur_start, cur_end_api, cur_label,
+             cur_full_end, yoy_start, yoy_end).
+    """
+    from datetime import date as _date
+    today = _date.today() - timedelta(days=3)
+    days_since_sunday = (today.weekday() + 1) % 7
+    last_sunday = today - timedelta(days=days_since_sunday)
+    cur_start    = last_sunday + timedelta(days=1)
+    cur_end_api  = today
+    cur_full_end = cur_start + timedelta(days=6)
+    # Previous complete week
+    prv_end   = last_sunday
+    prv_start = prv_end - timedelta(days=6)
+    prv_label = f"{prv_start.strftime('%d %b')}-{prv_end.strftime('%d %b')}"
+    has_partial = cur_start <= today
+    if has_partial:
+        cur_label = f"{cur_start.strftime('%d %b')}-{cur_end_api.strftime('%d %b')}"
+    else:
+        # Today is Sunday — no partial; use last 2 complete weeks
+        cur_start    = prv_start
+        cur_end_api  = prv_end
+        cur_full_end = prv_end
+        cur_label    = prv_label
+        prv_end   = prv_start - timedelta(days=1)
+        prv_start = prv_end - timedelta(days=6)
+        prv_label = f"{prv_start.strftime('%d %b')}-{prv_end.strftime('%d %b')}"
+    # YOY: same calendar dates last year
+    yoy_start = _date(cur_start.year - 1, cur_start.month, cur_start.day)
+    yoy_end   = _date(cur_end_api.year - 1, cur_end_api.month, cur_end_api.day)
+    return (prv_start, prv_end, prv_label,
+            cur_start, cur_end_api, cur_label, cur_full_end,
+            yoy_start, yoy_end)
+
+
+def _fetch_ga_report_wow(integration, sheet, date_ranges):
+    """
+    Weekly mode for ga_landing_pages and ga_other_sources.
+    Returns: prev week | current week (prorated) | MOM % | YOY %
+    """
+    from integrations.utils.prorate import calculate_prorate_factor
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('analyticsdata', 'v1beta', credentials=credentials)
+    property_id = integration.provider_id
+
+    (prv_start, prv_end, prv_label,
+     cur_start, cur_end_api, cur_label, cur_full_end,
+     yoy_start, yoy_end) = _get_weekly_ranges()
+
+    days_elapsed, total_days, factor = calculate_prorate_factor(cur_start, cur_full_end)
+    is_prorated = factor != 1.0
+    cur_col_label = f"{cur_label} (PR)" if is_prorated else cur_label
+
+    if sheet.sheet_type == 'ga_landing_pages':
+        ga_dimension   = 'landingPage'
+        dim_label      = 'Landing Pages'
+        ga_metrics     = ['sessions', 'totalUsers', 'screenPageViews', 'bounceRate']
+        metric_labels  = ['Sessions', 'Users', 'Page Views', 'Bounce Rate']
+        metric_is_rate = [False, False, False, True]
+    else:
+        ga_dimension   = 'sessionDefaultChannelGroup'
+        dim_label      = 'Source'
+        ga_metrics     = ['sessions', 'totalUsers']
+        metric_labels  = ['Sessions', 'Users']
+        metric_is_rate = [False, False]
+
+    all_keys   = set()
+    range_data = {'prev': {}, 'curr': {}, 'yoy': {}}
+    api_errors = []
+
+    for rkey, start_dt, end_dt in [
+        ('prev', prv_start, prv_end),
+        ('curr', cur_start, cur_end_api),
+        ('yoy',  yoy_start, yoy_end),
+    ]:
+        try:
+            body = {
+                'dateRanges': [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+                'dimensions': [{'name': ga_dimension}],
+                'metrics': [{'name': m} for m in ga_metrics],
+                'limit': 500,
+            }
+            response = service.properties().runReport(property=property_id, body=body).execute()
+            data_map = {}
+            for row in response.get('rows', []):
+                dim_key = row['dimensionValues'][0]['value']
+                all_keys.add(dim_key)
+                vals = {}
+                for i, ml in enumerate(metric_labels):
+                    raw = row['metricValues'][i]['value']
+                    vals[ml] = round(float(raw), 2) if '.' in raw else int(raw)
+                data_map[dim_key] = vals
+            range_data[rkey] = data_map
+        except Exception as e:
+            logger.error(f"GA weekly API error ({rkey}) for sheet {sheet.id}: {e}")
+            if rkey != 'yoy':
+                api_errors.append(str(e))
+
+    if not all_keys and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GA API error: {api_errors[0]}'}
+
+    def pct(cur_v, base_v):
+        if base_v and base_v != 0:
+            return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+        return 'N/A'
+
+    columns = ['Sr No', dim_label]
+    for ml, is_rate in zip(metric_labels, metric_is_rate):
+        col_label = cur_label if is_rate else cur_col_label
+        columns += [f"{prv_label} {ml}", f"{col_label} {ml}", f"{ml} MOM %", f"{ml} YOY %"]
+
+    rows = []
+    for idx, dim_key in enumerate(sorted(all_keys), 1):
+        row = {'Sr No': idx, dim_label: dim_key}
+        for ml, is_rate in zip(metric_labels, metric_is_rate):
+            col_label = cur_label if is_rate else cur_col_label
+            prv_v   = range_data['prev'].get(dim_key, {}).get(ml, 0)
+            cur_raw = range_data['curr'].get(dim_key, {}).get(ml, 0)
+            yoy_v   = range_data['yoy'].get(dim_key, {}).get(ml, 0)
+            cur_v   = cur_raw if is_rate else (round(cur_raw * factor) if factor != 1.0 else cur_raw)
+            if not is_rate and factor != 1.0:
+                display_v = f"{cur_raw} ({cur_v})"
+            else:
+                display_v = cur_v
+            row[f"{prv_label} {ml}"]  = prv_v
+            row[f"{col_label} {ml}"]  = display_v
+            row[f"{ml} MOM %"]        = pct(cur_v, prv_v)
+            row[f"{ml} YOY %"]        = pct(cur_v, yoy_v)
+        rows.append(row)
+
+    return {
+        'columns': columns,
+        'rows': rows,
+        'total_rows': len(rows),
+        'metrics_headers': metric_labels,
+        'is_prorated': is_prorated,
+        'days_elapsed': days_elapsed,
+        'total_days': total_days,
+    }
+
+
+def _fetch_gsc_report_wow(integration, sheet, date_ranges):
+    """
+    Weekly mode for gsc_pages, gsc_queries, gsc_branded_queries,
+    gsc_non_branded_queries.
+    Returns: prev week | current week (prorated) | MOM % | YOY %
+    """
+    from integrations.utils.prorate import calculate_prorate_factor
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service = build('searchconsole', 'v1', credentials=credentials)
+    site_url = integration.provider_id
+
+    (prv_start, prv_end, prv_label,
+     cur_start, cur_end_api, cur_label, cur_full_end,
+     yoy_start, yoy_end) = _get_weekly_ranges()
+
+    days_elapsed, total_days, factor = calculate_prorate_factor(cur_start, cur_full_end)
+    is_prorated = factor != 1.0
+    cur_col_label = f"{cur_label} (PR)" if is_prorated else cur_label
+
+    if sheet.sheet_type in ('gsc_pages',):
+        dimension = 'page'
+        dim_label = 'Pages'
+    else:
+        dimension = 'query'
+        dim_label = 'Queries'
+
+    domain_name = (site_url
+                   .replace('sc-domain:', '')
+                   .replace('https://', '')
+                   .replace('http://', '')
+                   .split('/')[0].split('.')[0])
+
+    def _dim_filter():
+        if sheet.sheet_type == 'gsc_branded_queries':
+            return [{'dimension': 'query', 'operator': 'contains', 'expression': domain_name}]
+        if sheet.sheet_type == 'gsc_non_branded_queries':
+            return [{'dimension': 'query', 'operator': 'excludingRegex', 'expression': f'(?i){domain_name}'}]
+        return None
+
+    dim_filters  = _dim_filter()
+    metrics_list = sheet.metrics or ['clicks', 'impressions', 'ctr', 'position']
+    ml_map   = {'clicks': 'Clicks', 'impressions': 'Impressions', 'ctr': 'CTR', 'position': 'Avg Position'}
+    rate_map = {'clicks': False, 'impressions': False, 'ctr': True, 'position': True}
+
+    all_keys   = set()
+    range_data = {'prev': {}, 'curr': {}, 'yoy': {}}
+    api_errors = []
+
+    for rkey, start_dt, end_dt in [
+        ('prev', prv_start, prv_end),
+        ('curr', cur_start, cur_end_api),
+        ('yoy',  yoy_start, yoy_end),
+    ]:
+        try:
+            body = {
+                'startDate': start_dt.isoformat(),
+                'endDate':   end_dt.isoformat(),
+                'dimensions': [dimension],
+                'rowLimit': 500,
+            }
+            if dim_filters:
+                body['dimensionFilterGroups'] = [{'filters': dim_filters}]
+            response = service.searchanalytics().query(siteUrl=site_url, body=body).execute()
+            data_map = {}
+            for row in response.get('rows', []):
+                dim_key = row.get('keys', [''])[0]
+                all_keys.add(dim_key)
+                data_map[dim_key] = {
+                    'clicks':      row.get('clicks', 0),
+                    'impressions': row.get('impressions', 0),
+                    'ctr':         round(row.get('ctr', 0) * 100, 2),
+                    'position':    round(row.get('position', 0), 1),
+                }
+            range_data[rkey] = data_map
+        except Exception as e:
+            logger.error(f"GSC weekly API error ({rkey}) for sheet {sheet.id}: {e}")
+            if rkey != 'yoy':
+                api_errors.append(str(e))
+
+    if not all_keys and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GSC API error: {api_errors[0]}'}
+
+    def pct(cur_v, base_v):
+        if base_v and base_v != 0:
+            return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+        return 'N/A'
+
+    columns = ['Sr No', dim_label]
+    for m in metrics_list:
+        ml = ml_map.get(m, m.capitalize())
+        is_rate = rate_map.get(m, False)
+        col_label = cur_label if is_rate else cur_col_label
+        columns += [f"{prv_label} {ml}", f"{col_label} {ml}", f"{ml} MOM %", f"{ml} YOY %"]
+
+    rows = []
+    for idx, dim_key in enumerate(sorted(all_keys), 1):
+        row = {'Sr No': idx, dim_label: dim_key}
+        for m in metrics_list:
+            ml      = ml_map.get(m, m.capitalize())
+            is_rate = rate_map.get(m, False)
+            col_label = cur_label if is_rate else cur_col_label
+            prv_v   = range_data['prev'].get(dim_key, {}).get(m, 0)
+            cur_raw = range_data['curr'].get(dim_key, {}).get(m, 0)
+            yoy_v   = range_data['yoy'].get(dim_key, {}).get(m, 0)
+            cur_v   = cur_raw if is_rate else (round(cur_raw * factor) if factor != 1.0 else cur_raw)
             if not is_rate and factor != 1.0:
                 display_v = f"{cur_raw} ({cur_v})"
             else:
@@ -3594,7 +4046,9 @@ def seo_report_export_xlsx(request):
     buffer.seek(0)
 
     domain_name = sheets[0].domain.name if sheets else 'report'
-    filename = f"seo-report-{domain_name.replace(' ', '_')}.xlsx"
+    from datetime import datetime as _dt
+    timestamp = _dt.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"seo-report-{domain_name.replace(' ', '_')}-{timestamp}.xlsx"
 
     response = HttpResponse(
         buffer.getvalue(),
