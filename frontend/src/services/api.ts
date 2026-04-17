@@ -1939,6 +1939,18 @@ export const apiClient = {
 
   getSeoReportSheetData: (domainId: number) =>
     apiRequest(`/seo/report-sheets/data/?domain_id=${domainId}`),
+
+  exportSeoReportXlsx: async (domainId: number): Promise<Blob> => {
+    const token = getAuthToken();
+    const headers: HeadersInit = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${API_BASE_URL}/seo/report-sheets/export/?domain_id=${domainId}`, {
+      method: 'GET',
+      headers,
+    });
+    if (!response.ok) throw new Error('Excel export failed');
+    return response.blob();
+  },
 };
 
 // Also export as 'api' for flexibility

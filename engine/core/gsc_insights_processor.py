@@ -4,6 +4,7 @@ GSC Insights Processor: Fetches and stores Google Search Console traffic data
 import logging
 from typing import Dict, Any
 from datetime import datetime, timedelta, date
+import calendar
 from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
@@ -237,6 +238,95 @@ class GSCInsightsProcessor:
                 'error': str(e)
             }
     
+    def process_monthly_insights(self, integration_id: int) -> Dict[str, Any]:
+        """
+        Create/update 3 calendar-month-aligned GSC insight records for MoM and YoY.
+
+        Records created:
+          current_month  — Apr 1 → Apr 30  (incomplete, prorated in API)
+          prev_month     — Mar 1 → Mar 31  (complete)
+          yoy_month      — Apr 1 2025 → Apr 30 2025 (complete)
+
+        Uses get_or_create on (integration, start_date, end_date) so the same
+        record is updated each day within the month (no duplicates).
+        The existing scheduler picks up INIT records and processes them normally.
+        """
+        try:
+            integration = Integration.objects.get(
+                id=integration_id, type='search_console', status='active'
+            )
+
+            if not integration.provider_id or integration.provider_id == '':
+                return {'success': False, 'error': 'No site selected for this integration'}
+
+            today = date.today()
+            month_start = today.replace(day=1)
+            month_last_day = calendar.monthrange(today.year, today.month)[1]
+            month_end = today.replace(day=month_last_day)
+
+            # Previous month
+            if today.month == 1:
+                prev_year, prev_month = today.year - 1, 12
+            else:
+                prev_year, prev_month = today.year, today.month - 1
+            prev_start = date(prev_year, prev_month, 1)
+            prev_last_day = calendar.monthrange(prev_year, prev_month)[1]
+            prev_end = date(prev_year, prev_month, prev_last_day)
+
+            # Same month last year
+            yoy_year = today.year - 1
+            yoy_last_day = calendar.monthrange(yoy_year, today.month)[1]
+            yoy_start = date(yoy_year, today.month, 1)
+            yoy_end = date(yoy_year, today.month, yoy_last_day)
+
+            periods = [
+                ('current_month', month_start, month_end),
+                ('prev_month',    prev_start,  prev_end),
+                ('yoy_month',     yoy_start,   yoy_end),
+            ]
+
+            created_ids = []
+            for period_type, start, end in periods:
+                insight, created = GSCTrafficInsight.objects.get_or_create(
+                    integration=integration,
+                    start_date=start,
+                    end_date=end,
+                    defaults={
+                        'domain': integration.domain,
+                        'track_status': 'INIT',
+                        'period_type': period_type,
+                    }
+                )
+                if not created:
+                    # Re-fetch daily: reset to INIT and update period_type label
+                    GSCTrafficInsight.objects.filter(id=insight.id).update(
+                        period_type=period_type,
+                        track_status='INIT',
+                        track_message=None,
+                    )
+                    logger.info(
+                        f"GSC monthly insight reset to INIT: integration={integration_id} "
+                        f"period={period_type} ({start}→{end})"
+                    )
+                else:
+                    logger.info(
+                        f"GSC monthly insight created: integration={integration_id} "
+                        f"period={period_type} ({start}→{end})"
+                    )
+                created_ids.append(insight.id)
+
+            return {
+                'success': True,
+                'insight_ids': created_ids,
+                'message': f'Scheduled {len(created_ids)} monthly GSC insight records'
+            }
+
+        except Integration.DoesNotExist:
+            return {'success': False, 'error': f'Integration {integration_id} not found or not active'}
+        except Exception as e:
+            logger.error(f"Error scheduling monthly GSC insights for integration {integration_id}: {e}", exc_info=True)
+            return {'success': False, 'error': str(e)}
+
     def _fetch_gsc_data(self, insight: GSCTrafficInsight, integration: Integration,
                        start_date: date, end_date: date) -> Dict[str, Any]:
         """Fetch data from Google Search Console API"""

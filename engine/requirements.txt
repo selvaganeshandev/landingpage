@@ -31,7 +31,7 @@ celery==5.3.4
 redis==5.0.1
 
 # HTTP and API
-requests==2.31.0
+requests>=2.31.0
 
 # Additional ML Dependencies
 huggingface-hub==0.24.2

@@ -472,6 +472,63 @@ def process_integration_insights_scheduler(self):
     return {'processed': processed}
 
 
+@shared_task(bind=True, ignore_result=True, max_retries=2)
+def schedule_ga_monthly_insights_task(self, integration_id: int):
+    """
+    Create/reset the three calendar-month GA insight records (current_month,
+    prev_month, yoy_month) so the integration scheduler can pick them up and
+    fetch data from the GA API.  Should be triggered once per day per integration.
+    """
+    try:
+        processor = GAInsightsProcessor()
+        result = processor.process_monthly_insights(integration_id)
+        logger.info(f"[GA Monthly] integration={integration_id} result={result}")
+        return result
+    except Exception as e:
+        logger.error(f"[GA Monthly] Error for integration {integration_id}: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=60)
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=2)
+def schedule_gsc_monthly_insights_task(self, integration_id: int):
+    """
+    Create/reset the three calendar-month GSC insight records (current_month,
+    prev_month, yoy_month) so the integration scheduler can pick them up and
+    fetch data from the GSC API.  Should be triggered once per day per integration.
+    """
+    try:
+        processor = GSCInsightsProcessor()
+        result = processor.process_monthly_insights(integration_id)
+        logger.info(f"[GSC Monthly] integration={integration_id} result={result}")
+        return result
+    except Exception as e:
+        logger.error(f"[GSC Monthly] Error for integration {integration_id}: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=60)
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=0)
+def schedule_all_monthly_insights_task(self):
+    """
+    Daily beat task: iterate all active GA and GSC integrations and schedule
+    their monthly insight records for MOM/YOY reporting.
+    """
+    from integrations.models import Integration
+    scheduled = {'ga': 0, 'gsc': 0}
+
+    ga_integrations = Integration.objects.filter(type='google_analytics', status='active').exclude(provider_id='')
+    for integration in ga_integrations:
+        schedule_ga_monthly_insights_task.delay(integration.id)
+        scheduled['ga'] += 1
+
+    gsc_integrations = Integration.objects.filter(type='search_console', status='active').exclude(provider_id='')
+    for integration in gsc_integrations:
+        schedule_gsc_monthly_insights_task.delay(integration.id)
+        scheduled['gsc'] += 1
+
+    logger.info(f"[Monthly Insights] Scheduled GA={scheduled['ga']} GSC={scheduled['gsc']} integrations")
+    return scheduled
+
+
 # ==================== REPORT EMAIL PROCESSING ====================
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
