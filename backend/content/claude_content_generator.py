@@ -650,6 +650,8 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
 - Includes actionable insights and practical takeaways
 - Uses short paragraphs (2-3 sentences) for better readability
 - Adds bullet points or numbered lists where appropriate
+- Adapts structure and formatting to the content's natural flow — avoid rigid, repetitive section patterns
+- Prioritizes any user-provided formatting or structural preferences over defaults
 - Returns ONLY the HTML content (no markdown, no code blocks)"""
 
         # Map article types to descriptions
@@ -720,32 +722,42 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
                 user_prompt += f"""- Topics/Themes to AVOID: {topics_to_avoid}
 """
 
-        if additional_instructions:
-            user_prompt += f"""
-**Additional Instructions:**
-{additional_instructions}
-"""
+        # additional_instructions are added at the end of the prompt with priority framing
+        # (see below, after structure guidelines) so they override defaults
 
-        # Add references if provided
+        # Add references if provided (with fetched content when available)
         if references and len(references) > 0:
             user_prompt += """
 **Reference Materials:**
-Use the following reference materials to inform and enhance your content. Extract relevant information, statistics, and insights from these sources:
+Use ONLY the information provided below from these reference sources. Do NOT fabricate, invent, or assume any facts, statistics, prices, or data that are not explicitly stated in the provided content.
 """
             for i, ref in enumerate(references, 1):
                 ref_type = ref.get('type', 'article').capitalize()
                 ref_url = ref.get('url', '')
                 ref_desc = ref.get('description', '')
-                user_prompt += f"\n{i}. [{ref_type}] {ref_url}"
+                fetched_content = ref.get('fetched_content', '')
+                fetched_title = ref.get('fetched_title', '')
+
+                user_prompt += f"\n--- Reference {i} ---"
+                user_prompt += f"\n[{ref_type}] {ref_url}"
+                if fetched_title:
+                    user_prompt += f"\nTitle: {fetched_title}"
                 if ref_desc:
-                    user_prompt += f"\n   Description: {ref_desc}"
+                    user_prompt += f"\nDescription: {ref_desc}"
+                if fetched_content:
+                    user_prompt += f"\nExtracted Content:\n{fetched_content}"
+                else:
+                    user_prompt += f"\n[NOTE: Content could not be fetched from this URL. Do NOT guess what this page contains.]"
+
             user_prompt += """
 
-When using these references:
-- Extract key facts, statistics, and insights
+CRITICAL RULES for using references:
+- Use ONLY facts, statistics, prices, and examples that appear in the extracted content above
+- Match the currency, units, and cultural context of the target country specified above
+- Do NOT invent or hallucinate any data not present in the reference content
+- If a reference could not be fetched, ignore it entirely — do not guess its content
+- Synthesize information naturally — do not copy verbatim
 - Cite or reference the source material where appropriate
-- Synthesize information from multiple sources
-- Do NOT simply copy content - create original content informed by these references
 """
 
         # Add reference repository context if available
@@ -776,7 +788,7 @@ Reference Content:
 """
 
         user_prompt += """
-**Structure Guidelines:**
+**Suggested Structure (adapt based on content needs and any additional instructions below):**
 """
 
         if article_type == 'guide':
@@ -857,10 +869,18 @@ Reference Content:
 - Lead capture section: Form description with CTA
 """
         else:  # blog (default)
-            user_prompt += """- Compelling introduction with a hook
-- 3-5 main body sections with h2 headings
-- Supporting subsections with h3 headings as needed
-- Conclusion with key takeaways
+            user_prompt += """- Start with a compelling introduction
+- Organize the body into logical sections using h2 headings
+- Use subsections (h3) where they add clarity
+- Vary the structure: mix paragraphs, short lists, and explanatory blocks as appropriate
+- End with a conclusion or key takeaways
+"""
+
+        if additional_instructions:
+            user_prompt += f"""
+**PRIORITY INSTRUCTIONS (from content creator — follow these over the suggested structure above):**
+The following instructions take precedence over the default structure guidelines. If these conflict with the structure suggestions, follow these instructions:
+{additional_instructions}
 """
 
         user_prompt += """
@@ -1000,11 +1020,6 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks, no extra text."""
 **Topics to Avoid:** {topics_to_avoid}
 """
 
-        if additional_instructions:
-            user_prompt += f"""
-**Additional Instructions:** {additional_instructions}
-"""
-
         # Add reference repository context if available
         reference_repository_context = params.get('reference_repository_context', '')
         if reference_repository_context:
@@ -1022,6 +1037,12 @@ Reference Content:
 --- START REFERENCE CONTENT ---
 {reference_repository_context}
 --- END REFERENCE CONTENT ---
+"""
+
+        if additional_instructions:
+            user_prompt += f"""
+**PRIORITY INSTRUCTIONS (from content creator — adapt the outline structure to honor these):**
+{additional_instructions}
 """
 
         user_prompt += f"""
@@ -1217,10 +1238,6 @@ Return ONLY the JSON array, nothing else."""
             user_prompt += f"""**Brand Values:** {brand_values}
 """
 
-        if additional_instructions:
-            user_prompt += f"""**Additional Instructions:** {additional_instructions}
-"""
-
         # Add reference repository context if available
         reference_repository_context = params.get('reference_repository_context', '')
         if reference_repository_context:
@@ -1238,6 +1255,32 @@ Reference Content:
 --- START REFERENCE CONTENT ---
 {reference_repository_context}
 --- END REFERENCE CONTENT ---
+"""
+
+        # Add fetched reference URL content if available
+        references = params.get('references', [])
+        if references and len(references) > 0:
+            user_prompt += """
+**Reference Materials:**
+Use ONLY the information provided below from these reference sources:
+"""
+            for i, ref in enumerate(references, 1):
+                ref_url = ref.get('url', '')
+                fetched_content = ref.get('fetched_content', '')
+                fetched_title = ref.get('fetched_title', '')
+                if fetched_content:
+                    user_prompt += f"\n--- Reference {i}: {fetched_title or ref_url} ---\n{fetched_content}\n"
+                elif ref_url:
+                    user_prompt += f"\n--- Reference {i}: {ref_url} [Content could not be fetched — do NOT guess] ---\n"
+            user_prompt += """
+- Use ONLY facts from the extracted content above. Do NOT fabricate data.
+- Match the currency, units, and cultural context of the target country.
+"""
+
+        if additional_instructions:
+            user_prompt += f"""
+**PRIORITY INSTRUCTIONS (from content creator — follow these over defaults):**
+{additional_instructions}
 """
 
         user_prompt += """
