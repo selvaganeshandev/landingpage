@@ -573,7 +573,7 @@ function ReportWidget({
                     >
                       {columns.map((col) => {
                         const value = row[col];
-                        const isChange = col.includes("Change") || col.includes("MOM %") || col.includes("YOY %");
+                        const isChange = col.includes("Change") || col.includes("MOM %") || col.includes("YOY %") || col.includes("WOW %");
                         const isUrl =
                           typeof value === "string" &&
                           (value.startsWith("http://") ||
