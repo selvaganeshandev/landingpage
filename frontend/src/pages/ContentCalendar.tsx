@@ -651,16 +651,25 @@ const ContentCalendar = () => {
 
           {/* Load More */}
           {hasMore && (
-            <div className="flex flex-col items-center gap-2 pt-6">
+            <div className="flex flex-col items-center gap-3 pt-8">
               <div className="text-sm text-muted-foreground">
-                Showing {contentItems.length} of {totalCount} items
+                Showing <span className="font-medium text-foreground">{contentItems.length}</span> of{" "}
+                <span className="font-medium text-foreground">{totalCount}</span> items
               </div>
               <Button
-                variant="outline"
+                size="lg"
                 onClick={handleLoadMore}
                 disabled={loadingMore}
+                className="min-w-[180px] shadow-sm"
               >
-                {loadingMore ? "Loading..." : "Load More"}
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  "Load More"
+                )}
               </Button>
             </div>
           )}
@@ -757,16 +766,25 @@ const ContentCalendar = () => {
 
           {/* Load More */}
           {hasMore && (
-            <div className="flex flex-col items-center gap-2 pt-6">
+            <div className="flex flex-col items-center gap-3 pt-8">
               <div className="text-sm text-muted-foreground">
-                Showing {contentItems.length} of {totalCount} items
+                Showing <span className="font-medium text-foreground">{contentItems.length}</span> of{" "}
+                <span className="font-medium text-foreground">{totalCount}</span> items
               </div>
               <Button
-                variant="outline"
+                size="lg"
                 onClick={handleLoadMore}
                 disabled={loadingMore}
+                className="min-w-[180px] shadow-sm"
               >
-                {loadingMore ? "Loading..." : "Load More"}
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  "Load More"
+                )}
               </Button>
             </div>
           )}
@@ -992,16 +1010,25 @@ const ContentCalendar = () => {
 
           {/* Load More */}
           {hasMore && (
-            <div className="flex flex-col items-center gap-2 pt-6">
+            <div className="flex flex-col items-center gap-3 pt-8">
               <div className="text-sm text-muted-foreground">
-                Showing {contentItems.length} of {totalCount} items
+                Showing <span className="font-medium text-foreground">{contentItems.length}</span> of{" "}
+                <span className="font-medium text-foreground">{totalCount}</span> items
               </div>
               <Button
-                variant="outline"
+                size="lg"
                 onClick={handleLoadMore}
                 disabled={loadingMore}
+                className="min-w-[180px] shadow-sm"
               >
-                {loadingMore ? "Loading..." : "Load More"}
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  "Load More"
+                )}
               </Button>
             </div>
           )}
