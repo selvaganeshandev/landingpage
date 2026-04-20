@@ -136,6 +136,10 @@ const ContentCalendar = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<ContentItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Plan content dialog state (Issue 8C)
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
@@ -153,8 +157,13 @@ const ContentCalendar = () => {
       if (!selectedDomain) return;
 
       try {
-        setLoading(true);
-        const response = await apiClient.getGeneratedContents({ domain_id: selectedDomain.id });
+        const isFirstPage = currentPage === 1;
+        if (isFirstPage) {
+          setLoading(true);
+        } else {
+          setLoadingMore(true);
+        }
+        const response = await apiClient.getGeneratedContents({ domain_id: selectedDomain.id, page: currentPage, page_size: '20' });
 
         if (response.status === "success" && response.results) {
           const formattedContent: ContentItem[] = response.results.map((item: any) => ({
@@ -171,7 +180,15 @@ const ContentCalendar = () => {
             totalComments: item.total_comments || 0,
             pendingComments: item.pending_comments || 0
           }));
-          setContentItems(formattedContent);
+
+          if (isFirstPage) {
+            setContentItems(formattedContent);
+          } else {
+            setContentItems(prev => [...prev, ...formattedContent]);
+          }
+
+          setHasMore(response.has_next || false);
+          setTotalCount(response.count || 0);
         }
       } catch (error) {
         console.error("Error fetching content:", error);
@@ -182,11 +199,24 @@ const ContentCalendar = () => {
         });
       } finally {
         setLoading(false);
+        setLoadingMore(false);
       }
     };
 
     fetchContent();
-  }, [selectedDomain, toast]);
+  }, [selectedDomain, currentPage, toast]);
+
+  // Reset to first page when domain changes
+  useEffect(() => {
+    setCurrentPage(1);
+    setContentItems([]);
+  }, [selectedDomain]);
+
+  const handleLoadMore = () => {
+    if (hasMore && !loadingMore) {
+      setCurrentPage(prev => prev + 1);
+    }
+  };
 
   const handleGenerateContent = () => {
     setGenerateDialogOpen(true);
@@ -211,6 +241,7 @@ const ContentCalendar = () => {
 
       // Remove from local state
       setContentItems(prev => prev.filter(item => item.id !== itemToDelete.id));
+      setTotalCount(prev => Math.max(0, prev - 1));
 
       toast({
         title: "Content Deleted",
@@ -617,6 +648,31 @@ const ContentCalendar = () => {
                 </Card>
               ))
           )}
+
+          {/* Load More */}
+          {hasMore && (
+            <div className="flex flex-col items-center gap-3 pt-8">
+              <div className="text-sm text-muted-foreground">
+                Showing <span className="font-medium text-foreground">{contentItems.length}</span> of{" "}
+                <span className="font-medium text-foreground">{totalCount}</span> items
+              </div>
+              <Button
+                size="lg"
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="min-w-[180px] shadow-sm"
+              >
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  "Load More"
+                )}
+              </Button>
+            </div>
+          )}
         </TabsContent>
 
         {/* Calendar View */}
@@ -707,6 +763,31 @@ const ContentCalendar = () => {
               </Card>
             </div>
           </div>
+
+          {/* Load More */}
+          {hasMore && (
+            <div className="flex flex-col items-center gap-3 pt-8">
+              <div className="text-sm text-muted-foreground">
+                Showing <span className="font-medium text-foreground">{contentItems.length}</span> of{" "}
+                <span className="font-medium text-foreground">{totalCount}</span> items
+              </div>
+              <Button
+                size="lg"
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="min-w-[180px] shadow-sm"
+              >
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  "Load More"
+                )}
+              </Button>
+            </div>
+          )}
         </TabsContent>
 
         {/* Pipeline View */}
@@ -924,6 +1005,31 @@ const ContentCalendar = () => {
                   )}
                 </div>
               </Card>
+            </div>
+          )}
+
+          {/* Load More */}
+          {hasMore && (
+            <div className="flex flex-col items-center gap-3 pt-8">
+              <div className="text-sm text-muted-foreground">
+                Showing <span className="font-medium text-foreground">{contentItems.length}</span> of{" "}
+                <span className="font-medium text-foreground">{totalCount}</span> items
+              </div>
+              <Button
+                size="lg"
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="min-w-[180px] shadow-sm"
+              >
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  "Load More"
+                )}
+              </Button>
             </div>
           )}
         </TabsContent>

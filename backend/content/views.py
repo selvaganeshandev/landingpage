@@ -130,6 +130,10 @@ def generate_content(request):
             'reference_repository_context': reference_repository_context,
         }
 
+        # Enrich reference URLs with actual fetched content to prevent hallucination
+        if generation_params.get('references'):
+            generation_params['references'] = _enrich_references_with_content(generation_params['references'])
+
         # Generate content using Claude
         logger.info(f"Generating content for domain {domain.id}: {validated_data['title']}")
         generation_result = generator.generate_content(generation_params)
@@ -357,8 +361,13 @@ def generate_content_from_outline(request):
             'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
             'additional_instructions': validated_data.get('additional_instructions', ''),
             'brand_values': validated_data.get('brand_values', ''),
+            'references': validated_data.get('references', []),
             'reference_repository_context': reference_repository_context,
         }
+
+        # Enrich reference URLs with actual fetched content to prevent hallucination
+        if generation_params.get('references'):
+            generation_params['references'] = _enrich_references_with_content(generation_params['references'])
 
         # Generate content from outline
         logger.info(f"Generating content from outline for domain {domain.id}: {validated_data['title']}")
@@ -2049,6 +2058,10 @@ def _run_bulk_generation_queue(batch_id):
                     'brand_values': '',
                 }
 
+                # Enrich reference URLs with actual fetched content to prevent hallucination
+                if generation_params.get('references'):
+                    generation_params['references'] = _enrich_references_with_content(generation_params['references'])
+
                 # Generate content using 2-step process for better structure:
                 # Step 1: Generate outline, Step 2: Generate from outline
                 # This ensures the content follows a logical flow (Issue 11)
@@ -3133,6 +3146,115 @@ def _fetch_image_metadata(url):
     except Exception as e:
         logger.warning(f"Image metadata fetch failed for {url}: {e}")
         return None
+
+
+def _fetch_url_content(url, max_words=3500, timeout=15):
+    """
+    Fetch and extract readable text content from a URL for use in content generation.
+    Returns dict with 'title', 'text_content', 'word_count', 'url' or None on failure.
+    """
+    try:
+        if not url or not url.strip():
+            return None
+
+        url = url.strip()
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+
+        url_lower = url.lower()
+        # Skip non-text URLs
+        image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico')
+        if any(url_lower.split('?')[0].endswith(ext) for ext in image_extensions):
+            return None
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; PromptmaxxBot/1.0)',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+
+        resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+        resp.raise_for_status()
+
+        content_type = resp.headers.get('Content-Type', '')
+        if content_type.startswith('image/'):
+            return None
+
+        html_content = resp.text
+
+        # Try trafilatura for clean text extraction
+        try:
+            import trafilatura
+            extracted = trafilatura.extract(html_content, include_comments=False, include_tables=True)
+            if extracted and len(extracted.strip()) > 50:
+                words = extracted.split()
+                if len(words) > max_words:
+                    extracted = ' '.join(words[:max_words]) + '\n[Content truncated]'
+                metadata = trafilatura.extract_metadata(html_content)
+                title = metadata.title if metadata and metadata.title else ''
+                return {
+                    'title': title,
+                    'text_content': extracted,
+                    'word_count': len(extracted.split()),
+                    'url': url,
+                }
+        except ImportError:
+            pass
+
+        # Fallback: basic BeautifulSoup extraction
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, 'html.parser')
+            for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'form', 'iframe', 'noscript']):
+                tag.decompose()
+            main_content = (
+                soup.find('article') or soup.find('main') or
+                soup.find('div', {'role': 'main'}) or soup.body or soup
+            )
+            text = main_content.get_text(separator='\n', strip=True)
+            words = text.split()
+            if len(words) > max_words:
+                text = ' '.join(words[:max_words]) + '\n[Content truncated]'
+            title_tag = soup.find('title')
+            title = title_tag.get_text(strip=True) if title_tag else ''
+            return {
+                'title': title,
+                'text_content': text,
+                'word_count': len(text.split()),
+                'url': url,
+            }
+        except ImportError:
+            pass
+
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to fetch URL content for {url}: {e}")
+        return None
+
+
+def _enrich_references_with_content(references, max_refs=5):
+    """
+    Fetch actual content for reference URLs to prevent AI hallucination.
+    Adds 'fetched_content' and 'fetched_title' keys to each reference dict.
+    """
+    enriched = []
+    for ref in references[:max_refs]:
+        url = ref.get('url', '')
+        if not url:
+            enriched.append(ref)
+            continue
+
+        fetched = _fetch_url_content(url, max_words=3500, timeout=15)
+        ref_copy = dict(ref)
+        if fetched and fetched.get('text_content'):
+            ref_copy['fetched_content'] = fetched['text_content']
+            ref_copy['fetched_title'] = fetched.get('title', '')
+            logger.info(f"[REF-URL] Fetched {fetched['word_count']} words from {url}")
+        else:
+            ref_copy['fetched_content'] = None
+            logger.warning(f"[REF-URL] Could not fetch content from {url}")
+        enriched.append(ref_copy)
+
+    return enriched
 
 
 @api_view(['POST'])
