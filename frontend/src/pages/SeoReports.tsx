@@ -578,6 +578,12 @@ function ReportWidget({
                           typeof value === "string" &&
                           (value.startsWith("http://") ||
                             value.startsWith("https://"));
+                        const isLongDimPath =
+                          typeof value === "string" &&
+                          !isUrl &&
+                          (col === "Landing Pages" ||
+                            col === "Pages" ||
+                            col === "Queries");
                         const numVal =
                           typeof value === "number"
                             ? value
@@ -627,6 +633,13 @@ function ReportWidget({
                               >
                                 {value}
                               </a>
+                            ) : isLongDimPath ? (
+                              <span
+                                className="truncate block max-w-[260px]"
+                                title={value}
+                              >
+                                {value}
+                              </span>
                             ) : isNegative ? (
                               <span className="text-red-500 font-medium">
                                 {value}{" "}

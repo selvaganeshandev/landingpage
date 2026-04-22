@@ -2182,7 +2182,7 @@ def _fetch_ga_report_data(integration, sheet):
     property_id = integration.provider_id
 
     if sheet.sheet_type == 'ga_landing_pages':
-        ga_dimension   = 'landingPage'
+        ga_dimension   = 'landingPagePlusQueryString'
         dim_label      = 'Landing Pages'
         ga_metrics     = ['sessions', 'totalUsers', 'screenPageViews', 'bounceRate']
         metric_labels  = ['Sessions', 'Users', 'Page Views', 'Bounce Rate']
@@ -2212,6 +2212,17 @@ def _fetch_ga_report_data(integration, sheet):
                 break
     is_prorated = factor != 1.0
 
+    # Landing-page sheet is scoped to Organic Search channel only; other GA
+    # sheet types remain unfiltered.
+    landing_page_channel_filter = None
+    if sheet.sheet_type == 'ga_landing_pages':
+        landing_page_channel_filter = {
+            'filter': {
+                'fieldName': 'sessionDefaultChannelGroup',
+                'stringFilter': {'value': 'Organic Search', 'matchType': 'EXACT'},
+            }
+        }
+
     # ── Fetch primary metrics per period ────────────────────────────────────
     all_keys   = set()
     range_data = {}
@@ -2224,6 +2235,8 @@ def _fetch_ga_report_data(integration, sheet):
                 'metrics': [{'name': m} for m in ga_metrics],
                 'limit': 500,
             }
+            if landing_page_channel_filter:
+                body['dimensionFilter'] = landing_page_channel_filter
             response = service.properties().runReport(property=property_id, body=body).execute()
             data_map = {}
             for row in response.get('rows', []):
@@ -2281,6 +2294,8 @@ def _fetch_ga_report_data(integration, sheet):
                 'metrics': [{'name': m} for m in ga_metrics],
                 'limit': 500,
             }
+            if landing_page_channel_filter:
+                body['dimensionFilter'] = landing_page_channel_filter
             resp = service.properties().runReport(property=property_id, body=body).execute()
             for row in resp.get('rows', []):
                 key = row['dimensionValues'][0]['value']
