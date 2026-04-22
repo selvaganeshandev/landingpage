@@ -1818,7 +1818,7 @@ export const GenerateContentDialog = ({
                         </>
                       ) : (
                         <>
-                          <SelectItem value="300">Below 500 words</SelectItem>
+                          <SelectItem value="700">Below 800 words</SelectItem>
                           <SelectItem value="800">800-1,000 words</SelectItem>
                           <SelectItem value="1500">1,000-2,000 words</SelectItem>
                           <SelectItem value="2500">2,000-3,000 words</SelectItem>

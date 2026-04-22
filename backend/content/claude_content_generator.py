@@ -31,11 +31,12 @@ class ClaudeContentGenerator:
     # (match_threshold, lower_bound, upper_bound): we pick the first row where
     # word_count <= match_threshold. Labels listed in the frontend:
     #   Main article / web-page:
-    #     value=300  → "Below 500 words"        → 300-500
-    #     value=800  → "800-1,000 words"        → 800-1000
-    #     value=1500 → "1,000-2,000 words"      → 1000-2000
-    #     value=2500 → "2,000-3,000 words"      → 2000-3000
-    #     value=3500 → "3,000+ words"           → 3000-4500
+    #     value=300  → "Below 500 words" (legacy) → 300-500
+    #     value=700  → "Below 800 words"          → 500-800
+    #     value=800  → "800-1,000 words"          → 800-1000
+    #     value=1500 → "1,000-2,000 words"        → 1000-2000
+    #     value=2500 → "2,000-3,000 words"        → 2000-3000
+    #     value=3500 → "3,000+ words"             → 3000-4500
     #   Social media:
     #     value=50   → "Short (50-100 words)"
     #     value=150  → "Medium (150-250 words)"
@@ -49,8 +50,9 @@ class ClaudeContentGenerator:
     _WORD_COUNT_RANGES_LIST = [
         (100, 50, 100),       # social Short
         (250, 150, 250),      # social Medium / community Brief
-        (300, 300, 500),      # social Long / main "Below 500 words"
+        (300, 300, 500),      # social Long / main "Below 500 words" (legacy)
         (500, 400, 600),      # community Standard / social Thread
+        (700, 500, 800),      # main "Below 800 words"
         (800, 800, 1000),     # main "800-1,000 words" / community Detailed
         (1500, 1000, 2000),   # main "1,000-2,000 words"
         (2500, 2000, 3000),   # main "2,000-3,000 words"
@@ -257,6 +259,128 @@ class ClaudeContentGenerator:
         if upper <= 1000:
             return 1
         return 2
+
+    # Phrases in the title or keywords that strongly signal the reader
+    # wants two or more entities compared side-by-side. Used to force a
+    # comparison <table> into the article so the differences are scannable
+    # rather than buried in prose.
+    _COMPARISON_SIGNALS = [
+        r'\bvs\.?\b',
+        r'\bv\.?s\.?\b',
+        r'\bversus\b',
+        r'\bcompare[sd]?\b',
+        r'\bcomparison\b',
+        r'\bdifference[s]? between\b',
+        r'\bwhich is better\b',
+        r'\bwhat is better\b',
+        r'\b(is |which )(one )?better\b',
+    ]
+
+    # Phrases signalling a listable article (types of X, top N, categories,
+    # features list, …). Used to nudge the prompt toward explicit <ul>/<ol>
+    # structures for scannability.
+    _LISTING_SIGNALS = [
+        r'\btypes? of\b',
+        r'\bkinds? of\b',
+        r'\bcategor(y|ies)\b',
+        r'\btop \d+\b',
+        r'\bbest \d+\b',
+        r'\b\d+ (ways|tips|tools|reasons|benefits|features|steps|examples|options|ideas|mistakes|methods)\b',
+        r'\bhow to\b',
+        r'\bstep[- ]by[- ]step\b',
+        r'\bchecklist\b',
+        r'\bfeatures? of\b',
+    ]
+
+    @classmethod
+    def _is_comparison_intent(cls, title, keywords, article_type):
+        """Return True when the content should include a comparison table.
+
+        Triggered when article_type is explicitly 'comparison', or when the
+        title/keywords contain comparison-intent phrasing ("vs", "versus",
+        "difference between", "which is better", …).
+        """
+        if article_type == 'comparison':
+            return True
+        haystack_parts = []
+        if title:
+            haystack_parts.append(str(title).lower())
+        if keywords:
+            haystack_parts.append(str(keywords).lower())
+        if not haystack_parts:
+            return False
+        combined = ' '.join(haystack_parts)
+        return any(re.search(pat, combined) for pat in cls._COMPARISON_SIGNALS)
+
+    @classmethod
+    def _is_listing_intent(cls, title, keywords, article_type):
+        """Return True when the content is shaped as a list/enumeration piece.
+
+        Used to reinforce list-formatting rules in the generation prompt so
+        enumerations of types, categories, features, or steps render as
+        <ul>/<ol> blocks instead of prose.
+        """
+        if article_type in ('listicle', 'guide'):
+            return True
+        haystack_parts = []
+        if title:
+            haystack_parts.append(str(title).lower())
+        if keywords:
+            haystack_parts.append(str(keywords).lower())
+        if not haystack_parts:
+            return False
+        combined = ' '.join(haystack_parts)
+        return any(re.search(pat, combined) for pat in cls._LISTING_SIGNALS)
+
+    @classmethod
+    def _format_structure_hints(cls, title, keywords, article_type, word_count):
+        """Build an explicit structural-rules block for the generation prompt.
+
+        Returns a string (may be empty) that instructs Claude to use a
+        comparison <table> when the topic implies comparison, and to use
+        <ul>/<ol> for types/categories/features/steps when the topic implies
+        enumeration. Always safe to append — returns '' when no signals match.
+        """
+        parts = []
+
+        if cls._is_comparison_intent(title, keywords, article_type):
+            parts.append(
+                "**COMPARISON TABLE (REQUIRED):**\n"
+                "The topic involves comparing two or more entities, so the content MUST include at least one HTML comparison table.\n"
+                "- Use this exact structure: <table><thead><tr><th>Criteria</th><th>Entity A</th><th>Entity B</th></tr></thead><tbody><tr><td>...</td><td>...</td><td>...</td></tr></tbody></table>\n"
+                "- Columns: one per entity being compared (name each in <th>). Rows: one per criterion (price, key features, pros, cons, specs, target user, availability, etc.).\n"
+                "- Include 6-10 meaningful comparison rows — the kind of differences a buyer would weigh, not filler.\n"
+                "- Place the table near the top of the article (after a short intro paragraph) so readers can scan the differences first.\n"
+                "- Follow the table with 1-2 short paragraphs interpreting the comparison and highlighting which entity suits which use case.\n"
+                "- Do NOT use markdown pipe tables (| col1 | col2 |). Use real HTML <table> tags only.\n"
+                "- Do NOT duplicate the same table twice — one well-built comparison table is enough.\n"
+            )
+
+        if cls._is_listing_intent(title, keywords, article_type):
+            parts.append(
+                "**LISTING FORMAT (REQUIRED):**\n"
+                "The topic naturally maps to an enumeration (types, categories, features, steps, options).\n"
+                "- Render each enumerated set as a <ul> (unordered) or <ol> (ordered when sequence matters) — not as prose or comma-separated sentences.\n"
+                "- Each <li> should start with a <strong>Label:</strong> followed by a concise explanation (1-2 sentences).\n"
+                "- Precede each list with a short intro sentence so the list has context.\n"
+                "- For \"types/kinds/categories\" topics: one <ul> per category group. For \"top N\" / \"best N\" topics: use <ol> with N items, ranked.\n"
+                "- For step-by-step guides: use <ol> with one step per <li>; keep each step actionable.\n"
+            )
+
+        # Always add a concise SEO structural checklist — cheap to include
+        # and keeps the article professionally formatted regardless of topic.
+        parts.append(
+            "**PROFESSIONAL SEO STRUCTURE:**\n"
+            "- Introduction (1-2 short paragraphs): establish the topic, include the primary keyword, and set reader expectations.\n"
+            "- Body: 4-6 <h2> sections (fewer for articles under 500 words). Each <h2> should cover a distinct sub-topic with 2-4 short paragraphs OR a <ul>/<ol>/<table> where the content fits that shape better than prose.\n"
+            "- Use <h3> subsections only when a <h2> section needs further breakdown — don't stack heading levels unnecessarily.\n"
+            "- Keep paragraphs to 2-4 sentences. Prefer short, scannable sentences (15-25 words) over long ones.\n"
+            "- Use <strong> sparingly to highlight key terms, figures, or lead-ins inside list items.\n"
+            "- Conclusion (required): a final <h2> such as \"Conclusion\", \"Final Verdict\", \"Key Takeaways\", or a topical closer. Summarise the main points and, where applicable, end with a recommendation or call-to-action.\n"
+            "- Never end the article mid-sentence or mid-section. The last HTML block must be a complete closing paragraph (or a <ul> of key takeaways followed by one closing paragraph).\n"
+        )
+
+        return "\n".join(parts)
 
     @staticmethod
     def _promote_bold_leadin_paragraphs_to_list(content_html):
@@ -516,12 +640,20 @@ AFTER (converted to <ul>):
 
     @classmethod
     def _enforce_word_count_limit(cls, content_html, word_count):
-        """Truncate content to the user-selected word count range's upper bound.
+        """Cap content at the user-selected word count range's upper bound,
+        preserving the conclusion so the article never ends mid-thought.
 
-        The UI word_count dropdown stores the lower bound of a range. We cap
-        at the upper bound of that range so "800-1,000 words" never exceeds
-        1000. Truncation happens at block boundaries (h2/h3/p/ul/ol/etc.) to
-        keep the HTML well-formed.
+        Behaviour:
+        1. A small overshoot (up to 15% over the upper bound) is allowed so
+           we don't strip the conclusion just because the article is a few
+           paragraphs long. A complete-but-slightly-long article reads
+           better than a truncated one that matches the target exactly.
+        2. If the content is significantly over, we identify the "conclusion
+           section" (the last <h1>/<h2>/<h3> and everything after it) and
+           always keep it. Body blocks before the conclusion are included
+           greedily in document order until the remaining budget is used up.
+        3. If no heading exists, we fall back to preserving the final block
+           so the article still has a proper closing paragraph.
         """
         if not content_html or not word_count or word_count <= 0:
             return content_html
@@ -529,38 +661,68 @@ AFTER (converted to <ul>):
         upper = cls._upper_word_limit(word_count)
         plain_text = re.sub(r'<[^>]+>', ' ', content_html)
         current_words = len(plain_text.split())
-        if current_words <= upper:
+
+        # Allow a modest overshoot (15%) — prefer a complete article with a
+        # real conclusion over hitting the word cap exactly.
+        soft_cap = int(upper * 1.15)
+        if current_words <= soft_cap:
             return content_html
 
-        # Split by top-level block elements. Keep headings with their following
-        # paragraphs so sections aren't orphaned.
+        # Split by top-level block elements.
         block_pattern = re.compile(
             r'<(h[1-6]|p|ul|ol|blockquote|pre|table|div|figure)\b[^>]*>.*?</\1>',
             re.IGNORECASE | re.DOTALL
         )
         matches = list(block_pattern.finditer(content_html))
         if not matches:
-            return content_html  # Nothing to truncate against; return original
+            return content_html
 
-        kept_parts = []
+        # Locate the conclusion section: last <h1>/<h2>/<h3> and everything
+        # after it. This keeps the article's closing thoughts intact even
+        # when we have to drop earlier body paragraphs.
+        heading_re = re.compile(r'^<h[1-3]\b', re.IGNORECASE)
+        conclusion_start = None
+        for i in range(len(matches) - 1, -1, -1):
+            if heading_re.match(matches[i].group(0)):
+                conclusion_start = i
+                break
+
+        if conclusion_start is None:
+            # No heading in the doc — treat the final block as the closing.
+            conclusion_blocks = [matches[-1].group(0)]
+            body_matches = matches[:-1]
+        else:
+            conclusion_blocks = [m.group(0) for m in matches[conclusion_start:]]
+            body_matches = matches[:conclusion_start]
+
+        conclusion_words = sum(
+            len(re.sub(r'<[^>]+>', ' ', b).split()) for b in conclusion_blocks
+        )
+        # Reserve budget for the conclusion; never let the conclusion take
+        # more than half the article, otherwise a bloated closing would
+        # crowd out the body entirely.
+        body_budget = max(upper - conclusion_words, int(upper * 0.5))
+
+        kept_body = []
         kept_words = 0
-        for m in matches:
+        for m in body_matches:
             block_html = m.group(0)
             block_words = len(re.sub(r'<[^>]+>', ' ', block_html).split())
-            # Stop once adding the next block would push us past the upper limit.
-            if kept_parts and kept_words + block_words > upper:
+            if kept_body and kept_words + block_words > body_budget:
                 break
-            kept_parts.append(block_html)
+            kept_body.append(block_html)
             kept_words += block_words
-            if kept_words >= upper:
+            if kept_words >= body_budget:
                 break
 
+        kept_parts = kept_body + conclusion_blocks
         if not kept_parts:
             return content_html
         truncated = '\n'.join(kept_parts)
+        final_words = kept_words + conclusion_words
         logger.info(
-            f"Enforced word count limit: {current_words} -> {kept_words} words "
-            f"(target {word_count}, upper {upper})"
+            f"Enforced word count limit: {current_words} -> {final_words} words "
+            f"(target {word_count}, upper {upper}, conclusion preserved)"
         )
         return truncated
 
@@ -1443,6 +1605,15 @@ Reference Content:
 - End with a conclusion or key takeaways (a short <ul> of takeaways works well)
 """
 
+        # Topic-aware structural hints (comparison tables, listing formats,
+        # SEO structure checklist). Added before the priority instructions so
+        # user-provided additional_instructions still override the defaults.
+        structure_hints = self._format_structure_hints(
+            title, keywords, article_type, word_count
+        )
+        if structure_hints:
+            user_prompt += "\n" + structure_hints + "\n"
+
         if additional_instructions:
             user_prompt += f"""
 **PRIORITY INSTRUCTIONS (from content creator — follow these over the suggested structure above):**
@@ -1450,9 +1621,17 @@ The following instructions take precedence over the default structure guidelines
 {additional_instructions}
 """
 
-        user_prompt += """
+        lower_limit = self._lower_word_limit(word_count)
+        upper_limit = self._upper_word_limit(word_count)
+        target_mid = (lower_limit + upper_limit) // 2
+
+        user_prompt += f"""
 **IMPORTANT - Content Completion Rule:**
-Always complete every sentence and paragraph fully. If you are approaching your output limit, wrap up the current section with a proper conclusion rather than starting a new section. Never end mid-sentence or leave content incomplete. Every article must end with a proper closing paragraph and valid closing HTML tags.
+- Target approximately {target_mid} words so you stay comfortably within the {lower_limit}-{upper_limit} range. Plan sections to fit that budget.
+- Every target keyword listed above MUST appear at least once in the final HTML — spread them across different sections, not clustered together.
+- Always complete every sentence and paragraph fully. If you are approaching your output limit, wrap up the current section with a proper conclusion rather than starting a new section.
+- Never end mid-sentence or leave content incomplete. Every article MUST end with a proper closing section (e.g. \"Conclusion\", \"Final Verdict\", or \"Key Takeaways\") and valid closing HTML tags.
+- Return well-formed HTML only. No markdown syntax (no `#` headings, no `|` tables, no ``` code fences). Use real <h2>/<h3>/<table>/<ul>/<ol>/<strong> tags.
 
 Begin writing the content now. Return ONLY the HTML content."""
 
@@ -1881,24 +2060,41 @@ Use ONLY the information provided below from these reference sources:
 - Match the currency, units, and cultural context of the target country.
 """
 
+        # Topic-aware structural hints (comparison tables, listing formats,
+        # SEO structure checklist). Applied in addition to — not in place of —
+        # the approved outline so tables/lists show up where the topic calls
+        # for them.
+        structure_hints = self._format_structure_hints(
+            title, keywords, article_type, params.get('word_count', 1500)
+        )
+        if structure_hints:
+            user_prompt += "\n" + structure_hints + "\n"
+
         if additional_instructions:
             user_prompt += f"""
 **PRIORITY INSTRUCTIONS (from content creator — follow these over defaults):**
 {additional_instructions}
 """
 
-        user_prompt += """
+        requested_word_count = params.get('word_count', 1500)
+        lower_limit = self._lower_word_limit(requested_word_count)
+        upper_limit = self._upper_word_limit(requested_word_count)
+        target_mid = (lower_limit + upper_limit) // 2
+
+        user_prompt += f"""
 IMPORTANT:
 - Follow the outline structure exactly (same headings, same order)
 - Cover all key points mentioned for each section
-- Match the estimated word count for each section
-- Use h2 tags for main sections, h3 tags for subsections
-- Return ONLY the HTML content, no markdown"""
+- Match the estimated word count for each section, and keep the total around {target_mid} words (range {lower_limit}-{upper_limit}).
+- Every target keyword MUST appear at least once across the final article.
+- Use h2 tags for main sections, h3 tags for subsections. For comparison/listing topics, honour the structural rules above (tables for comparisons, <ul>/<ol> for enumerations).
+- Always end with a complete closing section (Conclusion / Final Verdict / Key Takeaways). Never stop mid-sentence.
+- Return ONLY the HTML content, no markdown (no `#`, no `|` tables, no ``` fences)."""
 
         # Target word count is what the user selected; the outline's
         # estimated_words is advisory and must not push us past the user
-        # range's upper bound.
-        requested_word_count = params.get('word_count', 1500)
+        # range's upper bound. requested_word_count is defined above when
+        # building the user prompt — reuse it here.
         max_tokens = self._calculate_max_tokens(requested_word_count)
 
         try:
