@@ -26,28 +26,543 @@ class ClaudeContentGenerator:
         self.client = Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-5-20250929"
 
-    @staticmethod
-    def _calculate_max_tokens(word_count, is_section=False):
+    # Maps the word_count value stored by the UI dropdown to the (lower, upper)
+    # word-count range the generated content must fall within. Each tuple is
+    # (match_threshold, lower_bound, upper_bound): we pick the first row where
+    # word_count <= match_threshold. Labels listed in the frontend:
+    #   Main article / web-page:
+    #     value=300  → "Below 500 words"        → 300-500
+    #     value=800  → "800-1,000 words"        → 800-1000
+    #     value=1500 → "1,000-2,000 words"      → 1000-2000
+    #     value=2500 → "2,000-3,000 words"      → 2000-3000
+    #     value=3500 → "3,000+ words"           → 3000-4500
+    #   Social media:
+    #     value=50   → "Short (50-100 words)"
+    #     value=150  → "Medium (150-250 words)"
+    #     value=300  → "Long (300-500 words)"
+    #     value=500  → "Thread (500+ words)"
+    #   Community:
+    #     value=150  → "Brief (150-300 words)"
+    #     value=400  → "Standard (400-600 words)"
+    #     value=800  → "Detailed (800-1,200 words)"
+    #     value=1500 → "Comprehensive (1,500+ words)"
+    _WORD_COUNT_RANGES_LIST = [
+        (100, 50, 100),       # social Short
+        (250, 150, 250),      # social Medium / community Brief
+        (300, 300, 500),      # social Long / main "Below 500 words"
+        (500, 400, 600),      # community Standard / social Thread
+        (800, 800, 1000),     # main "800-1,000 words" / community Detailed
+        (1500, 1000, 2000),   # main "1,000-2,000 words"
+        (2500, 2000, 3000),   # main "2,000-3,000 words"
+        (3500, 3000, 4500),   # main "3,000+ words" (some headroom)
+    ]
+
+    @classmethod
+    def _word_count_range(cls, word_count):
+        """Return the (lower, upper) word count bounds for a dropdown value."""
+        if not word_count or word_count <= 0:
+            return (1000, 2000)
+        for threshold, lower, upper in cls._WORD_COUNT_RANGES_LIST:
+            if word_count <= threshold:
+                return (lower, upper)
+        # Beyond the largest threshold: treat input as the lower bound.
+        return (word_count, int(word_count * 1.25))
+
+    @classmethod
+    def _upper_word_limit(cls, word_count):
+        """Return the upper-bound word count for the dropdown value."""
+        return cls._word_count_range(word_count)[1]
+
+    @classmethod
+    def _lower_word_limit(cls, word_count):
+        """Return the lower-bound word count for the dropdown value."""
+        return cls._word_count_range(word_count)[0]
+
+    @classmethod
+    def _calculate_max_tokens(cls, word_count, is_section=False):
         """Calculate dynamic max_tokens based on requested word count.
         HTML content uses ~2 tokens per word (tags + text).
-        Adds buffer for overhead (HTML structure, formatting).
-
-        Note: max_tokens is a ceiling, not a target. Claude only uses what it
-        needs, so raising the cap does NOT increase cost for normal articles.
-        It only prevents truncation for longer content.
+        Tightened to the user's selected range upper bound so Claude
+        cannot physically generate far beyond the requested range.
         """
         if is_section:
-            # For single section regeneration, smaller buffer needed
             return max(4096, int(word_count * 2.5) + 500)
-        # Tighter multiplier for shorter articles to prevent over-generation
-        # (Issue 9: 800-word articles extending to 1500 words)
-        if word_count <= 1000:
-            tokens = int(word_count * 1.6) + 800
+        upper = cls._upper_word_limit(word_count)
+        # 2 tokens per word (word + HTML markup) + modest buffer for structure.
+        tokens = int(upper * 2.0) + 500
+        # Floor of 2048 for tiny requests; cap at 20480 for very large ones.
+        return max(2048, min(tokens, 20480))
+
+    @staticmethod
+    def _strip_code_fences(content):
+        """Remove markdown code fences Claude occasionally wraps HTML in.
+
+        Handles patterns like:
+            ```html\n<h2>...</h2>\n```
+            ```\n<p>...</p>\n```
+        Only strips fences that wrap the entire response — inline code blocks
+        inside the content are left untouched.
+        """
+        if not content:
+            return content
+        stripped = content.strip()
+        # Leading fence: ```html / ```HTML / ```
+        stripped = re.sub(r'^```[a-zA-Z]*\s*\r?\n', '', stripped)
+        # Trailing fence
+        stripped = re.sub(r'\r?\n```\s*$', '', stripped)
+        return stripped.strip()
+
+    @staticmethod
+    def _decode_escaped_html(content):
+        """Decode HTML entities when the response came back entity-escaped.
+
+        Sometimes Claude returns content like "&lt;h2&gt;Title&lt;/h2&gt;"
+        which, when rendered via innerHTML, appears as literal text rather
+        than an H2 tag. Detect that case and unescape.
+        """
+        if not content:
+            return content
+        escaped_brackets = content.count('&lt;') + content.count('&gt;')
+        raw_brackets = content.count('<') + content.count('>')
+        # Only decode when the content is predominantly entity-escaped,
+        # otherwise we'd corrupt legitimate entities inside normal HTML.
+        if escaped_brackets > 0 and escaped_brackets > raw_brackets:
+            import html as _html
+            return _html.unescape(content)
+        return content
+
+    @staticmethod
+    def _unwrap_outer_code_block(content):
+        """Strip a <pre><code>...</code></pre> wrapper around the whole response."""
+        if not content:
+            return content
+        stripped = content.strip()
+        m = re.match(
+            r'^<pre[^>]*>\s*<code[^>]*>(.*)</code>\s*</pre>$',
+            stripped, re.IGNORECASE | re.DOTALL
+        )
+        if m:
+            return m.group(1).strip()
+        m = re.match(
+            r'^<code[^>]*>(.*)</code>$',
+            stripped, re.IGNORECASE | re.DOTALL
+        )
+        if m:
+            return m.group(1).strip()
+        return content
+
+    @classmethod
+    def _sanitize_html_response(cls, content):
+        """Run the full cleanup pipeline on Claude's HTML response."""
+        content = cls._strip_code_fences(content)
+        content = cls._unwrap_outer_code_block(content)
+        content = cls._decode_escaped_html(content)
+        return content
+
+    @staticmethod
+    def _parse_keywords(keywords):
+        """Split a comma-separated keyword string into a cleaned list.
+
+        Returns a list of deduplicated, non-empty keyword strings preserving
+        input order (so the first keyword can be treated as primary).
+        """
+        if not keywords:
+            return []
+        parts = [k.strip() for k in str(keywords).split(',')]
+        seen = set()
+        result = []
+        for kw in parts:
+            if not kw:
+                continue
+            key = kw.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(kw)
+        return result
+
+    @classmethod
+    def _format_keywords_for_prompt(cls, keywords, word_count):
+        """Build an explicit, enumerated keyword block for the generation prompts.
+
+        Each keyword is listed on its own line so Claude treats them as discrete
+        items rather than a single "topic blob". Returns a fallback single-line
+        block if there is only 0-1 keyword (no enumeration needed).
+        """
+        kw_list = cls._parse_keywords(keywords)
+        if not kw_list:
+            return "**Target Keywords:** (none provided)\n"
+        if len(kw_list) == 1:
+            return f"**Target Keyword (MUST appear in content):** {kw_list[0]}\n"
+
+        upper = cls._upper_word_limit(word_count)
+        # Frequency targets scale with article length.
+        if upper <= 500:
+            freq = "1-2 times"
+        elif upper <= 1500:
+            freq = "2-3 times"
         else:
-            tokens = int(word_count * 2.0) + 1500
-        # Minimum 4096, maximum 20480 (raised from 16384 to prevent truncation
-        # on longer articles — this is a safety ceiling, not a cost driver)
-        return max(4096, min(tokens, 20480))
+            freq = "3-5 times"
+
+        numbered = "\n".join(f"  {i}. \"{kw}\"" for i, kw in enumerate(kw_list, 1))
+        primary = kw_list[0]
+        secondary = ", ".join(f'"{k}"' for k in kw_list[1:])
+
+        return (
+            "**Target Keywords (EVERY keyword below MUST appear in the final content):**\n"
+            f"{numbered}\n\n"
+            "KEYWORD USAGE RULES:\n"
+            f"- Each of the {len(kw_list)} keywords above MUST appear in the content at least once — do NOT silently drop any of them.\n"
+            f"- Aim for approximately {freq} per keyword across the article.\n"
+            "- Spread keywords across different sections/paragraphs — do not cluster them all in the intro.\n"
+            f"- Primary keyword \"{primary}\": use it in the introduction, in at least one h2 heading, and in the conclusion.\n"
+            f"- Secondary keywords ({secondary}): weave them into body paragraphs where they fit naturally.\n"
+            "- Use keywords naturally — no keyword stuffing, no awkward phrasing.\n"
+            "- Use exact spellings as listed (same casing or natural capitalisation at sentence start); do not substitute synonyms for the keyword itself.\n"
+        )
+
+    @classmethod
+    def _missing_keywords(cls, content_html, keywords):
+        """Return the list of keywords that do not appear in the HTML content.
+
+        Comparison is case-insensitive substring match against the plain text
+        extracted from the HTML.
+        """
+        kw_list = cls._parse_keywords(keywords)
+        if not kw_list or not content_html:
+            return []
+        plain_text = re.sub(r'<[^>]+>', ' ', content_html)
+        plain_text = re.sub(r'\s+', ' ', plain_text).lower()
+        return [kw for kw in kw_list if kw.lower() not in plain_text]
+
+    @staticmethod
+    def _count_lists(content_html):
+        """Return the number of top-level <ul> and <ol> blocks in the HTML."""
+        if not content_html:
+            return 0
+        # Count only opening tags, case-insensitive; attribute-tolerant.
+        return len(re.findall(r'<(?:ul|ol)\b', content_html, flags=re.IGNORECASE))
+
+    @classmethod
+    def _required_list_count(cls, word_count):
+        """Minimum <ul>/<ol> blocks expected given the target word count.
+
+        Short content (below ~600 words cap) has no hard list requirement —
+        a concise piece can be all prose. Medium articles need one list,
+        long articles need two so enumerations aren't all buried in paragraphs.
+        """
+        upper = cls._upper_word_limit(word_count)
+        if upper < 600:
+            return 0
+        if upper <= 1000:
+            return 1
+        return 2
+
+    @staticmethod
+    def _promote_bold_leadin_paragraphs_to_list(content_html):
+        """Deterministic converter: finds 3+ consecutive <p> paragraphs that
+        each start with a <strong>Term:</strong> label and fuses them into a
+        single <ul>. This is the most common "prose enumeration" pattern
+        Claude produces (e.g. "<p><strong>Speed:</strong> ...</p><p><strong>"
+        "Cost:</strong> ...</p><p><strong>Security:</strong> ...</p>").
+
+        Runs purely on regex — no API cost — so it's safe to call on every
+        generation regardless of whether lists are already present.
+        """
+        if not content_html:
+            return content_html, 0
+
+        # A run is 3+ consecutive <p><strong>Label(:|.|—)?</strong> ...</p>
+        # paragraphs with only whitespace between them.
+        run_pattern = re.compile(
+            r'(?:<p[^>]*>\s*<strong>[^<]{1,80}</strong>[^<]{0,800}</p>\s*){3,}',
+            re.IGNORECASE | re.DOTALL,
+        )
+        # Individual paragraph extractor inside a matched run.
+        p_pattern = re.compile(
+            r'<p[^>]*>\s*(<strong>[^<]{1,80}</strong>[^<]{0,800})\s*</p>',
+            re.IGNORECASE | re.DOTALL,
+        )
+
+        replacements = 0
+
+        def convert(run_match):
+            nonlocal replacements
+            block = run_match.group(0)
+            items = p_pattern.findall(block)
+            if len(items) < 3:
+                return block
+            lis = "\n".join(f"  <li>{item.strip()}</li>" for item in items)
+            replacements += 1
+            return f"<ul>\n{lis}\n</ul>\n"
+
+        new_html = run_pattern.sub(convert, content_html)
+        return new_html, replacements
+
+    def _ensure_lists_in_content(self, content_html, word_count):
+        """Safety net that guarantees long-form content has the expected
+        number of <ul>/<ol> blocks.
+
+        Runs in up to three passes — cheapest first:
+          1. Deterministic regex converter (no API call) that promotes
+             sequential "<strong>Label:</strong> …" paragraphs into a <ul>.
+          2. Claude fix pass with few-shot examples. Retries once if the
+             first response still contains fewer lists than required.
+          3. Final log if still short — returns best-effort content rather
+             than failing generation.
+        """
+        if not content_html:
+            return content_html, 0
+        required = self._required_list_count(word_count)
+        if required <= 0:
+            return content_html, 0
+
+        # Pass 1: deterministic regex promotion — cheap, no API cost.
+        content_html, promoted = self._promote_bold_leadin_paragraphs_to_list(
+            content_html
+        )
+        if promoted:
+            logger.info(
+                f"List-fix pass (regex) promoted {promoted} paragraph run(s) to <ul>"
+            )
+
+        current = self._count_lists(content_html)
+        if current >= required:
+            return content_html, 0
+
+        # Pass 2: Claude call with few-shot examples. One retry if the first
+        # response still falls short.
+        upper = self._upper_word_limit(word_count)
+        system_prompt = f"""You are an HTML restructuring assistant. Transform existing prose into HTML that uses <ul> or <ol> where enumerations appear.
+
+RULES:
+1. A paragraph that mentions 3+ parallel items (features, benefits, types, options, tips, tools, costs, permits, etc.) MUST be split into a short intro line plus a <ul> where each item becomes one <li>.
+2. 3+ consecutive paragraphs that each describe one item in a parallel set (same sentence structure, or each starts with a bolded label) MUST be fused into a single <ul>.
+3. 3+ consecutive paragraphs that describe sequential steps (First/Next/Finally, 1/2/3) MUST be fused into an <ol>.
+4. Inside each <li>, if there is a natural term-definition shape, use "<li><strong>Term:</strong> description.</li>".
+5. Preserve all headings (<h1>-<h6>), hyperlinks (<a>), images (<img>), and tables exactly.
+6. Do NOT invent new content. Only restructure existing content.
+7. Keep the total word count at or below {upper} words.
+8. Return ONLY the updated HTML — no explanations, no markdown code blocks, no ```html fences.
+
+EXAMPLES (study the transformation shape, not the topic):
+
+BEFORE (prose enumeration in one paragraph):
+<p>The key benefits include improved speed, lower costs, better scalability, and enhanced security for your users.</p>
+
+AFTER (converted to <ul>):
+<p>The key benefits include:</p>
+<ul>
+  <li><strong>Improved speed:</strong> faster load times for visitors.</li>
+  <li><strong>Lower costs:</strong> reduced infrastructure overhead.</li>
+  <li><strong>Better scalability:</strong> handles growing traffic smoothly.</li>
+  <li><strong>Enhanced security:</strong> protects user data end to end.</li>
+</ul>
+
+BEFORE (sequential "first/next/finally" paragraphs):
+<p>First, research your niche thoroughly to understand the market.</p>
+<p>Next, create a business plan with clear financial projections.</p>
+<p>Finally, secure funding through loans or investor partnerships.</p>
+
+AFTER (converted to <ol>):
+<ol>
+  <li>Research your niche thoroughly to understand the market.</li>
+  <li>Create a business plan with clear financial projections.</li>
+  <li>Secure funding through loans or investor partnerships.</li>
+</ol>
+
+BEFORE (parallel-structure paragraphs):
+<p>Yoast SEO helps you optimise on-page SEO and generate XML sitemaps.</p>
+<p>WooCommerce turns your WordPress site into an online store.</p>
+<p>WPForms lets you build contact and lead capture forms without code.</p>
+
+AFTER (converted to <ul>):
+<ul>
+  <li><strong>Yoast SEO:</strong> optimises on-page SEO and generates XML sitemaps.</li>
+  <li><strong>WooCommerce:</strong> turns your WordPress site into an online store.</li>
+  <li><strong>WPForms:</strong> builds contact and lead capture forms without code.</li>
+</ul>"""
+
+        def _run_fix_call(html_in):
+            user_prompt = (
+                f"The HTML article below currently has {self._count_lists(html_in)} "
+                f"<ul>/<ol> block(s). It MUST end up with at least {required} "
+                f"<ul>/<ol> block(s). Identify enumerations in the existing "
+                "content (parallel items, sequential steps, feature lists, "
+                "benefit lists, type lists, option lists) and transform them "
+                "into <ul> or <ol> using the rules and examples above. "
+                f"Keep the word count at or below {upper} words. "
+                f"Return ONLY the updated HTML with at least {required} "
+                "<ul>/<ol> block(s).\n\n"
+                f"Article HTML:\n{html_in}"
+            )
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=self._calculate_max_tokens(word_count),
+                temperature=0.3,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            out = self._sanitize_html_response(response.content[0].text)
+            out = self._convert_markdown_to_html(out)
+            return out, response.usage.output_tokens
+
+        total_extra_tokens = 0
+        try:
+            fixed, extra = _run_fix_call(content_html)
+            total_extra_tokens += extra
+            if fixed and len(fixed) >= len(content_html) * 0.5:
+                new_count = self._count_lists(fixed)
+                if new_count >= required:
+                    logger.info(
+                        f"List-fix pass (Claude) added lists: {current} -> {new_count} "
+                        f"(required {required})"
+                    )
+                    return fixed, total_extra_tokens
+                # First attempt fell short — retry once with the partial output
+                # as a new starting point (it may already have some progress).
+                logger.warning(
+                    f"List-fix pass 1 produced {new_count} lists (<{required}); retrying"
+                )
+                retry_input = fixed if new_count > current else content_html
+                fixed2, extra2 = _run_fix_call(retry_input)
+                total_extra_tokens += extra2
+                if fixed2 and len(fixed2) >= len(content_html) * 0.5:
+                    new_count2 = self._count_lists(fixed2)
+                    logger.info(
+                        f"List-fix pass (Claude retry) final list count: {new_count2} "
+                        f"(required {required})"
+                    )
+                    return fixed2, total_extra_tokens
+                return fixed, total_extra_tokens
+            logger.warning(
+                "List-fix pass output looks too short; keeping original content"
+            )
+            return content_html, total_extra_tokens
+        except Exception as e:
+            logger.warning(f"List-fix pass failed (non-fatal): {e}")
+            return content_html, total_extra_tokens
+
+    def _fix_missing_keywords(self, content_html, missing, word_count):
+        """Run a focused Claude call that weaves missing keywords into existing
+        content without changing structure or exceeding the word-count cap.
+
+        Returns (fixed_html, extra_completion_tokens). On any failure returns
+        the original content unchanged (0 extra tokens) — this is a best-effort
+        safety net, not a blocker.
+        """
+        if not missing or not content_html:
+            return content_html, 0
+        upper = self._upper_word_limit(word_count)
+        missing_list = "\n".join(f"- \"{kw}\"" for kw in missing)
+
+        system_prompt = (
+            "You are an SEO editor. Your only job is to insert missing SEO "
+            "keywords into existing HTML content naturally. Rules:\n"
+            "- Insert each missing keyword at least once, in a contextually "
+            "appropriate sentence or list item.\n"
+            "- Preserve ALL existing HTML tags, attributes, headings, lists, "
+            "tables, and hyperlinks exactly.\n"
+            "- Do NOT add new sections or headings. Weave keywords into "
+            "existing paragraphs or <li> items.\n"
+            f"- Keep the final word count at or below {upper} words.\n"
+            "- Use the exact spelling of each keyword as provided. Do NOT "
+            "substitute synonyms for the keyword itself.\n"
+            "- Return ONLY the updated HTML content, no explanations, no "
+            "markdown code blocks."
+        )
+        user_prompt = (
+            f"The HTML article below is missing these SEO keywords:\n"
+            f"{missing_list}\n\n"
+            "Insert each missing keyword naturally into the existing content "
+            f"while staying within {upper} words. Return ONLY the updated HTML.\n\n"
+            f"Article HTML:\n{content_html}"
+        )
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=self._calculate_max_tokens(word_count),
+                temperature=0.3,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            fixed = response.content[0].text
+            fixed = self._sanitize_html_response(fixed)
+            fixed = self._convert_markdown_to_html(fixed)
+            extra_tokens = response.usage.output_tokens
+
+            # If the fix pass somehow produced a much shorter or empty output,
+            # fall back to the original content.
+            if not fixed or len(fixed) < len(content_html) * 0.5:
+                logger.warning(
+                    "Keyword-fix pass output looks too short; keeping original content"
+                )
+                return content_html, extra_tokens
+
+            still_missing = self._missing_keywords(fixed, ", ".join(missing))
+            if still_missing:
+                logger.warning(
+                    f"Keyword-fix pass still missing: {still_missing}"
+                )
+            else:
+                logger.info(
+                    f"Keyword-fix pass inserted missing keywords: {missing}"
+                )
+            return fixed, extra_tokens
+        except Exception as e:
+            logger.warning(f"Keyword-fix pass failed (non-fatal): {e}")
+            return content_html, 0
+
+    @classmethod
+    def _enforce_word_count_limit(cls, content_html, word_count):
+        """Truncate content to the user-selected word count range's upper bound.
+
+        The UI word_count dropdown stores the lower bound of a range. We cap
+        at the upper bound of that range so "800-1,000 words" never exceeds
+        1000. Truncation happens at block boundaries (h2/h3/p/ul/ol/etc.) to
+        keep the HTML well-formed.
+        """
+        if not content_html or not word_count or word_count <= 0:
+            return content_html
+
+        upper = cls._upper_word_limit(word_count)
+        plain_text = re.sub(r'<[^>]+>', ' ', content_html)
+        current_words = len(plain_text.split())
+        if current_words <= upper:
+            return content_html
+
+        # Split by top-level block elements. Keep headings with their following
+        # paragraphs so sections aren't orphaned.
+        block_pattern = re.compile(
+            r'<(h[1-6]|p|ul|ol|blockquote|pre|table|div|figure)\b[^>]*>.*?</\1>',
+            re.IGNORECASE | re.DOTALL
+        )
+        matches = list(block_pattern.finditer(content_html))
+        if not matches:
+            return content_html  # Nothing to truncate against; return original
+
+        kept_parts = []
+        kept_words = 0
+        for m in matches:
+            block_html = m.group(0)
+            block_words = len(re.sub(r'<[^>]+>', ' ', block_html).split())
+            # Stop once adding the next block would push us past the upper limit.
+            if kept_parts and kept_words + block_words > upper:
+                break
+            kept_parts.append(block_html)
+            kept_words += block_words
+            if kept_words >= upper:
+                break
+
+        if not kept_parts:
+            return content_html
+        truncated = '\n'.join(kept_parts)
+        logger.info(
+            f"Enforced word count limit: {current_words} -> {kept_words} words "
+            f"(target {word_count}, upper {upper})"
+        )
+        return truncated
 
     def _continue_truncated_content(self, truncated_html):
         """
@@ -508,11 +1023,54 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
                 content_html, extra_tokens = self._continue_truncated_content(content_html)
                 total_completion_tokens += extra_tokens
 
+            # Post-processing: strip code fences / decode entities so the
+            # editor renders real HTML tags (not literal <h2> text).
+            content_html = self._sanitize_html_response(content_html)
+
             # Post-processing: convert any remaining markdown to HTML
             content_html = self._convert_markdown_to_html(content_html)
 
             # Post-processing: deduplicate internal links (SEO best practice)
             content_html = self._deduplicate_internal_links(content_html)
+
+            # Post-processing: cheap regex promotion of sequential bold
+            # lead-in paragraphs into <ul>. Runs every time (no API cost),
+            # independent of the list-count safety net.
+            content_html, _promoted = self._promote_bold_leadin_paragraphs_to_list(
+                content_html
+            )
+
+            # Post-processing: detect missing keywords and weave them in.
+            # Runs BEFORE the word-count enforcement so any content the fix
+            # pass adds is still capped by the final truncation step.
+            missing = self._missing_keywords(content_html, params.get('keywords', ''))
+            if missing:
+                logger.info(
+                    f"Missing keywords detected after generation: {missing}. "
+                    f"Running keyword-fix pass."
+                )
+                content_html, extra_tokens = self._fix_missing_keywords(
+                    content_html, missing, word_count
+                )
+                total_completion_tokens += extra_tokens
+
+            # Post-processing: ensure the article has the expected number of
+            # <ul>/<ol> blocks. Converts prose enumerations into lists when
+            # Claude produced none (common regression for narrative topics).
+            list_count_before = self._count_lists(content_html)
+            required_lists = self._required_list_count(word_count)
+            if list_count_before < required_lists:
+                content_html, extra_tokens = self._ensure_lists_in_content(
+                    content_html, word_count
+                )
+                total_completion_tokens += extra_tokens
+            logger.info(
+                f"Lists in final content: {self._count_lists(content_html)} "
+                f"(required {required_lists})"
+            )
+
+            # Post-processing: enforce the word count range the user selected
+            content_html = self._enforce_word_count_limit(content_html, word_count)
 
             # Calculate generation time
             generation_time = time.time() - start_time
@@ -649,10 +1207,17 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
 - Optimizes for both search engines and AI model responses
 - Includes actionable insights and practical takeaways
 - Uses short paragraphs (2-3 sentences) for better readability
-- Adds bullet points or numbered lists where appropriate
 - Adapts structure and formatting to the content's natural flow — avoid rigid, repetitive section patterns
 - Prioritizes any user-provided formatting or structural preferences over defaults
-- Returns ONLY the HTML content (no markdown, no code blocks)"""
+- Returns ONLY the HTML content (no markdown, no code blocks)
+
+LIST FORMATTING — USE <ul> / <ol> WHEREVER THEY IMPROVE SCANNABILITY:
+- Convert any enumeration of 3+ parallel items (features, benefits, use cases, tips, pros, cons, types, options, examples, reasons, tools, platforms, key takeaways) into a <ul> — do NOT leave them as prose or comma-separated sentences.
+- Use <ol> for any sequence where order matters (step-by-step, ranked lists, process flows, numbered best practices, timelines).
+- Every long-form article (500+ words) MUST contain at least one <ul> or <ol> block. Articles 1000+ words should contain two or more list blocks spread across different sections.
+- Inside each <li>, use <strong> for the lead-in term followed by a short explanation. Example: <li><strong>Scalability:</strong> handles traffic spikes without rewriting code.</li>
+- Do NOT use lists for only 1-2 items; write those as prose instead.
+- Do NOT nest lists more than one level deep."""
 
         # Map article types to descriptions
         article_type_descriptions = {
@@ -673,12 +1238,12 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
         article_description = article_type_descriptions.get(article_type, article_type_descriptions['blog'])
 
         # Build user prompt with specific requirements
+        keywords_block = self._format_keywords_for_prompt(keywords, word_count)
         user_prompt = f"""Write {article_description} with the following specifications:
 
 **Title:** {title}
 
-**Target Keywords:** {keywords}
-
+{keywords_block}
 **Target Market:**
 - Country: {country_display}
 - Language: {language_display}
@@ -689,7 +1254,7 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
 - Goal: {goal}
 - Target Audience: {audience}
 - Content Depth: {depth}
-- Target Word Count: {word_count} words (STRICT: stay within ±10% of this count. Do NOT exceed {int(word_count * 1.1)} words)
+- Target Word Count: {self._lower_word_limit(word_count)}-{self._upper_word_limit(word_count)} words (HARD LIMIT: the final article MUST be between {self._lower_word_limit(word_count)} and {self._upper_word_limit(word_count)} words — do NOT exceed {self._upper_word_limit(word_count)} words under any circumstance)
 
 **IMPORTANT - Language & Spelling:** Write the entire content in {language_display}.
 - Use spelling, grammar, and vocabulary conventions specific to {language_display}
@@ -872,8 +1437,10 @@ Reference Content:
             user_prompt += """- Start with a compelling introduction
 - Organize the body into logical sections using h2 headings
 - Use subsections (h3) where they add clarity
-- Vary the structure: mix paragraphs, short lists, and explanatory blocks as appropriate
-- End with a conclusion or key takeaways
+- Vary the structure: mix paragraphs, <ul> lists, and explanatory blocks as appropriate
+- Use <ul> for feature/benefit/tip/type/option enumerations (3+ parallel items)
+- Use <ol> for step-by-step instructions, ranked items, or ordered processes
+- End with a conclusion or key takeaways (a short <ul> of takeaways works well)
 """
 
         if additional_instructions:
@@ -999,15 +1566,21 @@ Return ONLY the regenerated HTML content for this specific section."""
 
 IMPORTANT: Return ONLY valid JSON, no markdown code blocks, no extra text."""
 
+        keywords_block = self._format_keywords_for_prompt(keywords, word_count)
         user_prompt = f"""Create a detailed outline for a {article_description} with these specifications:
 
 **Title:** {title}
-**Target Keywords:** {keywords}
-**Target Market:** {country_display} ({language_display})
+{keywords_block}**Target Market:** {country_display} ({language_display})
 **Tone:** {tone}
 **Style:** {style}
 **Target Audience:** {audience}
-**Target Word Count:** ~{word_count} words
+**Target Word Count:** {self._lower_word_limit(word_count)}-{self._upper_word_limit(word_count)} words (total across all sections must stay within this range)
+
+OUTLINE KEYWORD DISTRIBUTION:
+- Every target keyword listed above MUST be represented in the outline.
+- Each keyword should appear in at least one section title OR in the key_points of at least one section.
+- The primary (first) keyword should appear in the introduction section and at least one body section.
+- Do not silently drop secondary keywords — plan a section or key_point where each fits naturally.
 """
 
         if key_messages:
@@ -1039,6 +1612,29 @@ Reference Content:
 --- END REFERENCE CONTENT ---
 """
 
+        # Add fetched reference URL content if available so the outline
+        # structure is shaped around what the reference URLs actually contain.
+        references = params.get('references', [])
+        if references and len(references) > 0:
+            user_prompt += """
+**Reference URLs (Plan Outline Using These):**
+The content below was extracted from the reference URLs the user provided.
+Shape the outline so each section can be backed by facts from these references:
+
+- Create sections that cover the key themes, data points, and examples found below
+- Do NOT invent facts, statistics, or examples that do not appear in the reference content
+- If a reference could not be fetched, ignore it — do not guess its content
+- Use the extracted content as the primary source of truth for the outline's key_points
+"""
+            for i, ref in enumerate(references, 1):
+                ref_url = ref.get('url', '')
+                fetched_content = ref.get('fetched_content', '')
+                fetched_title = ref.get('fetched_title', '')
+                if fetched_content:
+                    user_prompt += f"\n--- Reference {i}: {fetched_title or ref_url} ---\n{fetched_content}\n"
+                elif ref_url:
+                    user_prompt += f"\n--- Reference {i}: {ref_url} [Content could not be fetched — do NOT guess] ---\n"
+
         if additional_instructions:
             user_prompt += f"""
 **PRIORITY INSTRUCTIONS (from content creator — adapt the outline structure to honor these):**
@@ -1065,10 +1661,11 @@ Return a JSON array with this exact structure:
 ]
 
 Guidelines:
-- Include 4-6 main sections (h2) for a {word_count}-word article
+- Target total content length: {self._lower_word_limit(word_count)}-{self._upper_word_limit(word_count)} words
+- Include 4-6 main sections (h2) for articles of 1000+ words; fewer (2-3) for shorter articles under 500 words
 - Add subsections (h3) where appropriate
 - Each section should have 2-4 key points
-- Distribute the {word_count} words across sections appropriately
+- Sum of estimated_words across all sections MUST fall within {self._lower_word_limit(word_count)}-{self._upper_word_limit(word_count)}
 - Use descriptive, engaging headings that incorporate keywords naturally
 - Structure should flow logically from introduction to conclusion
 
@@ -1183,7 +1780,14 @@ Return ONLY the JSON array, nothing else."""
 - Maintains readability score suitable for web content
 - Creates comprehensive, well-researched content that provides real value
 - Uses short paragraphs (2-3 sentences) for better readability
-- Returns ONLY the HTML content (no markdown, no code blocks)"""
+- Returns ONLY the HTML content (no markdown, no code blocks)
+
+LIST FORMATTING — USE <ul> / <ol> WHEREVER THEY IMPROVE SCANNABILITY:
+- Convert any enumeration of 3+ parallel items (features, benefits, use cases, tips, pros, cons, types, options, examples, reasons, tools, platforms, key takeaways) into a <ul>.
+- Use <ol> for any sequence where order matters (step-by-step, ranked lists, process flows).
+- Every article 500+ words MUST contain at least one <ul> or <ol>. Articles 1000+ words should contain two or more list blocks across different sections.
+- Inside each <li>, use <strong> for the lead-in term, followed by a short explanation.
+- Do NOT use lists for only 1-2 items; write those as prose."""
 
         title = params.get('title', '')
         keywords = params.get('keywords', '')
@@ -1212,11 +1816,11 @@ Return ONLY the JSON array, nothing else."""
             for point in key_points:
                 outline_text += f"{indent}  - {point}\n"
 
+        keywords_block = self._format_keywords_for_prompt(keywords, params.get('word_count', 1500))
         user_prompt = f"""Write content following this exact outline structure:
 
 **Title:** {title}
-**Keywords:** {keywords}
-**Tone:** {tone}
+{keywords_block}**Tone:** {tone}
 **Style:** {style}
 **Target Audience:** {audience}
 **Language:** {language_display}
@@ -1291,11 +1895,11 @@ IMPORTANT:
 - Use h2 tags for main sections, h3 tags for subsections
 - Return ONLY the HTML content, no markdown"""
 
-        # Calculate total word count from outline sections
-        outline_word_count = sum(s.get('estimated_words', 150) for s in outline)
-        # Use the larger of outline total or params word_count
-        target_word_count = max(outline_word_count, params.get('word_count', 1500))
-        max_tokens = self._calculate_max_tokens(target_word_count)
+        # Target word count is what the user selected; the outline's
+        # estimated_words is advisory and must not push us past the user
+        # range's upper bound.
+        requested_word_count = params.get('word_count', 1500)
+        max_tokens = self._calculate_max_tokens(requested_word_count)
 
         try:
             response = self.client.messages.create(
@@ -1318,16 +1922,49 @@ IMPORTANT:
             # Auto-continue on truncation
             if response.stop_reason == 'max_tokens':
                 logger.warning(
-                    f"Outline content truncated: target={target_word_count} words, "
+                    f"Outline content truncated: target={requested_word_count} words, "
                     f"max_tokens={max_tokens}. Attempting auto-continuation..."
                 )
                 content_html, extra_tokens = self._continue_truncated_content(content_html)
                 total_completion_tokens += extra_tokens
 
+            # Post-processing: strip code fences / decode entities so the
+            # editor renders real HTML tags (not literal <h2> text).
+            content_html = self._sanitize_html_response(content_html)
             # Post-processing: convert any remaining markdown to HTML
             content_html = self._convert_markdown_to_html(content_html)
             # Post-processing: deduplicate internal links
             content_html = self._deduplicate_internal_links(content_html)
+            # Post-processing: cheap regex promotion of sequential bold
+            # lead-in paragraphs into <ul> (no API cost).
+            content_html, _promoted = self._promote_bold_leadin_paragraphs_to_list(
+                content_html
+            )
+            # Post-processing: detect missing keywords and weave them in.
+            missing = self._missing_keywords(content_html, params.get('keywords', ''))
+            if missing:
+                logger.info(
+                    f"Missing keywords detected after outline generation: {missing}. "
+                    f"Running keyword-fix pass."
+                )
+                content_html, extra_tokens = self._fix_missing_keywords(
+                    content_html, missing, requested_word_count
+                )
+                total_completion_tokens += extra_tokens
+            # Post-processing: ensure the article has the expected number of
+            # <ul>/<ol> blocks (converts prose enumerations into lists).
+            required_lists = self._required_list_count(requested_word_count)
+            if self._count_lists(content_html) < required_lists:
+                content_html, extra_tokens = self._ensure_lists_in_content(
+                    content_html, requested_word_count
+                )
+                total_completion_tokens += extra_tokens
+            logger.info(
+                f"Lists in final content: {self._count_lists(content_html)} "
+                f"(required {required_lists})"
+            )
+            # Post-processing: enforce the word count range the user selected
+            content_html = self._enforce_word_count_limit(content_html, requested_word_count)
 
             generation_time = time.time() - start_time
             plain_text = re.sub(r'<[^>]+>', ' ', content_html)
@@ -1446,8 +2083,8 @@ TRANSFORMATION RULES:
 10. Remove rhetorical questions, generic connectors ("not just... but also..."). Never open or close a section with a question.
 11. STRICT: One idea per sentence. NEVER use semicolons (;) anywhere in the content — replace every semicolon with a full stop and start a new sentence. Never combine two separate actions with "and" (e.g. "Download the app and create a password" → "Download the app. Create a password."). Never use colons (:) to introduce a list within a sentence — restructure as separate sentences instead.
 12. Add natural human variation; slightly imperfect flow, varied pacing and rhythm.
-13. Use bullet points only when they genuinely improve readability, not as term:definition structures.
-14. STRICT 2-ITEM LIST RULE: Scan the ENTIRE content for every comma-separated series or list. Any series with 3 or more items MUST be reduced to exactly 2 items joined by "and" or "or". Drop the least important item(s). This applies to ALL patterns:
+13. PRESERVE existing <ul> and <ol> list structures exactly. Do NOT flatten <li> items into prose, paragraphs, or comma-separated sentences. You may shorten or rephrase text inside each <li>, but keep the <ul>/<ol>/<li> tags intact and keep every list item. Lists with 3+ <li> elements stay as-is — the 2-item rule below applies only to inline comma-separated series inside a sentence, NOT to <li> items inside a <ul>/<ol>.
+14. STRICT 2-ITEM INLINE LIST RULE: Scan every sentence for comma-separated series INSIDE prose (not inside <ul>/<ol>). Any inline comma-separated series with 3+ items MUST be reduced to exactly 2 items joined by "and" or "or". Drop the least important item(s). This rule does NOT apply to items inside <ul> or <ol> — those stay as-is. This applies to ALL inline patterns:
    - "collect, breed, and battle" → "collect and battle"
    - "trade, sell, or transfer" → "trade or sell"
    - "items, characters, or land parcels" → "items or characters"
@@ -1505,7 +2142,7 @@ TRANSFORMATION RULES:
 CRITICAL CHECKS — After transforming, scan the full output line by line and fix ANY violations before returning:
 □ Search for em-dashes (—) and en-dashes (–) — replace every one with a comma, semicolon, or full stop
 □ No sentence starts with an -ing word (Setting, Buying, Converting, Understanding, Owning, Mining, Purchasing, Connecting, Trading, Earning, Staking, Timing, Playing, Farming, Building, Creating, etc.)
-□ No comma-separated list has 3+ items anywhere — scan every comma between nouns/verbs and verify only 2 items exist. Also check sequential sentences listing 3+ options
+□ No INLINE comma-separated list has 3+ items in prose sentences — scan every comma between nouns/verbs and verify only 2 items exist. Also check sequential sentences listing 3+ options. Items inside <ul>/<ol> are exempt and must be preserved.
 □ None of the banned words from Rule 7 appear anywhere
 □ Count the paragraph count of each similar section (e.g. game reviews) — they MUST have at least 3 different counts (e.g. some 2, some 3, some 4). If all sections have the same count, merge or split paragraphs to create variation
 □ No word like "comprehensive", "remarkably", "leverage", "especially", "particularly" survived
