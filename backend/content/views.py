@@ -254,6 +254,7 @@ def generate_outline(request):
             'article_type': validated_data.get('article_type', 'blog'),
             'target_country': validated_data.get('target_country', 'united_states'),
             'target_language': validated_data.get('target_language', 'us_english'),
+            'references': validated_data.get('references', []),
             'tone': validated_data.get('tone', 'professional'),
             'style': validated_data.get('style', 'informative'),
             'audience': validated_data.get('audience', 'general'),
@@ -263,6 +264,12 @@ def generate_outline(request):
             'additional_instructions': validated_data.get('additional_instructions', ''),
             'reference_repository_context': reference_repository_context,
         }
+
+        # Enrich reference URLs with actual fetched content so the outline
+        # is shaped by what the URLs actually contain (same treatment the
+        # content-generation step already applies).
+        if generation_params.get('references'):
+            generation_params['references'] = _enrich_references_with_content(generation_params['references'])
 
         # Generate outline
         logger.info(f"Generating outline for domain {domain.id}: {validated_data['title']}")
@@ -2017,6 +2024,9 @@ def _run_bulk_generation_queue(batch_id):
         ).order_by('row_number')
 
         generator = ClaudeContentGenerator()
+        # Per-batch URL cache so identical reference URLs across rows are
+        # fetched once rather than once per row.
+        url_fetch_cache = {}
 
         for item in items:
             try:
@@ -2058,9 +2068,12 @@ def _run_bulk_generation_queue(batch_id):
                     'brand_values': '',
                 }
 
-                # Enrich reference URLs with actual fetched content to prevent hallucination
+                # Enrich reference URLs with actual fetched content to prevent hallucination.
+                # The per-batch cache avoids re-fetching the same URL for multiple rows.
                 if generation_params.get('references'):
-                    generation_params['references'] = _enrich_references_with_content(generation_params['references'])
+                    generation_params['references'] = _enrich_references_with_content(
+                        generation_params['references'], cache=url_fetch_cache
+                    )
 
                 # Generate content using 2-step process for better structure:
                 # Step 1: Generate outline, Step 2: Generate from outline
@@ -2231,6 +2244,11 @@ def _run_single_item_generation(item_id):
             'additional_instructions': item.additional_instructions or '',
             'brand_values': '',
         }
+
+        # Enrich reference URLs with actual fetched content to prevent hallucination.
+        # (The original batch path already does this; the retry path was missing it.)
+        if generation_params.get('references'):
+            generation_params['references'] = _enrich_references_with_content(generation_params['references'])
 
         generator = ClaudeContentGenerator()
         generation_result = generator.generate_content(generation_params)
@@ -3231,10 +3249,14 @@ def _fetch_url_content(url, max_words=3500, timeout=15):
         return None
 
 
-def _enrich_references_with_content(references, max_refs=5):
+def _enrich_references_with_content(references, max_refs=5, cache=None):
     """
     Fetch actual content for reference URLs to prevent AI hallucination.
     Adds 'fetched_content' and 'fetched_title' keys to each reference dict.
+
+    Pass ``cache`` (a dict) to reuse fetched content across multiple calls —
+    the bulk generation queue passes a single cache so the same URL appearing
+    in many rows is only fetched once per batch.
     """
     enriched = []
     for ref in references[:max_refs]:
@@ -3243,12 +3265,20 @@ def _enrich_references_with_content(references, max_refs=5):
             enriched.append(ref)
             continue
 
-        fetched = _fetch_url_content(url, max_words=3500, timeout=15)
+        # Normalize URL for cache key so trailing spaces / case don't miss.
+        cache_key = url.strip().lower()
+        if cache is not None and cache_key in cache:
+            fetched = cache[cache_key]
+        else:
+            fetched = _fetch_url_content(url, max_words=3500, timeout=15)
+            if cache is not None:
+                cache[cache_key] = fetched
+
         ref_copy = dict(ref)
         if fetched and fetched.get('text_content'):
             ref_copy['fetched_content'] = fetched['text_content']
             ref_copy['fetched_title'] = fetched.get('title', '')
-            logger.info(f"[REF-URL] Fetched {fetched['word_count']} words from {url}")
+            logger.info(f"[REF-URL] Using {fetched['word_count']} words from {url}")
         else:
             ref_copy['fetched_content'] = None
             logger.warning(f"[REF-URL] Could not fetch content from {url}")
