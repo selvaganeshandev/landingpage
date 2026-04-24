@@ -388,6 +388,7 @@ class SeoReportSheet(models.Model):
         ('gsc_pages', 'GSC Pages'),
         ('ga_landing_pages', 'GA Landing Pages'),
         ('ga_other_sources', 'GA Other Sources'),
+        ('ga_gsc_reconcile', 'GA vs GSC Reconciliation'),
         ('ga_overview', 'GA Overview'),
         ('keyword_ranking', 'Keyword Ranking'),
         ('domain_metrics', 'Domain Metrics'),

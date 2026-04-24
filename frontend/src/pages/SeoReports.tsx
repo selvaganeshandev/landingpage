@@ -24,6 +24,8 @@ import {
   ChevronsRight,
   Calendar,
   ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
   Download,
 } from "lucide-react";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
@@ -38,6 +40,7 @@ const SHEET_TYPE_LABELS: Record<string, string> = {
   gsc_pages: "Pages",
   ga_landing_pages: "Landing Pages",
   ga_other_sources: "Other Sources",
+  ga_gsc_reconcile: "GA vs GSC",
   ga_overview: "GA Overview",
   keyword_ranking: "Keyword Ranking",
   domain_metrics: "Domain Metrics",
@@ -298,6 +301,50 @@ const SeoReports = () => {
 
 // ─── Report Widget ───────────────────────────────────────────────────────────
 
+const DIM_COL_NAMES = new Set([
+  "Sr No",
+  "Pages",
+  "Queries",
+  "Landing Pages",
+  "Keywords",
+  "Source",
+  "Metric",
+  "Month",
+]);
+
+// Extract a sortable number from any cell value.
+// Handles: plain numbers, "52 (65)" (raw(prorated)), "+12.3%", "-5%", "N/A".
+function parseSortNumber(value: unknown): number {
+  if (value === null || value === undefined) return Number.NEGATIVE_INFINITY;
+  if (typeof value === "number") return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+  const s = String(value).trim();
+  if (!s || s === "N/A" || s === "-") return Number.NEGATIVE_INFINITY;
+  const m = s.match(/-?\d+(?:\.\d+)?/);
+  return m ? parseFloat(m[0]) : Number.NEGATIVE_INFINITY;
+}
+
+// Matches "Feb 2026 Sessions" / "Apr 2026 (PR) Users" — a month column with a
+// metric suffix. Bare month columns ("Mar 2026") are excluded on purpose so
+// reports like keyword_ranking / ga_overview keep the backend-provided order.
+const MONTH_METRIC_COL_RE = /^[A-Za-z]{3,} \d{4}( \(PR\))? \S+/;
+
+// Default sort column for month-with-metric reports (GA/GSC landing pages, queries).
+// Preference: full-month "Sessions" → full-month "Clicks" → any full-month metric
+// → any month-metric column. Returns null when no such column exists so the
+// backend's natural order is preserved (keyword ranking, overview reports, etc.).
+function pickDefaultSortCol(columns: string[]): string | null {
+  const eligible = columns.filter(
+    (c) => !DIM_COL_NAMES.has(c) && MONTH_METRIC_COL_RE.test(c),
+  );
+  if (eligible.length === 0) return null;
+  const fullMonth = eligible.filter((c) => !c.includes("(PR)"));
+  for (const p of ["Sessions", "Clicks"]) {
+    const match = fullMonth.find((c) => c.endsWith(` ${p}`));
+    if (match) return match;
+  }
+  return fullMonth[0] || eligible[0];
+}
+
 function ReportWidget({
   sheet,
   reportData,
@@ -321,16 +368,59 @@ function ReportWidget({
   const menuRef = useRef<HTMLDivElement>(null);
 
   const columns: string[] = reportData?.columns || [];
-  const allRows: any[] = reportData?.rows || [];
-  const totalRows = allRows.length;
+  const rawRows: any[] = reportData?.rows || [];
   const hasSrNo = columns.includes("Sr No");
-  const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
-  const paginatedRows = allRows.slice(
-    page * rowsPerPage,
-    (page + 1) * rowsPerPage
+
+  // Sort state — column + direction. Null col = use backend order.
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(
+    sheet.order_by === "Ascending" ? "asc" : "desc",
   );
 
-  const hasData = columns.length > 0 && allRows.length > 0;
+  // On first render / when columns change, auto-pick the default sort column
+  // based on the sheet's saved order_by direction.
+  const defaultSortCol = pickDefaultSortCol(columns);
+  useEffect(() => {
+    setSortCol(defaultSortCol);
+    setSortDir(sheet.order_by === "Ascending" ? "asc" : "desc");
+    setPage(0);
+  }, [defaultSortCol, sheet.order_by]);
+
+  const sortedRows = (() => {
+    if (!sortCol || !columns.includes(sortCol)) return rawRows;
+    const copy = [...rawRows];
+    copy.sort((a, b) => {
+      const av = parseSortNumber(a[sortCol]);
+      const bv = parseSortNumber(b[sortCol]);
+      if (av === bv) return 0;
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
+    // Re-number Sr No after sort so rows display 1..N in visual order.
+    if (hasSrNo) {
+      return copy.map((r, i) => ({ ...r, "Sr No": i + 1 }));
+    }
+    return copy;
+  })();
+
+  const totalRows = sortedRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
+  const paginatedRows = sortedRows.slice(
+    page * rowsPerPage,
+    (page + 1) * rowsPerPage,
+  );
+
+  const handleSort = (col: string) => {
+    if (DIM_COL_NAMES.has(col)) return;
+    if (sortCol === col) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortCol(col);
+      setSortDir("desc");
+    }
+    setPage(0);
+  };
+
+  const hasData = columns.length > 0 && rawRows.length > 0;
   const rawError = reportData?.error;
   // Show user-friendly error messages instead of raw API errors
   const errorMsg = rawError
@@ -523,18 +613,17 @@ function ReportWidget({
               <thead>
                 <tr className="border-b" style={{ backgroundColor: "#f6f9fe" }}>
                   {columns.map((col) => {
-                    const isDimCol =
-                      col === "Sr No" ||
-                      col === "Pages" ||
-                      col === "Queries" ||
-                      col === "Landing Pages" ||
-                      col === "Keywords" ||
-                      col === "Source" ||
-                      col === "Metric";
+                    const isDimCol = DIM_COL_NAMES.has(col);
+                    const isSortable = !isDimCol;
+                    const isActive = sortCol === col;
                     return (
                       <th
                         key={col}
-                        className="px-4 py-3 text-left font-semibold text-xs whitespace-nowrap"
+                        onClick={isSortable ? () => handleSort(col) : undefined}
+                        title={isSortable ? `Click to sort by ${col}` : undefined}
+                        className={`px-4 py-3 text-left font-semibold text-xs whitespace-nowrap ${
+                          isSortable ? "cursor-pointer select-none hover:bg-muted/40" : ""
+                        }`}
                         style={{
                           minWidth:
                             col === "Sr No"
@@ -556,7 +645,19 @@ function ReportWidget({
                           zIndex: isDimCol || col === "Sr No" ? 2 : undefined,
                         }}
                       >
-                        {col}
+                        <span className="inline-flex items-center gap-1">
+                          {col}
+                          {isSortable &&
+                            (isActive ? (
+                              sortDir === "desc" ? (
+                                <ArrowDown className="h-3 w-3 text-primary" />
+                              ) : (
+                                <ArrowUp className="h-3 w-3 text-primary" />
+                              )
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 text-muted-foreground/40" />
+                            ))}
+                        </span>
                       </th>
                     );
                   })}
@@ -593,14 +694,7 @@ function ReportWidget({
                         const isPositive =
                           isChange && !isNaN(numVal) && numVal > 0;
 
-                        const isDimCol =
-                          col === "Sr No" ||
-                          col === "Pages" ||
-                          col === "Queries" ||
-                          col === "Landing Pages" ||
-                          col === "Keywords" ||
-                          col === "Source" ||
-                          col === "Metric";
+                        const isDimCol = DIM_COL_NAMES.has(col);
 
                         return (
                           <td

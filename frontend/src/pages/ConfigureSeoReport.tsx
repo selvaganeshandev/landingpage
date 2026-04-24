@@ -193,7 +193,15 @@ const ConfigureSeoReport = () => {
           toast({ title: "Validation", description: "Connect Google Analytics to add GA sheet.", variant: "destructive" });
           return;
         }
-        sheetType = formState.gaType === "Landing Pages" ? "ga_landing_pages" : "ga_other_sources";
+        if (formState.gaType === "GA vs GSC" && !isGscConnected) {
+          toast({ title: "Validation", description: "GA vs GSC needs both Google Analytics and Google Search Console connected.", variant: "destructive" });
+          return;
+        }
+        sheetType =
+          formState.gaType === "Landing Pages"            ? "ga_landing_pages"
+          : formState.gaType === "Other Sources"          ? "ga_other_sources"
+          : formState.gaType === "GA vs GSC" ? "ga_gsc_reconcile"
+          : "ga_landing_pages";
         break;
 
       case "rank":
@@ -325,7 +333,7 @@ const ConfigureSeoReport = () => {
 
           {/* Tab-specific content (non-overview tabs show metrics first) */}
           {activeTab === "gsc" && <GscForm formState={formState} toggleArrayItem={toggleArrayItem} />}
-          {activeTab === "ga" && <GaForm formState={formState} setFormState={setFormState} />}
+          {activeTab === "ga" && <GaForm formState={formState} setFormState={setFormState} isGscConnected={isGscConnected} />}
           {activeTab === "rank" && <RankForm formState={formState} toggleArrayItem={toggleArrayItem} />}
           {activeTab === "base" && <BaseForm />}
 
@@ -417,18 +425,43 @@ function GscForm({ formState, toggleArrayItem }: { formState: any; toggleArrayIt
 
 // ─── GA Form ─────────────────────────────────────────────────────────────────
 
-function GaForm({ formState, setFormState }: { formState: any; setFormState: React.Dispatch<React.SetStateAction<any>> }) {
+function GaForm({
+  formState,
+  setFormState,
+  isGscConnected,
+}: {
+  formState: any;
+  setFormState: React.Dispatch<React.SetStateAction<any>>;
+  isGscConnected: boolean;
+}) {
+  const isReconcile = formState.gaType === "GA vs GSC";
   return (
     <FormSection title="Types">
       <Select value={formState.gaType} onValueChange={(v) => setFormState((p: any) => ({ ...p, gaType: v }))}>
-        <SelectTrigger className="w-[220px]">
+        <SelectTrigger className="w-[260px]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="Landing Pages">Landing Pages</SelectItem>
           <SelectItem value="Other Sources">Other Sources</SelectItem>
+          <SelectItem
+            value="GA vs GSC"
+            disabled={!isGscConnected}
+          >
+            GA vs GSC{!isGscConnected && " (GSC not connected)"}
+          </SelectItem>
         </SelectContent>
       </Select>
+      {isReconcile && (
+        <p className="text-xs text-muted-foreground mt-2">
+          This report needs both Google Analytics and Google Search Console connected.
+          {!isGscConnected && (
+            <span className="text-destructive font-medium">
+              {" "}Google Search Console is not connected for this domain — connect it in Domain Settings before saving.
+            </span>
+          )}
+        </p>
+      )}
     </FormSection>
   );
 }
