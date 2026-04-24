@@ -2963,6 +2963,148 @@ def _fetch_ga_overview_data(integration, sheet):
     return {'columns': columns, 'rows': rows, 'total_rows': len(rows)}
 
 
+def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
+    """
+    GA vs GSC Reconciliation — one row per period showing:
+      - Sessions: GA Organic Search sessions (site-wide)
+      - Clicks: GSC total clicks (site-wide)
+      - Clicks to Sessions Ratio: Sessions ÷ Clicks (how much of GSC-reported traffic
+        GA is capturing as Organic sessions; 1.0 means perfect match)
+    Monthly schedule prorates the current incomplete month (raw shown alongside
+    projected value and the label suffixed with " (PR)").
+    """
+    import calendar as _cal
+    from datetime import date as _date
+    from integrations.utils.prorate import calculate_prorate_factor
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    order_asc = sheet.order_by == 'Ascending'
+    # GSC has a 3-day reporting lag; use that for both to keep period alignment.
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc, data_lag_days=3)
+
+    ga_creds = get_credentials_from_integration(ga_integration)
+    if not ga_creds:
+        return {'columns': [], 'rows': [], 'error': 'Invalid GA credentials'}
+    gsc_creds = get_credentials_from_integration(gsc_integration)
+    if not gsc_creds:
+        return {'columns': [], 'rows': [], 'error': 'Invalid GSC credentials'}
+
+    ga_service  = build('analyticsdata', 'v1beta', credentials=ga_creds)
+    gsc_service = build('searchconsole', 'v1', credentials=gsc_creds)
+    property_id = ga_integration.provider_id
+    site_url    = gsc_integration.provider_id
+
+    # ── Prorate setup: only the current calendar month (monthly schedule) ────
+    is_monthly = sheet.schedule == 'monthly'
+    today      = _date.today()
+    cur_label  = None
+    factor     = 1.0
+    days_elapsed = total_days = None
+    if is_monthly:
+        for s_dt, _e_dt, lbl in date_ranges:
+            if s_dt.year == today.year and s_dt.month == today.month:
+                _, last_day  = _cal.monthrange(s_dt.year, s_dt.month)
+                cur_full_end = _date(s_dt.year, s_dt.month, last_day)
+                days_elapsed, total_days, factor = calculate_prorate_factor(s_dt, cur_full_end)
+                if factor != 1.0:
+                    cur_label = lbl
+                break
+    is_prorated = factor != 1.0
+
+    organic_filter = {
+        'filter': {
+            'fieldName': 'sessionDefaultChannelGroup',
+            'stringFilter': {'value': 'Organic Search', 'matchType': 'EXACT'},
+        }
+    }
+
+    range_data = {}   # {label: {'sessions': int, 'clicks': int}}
+    api_errors = []
+
+    for start_dt, end_dt, label in date_ranges:
+        # GA Organic Sessions (site-wide, no dimension)
+        try:
+            ga_resp = ga_service.properties().runReport(
+                property=property_id,
+                body={
+                    'dateRanges':      [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+                    'metrics':         [{'name': 'sessions'}],
+                    'dimensionFilter': organic_filter,
+                }
+            ).execute()
+            ga_rows = ga_resp.get('rows', [])
+            sessions = int(ga_rows[0]['metricValues'][0]['value']) if ga_rows else 0
+        except Exception as e:
+            logger.error(f"Reconcile GA error ({label}) for sheet {sheet.id}: {e}")
+            sessions = 0
+            api_errors.append(f'GA: {e}')
+
+        # GSC Clicks (site-wide totals, no dimensions)
+        try:
+            gsc_resp = gsc_service.searchanalytics().query(
+                siteUrl=site_url,
+                body={
+                    'startDate': start_dt.isoformat(),
+                    'endDate':   end_dt.isoformat(),
+                    'rowLimit':  1,
+                }
+            ).execute()
+            gsc_rows = gsc_resp.get('rows', [])
+            clicks = int(gsc_rows[0].get('clicks', 0)) if gsc_rows else 0
+        except Exception as e:
+            logger.error(f"Reconcile GSC error ({label}) for sheet {sheet.id}: {e}")
+            clicks = 0
+            api_errors.append(f'GSC: {e}')
+
+        range_data[label] = {'sessions': sessions, 'clicks': clicks}
+
+    # If EVERY period failed for both APIs, surface an error.
+    if not range_data and api_errors:
+        return {'columns': [], 'rows': [], 'total_rows': 0, 'error': api_errors[0]}
+
+    columns = ['Sr No', 'Month', 'Sessions', 'Clicks', 'Clicks to Sessions Ratio']
+
+    rows = []
+    for idx, (_s, _e, label) in enumerate(date_ranges, 1):
+        data = range_data.get(label, {'sessions': 0, 'clicks': 0})
+        raw_s = data['sessions']
+        raw_c = data['clicks']
+
+        if is_prorated and label == cur_label:
+            proj_s = round(raw_s * factor)
+            proj_c = round(raw_c * factor)
+            sessions_cell = f"{raw_s} ({proj_s})"
+            clicks_cell   = f"{raw_c} ({proj_c})"
+            ratio_s, ratio_c = proj_s, proj_c
+            month_label = f"{label} (PR)"
+        else:
+            sessions_cell = raw_s
+            clicks_cell   = raw_c
+            ratio_s, ratio_c = raw_s, raw_c
+            month_label = label
+
+        if ratio_c:
+            ratio_cell = round(ratio_s / ratio_c, 4)
+        else:
+            ratio_cell = 'N/A'
+
+        rows.append({
+            'Sr No':                     idx,
+            'Month':                     month_label,
+            'Sessions':                  sessions_cell,
+            'Clicks':                    clicks_cell,
+            'Clicks to Sessions Ratio':  ratio_cell,
+        })
+
+    return {
+        'columns':      columns,
+        'rows':         rows,
+        'total_rows':   len(rows),
+        'is_prorated':  is_prorated,
+        'days_elapsed': days_elapsed,
+        'total_days':   total_days,
+    }
 
 
 def _get_weekly_ranges(data_lag_days=3):
@@ -3514,6 +3656,15 @@ def seo_report_sheet_data(request):
                     data = _fetch_ga_report_data(ga_integration, sheet)
                     report_entry.update(data)
 
+            elif sheet.sheet_type == 'ga_gsc_reconcile':
+                if not ga_integration:
+                    report_entry['error'] = 'Google Analytics not connected'
+                elif not gsc_integration:
+                    report_entry['error'] = 'Google Search Console not connected'
+                else:
+                    data = _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet)
+                    report_entry.update(data)
+
             elif sheet.sheet_type == 'keyword_ranking':
                 # Route to weekly or monthly keyword ranking report
                 if sheet.schedule == 'monthly':
@@ -3630,6 +3781,9 @@ def seo_report_export_xlsx(request):
             ):
                 if ga_integration:
                     data = _fetch_ga_report_data(ga_integration, sheet)
+            elif sheet.sheet_type == 'ga_gsc_reconcile':
+                if ga_integration and gsc_integration:
+                    data = _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet)
             elif sheet.sheet_type == 'keyword_ranking':
                 if sheet.schedule == 'monthly':
                     data = _fetch_keyword_ranking_monthly(domain_id, sheet)
