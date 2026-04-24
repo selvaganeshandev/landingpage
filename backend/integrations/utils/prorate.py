@@ -11,7 +11,7 @@ Rate and average metrics (CTR, Bounce Rate, Avg Position, Avg Session Duration)
 are intentionally NOT prorated — they are already normalised per-unit.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 
 # Metric keys that should be prorated (counts / totals only)
@@ -24,39 +24,50 @@ COUNT_METRICS_GA = {
     'total_revenue',
 }
 
+# Default reporting lag per provider — GA4 typically has same/next-day data,
+# GSC has a ~3-day delay. Callers can override these when they know better.
+DEFAULT_LAG_GA  = 1
+DEFAULT_LAG_GSC = 3
 
-def calculate_prorate_factor(start_date, end_date):
+
+def calculate_prorate_factor(start_date, end_date, data_lag_days=0):
     """
     Calculate the prorate factor for a date range.
 
     Args:
-        start_date (date): Period start (inclusive).
-        end_date   (date): Period end   (inclusive).
+        start_date    (date): Period start (inclusive).
+        end_date      (date): Period end   (inclusive).
+        data_lag_days (int):  Reporting lag of the data source. The "days
+                              elapsed" denominator uses today − lag, so the
+                              factor reflects only the days for which real
+                              data exists. Default 0 (no lag) preserves the
+                              pre-existing behavior for generic callers.
 
     Returns:
         tuple: (days_elapsed, total_days, factor)
-            - days_elapsed : int   — how many days of data actually exist
+            - days_elapsed : int   — days of data actually available
             - total_days   : int   — total days the period spans
-            - factor       : float — multiply raw count by this to get prorated value
-                             1.0 when the period is complete.
+            - factor       : float — multiply raw count by this to project to
+                                     the full period. 1.0 when already complete.
     """
-    today = date.today()
+    # Effective "last day of real data" — accounts for provider reporting lag.
+    data_cutoff = date.today() - timedelta(days=data_lag_days)
     total_days = (end_date - start_date).days + 1
 
-    # Period is fully in the past — no proration needed
-    if today >= end_date:
+    # Period is fully in the past (all data available) — no proration
+    if data_cutoff >= end_date:
         return total_days, total_days, 1.0
 
     # Period has not started yet — edge case, treat as complete (no data)
-    if today < start_date:
+    if data_cutoff < start_date:
         return total_days, total_days, 1.0
 
-    days_elapsed = (today - start_date).days + 1
+    days_elapsed = (data_cutoff - start_date).days + 1
     factor = total_days / days_elapsed if days_elapsed > 0 else 1.0
     return days_elapsed, total_days, factor
 
 
-def apply_prorate_gsc(data: dict, start_date, end_date) -> dict:
+def apply_prorate_gsc(data: dict, start_date, end_date, data_lag_days=DEFAULT_LAG_GSC) -> dict:
     """
     Apply prorate to a GSC insight data dict.
 
@@ -65,14 +76,19 @@ def apply_prorate_gsc(data: dict, start_date, end_date) -> dict:
     CTR and avg_position are left unchanged.
 
     Args:
-        data       : dict with raw GSC metric values.
-        start_date : period start date.
-        end_date   : period end date.
+        data          : dict with raw GSC metric values.
+        start_date    : period start date.
+        end_date      : period end date.
+        data_lag_days : GSC reporting lag (default 3). The prorate factor
+                        is based on today − lag, matching the actual data
+                        available from the GSC API.
 
     Returns:
         Modified copy of data with prorated values.
     """
-    days_elapsed, total_days, factor = calculate_prorate_factor(start_date, end_date)
+    days_elapsed, total_days, factor = calculate_prorate_factor(
+        start_date, end_date, data_lag_days=data_lag_days
+    )
     result = dict(data)
     result['is_prorated'] = factor != 1.0
     result['days_elapsed'] = days_elapsed
@@ -87,7 +103,7 @@ def apply_prorate_gsc(data: dict, start_date, end_date) -> dict:
     return result
 
 
-def apply_prorate_ga(data: dict, start_date, end_date) -> dict:
+def apply_prorate_ga(data: dict, start_date, end_date, data_lag_days=DEFAULT_LAG_GA) -> dict:
     """
     Apply prorate to a GA insight data dict.
 
@@ -96,14 +112,19 @@ def apply_prorate_ga(data: dict, start_date, end_date) -> dict:
     Bounce rate and avg_session_duration are left unchanged.
 
     Args:
-        data       : dict with raw GA metric values.
-        start_date : period start date.
-        end_date   : period end date.
+        data          : dict with raw GA metric values.
+        start_date    : period start date.
+        end_date      : period end date.
+        data_lag_days : GA reporting lag (default 1). The prorate factor is
+                        based on today − lag, matching the actual data
+                        available from the GA Data API.
 
     Returns:
         Modified copy of data with prorated values.
     """
-    days_elapsed, total_days, factor = calculate_prorate_factor(start_date, end_date)
+    days_elapsed, total_days, factor = calculate_prorate_factor(
+        start_date, end_date, data_lag_days=data_lag_days
+    )
     result = dict(data)
     result['is_prorated'] = factor != 1.0
     result['days_elapsed'] = days_elapsed

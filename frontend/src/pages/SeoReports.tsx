@@ -313,11 +313,13 @@ const DIM_COL_NAMES = new Set([
 ]);
 
 // Extract a sortable number from any cell value.
-// Handles: plain numbers, "52 (65)" (raw(prorated)), "+12.3%", "-5%", "N/A".
+// Handles: plain numbers, "52 (65)" (raw(prorated)), "+12.3%", "-5%",
+// "74,148" (thousands separators), "N/A".
 function parseSortNumber(value: unknown): number {
   if (value === null || value === undefined) return Number.NEGATIVE_INFINITY;
   if (typeof value === "number") return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
-  const s = String(value).trim();
+  // Strip thousands separators so "74,148" parses as 74148 (not 74).
+  const s = String(value).trim().replace(/,/g, "");
   if (!s || s === "N/A" || s === "-") return Number.NEGATIVE_INFINITY;
   const m = s.match(/-?\d+(?:\.\d+)?/);
   return m ? parseFloat(m[0]) : Number.NEGATIVE_INFINITY;
