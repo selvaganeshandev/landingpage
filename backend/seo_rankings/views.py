@@ -2799,8 +2799,13 @@ def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
     from googleapiclient.discovery import build
 
     order_asc = sheet.order_by == 'Ascending'
-    # GSC has a 3-day reporting lag; use that for both to keep period alignment.
-    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc, data_lag_days=3)
+    # GA has ~1-day reporting lag, GSC has ~3-day lag. Use each provider's
+    # natural lag so the raw values shown match what the user sees in GA/GSC
+    # UI for the same period. For the current incomplete month the end dates
+    # will differ slightly (e.g. GA Apr 1-26 vs GSC Apr 1-24); proration
+    # projects both to the full calendar month for an apples-to-apples ratio.
+    ga_ranges  = _get_date_ranges(sheet.schedule, sheet.duration, order_asc, data_lag_days=1)
+    gsc_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc, data_lag_days=3)
 
     ga_creds = get_credentials_from_integration(ga_integration)
     if not ga_creds:
@@ -2815,25 +2820,33 @@ def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
     site_url    = gsc_integration.provider_id
 
     # ── Prorate setup: only the current calendar month (monthly schedule) ────
+    # GA and GSC are prorated independently using their own lag so the raw
+    # value in the cell matches each provider's UI for the dates fetched.
     is_monthly = sheet.schedule == 'monthly'
     today      = _date.today()
     cur_label  = None
-    factor     = 1.0
-    days_elapsed = total_days = None
+    ga_factor  = gsc_factor = 1.0
+    ga_days_elapsed  = ga_total_days  = None
+    gsc_days_elapsed = gsc_total_days = None
     if is_monthly:
-        for s_dt, _e_dt, lbl in date_ranges:
+        for s_dt, _e_dt, lbl in ga_ranges:
             if s_dt.year == today.year and s_dt.month == today.month:
                 _, last_day  = _cal.monthrange(s_dt.year, s_dt.month)
                 cur_full_end = _date(s_dt.year, s_dt.month, last_day)
-                days_elapsed, total_days, factor = calculate_prorate_factor(s_dt, cur_full_end, data_lag_days=3)
-                if factor != 1.0:
+                ga_days_elapsed,  ga_total_days,  ga_factor  = calculate_prorate_factor(s_dt, cur_full_end, data_lag_days=1)
+                gsc_days_elapsed, gsc_total_days, gsc_factor = calculate_prorate_factor(s_dt, cur_full_end, data_lag_days=3)
+                if ga_factor != 1.0 or gsc_factor != 1.0:
                     cur_label = lbl
                 break
-    is_prorated = factor != 1.0
+    is_prorated = (ga_factor != 1.0) or (gsc_factor != 1.0)
 
+    # Match the dimension shown in the GA UI's Traffic acquisition report —
+    # "Session primary channel group" (sessionPrimaryChannelGroup). The
+    # previous default-channel-group filter could under-report Organic Search
+    # in properties that customize their primary channel group.
     organic_filter = {
         'filter': {
-            'fieldName': 'sessionDefaultChannelGroup',
+            'fieldName': 'sessionPrimaryChannelGroup',
             'stringFilter': {'value': 'Organic Search', 'matchType': 'EXACT'},
         }
     }
@@ -2841,13 +2854,15 @@ def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
     range_data = {}   # {label: {'sessions': int, 'clicks': int}}
     api_errors = []
 
-    for start_dt, end_dt, label in date_ranges:
+    # ga_ranges and gsc_ranges share the same labels and start dates; only the
+    # current period's end date differs (each uses its own provider lag).
+    for (ga_start, ga_end, label), (_gsc_start, gsc_end, _gsc_label) in zip(ga_ranges, gsc_ranges):
         # GA Organic Sessions (site-wide, no dimension)
         try:
             ga_resp = ga_service.properties().runReport(
                 property=property_id,
                 body={
-                    'dateRanges':      [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+                    'dateRanges':      [{'startDate': ga_start.isoformat(), 'endDate': ga_end.isoformat()}],
                     'metrics':         [{'name': 'sessions'}],
                     'dimensionFilter': organic_filter,
                 }
@@ -2864,8 +2879,8 @@ def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
             gsc_resp = gsc_service.searchanalytics().query(
                 siteUrl=site_url,
                 body={
-                    'startDate': start_dt.isoformat(),
-                    'endDate':   end_dt.isoformat(),
+                    'startDate': ga_start.isoformat(),
+                    'endDate':   gsc_end.isoformat(),
                     'rowLimit':  1,
                 }
             ).execute()
@@ -2885,14 +2900,14 @@ def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
     columns = ['Sr No', 'Month', 'Sessions', 'Clicks', 'Clicks to Sessions Ratio']
 
     rows = []
-    for idx, (_s, _e, label) in enumerate(date_ranges, 1):
+    for idx, (_s, _e, label) in enumerate(ga_ranges, 1):
         data = range_data.get(label, {'sessions': 0, 'clicks': 0})
         raw_s = data['sessions']
         raw_c = data['clicks']
 
         if is_prorated and label == cur_label:
-            proj_s = round(raw_s * factor)
-            proj_c = round(raw_c * factor)
+            proj_s = round(raw_s * ga_factor)
+            proj_c = round(raw_c * gsc_factor)
             sessions_cell = f"{raw_s} ({proj_s})"
             clicks_cell   = f"{raw_c} ({proj_c})"
             ratio_s, ratio_c = proj_s, proj_c
@@ -2917,12 +2932,13 @@ def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
         })
 
     return {
-        'columns':      columns,
-        'rows':         rows,
-        'total_rows':   len(rows),
-        'is_prorated':  is_prorated,
-        'days_elapsed': days_elapsed,
-        'total_days':   total_days,
+        'columns':          columns,
+        'rows':             rows,
+        'total_rows':       len(rows),
+        'is_prorated':      is_prorated,
+        'ga_days_elapsed':  ga_days_elapsed,
+        'gsc_days_elapsed': gsc_days_elapsed,
+        'total_days':       ga_total_days or gsc_total_days,
     }
 
 
