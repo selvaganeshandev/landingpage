@@ -589,12 +589,12 @@ def process_single_report_email_task(self, scheduled_report_id: int):
 @shared_task(bind=True, ignore_result=True, max_retries=1)
 def process_seo_keyword_task(self, seo_keyword_rank_id: int):
     """
-    Process a single SEO keyword: fetch SERP data via ScrapingDog, parse, save rank.
+    Process a single SEO keyword: fetch SERP data via DataBlue, parse, save rank.
 
-    max_retries=1 (not 3) because process_single_keyword already handles retries
-    internally via fetch_serp_data (2 retries per page × 3 pages). A Celery-level
-    retry would re-run the entire fetch, burning 3-9 extra ScrapingDog credits
-    per retry. One Celery retry covers transient infra issues (DB connection, OOM).
+    max_retries=1 (not 3) because each Celery retry re-issues a full DataBlue
+    request, burning an extra credit. One Celery retry covers transient infra
+    issues (DB connection, OOM); transport-level failures inside the request
+    surface as auto_call_status='fail' and get retried by the daily scheduler.
 
     Args:
         seo_keyword_rank_id: ID of SeoKeywordRank to process
@@ -626,7 +626,7 @@ def process_seo_domain_task(self, domain_id: int, batch_num: int = 1):
     If unprocessed ('avail') keywords remain after a batch, a follow-up task is
     automatically scheduled for the next batch. Failed keywords are NOT retried
     within the same run — they are left as 'fail' and retried by the daily scheduler
-    next day to avoid wasting ScrapingDog API credits on persistent failures.
+    next day to avoid wasting DataBlue API credits on persistent failures.
 
     Chains batches until all keywords are processed. No infinite loop risk because
     each batch only picks up 'avail' keywords (not 'fail'), so the remaining count
@@ -661,7 +661,7 @@ def process_seo_domain_task(self, domain_id: int, batch_num: int = 1):
 
         # Auto-schedule follow-up task for remaining unprocessed keywords.
         # Only check 'avail' (not 'fail') to avoid retrying already-failed keywords
-        # which would waste ScrapingDog credits on the same errors.
+        # which would waste DataBlue credits on the same errors.
         remaining = 0
         try:
             from shared_models.seo_models import SeoKeywordRank

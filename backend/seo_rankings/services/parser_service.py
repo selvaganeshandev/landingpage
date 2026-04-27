@@ -1,7 +1,9 @@
 """
 SERP parsing service.
-Ported from Rankmax: parser.py + parser_json.py
-Parses ScrapingDog JSON responses to extract rank position and SERP features.
+Parses SERP JSON responses (DataBlue, post-normalization) to extract rank
+position and SERP features. The expected shape — `organic_results[]` with
+`rank` / `link` / `title` / `snippet` / `displayed_link` — is the historical
+ScrapingDog shape that DataBlue responses are normalized to in datablue_service.
 """
 import re
 import logging
@@ -40,11 +42,10 @@ def exact_url_scheme(url):
 
 def parse_json_serp_response(json_data, target_url, exact_domain=False):
     """
-    Parse ScrapingDog JSON response to find target domain rank.
-    Ported from Rankmax parser_json.py → engineParseData()
+    Parse a SERP JSON response (DataBlue, normalized) to find target domain rank.
 
     Args:
-        json_data: ScrapingDog JSON response (merged across pages)
+        json_data: SERP JSON response (organic_results, ads, knowledge_graph, …)
         target_url: The target URL/domain to find rank for
         exact_domain: If True, match exact URL instead of domain
 

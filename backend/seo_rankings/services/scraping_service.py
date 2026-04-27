@@ -1,20 +1,15 @@
 """
 SEO Ranking Engine — Scraping and orchestration service.
-Ported from Rankmax: automation_proxy.py + automation_engine.py + centralised.py
 
 This is the main entry point that:
-1. Calls ScrapingDog API for each keyword
+1. Calls DataBlue API for each keyword (replaces ScrapingDog as of the SERP migration)
 2. Parses the SERP response
 3. Saves rank data to PostgreSQL
 4. Recalculates domain-level metrics
 """
 import logging
-import urllib.parse
-import base64
 from datetime import date, datetime
 
-import requests
-from django.conf import settings
 from django.db import transaction
 
 from seo_rankings.models import (
@@ -24,128 +19,24 @@ from seo_rankings.services.parser_service import parse_json_serp_response, extra
 from seo_rankings.services.score_service import (
     compute_rank_changes, calculate_domain_daily_metrics, check_status, rank_formulation
 )
+from seo_rankings.services import datablue_service
 
 logger = logging.getLogger(__name__)
-
-# ScrapingDog API endpoint
-SCRAPINGDOG_URL = "https://api.scrapingdog.com/google"
-
-
-def _get_api_key():
-    """Get ScrapingDog API key from Django settings."""
-    return getattr(settings, 'SCRAPINGDOG_API_KEY', None) or ''
-
-
-def _generate_uule(location):
-    """
-    Generate UULE parameter for Google location targeting.
-    Ported from Rankmax automation_proxy.py → __automation_generate_uule__()
-    """
-    if not location:
-        return ''
-
-    canonical_char_codes = {
-        4: "E", 5: "F", 6: "G", 7: "H", 8: "I", 9: "J", 10: "K", 11: "L",
-        12: "M", 13: "N", 14: "O", 15: "P", 16: "Q", 17: "R", 18: "S",
-        19: "T", 20: "U", 21: "V", 22: "W", 23: "X", 24: "Y", 25: "Z",
-        26: "a", 27: "b", 28: "c", 29: "d", 30: "e", 31: "f", 32: "g",
-        33: "h", 34: "i", 35: "j", 36: "k", 37: "l", 38: "m", 39: "n",
-        40: "o", 41: "p", 42: "q", 43: "r", 44: "s", 45: "t", 46: "u",
-        47: "v", 48: "w", 49: "x", 50: "y", 51: "z",
-    }
-
-    loc_len = len(location)
-    canonical_value = canonical_char_codes.get(loc_len)
-    if not canonical_value:
-        return ''
-
-    prefix = "w+CAIQICI" + canonical_value
-    encoded_location = base64.urlsafe_b64encode(location.encode("utf-8")).decode("utf-8")
-    uule = prefix + encoded_location
-    return uule.rstrip('=')
-
-
-def _find_location(location_string):
-    """Extract location from parentheses. E.g. 'New York (New York, US)' → 'New York, US'"""
-    if not location_string:
-        return None
-    start = location_string.find('(')
-    end = location_string.find(')')
-    if start != -1 and end != -1:
-        return location_string[start + 1:end].strip()
-    return None
 
 
 def fetch_serp_data(keyword_text, region, isocode, language_code, uule='', platform='desktop'):
     """
-    Call ScrapingDog API to fetch Google SERP data.
-    Ported from Rankmax automation_proxy.py → __automation_collective_request_json__()
+    Fetch Google SERP data via DataBlue.
 
-    Makes up to 10 paginated calls (page 0-9) = ~100 results.
-    Returns merged JSON response.
+    Signature kept stable so existing callers don't need changes; `region`,
+    `uule` and `platform` are accepted but not forwarded — DataBlue handles
+    geo via country+language and returns DATABLUE_NUM_RESULTS in one call.
     """
-    api_key = _get_api_key()
-    if not api_key:
-        logger.error("SCRAPINGDOG_API_KEY not configured")
-        return None
-
-    session = requests.Session()
-    all_organic = []
-    merged_json = {}
-    base_rank = 0
-
-    for page_num in range(10):
-        params = {
-            'api_key': api_key,
-            'query': keyword_text,
-            'country': isocode,
-            'language': language_code,
-            'domain': region,
-            'page': page_num,
-            'advance_search': 'false',
-        }
-        if uule:
-            params['uule'] = uule
-
-        try:
-            resp = session.get(SCRAPINGDOG_URL, params=params, timeout=(3.05, 15))
-            if resp.status_code == 200:
-                page_json = resp.json()
-                if not isinstance(page_json, dict):
-                    continue
-
-                if page_num == 0:
-                    merged_json = page_json.copy()
-                    page_organic = page_json.get('organic_results', [])
-                    first_ranks = [
-                        x.get('rank') for x in page_organic
-                        if isinstance(x, dict) and isinstance(x.get('rank'), int)
-                    ]
-                    base_rank = max(first_ranks) if first_ranks else len(page_organic)
-                    all_organic.extend(page_organic)
-                else:
-                    page_organic = page_json.get('organic_results', [])
-                    for item in page_organic:
-                        if isinstance(item, dict):
-                            base_rank += 1
-                            item['rank'] = base_rank
-                    all_organic.extend(page_organic)
-
-            elif resp.status_code == 429:
-                logger.warning(f"ScrapingDog rate limit hit on page {page_num} for '{keyword_text}'")
-                break
-            else:
-                logger.warning(f"ScrapingDog error {resp.status_code} on page {page_num} for '{keyword_text}'")
-                break
-
-        except requests.RequestException as e:
-            logger.error(f"ScrapingDog request failed for '{keyword_text}' page {page_num}: {e}")
-            break
-
-    if merged_json:
-        merged_json['organic_results'] = all_organic
-
-    return merged_json if merged_json else None
+    return datablue_service.fetch_one(
+        keyword_text=keyword_text,
+        isocode=isocode,
+        language_code=language_code,
+    )
 
 
 def process_single_keyword(seo_kw_rank_id):
@@ -164,24 +55,17 @@ def process_single_keyword(seo_kw_rank_id):
     keyword_text = seo_kw.keyword.keyword
     target_url = seo_kw.target_url or seo_kw.domain.url
 
-    # Build UULE for location targeting
-    uule = seo_kw.geo_target_uule
-    if not uule and seo_kw.geo_target:
-        location = _find_location(seo_kw.geo_target)
-        if location:
-            uule = _generate_uule(location)
-
     # Mark as busy
     SeoKeywordRank.objects.filter(id=seo_kw.id).update(auto_call_status='busy')
 
     try:
-        # Step 1: Fetch SERP data from ScrapingDog
+        # Step 1: Fetch SERP data from DataBlue
         json_data = fetch_serp_data(
             keyword_text=keyword_text,
             region=seo_kw.region,
             isocode=seo_kw.isocode,
             language_code=seo_kw.language_code,
-            uule=uule,
+            uule='',
             platform=seo_kw.platform,
         )
 
