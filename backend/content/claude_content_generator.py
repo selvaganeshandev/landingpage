@@ -245,20 +245,180 @@ class ClaudeContentGenerator:
         # Count only opening tags, case-insensitive; attribute-tolerant.
         return len(re.findall(r'<(?:ul|ol)\b', content_html, flags=re.IGNORECASE))
 
+    @staticmethod
+    def _count_tables(content_html):
+        """Return the number of <table> blocks in the HTML."""
+        if not content_html:
+            return 0
+        return len(re.findall(r'<table\b', content_html, flags=re.IGNORECASE))
+
     @classmethod
-    def _required_list_count(cls, word_count):
+    def _required_list_count(cls, word_count, user_requested_list=False):
         """Minimum <ul>/<ol> blocks expected given the target word count.
 
         Short content (below ~600 words cap) has no hard list requirement —
         a concise piece can be all prose. Medium articles need one list,
         long articles need two so enumerations aren't all buried in paragraphs.
+
+        When the content creator explicitly asks for a list in their
+        instructions, force a minimum of 1 even on short articles.
         """
         upper = cls._upper_word_limit(word_count)
         if upper < 600:
-            return 0
-        if upper <= 1000:
-            return 1
-        return 2
+            base = 0
+        elif upper <= 1000:
+            base = 1
+        else:
+            base = 2
+        if user_requested_list:
+            return max(1, base)
+        return base
+
+    # ------------------------------------------------------------------
+    # Free-text prompt detection: list / table requests from the client
+    # ------------------------------------------------------------------
+    # When users fill in "Additional Instructions" or "Key Messages" they
+    # often ask for structured output using everyday words rather than HTML
+    # terms. Examples we see in production:
+    #   - "Include a table comparing the plans"
+    #   - "List the main points"
+    #   - "Cover these topics as bullet points"
+    #   - "Show the differences between A and B"
+    #   - "Categorise the items"
+    #   - "Add a menu of options"
+    #   - "Show pros and cons side by side"
+    #
+    # The regexes below are deliberately broad so any of these phrasings
+    # (and close variants) will trigger:
+    #   1. The strong "REQUIRED" structure block in the generation prompt
+    #   2. The list / table safety-net post-processing pass after generation
+    # That way a brief instruction like "use a list and table" can't be
+    # quietly ignored, and Claude won't return paragraphs when the client
+    # explicitly asked for structured formatting.
+    #
+    # Tip: keep these patterns in sync with the comparison/listing intent
+    # detectors above (`_COMPARISON_SIGNALS`, `_LISTING_SIGNALS`) — those
+    # look at the article title/keywords; these look at the user's
+    # free-text instructions.
+
+    # Words/phrases that mean "I want list-style output (<ul> or <ol>)".
+    # Covers explicit list terminology AND common enumeration nouns the
+    # client might use ("points", "topics", "categories", "items", "menus",
+    # "steps", "tips", "options", …).
+    _USER_LIST_REQUEST_SIGNALS = [
+        # Explicit list / bullet / numbered terminology
+        r'\blists?\b',                          # list, lists
+        r'\blisting\b',                         # listing
+        r'\blistify\b',                         # listify
+        r'\bbullet(ed|s)?\b',                   # bullet, bulleted, bullets
+        r'\bbullet[- ]?points?\b',              # bullet point, bullet-points
+        r'\bnumbered\b',                        # numbered (list/items/format)
+        r'\bordered\b',                         # ordered (list)
+
+        # Enumeration nouns clients commonly use to mean "list these out"
+        # ("the main points", "cover the topics", "list the categories",
+        # "menu items", …)
+        r'\bpoints?\b',                         # point, points
+        r'\btopics?\b',                         # topic, topics
+        r'\bcategor(y|ies|ize|ized|ization|ising|ised|isation)\b',  # category, categorise, …
+        r'\bitems?\b',                          # item, items
+        r'\bmenus?\b',                          # menu, menus
+        r'\bsteps?\b',                          # step, steps
+        r'\btips?\b',                           # tip, tips
+        r'\boptions?\b',                        # option, options
+        r'\bchecklists?\b',                     # checklist, checklists
+        r'\btakeaways?\b',                      # takeaway, takeaways
+        r'\bhighlights?\b',                     # highlight, highlights
+
+        # Compound phrasings that almost always mean an ordered/unordered list
+        r'\bstep[- ]by[- ]step\b',              # step-by-step / step by step
+        r'\btop\s+\d+\b',                       # "top 5", "top 10"
+        r'\bbest\s+\d+\b',                      # "best 5"
+        r'\b\d+\s+(ways|tips|reasons|things|points|items|options|topics|features|benefits|methods|examples|ideas|tools|mistakes)\b',
+
+        # Raw HTML hints (advanced clients sometimes write these)
+        r'<ul\b',
+        r'<ol\b',
+    ]
+
+    # Words/phrases that mean "I want a real HTML <table>".
+    # Covers explicit table terminology AND comparison phrasings that are
+    # naturally tabular ("compare X and Y", "differences between", "vs",
+    # "side by side", "pros and cons", …).
+    _USER_TABLE_REQUEST_SIGNALS = [
+        # Explicit table terminology
+        r'\btables?\b',                         # table, tables
+        r'\btabular\b',                         # tabular (format/layout)
+        r'<table\b',                            # raw HTML
+
+        # Comparison phrasings that should render as a table
+        r'\bcompar(e|ed|es|ing|ison|isons)\b',  # compare, compared, comparison, comparing
+        r'\bdifferenc(e|es)\b',                 # difference, differences
+        r'\bvs\.?\b',                           # vs, vs.
+        r'\bversus\b',                          # versus
+        r'\bside[- ]by[- ]side\b',              # side-by-side, side by side
+        r'\bpros\s+and\s+cons\b',               # pros and cons
+        r'\badvantages?\s+and\s+disadvantages?\b',  # advantages and disadvantages
+    ]
+
+    @classmethod
+    def _user_requested_list_format(cls, additional_instructions, key_messages=''):
+        """Did the client ask for list-style output in their instructions?
+
+        Scans the free-text fields the client controls (Additional Instructions
+        + Key Messages) for words that mean "render this as a <ul> or <ol>".
+        We detect both explicit list terms ("list", "bullet points",
+        "numbered") AND common enumeration nouns that clients use in plain
+        English ("points", "topics", "categories", "items", "menus", "steps",
+        "tips", "options", "checklist", "step-by-step", "top 5", …).
+
+        Examples that return True:
+            "Cover the main topics in a list"
+            "Add bullet points for the key benefits"
+            "Categorise the items"
+            "Include a menu of services"
+            "Step-by-step instructions please"
+            "Top 10 tips"
+
+        Returns:
+            bool: True if any list-style intent is found, otherwise False.
+        """
+        text = ' '.join([
+            str(additional_instructions or ''),
+            str(key_messages or ''),
+        ]).lower()
+        if not text.strip():
+            return False
+        return any(re.search(p, text) for p in cls._USER_LIST_REQUEST_SIGNALS)
+
+    @classmethod
+    def _user_requested_table_format(cls, additional_instructions, key_messages=''):
+        """Did the client ask for table-style output in their instructions?
+
+        Scans the free-text fields the client controls (Additional Instructions
+        + Key Messages) for words that mean "render this as an HTML <table>".
+        We detect both explicit table terms ("table", "tabular") AND comparison
+        phrasings that are naturally tabular ("compare", "comparison",
+        "difference between", "vs", "versus", "side-by-side", "pros and
+        cons", "advantages and disadvantages").
+
+        Examples that return True:
+            "Include a table comparing the plans"
+            "Show the differences between A and B"
+            "Add a tabular layout for pricing"
+            "Pros and cons of each option"
+            "Compare the top 3 tools"
+
+        Returns:
+            bool: True if any table-style intent is found, otherwise False.
+        """
+        text = ' '.join([
+            str(additional_instructions or ''),
+            str(key_messages or ''),
+        ]).lower()
+        if not text.strip():
+            return False
+        return any(re.search(p, text) for p in cls._USER_TABLE_REQUEST_SIGNALS)
 
     # Phrases in the title or keywords that strongly signal the reader
     # wants two or more entities compared side-by-side. Used to force a
@@ -333,17 +493,23 @@ class ClaudeContentGenerator:
         return any(re.search(pat, combined) for pat in cls._LISTING_SIGNALS)
 
     @classmethod
-    def _format_structure_hints(cls, title, keywords, article_type, word_count):
+    def _format_structure_hints(cls, title, keywords, article_type, word_count,
+                                user_requested_list=False, user_requested_table=False):
         """Build an explicit structural-rules block for the generation prompt.
 
         Returns a string (may be empty) that instructs Claude to use a
         comparison <table> when the topic implies comparison, and to use
         <ul>/<ol> for types/categories/features/steps when the topic implies
         enumeration. Always safe to append — returns '' when no signals match.
+
+        When the content creator explicitly asks for a list or table in their
+        instructions, the corresponding REQUIRED block is forced in even when
+        the topic-intent detection doesn't match.
         """
         parts = []
 
-        if cls._is_comparison_intent(title, keywords, article_type):
+        is_comparison = cls._is_comparison_intent(title, keywords, article_type)
+        if is_comparison:
             parts.append(
                 "**COMPARISON TABLE (REQUIRED):**\n"
                 "The topic involves comparing two or more entities, so the content MUST include at least one HTML comparison table.\n"
@@ -355,12 +521,37 @@ class ClaudeContentGenerator:
                 "- Do NOT use markdown pipe tables (| col1 | col2 |). Use real HTML <table> tags only.\n"
                 "- Do NOT duplicate the same table twice — one well-built comparison table is enough.\n"
             )
-
-        if cls._is_listing_intent(title, keywords, article_type):
+        elif user_requested_table:
+            # User asked for a table but the topic isn't an explicit comparison.
+            # Use a more flexible "data table" instruction so any tabular content
+            # (specs, pricing tiers, pros/cons, options summary, …) qualifies.
             parts.append(
-                "**LISTING FORMAT (REQUIRED):**\n"
-                "The topic naturally maps to an enumeration (types, categories, features, steps, options).\n"
-                "- Render each enumerated set as a <ul> (unordered) or <ol> (ordered when sequence matters) — not as prose or comma-separated sentences.\n"
+                "**HTML TABLE (REQUIRED — content creator explicitly asked for a table):**\n"
+                "The content MUST include at least one real HTML <table> block. This is a hard requirement from the content creator's instructions, not a suggestion.\n"
+                "- Use this exact shape: <table><thead><tr><th>Column 1</th><th>Column 2</th>...</tr></thead><tbody><tr><td>...</td><td>...</td></tr></tbody></table>\n"
+                "- Pick the section of the article whose content is most naturally tabular: a comparison of options, a feature/spec breakdown, pros vs cons, pricing tiers, before-vs-after, criteria-by-option, or any structured data set.\n"
+                "- Use 3-6 columns and 4-8 rows of meaningful data. Header cells go in <thead>, data rows in <tbody>.\n"
+                "- Precede the table with a short intro sentence and follow it with 1-2 short paragraphs interpreting the data.\n"
+                "- Do NOT use markdown pipe tables (| col1 | col2 |). Use real HTML <table> tags only.\n"
+                "- Do NOT skip the table because \"prose works fine\" — the content creator specifically requested tabular formatting.\n"
+            )
+
+        is_listing = cls._is_listing_intent(title, keywords, article_type)
+        if is_listing or user_requested_list:
+            header = (
+                "**LISTING FORMAT (REQUIRED — content creator explicitly asked for lists):**\n"
+                if user_requested_list and not is_listing
+                else "**LISTING FORMAT (REQUIRED):**\n"
+            )
+            intro = (
+                "The content creator's instructions specifically request list formatting, so the article MUST include at least one <ul> or <ol> block.\n"
+                if user_requested_list and not is_listing
+                else "The topic naturally maps to an enumeration (types, categories, features, steps, options).\n"
+            )
+            parts.append(
+                header
+                + intro
+                + "- Render each enumerated set as a <ul> (unordered) or <ol> (ordered when sequence matters) — not as prose or comma-separated sentences.\n"
                 "- Each <li> should start with a <strong>Label:</strong> followed by a concise explanation (1-2 sentences).\n"
                 "- Precede each list with a short intro sentence so the list has context.\n"
                 "- For \"types/kinds/categories\" topics: one <ul> per category group. For \"top N\" / \"best N\" topics: use <ol> with N items, ranked.\n"
@@ -423,7 +614,7 @@ class ClaudeContentGenerator:
         new_html = run_pattern.sub(convert, content_html)
         return new_html, replacements
 
-    def _ensure_lists_in_content(self, content_html, word_count):
+    def _ensure_lists_in_content(self, content_html, word_count, user_requested_list=False):
         """Safety net that guarantees long-form content has the expected
         number of <ul>/<ol> blocks.
 
@@ -434,10 +625,16 @@ class ClaudeContentGenerator:
              first response still contains fewer lists than required.
           3. Final log if still short — returns best-effort content rather
              than failing generation.
+
+        When user_requested_list=True the required count is forced to at
+        least 1 even on short articles, since the content creator
+        specifically asked for list formatting.
         """
         if not content_html:
             return content_html, 0
-        required = self._required_list_count(word_count)
+        required = self._required_list_count(
+            word_count, user_requested_list=user_requested_list
+        )
         if required <= 0:
             return content_html, 0
 
@@ -566,6 +763,89 @@ AFTER (converted to <ul>):
         except Exception as e:
             logger.warning(f"List-fix pass failed (non-fatal): {e}")
             return content_html, total_extra_tokens
+
+    def _ensure_table_in_content(self, content_html, word_count):
+        """Safety net that inserts an HTML <table> when the content creator
+        explicitly asked for one but the article was returned as paragraphs.
+
+        Runs a single Claude fix pass that converts the most tabular section
+        of the existing article into an HTML <table>. It must NOT invent new
+        facts — it only restructures existing content. On any failure (or if
+        the fix pass still produces no <table>) the original content is
+        returned unchanged so generation never blocks on the safety net.
+
+        Returns (fixed_html, extra_completion_tokens).
+        """
+        if not content_html:
+            return content_html, 0
+        if self._count_tables(content_html) > 0:
+            return content_html, 0
+
+        upper = self._upper_word_limit(word_count)
+        system_prompt = (
+            "You are an HTML restructuring assistant. The article below was "
+            "supposed to include an HTML <table> (the content creator "
+            "specifically asked for one) but currently has none. Find the "
+            "section whose content is most naturally tabular — a comparison "
+            "of options, a feature/spec breakdown, pros vs cons, pricing "
+            "tiers, before-vs-after, criteria-by-option, or any structured "
+            "data set — and convert that section into a real HTML <table>.\n\n"
+            "RULES:\n"
+            "1. Add exactly ONE <table> block. Use "
+            "<table><thead><tr><th>...</th></tr></thead><tbody>"
+            "<tr><td>...</td></tr></tbody></table>.\n"
+            "2. Use 3-6 columns and 4-8 rows of meaningful data drawn from "
+            "the existing article. Do NOT invent new facts, prices, or "
+            "statistics that aren't already in the article.\n"
+            "3. Place the <table> inside the section it summarises. Keep a "
+            "short intro sentence above the table and (where natural) a "
+            "1-sentence interpretation below it.\n"
+            "4. Preserve all headings, paragraphs, lists, links, and images "
+            "outside the converted section.\n"
+            "5. Do NOT use markdown pipe tables (| col1 | col2 |). Use real "
+            "HTML <table> tags only.\n"
+            f"6. Keep total word count at or below {upper} words.\n"
+            "7. Return ONLY the updated HTML — no markdown fences, no "
+            "commentary, no ```html blocks."
+        )
+        user_prompt = (
+            "The HTML article below has no <table> block. Insert exactly one "
+            "<table> by converting the most tabular content into rows and "
+            "columns. Do NOT invent facts. Return ONLY the updated HTML.\n\n"
+            f"Article HTML:\n{content_html}"
+        )
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=self._calculate_max_tokens(word_count),
+                temperature=0.3,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            fixed = response.content[0].text
+            fixed = self._sanitize_html_response(fixed)
+            fixed = self._convert_markdown_to_html(fixed)
+            extra_tokens = response.usage.output_tokens
+
+            if not fixed or len(fixed) < len(content_html) * 0.5:
+                logger.warning(
+                    "Table-fix pass output looks too short; keeping original content"
+                )
+                return content_html, extra_tokens
+            if self._count_tables(fixed) == 0:
+                logger.warning(
+                    "Table-fix pass did not add a <table>; keeping original content"
+                )
+                return content_html, extra_tokens
+
+            logger.info(
+                "Table-fix pass added <table> (user-requested table formatting)"
+            )
+            return fixed, extra_tokens
+        except Exception as e:
+            logger.warning(f"Table-fix pass failed (non-fatal): {e}")
+            return content_html, 0
 
     def _fix_missing_keywords(self, content_html, missing, word_count):
         """Run a focused Claude call that weaves missing keywords into existing
@@ -1216,20 +1496,56 @@ Now extract ONLY the relevant portions. If nothing is relevant, return exactly: 
                 )
                 total_completion_tokens += extra_tokens
 
-            # Post-processing: ensure the article has the expected number of
-            # <ul>/<ol> blocks. Converts prose enumerations into lists when
-            # Claude produced none (common regression for narrative topics).
+            # Did the client ask for lists or tables in their instructions?
+            # We check Additional Instructions + Key Messages for everyday
+            # phrasings ("table", "list", "points", "topics", "categories",
+            # "difference", "items", "comparison", "menus", "step-by-step",
+            # "pros and cons", …) so the safety nets below honour those
+            # requests even when the article title/keywords don't trigger
+            # the topic-intent detectors.
+            user_wants_list = self._user_requested_list_format(
+                params.get('additional_instructions', ''),
+                params.get('key_messages', ''),
+            )
+            user_wants_table = self._user_requested_table_format(
+                params.get('additional_instructions', ''),
+                params.get('key_messages', ''),
+            )
+
+            # Safety net 1 — Lists.
+            # If the article ended up as pure paragraphs (or fewer lists than
+            # the word-count threshold expects, or fewer than the client's
+            # explicit request expects), convert prose enumerations into
+            # <ul>/<ol> via a focused fix pass.
             list_count_before = self._count_lists(content_html)
-            required_lists = self._required_list_count(word_count)
+            required_lists = self._required_list_count(
+                word_count, user_requested_list=user_wants_list
+            )
             if list_count_before < required_lists:
                 content_html, extra_tokens = self._ensure_lists_in_content(
-                    content_html, word_count
+                    content_html, word_count, user_requested_list=user_wants_list
                 )
                 total_completion_tokens += extra_tokens
             logger.info(
                 f"Lists in final content: {self._count_lists(content_html)} "
                 f"(required {required_lists})"
             )
+
+            # Safety net 2 — Tables.
+            # When the client clearly asked for a table (e.g. "include a
+            # comparison table", "show the differences", "pros and cons")
+            # but Claude returned no <table> at all, run a focused fix pass
+            # that converts the most tabular section of the article into a
+            # real HTML <table> without inventing new facts.
+            if user_wants_table and self._count_tables(content_html) == 0:
+                logger.info(
+                    "Client asked for a table but generated content has none; "
+                    "running table-fix pass."
+                )
+                content_html, extra_tokens = self._ensure_table_in_content(
+                    content_html, word_count
+                )
+                total_completion_tokens += extra_tokens
 
             # Post-processing: enforce the word count range the user selected
             content_html = self._enforce_word_count_limit(content_html, word_count)
@@ -1605,11 +1921,28 @@ Reference Content:
 - End with a conclusion or key takeaways (a short <ul> of takeaways works well)
 """
 
+        # Detect list / table requests inside the client's free-text fields
+        # (Additional Instructions + Key Messages). Catches everyday phrasings
+        # such as "table", "list", "points", "topics", "categories",
+        # "difference", "items", "comparison", "menus", "step-by-step",
+        # "pros and cons", and similar. When found we (a) force the matching
+        # REQUIRED structure block into the prompt below and (b) reinforce
+        # the request directly under the PRIORITY INSTRUCTIONS so it isn't
+        # lost in the surrounding context.
+        user_wants_list = self._user_requested_list_format(
+            additional_instructions, key_messages
+        )
+        user_wants_table = self._user_requested_table_format(
+            additional_instructions, key_messages
+        )
+
         # Topic-aware structural hints (comparison tables, listing formats,
         # SEO structure checklist). Added before the priority instructions so
         # user-provided additional_instructions still override the defaults.
         structure_hints = self._format_structure_hints(
-            title, keywords, article_type, word_count
+            title, keywords, article_type, word_count,
+            user_requested_list=user_wants_list,
+            user_requested_table=user_wants_table,
         )
         if structure_hints:
             user_prompt += "\n" + structure_hints + "\n"
@@ -1620,6 +1953,20 @@ Reference Content:
 The following instructions take precedence over the default structure guidelines. If these conflict with the structure suggestions, follow these instructions:
 {additional_instructions}
 """
+            # Short structural reinforcement so brief client prompts like
+            # "use a list", "include a table", "list the topics", or
+            # "show the differences" can't be lost in the wider context.
+            explicit_reinforcement = []
+            if user_wants_list:
+                explicit_reinforcement.append(
+                    "- The instructions above ask for list-style output (e.g. list / points / topics / categories / items / menus / steps) — your final HTML MUST contain at least one <ul> or <ol> block. Do NOT return only paragraphs."
+                )
+            if user_wants_table:
+                explicit_reinforcement.append(
+                    "- The instructions above ask for a table (e.g. table / comparison / difference / pros and cons / vs) — your final HTML MUST contain at least one real <table> block with <thead>/<tbody>. Do NOT skip it because prose works fine; tabular data is what was asked for."
+                )
+            if explicit_reinforcement:
+                user_prompt += "\n" + "\n".join(explicit_reinforcement) + "\n"
 
         lower_limit = self._lower_word_limit(word_count)
         upper_limit = self._upper_word_limit(word_count)
@@ -2060,12 +2407,28 @@ Use ONLY the information provided below from these reference sources:
 - Match the currency, units, and cultural context of the target country.
 """
 
+        # Detect list / table requests inside the client's free-text fields
+        # (Additional Instructions + Key Messages). Catches everyday phrasings
+        # such as "table", "list", "points", "topics", "categories",
+        # "difference", "items", "comparison", "menus", "step-by-step",
+        # "pros and cons", and similar. Used in this outline-driven path to
+        # force the matching REQUIRED structure block into the prompt and to
+        # drive the safety-net post-processing passes below.
+        user_wants_list = self._user_requested_list_format(
+            additional_instructions, key_messages
+        )
+        user_wants_table = self._user_requested_table_format(
+            additional_instructions, key_messages
+        )
+
         # Topic-aware structural hints (comparison tables, listing formats,
         # SEO structure checklist). Applied in addition to — not in place of —
         # the approved outline so tables/lists show up where the topic calls
         # for them.
         structure_hints = self._format_structure_hints(
-            title, keywords, article_type, params.get('word_count', 1500)
+            title, keywords, article_type, params.get('word_count', 1500),
+            user_requested_list=user_wants_list,
+            user_requested_table=user_wants_table,
         )
         if structure_hints:
             user_prompt += "\n" + structure_hints + "\n"
@@ -2075,6 +2438,20 @@ Use ONLY the information provided below from these reference sources:
 **PRIORITY INSTRUCTIONS (from content creator — follow these over defaults):**
 {additional_instructions}
 """
+            # Short structural reinforcement so brief client prompts like
+            # "use a list", "include a table", "list the topics", or
+            # "show the differences" can't be lost in the wider context.
+            explicit_reinforcement = []
+            if user_wants_list:
+                explicit_reinforcement.append(
+                    "- The instructions above ask for list-style output (e.g. list / points / topics / categories / items / menus / steps) — your final HTML MUST contain at least one <ul> or <ol> block. Do NOT return only paragraphs."
+                )
+            if user_wants_table:
+                explicit_reinforcement.append(
+                    "- The instructions above ask for a table (e.g. table / comparison / difference / pros and cons / vs) — your final HTML MUST contain at least one real <table> block with <thead>/<tbody>. Do NOT skip it because prose works fine; tabular data is what was asked for."
+                )
+            if explicit_reinforcement:
+                user_prompt += "\n" + "\n".join(explicit_reinforcement) + "\n"
 
         requested_word_count = params.get('word_count', 1500)
         lower_limit = self._lower_word_limit(requested_word_count)
@@ -2147,18 +2524,43 @@ IMPORTANT:
                     content_html, missing, requested_word_count
                 )
                 total_completion_tokens += extra_tokens
-            # Post-processing: ensure the article has the expected number of
-            # <ul>/<ol> blocks (converts prose enumerations into lists).
-            required_lists = self._required_list_count(requested_word_count)
+            # Safety net 1 — Lists.
+            # If the article ended up as pure paragraphs (or fewer lists than
+            # the word-count threshold expects, or fewer than the client's
+            # explicit request expects), convert prose enumerations into
+            # <ul>/<ol> via a focused fix pass. user_wants_list captures
+            # everyday phrasings like "list", "points", "topics", "categories",
+            # "items", "menus", "step-by-step" from the client's instructions.
+            required_lists = self._required_list_count(
+                requested_word_count, user_requested_list=user_wants_list
+            )
             if self._count_lists(content_html) < required_lists:
                 content_html, extra_tokens = self._ensure_lists_in_content(
-                    content_html, requested_word_count
+                    content_html, requested_word_count,
+                    user_requested_list=user_wants_list,
                 )
                 total_completion_tokens += extra_tokens
             logger.info(
                 f"Lists in final content: {self._count_lists(content_html)} "
                 f"(required {required_lists})"
             )
+
+            # Safety net 2 — Tables.
+            # When the client clearly asked for a table (e.g. "include a
+            # comparison table", "show the differences", "pros and cons")
+            # but Claude returned no <table> at all, run a focused fix pass
+            # that converts the most tabular section of the article into a
+            # real HTML <table> without inventing new facts.
+            if user_wants_table and self._count_tables(content_html) == 0:
+                logger.info(
+                    "Client asked for a table but outline-based content has "
+                    "none; running table-fix pass."
+                )
+                content_html, extra_tokens = self._ensure_table_in_content(
+                    content_html, requested_word_count
+                )
+                total_completion_tokens += extra_tokens
+
             # Post-processing: enforce the word count range the user selected
             content_html = self._enforce_word_count_limit(content_html, requested_word_count)
 
@@ -2180,16 +2582,35 @@ IMPORTANT:
 
     def rewrite_text(self, original_text, prompt, max_retries=3):
         """
-        Rewrite a portion of text based on user instructions
+        Rewrite a portion of text based on user instructions.
+
+        This is the backend for the editor's "Optimize with custom prompt"
+        button: the user selects a passage, types an instruction (e.g.
+        "convert to a list", "make this a comparison table", "show the
+        differences as bullet points"), and we rewrite that selection in
+        place.
+
+        We honour list / table requests in the same way the main content
+        generators do — via the shared `_user_requested_list_format` /
+        `_user_requested_table_format` detectors plus the
+        `_ensure_lists_in_content` / `_ensure_table_in_content` safety nets
+        — so a brief instruction like "use a list" can't be ignored.
 
         Args:
-            original_text (str): The text to rewrite
-            prompt (str): Instructions for how to rewrite the text
-            max_retries (int): Maximum number of retries for transient errors
+            original_text (str): The text to rewrite (HTML or plain).
+            prompt (str): User's rewrite instruction.
+            max_retries (int): Retries for transient API errors.
 
         Returns:
-            str: The rewritten text
+            str: The rewritten text/HTML.
         """
+        # Did the client ask for list / table output in their rewrite prompt?
+        # Catches the same everyday phrasings used elsewhere ("table", "list",
+        # "points", "topics", "categories", "difference", "items",
+        # "comparison", "menus", "step-by-step", "pros and cons", …).
+        user_wants_list = self._user_requested_list_format(prompt)
+        user_wants_table = self._user_requested_table_format(prompt)
+
         system_prompt = """You are a skilled editor and content writer. Your task is to rewrite the provided text according to the user's instructions.
 
 Guidelines:
@@ -2199,7 +2620,29 @@ Guidelines:
 - If the original text contains HTML tags, output HTML. Use <h2>, <h3> tags for headings — NEVER use markdown hashtag syntax (# or ##)
 - Use <table>, <thead>, <tbody>, <tr>, <th>, <td> for tables — NEVER use markdown pipe (|) table syntax
 - Preserve the heading hierarchy (H1, H2, H3) from the original text. Do not remove or flatten headings
-- Preserve any formatting style from the original text"""
+- Preserve any formatting style from the original text
+- Wrap EVERY paragraph of running text in <p>...</p> tags. Do NOT leave plain prose floating between block elements (between </h2> and <table>, between </ul> and <h2>, etc.) — every paragraph must have its own <p> opening and closing tag, otherwise the editor will render the text without paragraph styling
+- Use <strong> ONLY to emphasise specific words/phrases inside a <p> or <li>. Do NOT wrap whole paragraphs, headings, or list items in <strong> — that makes the entire passage render bold"""
+
+        # Append structural rules to the system prompt only when the user's
+        # instruction asks for a list or a table, so default rewrites stay
+        # untouched.
+        if user_wants_list:
+            system_prompt += (
+                "\n\nLIST FORMATTING (the user asked for list-style output):\n"
+                "- Your rewritten HTML MUST contain at least one <ul> or <ol> block.\n"
+                "- Use <ol> when sequence/order matters (steps, ranked items); otherwise use <ul>.\n"
+                "- Inside each <li>, lead with a <strong>Term:</strong> when there is a natural label, then a short explanation.\n"
+                "- Do NOT return only paragraphs when the instruction asks for a list, points, topics, categories, items, menus, or steps."
+            )
+        if user_wants_table:
+            system_prompt += (
+                "\n\nTABLE FORMATTING (the user asked for tabular output):\n"
+                "- Your rewritten HTML MUST contain at least one real HTML <table> block, with <thead> for column headers and <tbody> for data rows.\n"
+                "- 3-6 columns and 4-8 rows of meaningful data, pulled from the existing text. Do NOT invent new facts.\n"
+                "- Do NOT use markdown pipe tables (| col1 | col2 |). Use real <table> tags only.\n"
+                "- Do NOT skip the table because prose works fine — tabular data is what was asked for."
+            )
 
         user_prompt = f"""Please rewrite the following text according to these instructions:
 
@@ -2209,6 +2652,25 @@ Original text:
 {original_text}
 
 Rewritten text:"""
+
+        # Reinforce the user's structural intent right before the rewrite,
+        # mirroring what the main generators do under PRIORITY INSTRUCTIONS.
+        explicit_reinforcement = []
+        if user_wants_list:
+            explicit_reinforcement.append(
+                "- The instruction above asks for list-style output (e.g. list / points / topics / categories / items / menus / steps) — your rewritten HTML MUST include at least one <ul> or <ol>. Do NOT return only paragraphs."
+            )
+        if user_wants_table:
+            explicit_reinforcement.append(
+                "- The instruction above asks for a table (e.g. table / comparison / difference / pros and cons / vs) — your rewritten HTML MUST include at least one real <table> with <thead>/<tbody>."
+            )
+        if explicit_reinforcement:
+            user_prompt = (
+                user_prompt.rstrip("\n").rsplit("\n\nRewritten text:", 1)[0]
+                + "\n\n"
+                + "\n".join(explicit_reinforcement)
+                + "\n\nRewritten text:"
+            )
 
         last_error = None
         for attempt in range(max_retries):
@@ -2228,10 +2690,50 @@ Rewritten text:"""
 
                 rewritten_text = response.content[0].text.strip()
 
+                # Post-processing: clean up Claude's response so the editor
+                # renders real HTML instead of literal tags.
+                # _sanitize_html_response() handles three failure modes we
+                # were seeing in the editor's "Optimize with custom prompt":
+                #   1. Output wrapped in ```html ... ``` markdown code fences
+                #      (the editor would then store `<h1>` etc. as visible text).
+                #   2. Output wrapped in <pre><code>...</code></pre>.
+                #   3. Output entity-escaped (`&lt;h1&gt;Title&lt;/h1&gt;`).
+                # The main generators (generate_content / generate_content_from_outline)
+                # already run this; rewrite_text was missing it, which is why
+                # rewrites occasionally surfaced raw HTML tags in the editor.
+                rewritten_text = self._sanitize_html_response(rewritten_text)
+
                 # Post-processing: convert any markdown to HTML
                 # (fixes Issue 4: hashtag headings, Issue 5: pipe tables)
                 rewritten_text = self._convert_markdown_to_html(rewritten_text)
                 rewritten_text = self._deduplicate_internal_links(rewritten_text)
+
+                # Safety nets — only run when the client explicitly asked for
+                # a list or a table. Default rewrites are untouched.
+                if user_wants_list or user_wants_table:
+                    # Word-count proxy for the safety nets: use the rewritten
+                    # text's own length so the helpers' upper-bound caps
+                    # match the size of the selection being rewritten.
+                    plain = re.sub(r'<[^>]+>', ' ', rewritten_text)
+                    wc_proxy = max(150, len(plain.split()))
+
+                    if user_wants_list and self._count_lists(rewritten_text) == 0:
+                        logger.info(
+                            "Optimize-with-custom-prompt: client asked for a "
+                            "list but rewrite has none; running list-fix pass."
+                        )
+                        rewritten_text, _ = self._ensure_lists_in_content(
+                            rewritten_text, wc_proxy, user_requested_list=True
+                        )
+
+                    if user_wants_table and self._count_tables(rewritten_text) == 0:
+                        logger.info(
+                            "Optimize-with-custom-prompt: client asked for a "
+                            "table but rewrite has none; running table-fix pass."
+                        )
+                        rewritten_text, _ = self._ensure_table_in_content(
+                            rewritten_text, wc_proxy
+                        )
 
                 return rewritten_text
 

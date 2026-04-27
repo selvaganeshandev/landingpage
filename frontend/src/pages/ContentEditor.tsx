@@ -1316,27 +1316,75 @@ const ContentEditor = () => {
         domain_id: contentData?.domain_id
       });
 
-      if (response.status === 'success' && response.rewritten_text) {
-        // Focus editor and restore selection
-        editorRef.current?.focus();
+      if (response.status === 'success' && response.rewritten_text && editorRef.current) {
+        // Replace the selected text with the rewritten content.
+        //
+        // We deliberately AVOID document.execCommand('insertHTML', ...) here.
+        // execCommand inherits the selection's active formatting state — so
+        // if the user's selection happened to start inside a <strong> (or
+        // any inline wrapper), every block of the inserted HTML (h2, p, li,
+        // …) ended up inheriting bold/italic and the whole rewrite rendered
+        // bold. That was the visible bug in the editor screenshots.
+        //
+        // Instead, we use the SAME pattern the "Add new content" flow uses
+        // (see line where editorRef.current.innerHTML = content): direct
+        // innerHTML write. To do that without losing track of which part of
+        // the article was selected, we drop two unique text-node markers at
+        // the selection boundaries, read editorRef.innerHTML, and splice
+        // the rewritten HTML between the markers.
+        //
+        // Why this matches Add's behaviour: both flows now go through a
+        // plain `innerHTML = ...` assignment, which the browser parses as
+        // fresh top-level HTML — no inherited formatting state, no execCommand.
+        const rewritten = response.rewritten_text;
 
-        const selection = window.getSelection();
-        if (selection && selectedRangeRef.current) {
-          selection.removeAllRanges();
-          selection.addRange(selectedRangeRef.current);
+        const sessionId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        const START_MARKER = `__REWRITE_START_${sessionId}__`;
+        const END_MARKER = `__REWRITE_END_${sessionId}__`;
 
-          // Replace selected text with rewritten content
-          document.execCommand('insertText', false, response.rewritten_text);
+        // Insert end marker first so the end position doesn't drift when
+        // we then insert the start marker.
+        const endRange = selectedRangeRef.current.cloneRange();
+        endRange.collapse(false);
+        endRange.insertNode(document.createTextNode(END_MARKER));
 
-          // Update content state
-          handleContentChange();
+        const startRange = selectedRangeRef.current.cloneRange();
+        startRange.collapse(true);
+        startRange.insertNode(document.createTextNode(START_MARKER));
 
+        let html = editorRef.current.innerHTML;
+        const startIdx = html.indexOf(START_MARKER);
+        const endIdx = html.indexOf(END_MARKER);
+
+        if (startIdx !== -1 && endIdx > startIdx) {
+          // Splice the rewritten HTML in place of the marker-bracketed region.
+          html =
+            html.substring(0, startIdx) +
+            rewritten +
+            html.substring(endIdx + END_MARKER.length);
+          editorRef.current.innerHTML = html;
+        } else {
+          // Failsafe: markers got mangled (e.g. by a CSS transform or other
+          // mutation observer) — strip any stragglers and bail out without
+          // corrupting the article.
+          html = html.split(START_MARKER).join('').split(END_MARKER).join('');
+          editorRef.current.innerHTML = html;
           toast({
-            title: "Content rewritten",
-            description: "The selected text has been rewritten successfully.",
+            title: "Rewrite failed",
+            description: "Could not locate the selected text in the editor. Please re-select and try again.",
+            variant: "destructive",
           });
+          return;
         }
-      } else {
+
+        // Sync React state with the new editor HTML
+        handleContentChange();
+
+        toast({
+          title: "Content rewritten",
+          description: "The selected text has been rewritten successfully.",
+        });
+      } else if (response.status !== 'success' || !response.rewritten_text) {
         toast({
           title: "Rewrite failed",
           description: response.message || "Failed to rewrite content",
