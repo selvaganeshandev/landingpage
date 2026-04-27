@@ -2620,7 +2620,9 @@ Guidelines:
 - If the original text contains HTML tags, output HTML. Use <h2>, <h3> tags for headings — NEVER use markdown hashtag syntax (# or ##)
 - Use <table>, <thead>, <tbody>, <tr>, <th>, <td> for tables — NEVER use markdown pipe (|) table syntax
 - Preserve the heading hierarchy (H1, H2, H3) from the original text. Do not remove or flatten headings
-- Preserve any formatting style from the original text"""
+- Preserve any formatting style from the original text
+- Wrap EVERY paragraph of running text in <p>...</p> tags. Do NOT leave plain prose floating between block elements (between </h2> and <table>, between </ul> and <h2>, etc.) — every paragraph must have its own <p> opening and closing tag, otherwise the editor will render the text without paragraph styling
+- Use <strong> ONLY to emphasise specific words/phrases inside a <p> or <li>. Do NOT wrap whole paragraphs, headings, or list items in <strong> — that makes the entire passage render bold"""
 
         # Append structural rules to the system prompt only when the user's
         # instruction asks for a list or a table, so default rewrites stay
@@ -2687,6 +2689,19 @@ Rewritten text:"""
                 )
 
                 rewritten_text = response.content[0].text.strip()
+
+                # Post-processing: clean up Claude's response so the editor
+                # renders real HTML instead of literal tags.
+                # _sanitize_html_response() handles three failure modes we
+                # were seeing in the editor's "Optimize with custom prompt":
+                #   1. Output wrapped in ```html ... ``` markdown code fences
+                #      (the editor would then store `<h1>` etc. as visible text).
+                #   2. Output wrapped in <pre><code>...</code></pre>.
+                #   3. Output entity-escaped (`&lt;h1&gt;Title&lt;/h1&gt;`).
+                # The main generators (generate_content / generate_content_from_outline)
+                # already run this; rewrite_text was missing it, which is why
+                # rewrites occasionally surfaced raw HTML tags in the editor.
+                rewritten_text = self._sanitize_html_response(rewritten_text)
 
                 # Post-processing: convert any markdown to HTML
                 # (fixes Issue 4: hashtag headings, Issue 5: pipe tables)
