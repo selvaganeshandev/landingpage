@@ -2599,10 +2599,11 @@ Use ONLY the information provided below from these reference sources:
 IMPORTANT:
 - Follow the outline structure exactly (same headings, same order)
 - Cover all key points mentioned for each section
-- Match the estimated word count for each section, and keep the total around {target_mid} words (range {lower_limit}-{upper_limit}).
+- Target approximately {target_mid} words so you stay comfortably within the {lower_limit}-{upper_limit} range. Match the estimated word count for each section and budget accordingly — do NOT exceed the upper bound.
 - Every target keyword MUST appear at least once across the final article.
 - Use h2 tags for main sections, h3 tags for subsections. For comparison/listing topics, honour the structural rules above (tables for comparisons, <ul>/<ol> for enumerations).
-- Always end with a complete closing section (Conclusion / Final Verdict / Key Takeaways). Never stop mid-sentence.
+- Always complete every sentence and paragraph fully. If you are approaching your output limit, wrap up the current section with a proper conclusion rather than starting a new section.
+- Never end mid-sentence or leave content incomplete. Every article MUST end with a proper closing section (Conclusion / Final Verdict / Key Takeaways) and valid closing HTML tags.
 - Return ONLY the HTML content, no markdown (no `#`, no `|` tables, no ``` fences)."""
 
         # Target word count is what the user selected; the outline's
