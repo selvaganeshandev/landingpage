@@ -2008,6 +2008,58 @@ BULK_EXCEL_COLUMNS = [
 ]
 
 
+def _validate_bulk_outline(outline, generation_params):
+    # Guard against the LLM silently truncating the outline JSON for long
+    # articles, which previously caused trailing sections (and their
+    # keywords) to vanish from bulk-upload output. Returns (is_valid, reason).
+    if not outline or not isinstance(outline, list):
+        return False, "outline is empty or not a list"
+
+    if len(outline) < 2:
+        return False, f"outline has only {len(outline)} section(s); expected at least 2"
+
+    for i, section in enumerate(outline):
+        if not isinstance(section, dict):
+            return False, f"section {i} is not a JSON object"
+        title = (section.get('title') or '').strip()
+        if not title:
+            return False, f"section {i} has no title"
+        key_points = section.get('key_points', [])
+        if key_points and not isinstance(key_points, list):
+            return False, f"section {i} key_points is malformed"
+
+    # If estimated_words sum is far below the requested target, the outline
+    # was almost certainly truncated mid-array and lost the trailing sections.
+    word_count = generation_params.get('word_count', 1500) or 1500
+    total_estimated = sum(
+        s.get('estimated_words', 0) for s in outline
+        if isinstance(s.get('estimated_words'), int)
+    )
+    if total_estimated > 0 and total_estimated < int(word_count * 0.5):
+        return False, (
+            f"estimated_words sum ({total_estimated}) is below 50% of target "
+            f"({word_count}); outline likely truncated"
+        )
+
+    # Every target keyword must be represented in at least one section's
+    # title or key_points — matches the explicit instruction the outline
+    # prompt gives the LLM.
+    keywords_str = generation_params.get('keywords', '') or ''
+    if keywords_str.strip():
+        keyword_list = [
+            k.strip().lower() for k in re.split(r'[,;]', keywords_str) if k.strip()
+        ]
+        outline_text = ' '.join(
+            (s.get('title') or '') + ' ' + ' '.join(s.get('key_points') or [])
+            for s in outline
+        ).lower()
+        missing = [k for k in keyword_list if k and k not in outline_text]
+        if missing:
+            return False, f"keywords missing from outline: {missing}"
+
+    return True, ""
+
+
 def _run_bulk_generation_queue(batch_id):
     """
     Background thread: processes all 'processed' items in a batch ONE BY ONE.
@@ -2077,16 +2129,55 @@ def _run_bulk_generation_queue(batch_id):
 
                 # Generate content using 2-step process for better structure:
                 # Step 1: Generate outline, Step 2: Generate from outline
-                # This ensures the content follows a logical flow (Issue 11)
+                # This ensures the content follows a logical flow (Issue 11).
+                # Outline JSON is validated for completeness before content
+                # generation; if it's truncated/incomplete we retry once with
+                # a larger token budget, then fall back to direct generation.
                 logger.info(f"Bulk item {item.id} (row {item.row_number}): generating outline for '{item.title}'")
+                generation_result = None
                 try:
                     outline_result = generator.generate_outline(generation_params)
                     outline = outline_result.get('outline', [])
-                    if outline:
-                        logger.info(f"Bulk item {item.id}: generating content from {len(outline)}-section outline")
-                        generation_result = generator.generate_content_from_outline(generation_params, outline)
+
+                    is_valid, reason = _validate_bulk_outline(outline, generation_params)
+
+                    if not is_valid:
+                        logger.warning(
+                            f"Bulk item {item.id}: outline validation failed "
+                            f"({reason}); retrying with extended token budget"
+                        )
+                        try:
+                            outline_result = generator.generate_outline(
+                                generation_params, extended_tokens=True
+                            )
+                            outline = outline_result.get('outline', [])
+                            is_valid, reason = _validate_bulk_outline(
+                                outline, generation_params
+                            )
+                            if is_valid:
+                                logger.info(
+                                    f"Bulk item {item.id}: outline retry produced "
+                                    f"a valid {len(outline)}-section outline"
+                                )
+                        except Exception as retry_err:
+                            logger.warning(
+                                f"Bulk item {item.id}: outline retry failed: {retry_err}"
+                            )
+                            is_valid = False
+
+                    if is_valid and outline:
+                        logger.info(
+                            f"Bulk item {item.id}: generating content from "
+                            f"{len(outline)}-section outline"
+                        )
+                        generation_result = generator.generate_content_from_outline(
+                            generation_params, outline
+                        )
                     else:
-                        logger.info(f"Bulk item {item.id}: outline empty, falling back to direct generation")
+                        logger.info(
+                            f"Bulk item {item.id}: falling back to direct generation "
+                            f"(reason: {reason or 'empty outline'})"
+                        )
                         generation_result = generator.generate_content(generation_params)
                 except Exception as outline_err:
                     logger.warning(

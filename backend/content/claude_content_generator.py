@@ -95,6 +95,21 @@ class ClaudeContentGenerator:
         # Floor of 2048 for tiny requests; cap at 20480 for very large ones.
         return max(2048, min(tokens, 20480))
 
+    @classmethod
+    def _calculate_outline_max_tokens(cls, word_count, extended=False):
+        # Outline JSON is structurally smaller than the article body, but its
+        # size still scales with section count + key_points (which scale with
+        # word_count). The previous fixed 2048-token cap silently truncated
+        # outlines for 2500+ word articles, dropping trailing sections from
+        # the bulk-upload pipeline. `extended=True` doubles the budget for
+        # the validation-retry path.
+        upper = cls._upper_word_limit(word_count)
+        tokens = int(upper * 0.6) + 1024
+        base = max(2048, min(tokens, 8192))
+        if extended:
+            return min(base * 2, 16384)
+        return base
+
     @staticmethod
     def _strip_code_fences(content):
         """Remove markdown code fences Claude occasionally wraps HTML in.
@@ -919,7 +934,7 @@ AFTER (converted to <ul>):
             return content_html, 0
 
     @classmethod
-    def _enforce_word_count_limit(cls, content_html, word_count):
+    def _enforce_word_count_limit(cls, content_html, word_count, outline=None):
         """Cap content at the user-selected word count range's upper bound,
         preserving the conclusion so the article never ends mid-thought.
 
@@ -928,11 +943,15 @@ AFTER (converted to <ul>):
            we don't strip the conclusion just because the article is a few
            paragraphs long. A complete-but-slightly-long article reads
            better than a truncated one that matches the target exactly.
-        2. If the content is significantly over, we identify the "conclusion
-           section" (the last <h1>/<h2>/<h3> and everything after it) and
-           always keep it. Body blocks before the conclusion are included
-           greedily in document order until the remaining budget is used up.
-        3. If no heading exists, we fall back to preserving the final block
+        2. If `outline` is provided (bulk-upload path), trim *within* sections
+           so every planned section heading is preserved in the output.
+           This stops middle sections from being silently dropped when the
+           generated article overshoots the word cap.
+        3. Otherwise (single-article path), identify the "conclusion section"
+           (the last <h1>/<h2>/<h3> and everything after it) and always keep
+           it. Body blocks before the conclusion are included greedily in
+           document order until the remaining budget is used up.
+        4. If no heading exists, we fall back to preserving the final block
            so the article still has a proper closing paragraph.
         """
         if not content_html or not word_count or word_count <= 0:
@@ -947,6 +966,16 @@ AFTER (converted to <ul>):
         soft_cap = int(upper * 1.15)
         if current_words <= soft_cap:
             return content_html
+
+        # Outline-aware path: keep every planned section heading, trim
+        # trailing body blocks within sections instead. Falls through to the
+        # legacy algorithm if the helper can't run (no headings detected).
+        if outline:
+            outline_aware = cls._enforce_word_count_outline_aware(
+                content_html, word_count, upper, current_words
+            )
+            if outline_aware is not None:
+                return outline_aware
 
         # Split by top-level block elements.
         block_pattern = re.compile(
@@ -1005,6 +1034,97 @@ AFTER (converted to <ul>):
             f"(target {word_count}, upper {upper}, conclusion preserved)"
         )
         return truncated
+
+    @classmethod
+    def _enforce_word_count_outline_aware(cls, content_html, word_count, upper, current_words):
+        # Trim content while preserving every section heading. Returns the
+        # trimmed HTML, or None if outline-aware trimming can't run (no
+        # headings detected) — caller falls back to the legacy trim.
+        block_pattern = re.compile(
+            r'<(h[1-6]|p|ul|ol|blockquote|pre|table|div|figure)\b[^>]*>.*?</\1>',
+            re.IGNORECASE | re.DOTALL
+        )
+        matches = list(block_pattern.finditer(content_html))
+        if not matches:
+            return None
+
+        heading_re = re.compile(r'^<h[1-3]\b', re.IGNORECASE)
+
+        # Group blocks into sections (each section = heading + following
+        # body blocks). Anything before the first heading becomes a "lead"
+        # section with heading=None.
+        sections = []
+        current = {"heading": None, "blocks": []}
+        for m in matches:
+            block = m.group(0)
+            if heading_re.match(block):
+                if current["heading"] is not None or current["blocks"]:
+                    sections.append(current)
+                current = {"heading": block, "blocks": []}
+            else:
+                current["blocks"].append(block)
+        if current["heading"] is not None or current["blocks"]:
+            sections.append(current)
+
+        if not any(s["heading"] for s in sections):
+            return None
+
+        def words_of(block):
+            return len(re.sub(r'<[^>]+>', ' ', block).split())
+
+        for s in sections:
+            s["heading_words"] = words_of(s["heading"]) if s["heading"] else 0
+            s["block_words"] = [words_of(b) for b in s["blocks"]]
+
+        total_words = sum(
+            s["heading_words"] + sum(s["block_words"]) for s in sections
+        )
+        target = int(upper * 1.05)
+
+        # Greedy trim: drop the trailing body block of whichever section
+        # has the most trimmable content (>1 body block first, so we don't
+        # gut shorter sections). Section headings are never dropped.
+        while total_words > target:
+            best_i = -1
+            best_words = 0
+            for i, s in enumerate(sections):
+                if len(s["blocks"]) > 1:
+                    last = s["block_words"][-1]
+                    if last > best_words:
+                        best_words = last
+                        best_i = i
+            # Fallback: if every section is down to one body block, keep
+            # trimming the longest trailing block (heading still preserved).
+            if best_i < 0:
+                for i, s in enumerate(sections):
+                    if s["blocks"]:
+                        last = s["block_words"][-1]
+                        if last > best_words:
+                            best_words = last
+                            best_i = i
+            if best_i < 0:
+                break
+
+            sections[best_i]["blocks"].pop()
+            sections[best_i]["block_words"].pop()
+            total_words -= best_words
+
+        parts = []
+        for s in sections:
+            if s["heading"]:
+                parts.append(s["heading"])
+            parts.extend(s["blocks"])
+
+        if not parts:
+            return None
+
+        sections_with_heading = sum(1 for s in sections if s["heading"])
+        logger.info(
+            f"Enforced word count limit (outline-aware): {current_words} -> "
+            f"{total_words} words (target {word_count}, upper {upper}, "
+            f"{sections_with_heading} section heading(s) preserved)"
+        )
+        return '\n'.join(parts)
 
     def _continue_truncated_content(self, truncated_html):
         """
@@ -2038,12 +2158,16 @@ Return ONLY the regenerated HTML content for this specific section."""
         except Exception as e:
             raise Exception(f"Claude API error during regeneration: {str(e)}")
 
-    def generate_outline(self, params):
+    def generate_outline(self, params, extended_tokens=False):
         """
         Generate a content outline based on provided parameters
 
         Args:
             params (dict): Generation parameters (same as generate_content)
+            extended_tokens (bool): When True, requests a doubled token budget.
+                Used by the bulk-upload validation-retry path so an outline
+                that was truncated on the first attempt has enough headroom
+                to come back complete.
 
         Returns:
             dict: Generated outline with sections
@@ -2197,10 +2321,14 @@ Guidelines:
 
 Return ONLY the JSON array, nothing else."""
 
+        outline_max_tokens = self._calculate_outline_max_tokens(
+            word_count, extended=extended_tokens
+        )
+
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=2048,
+                max_tokens=outline_max_tokens,
                 temperature=0.7,
                 system=system_prompt,
                 messages=[
@@ -2212,6 +2340,13 @@ Return ONLY the JSON array, nothing else."""
             )
 
             outline_text = response.content[0].text.strip()
+            if response.stop_reason == 'max_tokens':
+                logger.warning(
+                    f"Outline generation hit max_tokens cap "
+                    f"(word_count={word_count}, max_tokens={outline_max_tokens}, "
+                    f"extended={extended_tokens}). The outline JSON may be "
+                    f"incomplete — caller validation should retry or fall back."
+                )
 
             # Clean up the response if it has markdown code blocks
             if '```' in outline_text:
@@ -2242,10 +2377,12 @@ Return ONLY the JSON array, nothing else."""
             try:
                 outline_sections = json.loads(outline_text)
             except json.JSONDecodeError:
-                # Retry: ask Claude to fix the malformed JSON
+                # Retry: ask Claude to fix the malformed JSON. Use the same
+                # token budget as the original outline call so the repair
+                # itself isn't truncated.
                 fix_response = self.client.messages.create(
                     model=self.model,
-                    max_tokens=2048,
+                    max_tokens=outline_max_tokens,
                     temperature=0,
                     messages=[
                         {
@@ -2561,8 +2698,12 @@ IMPORTANT:
                 )
                 total_completion_tokens += extra_tokens
 
-            # Post-processing: enforce the word count range the user selected
-            content_html = self._enforce_word_count_limit(content_html, requested_word_count)
+            # Post-processing: enforce the word count range the user
+            # selected. Pass the outline so trimming preserves every planned
+            # section heading instead of silently dropping middle sections.
+            content_html = self._enforce_word_count_limit(
+                content_html, requested_word_count, outline=outline
+            )
 
             generation_time = time.time() - start_time
             plain_text = re.sub(r'<[^>]+>', ' ', content_html)
