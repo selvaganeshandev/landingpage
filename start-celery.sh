@@ -94,25 +94,35 @@ read -p "Enter choice [1-4]: " choice
 
 case $choice in
     1)
-        echo -e "${GREEN}Starting Celery Worker...${NC}"
-        "$VENV_PYTHON" -m celery -A llm_monitor_engine worker --loglevel=info
+        echo -e "${GREEN}Starting Celery Worker (default queue)...${NC}"
+        "$VENV_PYTHON" -m celery -A llm_monitor_engine worker -Q celery --loglevel=info
         ;;
     2)
         echo -e "${GREEN}Starting Celery Beat...${NC}"
         "$VENV_PYTHON" -m celery -A llm_monitor_engine beat --loglevel=info
         ;;
     3)
-        echo -e "${GREEN}Starting Celery Worker in background...${NC}"
-        nohup "$VENV_PYTHON" -m celery -A llm_monitor_engine worker --loglevel=info > /tmp/celery-worker.log 2>&1 &
+        # SEO ranking tasks are routed to the 'seo' queue (see CELERY_TASK_ROUTES
+        # in engine settings). They run on a dedicated worker so user-triggered
+        # SEO refreshes aren't blocked by the prompt/competitor analytics backlog
+        # on the default queue.
+        echo -e "${GREEN}Starting default-queue Celery Worker in background...${NC}"
+        nohup "$VENV_PYTHON" -m celery -A llm_monitor_engine worker -Q celery --loglevel=info > /tmp/celery-worker.log 2>&1 &
         WORKER_PID=$!
+        sleep 2
+        echo -e "${GREEN}Starting SEO-queue Celery Worker in background...${NC}"
+        nohup "$VENV_PYTHON" -m celery -A llm_monitor_engine worker -Q seo --concurrency=2 -n seo@%h --loglevel=info > /tmp/celery-seo-worker.log 2>&1 &
+        SEO_WORKER_PID=$!
         sleep 2
         echo -e "${GREEN}Starting Celery Beat in background...${NC}"
         nohup "$VENV_PYTHON" -m celery -A llm_monitor_engine beat --loglevel=info > /tmp/celery-beat.log 2>&1 &
         BEAT_PID=$!
         sleep 2
-        echo -e "${GREEN}✓ Celery Worker started (PID: $WORKER_PID)${NC}"
+        echo -e "${GREEN}✓ Default Worker started (PID: $WORKER_PID)${NC}"
+        echo -e "${GREEN}✓ SEO Worker started (PID: $SEO_WORKER_PID)${NC}"
         echo -e "${GREEN}✓ Celery Beat started (PID: $BEAT_PID)${NC}"
-        echo -e "${YELLOW}Worker log: /tmp/celery-worker.log${NC}"
+        echo -e "${YELLOW}Default worker log: /tmp/celery-worker.log${NC}"
+        echo -e "${YELLOW}SEO worker log: /tmp/celery-seo-worker.log${NC}"
         echo -e "${YELLOW}Beat log: /tmp/celery-beat.log${NC}"
         echo ""
         echo -e "${YELLOW}To stop: pkill -f 'celery.*worker' && pkill -f 'celery.*beat'${NC}"

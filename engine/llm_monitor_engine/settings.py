@@ -212,6 +212,18 @@ CELERY_TASK_SERIALIZER = config('CELERY_TASK_SERIALIZER', default='json')
 CELERY_RESULT_SERIALIZER = config('CELERY_RESULT_SERIALIZER', default='json')
 CELERY_TIMEZONE = TIME_ZONE
 
+# Route SEO ranking tasks to a dedicated queue so user-triggered refreshes
+# don't get stuck behind the prompt/competitor analytics backlog on the
+# default queue (which can pile up to thousands of tasks during scheduler
+# bursts). Other tasks keep their existing routing — the default 'celery'
+# queue. A dedicated worker must be running with `-Q seo` for SEO tasks to
+# be processed; see start-celery.sh.
+CELERY_TASK_ROUTES = {
+    'core.processing_tasks.process_seo_domain_task': {'queue': 'seo'},
+    'core.processing_tasks.process_seo_keyword_task': {'queue': 'seo'},
+    'core.processing_tasks.seo_rankings_daily_scheduler': {'queue': 'seo'},
+}
+
 # Auto-expire task results after 1 day (reduce Redis usage); set to None if not needed
 from datetime import timedelta
 CELERY_RESULT_EXPIRES = timedelta(days=config('CELERY_RESULT_EXPIRES_DAYS', default=1, cast=int))

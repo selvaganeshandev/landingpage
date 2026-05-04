@@ -103,18 +103,30 @@ async def _fetch_one_async(client, sem, item_id, item_data, api_key, timeout):
                     raw = resp.json()
                     organic = raw.get("organic_results", []) or []
                     raw["organic_results"] = _normalize_organic(organic)
+                    # Trust DataBlue's own success flag. An empty organic list
+                    # with success=true is a legitimate "not in top N" — let
+                    # the parser record rank=0 instead of flagging the keyword
+                    # as failed (which would skip it until tomorrow's
+                    # scheduler retry). Fall back to True if the field is
+                    # absent so we don't regress on schema changes.
+                    api_success = bool(raw.get("success", True))
                     return {
                         "item_id": item_id,
                         "status": resp.status_code,
                         "data": raw,
-                        "success": len(organic) > 0,
+                        "success": api_success,
                     }
                 except Exception as je:
                     logger.warning(f"[DataBlue] JSON parse failed for item {item_id}: {je}")
                     return {"item_id": item_id, "status": resp.status_code, "data": None, "success": False}
 
+            # Include response body so auth/billing failures (401, 402, 403)
+            # are visible in the worker log instead of looking like a generic
+            # scraping error.
+            body_snippet = (resp.text or '')[:300].replace('\n', ' ')
             logger.warning(
-                f"[DataBlue] Non-200 for item {item_id}: status={resp.status_code} kw={payload.get('query', '')[:60]}"
+                f"[DataBlue] Non-200 for item {item_id}: status={resp.status_code} "
+                f"kw={payload.get('query', '')[:60]} body={body_snippet}"
             )
             return {"item_id": item_id, "status": resp.status_code, "data": None, "success": False}
 
@@ -234,7 +246,10 @@ def fetch_one(keyword_text: str, isocode: str = "", language_code: str = "") -> 
         return None
 
     if resp.status_code != 200:
-        logger.warning(f"[DataBlue] Non-200 ({resp.status_code}) for '{keyword_text}'")
+        body_snippet = (resp.text or '')[:300].replace('\n', ' ')
+        logger.warning(
+            f"[DataBlue] Non-200 ({resp.status_code}) for '{keyword_text}': {body_snippet}"
+        )
         return None
 
     try:
@@ -248,4 +263,10 @@ def fetch_one(keyword_text: str, isocode: str = "", language_code: str = "") -> 
 
     organic = raw.get("organic_results", []) or []
     raw["organic_results"] = _normalize_organic(organic)
-    return raw if organic else None
+    # Trust DataBlue's success flag. success=false → DataBlue couldn't fetch
+    # (should be retried). success=true with empty organic → legitimate "not
+    # ranked in top N" → return raw so the parser records rank=0 and the
+    # keyword is marked 'done' rather than 'fail'.
+    if not raw.get("success", True):
+        return None
+    return raw

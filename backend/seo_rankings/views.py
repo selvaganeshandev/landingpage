@@ -677,11 +677,20 @@ def seo_refresh_status(request):
             'status': 'idle',
         })
 
-    done_count = SeoKeywordRank.objects.filter(
+    # 'done' = scraped successfully, 'fail' = SERP API rejected/empty (e.g.
+    # DataBlue success=false, ScrapingDog 4xx). Both terminate the keyword for
+    # this run, so they together gate "is the run finished?", but we need them
+    # separately to distinguish a real success from a SERP-service outage.
+    succeeded_count = SeoKeywordRank.objects.filter(
         domain_id=domain_id,
-        auto_call_status__in=['done', 'fail'],
+        auto_call_status='done',
     ).count()
-    # Only count actively processing keywords (not 'avail' which is the idle/default state)
+    failed_count = SeoKeywordRank.objects.filter(
+        domain_id=domain_id,
+        auto_call_status='fail',
+    ).count()
+    done_count = succeeded_count + failed_count
+    # Actively processing keywords
     running_count = SeoKeywordRank.objects.filter(
         domain_id=domain_id,
         auto_call_status__in=['busy', 'load', 'read'],
@@ -692,13 +701,24 @@ def seo_refresh_status(request):
         auto_call_status='avail',
     ).count()
 
-    # refreshing = true ONLY when keywords are actively being processed (busy/load/read).
-    # pending (avail) keywords with running=0 means the task has finished or no task is
-    # running — don't keep the frontend spinner going for stuck/idle keywords.
-    is_refreshing = running_count > 0
+    # refreshing while anything is running OR still pending — covers the
+    # inter-batch gap (process_seo_domain_task auto-schedules a follow-up
+    # batch with a 10s countdown when 'avail' keywords remain). The frontend
+    # has its own 30s no-progress stale-detection for genuinely stuck cases,
+    # so a generous 'is_refreshing' here doesn't risk an infinite spinner.
+    is_refreshing = running_count > 0 or pending_count > 0
     progress = int((done_count / total) * 100) if total > 0 else 0
 
-    if running_count > 0:
+    # Error surface: refresh has finished but every attempted keyword failed.
+    # This is the "SERP service is rejecting our requests" state (invalid key,
+    # account out of credits, provider down). Without this, the frontend sees
+    # status='done' and shows 100% completion even though no rank values were
+    # actually written.
+    error_message = None
+    if not is_refreshing and failed_count > 0 and succeeded_count == 0:
+        error_message = "SERP service is currently unavailable. Please try again after some time."
+        current_status = 'error'
+    elif is_refreshing:
         current_status = 'running'
     else:
         current_status = 'done'
@@ -707,10 +727,13 @@ def seo_refresh_status(request):
         'refreshing': is_refreshing,
         'total': total,
         'completed': done_count,
+        'succeeded': succeeded_count,
+        'failed': failed_count,
         'running': running_count,
         'pending': pending_count,
         'progress': progress,
         'status': current_status,
+        'error': error_message,
     })
 
 

@@ -423,7 +423,11 @@ class SeoRankingProcessor:
                 f"[SEO] {len(skipped_no_keyword)} keyword rows had no linked keyword — marked fail"
             )
 
-        concurrency = DATABLUE_CONCURRENCY
+        # Read at call-time so .env / settings tweaks take effect on the next
+        # batch without needing a worker restart. The module-level constant
+        # only captures the value at first import, which silently locks in
+        # whatever was set when the worker started.
+        concurrency = getattr(settings, 'DATABLUE_CONCURRENCY', DATABLUE_CONCURRENCY)
         logger.info(
             f"Starting SEO rank check for domain {domain_id}: "
             f"batch={total}/{total_pending} pending, concurrency={concurrency}"
