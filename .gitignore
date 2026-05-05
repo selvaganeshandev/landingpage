@@ -112,3 +112,7 @@ coverage/
 Thumbs.db
 *.bak
 *.tmp
+
+# Celery beat runtime state — regenerated on each start, never commit.
+engine/celerybeat-schedule
+engine/celerybeat-schedule.*
