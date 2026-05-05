@@ -250,8 +250,14 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 # Google Gemini API Configuration (for AI-powered features)
 GOOGLE_GEMINI_API_KEY = config('GOOGLE_GEMINI_API_KEY', default=None)
 
-# ScrapingDog API Configuration (for web crawling)
+# ScrapingDog API Configuration (still used by misinformation crawler & domains/views.py — /scrape endpoint)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
+
+# DataBlue API Configuration (SEO keyword ranking / SERP — /v1/data/google/search)
+DATABLUE_API_KEY = config('DATABLUE_API_KEY', default='')
+DATABLUE_NUM_RESULTS = config('DATABLUE_NUM_RESULTS', default=50, cast=int)
+DATABLUE_CONCURRENCY = config('DATABLUE_CONCURRENCY', default=100, cast=int)
+DATABLUE_TIMEOUT = config('DATABLUE_TIMEOUT', default=60, cast=int)
 
 # Google PageSpeed Insights API Configuration (for Core Web Vitals & Performance)
 GOOGLE_PAGESPEED_API_KEY = config('GOOGLE_PAGESPEED_API_KEY', default=None)

@@ -3,17 +3,16 @@ SEO Competitor Processor — Aggregates competitor domains from SERP data.
 
 Strategy:
 1. First try to read stored snippets_details.competitors (set during rank processing).
-2. If a keyword has no stored competitors data, make a fresh ScrapingDog call
-   (single page = top 10 results only, far cheaper than full rank processing).
+2. If a keyword has no stored competitors data, make a fresh DataBlue call
+   (single keyword, top results only — far cheaper than full rank processing).
 Results are stored in SeoCompetitorAnalysis.analysis_json.
 """
 import logging
-import requests as http_requests
 from urllib.parse import urlparse
 
-logger = logging.getLogger(__name__)
+from core import datablue_service
 
-SCRAPINGDOG_URL = "https://api.scrapingdog.com/google"
+logger = logging.getLogger(__name__)
 
 # Domains to exclude from competitor results
 EXCLUDE_DOMAINS = {
@@ -39,62 +38,49 @@ def _extract_domain(url: str) -> str:
 
 def _fetch_top10_competitors(kw_text: str, region: str, isocode: str,
                               language_code: str, uule: str,
-                              platform: str, api_key: str) -> dict:
+                              platform: str, api_key: str = '') -> dict:
     """
-    Fetch only page 0 of SERP (top ~10 results) and return a competitors dict
-    keyed by rank position, same format as parse_json_serp_response produces.
+    Fetch SERP via DataBlue and return a competitors dict keyed by rank,
+    same shape as parse_json_serp_response produces.
+
+    `region`, `uule`, `platform`, `api_key` kept in signature for backward
+    compatibility but ignored — DataBlue handles geo via country+language and
+    reads its key from Django settings.
     """
-    params = {
-        'api_key': api_key,
-        'query': kw_text,
-        'country': isocode,
-        'language': language_code,
-        'domain': region,
-        'page': 0,
-        'advance_search': 'false',
-    }
-    if uule:
-        params['uule'] = uule
-
-    try:
-        resp = http_requests.get(SCRAPINGDOG_URL, params=params, timeout=(3.05, 15))
-        if resp.status_code != 200:
-            logger.warning(f"[CompAnalysis] ScrapingDog {resp.status_code} for '{kw_text}'")
-            return {}
-        page_json = resp.json()
-        if not isinstance(page_json, dict):
-            return {}
-
-        competitors = {}
-        for item in page_json.get('organic_results', []):
-            if not isinstance(item, dict):
-                continue
-            item_url = item.get('link', '')
-            item_domain = _extract_domain(item_url)
-            item_rank = item.get('rank') or item.get('position', 0)
-            try:
-                item_rank = int(item_rank)
-            except (ValueError, TypeError):
-                item_rank = 0
-
-            if item_rank and item_domain:
-                competitors[str(item_rank)] = {
-                    'url': item_url,
-                    'domain': item_domain,
-                    'rank': item_rank,
-                }
-        return competitors
-
-    except Exception as e:
-        logger.warning(f"[CompAnalysis] SERP fetch error for '{kw_text}': {e}")
+    page_json = datablue_service.fetch_one(
+        keyword_text=kw_text,
+        isocode=isocode,
+        language_code=language_code,
+    )
+    if not page_json:
         return {}
+
+    competitors = {}
+    for item in page_json.get('organic_results', []):
+        if not isinstance(item, dict):
+            continue
+        item_url = item.get('link', '')
+        item_domain = _extract_domain(item_url)
+        item_rank = item.get('rank') or item.get('position', 0)
+        try:
+            item_rank = int(item_rank)
+        except (ValueError, TypeError):
+            item_rank = 0
+
+        if item_rank and item_domain:
+            competitors[str(item_rank)] = {
+                'url': item_url,
+                'domain': item_domain,
+                'rank': item_rank,
+            }
+    return competitors
 
 
 def analyze_competitors_for_domain(domain_id: int) -> dict:
     """
     Aggregate competitor domains from SERP data for a domain.
     - Uses stored snippets_details.competitors if available.
-    - Falls back to a fresh single-page ScrapingDog call if not.
+    - Falls back to a fresh DataBlue call if not.
     Updates SeoCompetitorAnalysis to COMP on success, FAIL on error.
     """
     from shared_models.seo_models import SeoKeywordRank, SeoCompetitorAnalysis
@@ -128,7 +114,7 @@ def analyze_competitors_for_domain(domain_id: int) -> dict:
         except Exception:
             pass
 
-        api_key = getattr(settings, 'SCRAPINGDOG_API_KEY', '') or ''
+        datablue_key = getattr(settings, 'DATABLUE_API_KEY', '') or ''
 
         domain_counts = {}   # {competitor_domain: hit_count}
         domain_kw_ids = {}   # {competitor_domain: [kw_ids]}
@@ -140,8 +126,8 @@ def analyze_competitors_for_domain(domain_id: int) -> dict:
             if kw.snippets_details and isinstance(kw.snippets_details, dict):
                 competitors = kw.snippets_details.get('competitors', {})
 
-            # Fall back to fresh call if no stored competitor data
-            if not competitors and api_key:
+            # Fall back to fresh DataBlue call if no stored competitor data
+            if not competitors and datablue_key:
                 kw_text = kw.keyword.keyword if kw.keyword else ''
                 if kw_text:
                     competitors = _fetch_top10_competitors(
@@ -151,7 +137,6 @@ def analyze_competitors_for_domain(domain_id: int) -> dict:
                         language_code=kw.language_code or 'en',
                         uule=kw.geo_target_uule or '',
                         platform=kw.platform or 'desktop',
-                        api_key=api_key,
                     )
                     fresh_calls += 1
 

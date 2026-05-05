@@ -550,7 +550,7 @@ def seo_domain_overview(request):
             snippets = kw.snippets_details or {}
             if kw.ads and isinstance(snippets, dict) and 'ads' in snippets:
                 ads_data = snippets['ads']
-                # ScrapingDog returns ads as a list; convert to counts
+                # SERP API returns ads as a list; convert to counts
                 if isinstance(ads_data, list):
                     top_count = len(ads_data)
                     bottom_count = 0
@@ -677,11 +677,20 @@ def seo_refresh_status(request):
             'status': 'idle',
         })
 
-    done_count = SeoKeywordRank.objects.filter(
+    # 'done' = scraped successfully, 'fail' = SERP API rejected/empty (e.g.
+    # DataBlue success=false, ScrapingDog 4xx). Both terminate the keyword for
+    # this run, so they together gate "is the run finished?", but we need them
+    # separately to distinguish a real success from a SERP-service outage.
+    succeeded_count = SeoKeywordRank.objects.filter(
         domain_id=domain_id,
-        auto_call_status__in=['done', 'fail'],
+        auto_call_status='done',
     ).count()
-    # Only count actively processing keywords (not 'avail' which is the idle/default state)
+    failed_count = SeoKeywordRank.objects.filter(
+        domain_id=domain_id,
+        auto_call_status='fail',
+    ).count()
+    done_count = succeeded_count + failed_count
+    # Actively processing keywords
     running_count = SeoKeywordRank.objects.filter(
         domain_id=domain_id,
         auto_call_status__in=['busy', 'load', 'read'],
@@ -692,13 +701,24 @@ def seo_refresh_status(request):
         auto_call_status='avail',
     ).count()
 
-    # refreshing = true ONLY when keywords are actively being processed (busy/load/read).
-    # pending (avail) keywords with running=0 means the task has finished or no task is
-    # running — don't keep the frontend spinner going for stuck/idle keywords.
-    is_refreshing = running_count > 0
+    # refreshing while anything is running OR still pending — covers the
+    # inter-batch gap (process_seo_domain_task auto-schedules a follow-up
+    # batch with a 10s countdown when 'avail' keywords remain). The frontend
+    # has its own 30s no-progress stale-detection for genuinely stuck cases,
+    # so a generous 'is_refreshing' here doesn't risk an infinite spinner.
+    is_refreshing = running_count > 0 or pending_count > 0
     progress = int((done_count / total) * 100) if total > 0 else 0
 
-    if running_count > 0:
+    # Error surface: refresh has finished but every attempted keyword failed.
+    # This is the "SERP service is rejecting our requests" state (invalid key,
+    # account out of credits, provider down). Without this, the frontend sees
+    # status='done' and shows 100% completion even though no rank values were
+    # actually written.
+    error_message = None
+    if not is_refreshing and failed_count > 0 and succeeded_count == 0:
+        error_message = "SERP service is currently unavailable. Please try again after some time."
+        current_status = 'error'
+    elif is_refreshing:
         current_status = 'running'
     else:
         current_status = 'done'
@@ -707,10 +727,13 @@ def seo_refresh_status(request):
         'refreshing': is_refreshing,
         'total': total,
         'completed': done_count,
+        'succeeded': succeeded_count,
+        'failed': failed_count,
         'running': running_count,
         'pending': pending_count,
         'progress': progress,
         'status': current_status,
+        'error': error_message,
     })
 
 
@@ -1162,14 +1185,12 @@ def _run_competitor_analysis(domain_id: int):
     Data sources (tried in order per keyword):
       1. snippets_details['competitors']  — rank-keyed dict set by parser_service / engine
       2. SeoSerpFeatureHistory.comp_today — {tp:[…], bf:[…], ar:[…]} set by scraping_service
-      3. Fresh single-page ScrapingDog call (page 0 = top ~10 results)
+      3. Fresh DataBlue call (top results only)
     Updates SeoCompetitorAnalysis to COMP or FAIL.
     """
-    import requests as http_requests
     from urllib.parse import urlparse
     from django.db import connection
-
-    SCRAPINGDOG_URL = "https://api.scrapingdog.com/google"
+    from seo_rankings.services import datablue_service
 
     def _extract_dom(url):
         try:
@@ -1193,7 +1214,7 @@ def _run_competitor_analysis(domain_id: int):
             .select_related('keyword')
         )
         total_kw = len(keywords)
-        api_key = getattr(settings, 'SCRAPINGDOG_API_KEY', '') or ''
+        datablue_key = getattr(settings, 'DATABLUE_API_KEY', '') or ''
 
         # Pre-load SeoSerpFeatureHistory comp_today for all keywords (single query)
         serp_history_map = {}
@@ -1252,56 +1273,40 @@ def _run_competitor_analysis(domain_id: int):
                         sd['competitors'] = competitors
                         SeoKeywordRank.objects.filter(id=kw.id).update(snippets_details=sd)
 
-            # --- Source 3: Fresh ScrapingDog single-page call ---
-            if not competitors and api_key:
+            # --- Source 3: Fresh DataBlue call ---
+            if not competitors and datablue_key:
                 kw_text = kw.keyword.keyword if kw.keyword else ''
                 if kw_text:
-                    try:
-                        params = {
-                            'api_key': api_key,
-                            'query': kw_text,
-                            'country': kw.isocode or 'us',
-                            'language': kw.language_code or 'en',
-                            'domain': kw.region or 'google.com',
-                            'page': 0,
-                            'advance_search': 'false',
-                        }
-                        if kw.geo_target_uule:
-                            params['uule'] = kw.geo_target_uule
+                    page_json = datablue_service.fetch_one(
+                        keyword_text=kw_text,
+                        isocode=kw.isocode or 'us',
+                        language_code=kw.language_code or 'en',
+                    )
+                    fresh_calls += 1
 
-                        resp = http_requests.get(
-                            SCRAPINGDOG_URL, params=params, timeout=(3.05, 15)
-                        )
-                        fresh_calls += 1
+                    if isinstance(page_json, dict):
+                        for item in page_json.get('organic_results', []):
+                            if not isinstance(item, dict):
+                                continue
+                            item_url = item.get('link', '')
+                            item_domain = _extract_dom(item_url)
+                            item_rank = item.get('rank') or item.get('position', 0)
+                            try:
+                                item_rank = int(item_rank)
+                            except (ValueError, TypeError):
+                                item_rank = 0
+                            if item_rank and item_domain:
+                                competitors[str(item_rank)] = {
+                                    'url': item_url,
+                                    'domain': item_domain,
+                                    'rank': item_rank,
+                                }
 
-                        if resp.status_code == 200:
-                            page_json = resp.json()
-                            if isinstance(page_json, dict):
-                                for item in page_json.get('organic_results', []):
-                                    if not isinstance(item, dict):
-                                        continue
-                                    item_url = item.get('link', '')
-                                    item_domain = _extract_dom(item_url)
-                                    item_rank = item.get('rank') or item.get('position', 0)
-                                    try:
-                                        item_rank = int(item_rank)
-                                    except (ValueError, TypeError):
-                                        item_rank = 0
-                                    if item_rank and item_domain:
-                                        competitors[str(item_rank)] = {
-                                            'url': item_url,
-                                            'domain': item_domain,
-                                            'rank': item_rank,
-                                        }
-
-                                # Cache back into DB
-                                if competitors:
-                                    sd = kw.snippets_details if isinstance(kw.snippets_details, dict) else {}
-                                    sd['competitors'] = competitors
-                                    SeoKeywordRank.objects.filter(id=kw.id).update(snippets_details=sd)
-
-                    except Exception as e:
-                        logger.warning(f"[CompAnalysis] SERP fetch error for '{kw_text}': {e}")
+                        # Cache back into DB
+                        if competitors:
+                            sd = kw.snippets_details if isinstance(kw.snippets_details, dict) else {}
+                            sd['competitors'] = competitors
+                            SeoKeywordRank.objects.filter(id=kw.id).update(snippets_details=sd)
 
             # Tally competitor domains
             for _rank_str, comp_data in competitors.items():

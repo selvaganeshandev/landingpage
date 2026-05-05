@@ -315,12 +315,26 @@ const SeoRankings = () => {
       try {
         const statusRes = await apiClient.getSeoRefreshStatus(domainId) as {
           refreshing: boolean; total: number; completed: number; progress: number; status: string;
-          running?: number;
+          running?: number; succeeded?: number; failed?: number; error?: string | null;
         };
 
         setRefreshTotal(statusRes.total);
         setRefreshCompleted(statusRes.completed);
         setRefreshProgress(statusRes.progress);
+
+        // SERP-service failure (e.g. ScrapingDog/DataBlue rejected every
+        // request — invalid key, billing limit, provider down). Stop polling
+        // and surface the message instead of silently showing "completed".
+        if (statusRes.status === 'error') {
+          stopPolling();
+          toast({
+            title: "Refresh failed",
+            description: statusRes.error || "SERP service is currently unavailable. Please try again after some time.",
+            variant: "destructive",
+          });
+          resetRefreshState();
+          return;
+        }
 
         // Detect stale refresh: only count as stale when no keywords are actively running
         // Each keyword can take 30s+ (10 paginated API calls), so don't treat as stale
@@ -361,7 +375,7 @@ const SeoRankings = () => {
         // Keep polling on transient network errors
       }
     }, 5000);
-  }, [stopPolling, resetRefreshState]);
+  }, [stopPolling, resetRefreshState, toast]);
 
   // Cleanup polling on unmount or domain change
   useEffect(() => {
