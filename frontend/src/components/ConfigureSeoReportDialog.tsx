@@ -273,11 +273,12 @@ export function ConfigureSeoReportDialog({
           google_analytics: "ga_overview",
           google_search_console: "gsc_overview",
           keyword_ranking: "keyword_ranking_overview",
+          ga_organic_traffic_breakup: "ga_organic_traffic_breakup",
         };
-        if (
-          formState.summaryMetric === "google_analytics" &&
-          !isGaConnected
-        ) {
+        const needsGa =
+          formState.summaryMetric === "google_analytics" ||
+          formState.summaryMetric === "ga_organic_traffic_breakup";
+        if (needsGa && !isGaConnected) {
           toast({
             title: "Validation",
             description: "Connect Google Analytics to add GA sheet.",
@@ -706,6 +707,10 @@ function OverviewForm({
             label: "Google Search Console",
           },
           { value: "keyword_ranking", label: "Keyword Ranking" },
+          {
+            value: "ga_organic_traffic_breakup",
+            label: "GA Organic Traffic Breakup",
+          },
         ].map((item) => (
           <label
             key={item.value}

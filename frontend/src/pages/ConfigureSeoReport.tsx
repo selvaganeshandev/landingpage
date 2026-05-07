@@ -220,8 +220,12 @@ const ConfigureSeoReport = () => {
           google_search_console: "gsc_overview",
           keyword_ranking: "keyword_ranking_overview",
           domain_metrics: "domain_metrics",
+          ga_organic_traffic_breakup: "ga_organic_traffic_breakup",
         };
-        if (formState.summaryMetric === "google_analytics" && !isGaConnected) {
+        const needsGa =
+          formState.summaryMetric === "google_analytics" ||
+          formState.summaryMetric === "ga_organic_traffic_breakup";
+        if (needsGa && !isGaConnected) {
           toast({ title: "Validation", description: "Connect Google Analytics to add GA sheet.", variant: "destructive" });
           return;
         }
@@ -516,12 +520,13 @@ function BaseForm() {
 function OverviewForm({ formState, setFormState }: { formState: any; setFormState: React.Dispatch<React.SetStateAction<any>> }) {
   return (
     <FormSection title="Metrics">
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         {[
           { value: "google_analytics", label: "Google Analytics" },
           { value: "google_search_console", label: "Google Search Console" },
           { value: "keyword_ranking", label: "Keyword Ranking" },
           { value: "domain_metrics", label: "Domain Metrics" },
+          { value: "ga_organic_traffic_breakup", label: "GA Organic Traffic Breakup" },
         ].map((item) => (
           <label key={item.value} className="flex items-center gap-2 cursor-pointer">
             <input

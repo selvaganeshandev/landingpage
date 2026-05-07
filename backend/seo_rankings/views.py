@@ -1729,7 +1729,7 @@ def seo_report_sheet_add(request):
     from integrations.models import Integration
 
     gsc_types = ('gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries', 'gsc_overview')
-    ga_types = ('ga_landing_pages', 'ga_other_sources', 'ga_overview')
+    ga_types = ('ga_landing_pages', 'ga_other_sources', 'ga_overview', 'ga_organic_traffic_breakup')
 
     if sheet_type in gsc_types:
         gsc_integration = Integration.objects.filter(
@@ -2963,6 +2963,327 @@ def _fetch_ga_overview_data(integration, sheet):
     }
 
 
+# ── GA Organic Traffic Breakup helpers ─────────────────────────────────────
+_BUCKET_TOP_N        = 8     # Number of buckets shown as separate rows; rest → "Other Pages"
+_DRILL_TOP_URLS      = 50    # Top URLs per drill-down sub-table (by latest-period sessions)
+
+
+def _bucket_of_path(path: str) -> str:
+    """Return the bucket display name for a URL path (first path segment, prettified)."""
+    if not path or path in ('/', ''):
+        return 'Home Page'
+    cleaned = path.lstrip('/')
+    seg = cleaned.split('/', 1)[0] if cleaned else ''
+    if not seg:
+        return 'Home Page'
+    pretty = seg.replace('-', ' ').replace('_', ' ').strip().title()
+    return pretty or 'Home Page'
+
+
+def _drill_topic_of_path(path: str) -> str:
+    """
+    Return a Category label for drill-down rows — the second path segment
+    prettified (matches the client's "Saving & Investment", "Term Insurance"
+    style). Empty string when the URL has no second segment.
+    """
+    cleaned = (path or '').lstrip('/')
+    parts = cleaned.split('/')
+    if len(parts) >= 2 and parts[1]:
+        return parts[1].replace('-', ' ').replace('_', ' ').strip().title()
+    return ''
+
+
+def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
+    """
+    GA Organic Traffic Breakup — auto-bucketed page-type summary.
+
+    Output is a stacked-tables payload (same shape as GSC Overview) so the
+    front-end <SubTable> renderer and the xlsx stacked-tables exporter pick it
+    up automatically. Three layers:
+      1. Page Type × Months matrix — top buckets (auto-discovered from URL
+         data by first path segment). Buckets beyond top-N collapse into
+         "Other Pages".
+      2. Per-bucket drill-down tables — second-segment topic rollup, then a
+         per-URL list (top 50 by latest-period sessions).
+    Bucket discovery is purely URL-structural — no per-domain/industry list
+    is hard-coded, so the same fetcher works for every project.
+
+    Prorate applies to the current incomplete calendar month (monthly only).
+    Weekly schedules are complete-only — no prorate.
+    YOY column added monthly only, comparing the rightmost period to the same
+    calendar month one year prior.
+    """
+    import calendar as _cal
+    from datetime import date as _date
+    from integrations.utils.prorate import calculate_prorate_factor
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service     = build('analyticsdata', 'v1beta', credentials=credentials)
+    property_id = integration.provider_id
+
+    order_asc   = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc, data_lag_days=1)
+    if not date_ranges:
+        return {'columns': [], 'rows': [], 'total_rows': 0}
+
+    is_monthly = sheet.schedule == 'monthly'
+    is_weekly  = sheet.schedule == 'weekly'
+
+    # ── Prorate setup: current calendar month only (monthly schedule) ───────
+    today        = _date.today()
+    cur_label    = None
+    factor       = 1.0
+    days_elapsed = total_days = None
+    if is_monthly:
+        for s_dt, _e_dt, lbl in date_ranges:
+            if s_dt.year == today.year and s_dt.month == today.month:
+                _, last_day  = _cal.monthrange(s_dt.year, s_dt.month)
+                cur_full_end = _date(s_dt.year, s_dt.month, last_day)
+                days_elapsed, total_days, factor = calculate_prorate_factor(
+                    s_dt, cur_full_end, data_lag_days=1
+                )
+                if factor != 1.0:
+                    cur_label = lbl
+                break
+    is_prorated = factor != 1.0
+
+    organic_filter = {
+        'filter': {
+            'fieldName':    'sessionDefaultChannelGroup',
+            'stringFilter': {'value': 'Organic Search', 'matchType': 'EXACT'},
+        }
+    }
+
+    def _runReport(start_dt, end_dt, dim='pagePath', limit=10000):
+        body = {
+            'dateRanges':      [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+            'dimensions':      [{'name': dim}],
+            'metrics':         [{'name': 'sessions'}],
+            'dimensionFilter': organic_filter,
+            'limit':           limit,
+        }
+        return service.properties().runReport(property=property_id, body=body).execute()
+
+    # ── Fetch per-period page paths ─────────────────────────────────────────
+    range_paths = {}     # {label: [(path, sessions), ...]}
+    api_errors  = []
+    for s_dt, e_dt, label in date_ranges:
+        try:
+            resp = _runReport(s_dt, e_dt)
+            entries = []
+            for r in resp.get('rows', []):
+                path = r['dimensionValues'][0]['value']
+                sess = int(r['metricValues'][0]['value'])
+                entries.append((path, sess))
+            range_paths[label] = entries
+        except Exception as e:
+            logger.error(f"GA Breakup API error ({label}) for sheet {sheet.id}: {e}")
+            range_paths[label] = []
+            api_errors.append(str(e))
+
+    # ── YOY fetch — monthly only ────────────────────────────────────────────
+    yoy_paths = []
+    if is_monthly and date_ranges:
+        cur_s, cur_e, _ = date_ranges[-1]
+        yoy_s = _date(cur_s.year - 1, cur_s.month, cur_s.day)
+        yoy_e = _date(cur_e.year - 1, cur_e.month, cur_e.day)
+        try:
+            resp = _runReport(yoy_s, yoy_e)
+            for r in resp.get('rows', []):
+                yoy_paths.append((
+                    r['dimensionValues'][0]['value'],
+                    int(r['metricValues'][0]['value']),
+                ))
+        except Exception as e:
+            logger.error(f"GA Breakup YOY API error for sheet {sheet.id}: {e}")
+
+    if api_errors and len(api_errors) == len(date_ranges):
+        return {
+            'columns': [], 'rows': [], 'total_rows': 0,
+            'error':   f'GA API error: {api_errors[0]}',
+        }
+
+    # ── Bucket aggregation ──────────────────────────────────────────────────
+    # bucket_period_sessions[bucket][label] = sum of sessions for that bucket/period
+    # bucket_paths[bucket][label] = [(path, sessions), ...]
+    from collections import defaultdict
+    bucket_period_sessions = defaultdict(lambda: defaultdict(int))
+    bucket_paths           = defaultdict(lambda: defaultdict(list))
+
+    for label, entries in range_paths.items():
+        for path, sess in entries:
+            bucket = _bucket_of_path(path)
+            bucket_period_sessions[bucket][label] += sess
+            bucket_paths[bucket][label].append((path, sess))
+
+    yoy_bucket = defaultdict(int)
+    for path, sess in yoy_paths:
+        yoy_bucket[_bucket_of_path(path)] += sess
+
+    # Pick top-N buckets by total sessions across all periods. Always keep
+    # "Home Page" pinned at the top if present.
+    bucket_totals = {b: sum(v.values()) for b, v in bucket_period_sessions.items()}
+    sorted_buckets = sorted(bucket_totals.items(), key=lambda kv: kv[1], reverse=True)
+    top_buckets = []
+    if 'Home Page' in bucket_totals:
+        top_buckets.append('Home Page')
+    for b, _ in sorted_buckets:
+        if b == 'Home Page':
+            continue
+        if len(top_buckets) >= _BUCKET_TOP_N:
+            break
+        top_buckets.append(b)
+    rest_buckets = [b for b in bucket_totals if b not in top_buckets]
+
+    # ── Section 1: Page Type × Months matrix ────────────────────────────────
+    range_labels         = [r[2] for r in date_ranges]
+    range_labels_display = [
+        (f"{lbl} (PR)" if lbl == cur_label else lbl) for lbl in range_labels
+    ]
+    change_label = 'WOW %' if is_weekly else 'MOM %'
+    period_cols  = list(range_labels_display)
+    section1_cols = ['Page Type'] + period_cols + [change_label]
+    if is_monthly:
+        section1_cols.append('YOY %')
+
+    def _pct(cur_v, base_v):
+        if base_v and base_v != 0:
+            return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+        return 'N/A'
+
+    def _cell_for(raw, lbl_orig):
+        """Apply prorate to the current-month cell, else return raw."""
+        if is_prorated and lbl_orig == cur_label:
+            proj = round(raw * factor)
+            return f"{raw} ({proj})", proj
+        return raw, raw
+
+    section1_rows = []
+    for bucket in top_buckets:
+        row = {'Page Type': bucket}
+        change_series = []
+        for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+            raw = bucket_period_sessions.get(bucket, {}).get(lbl_orig, 0)
+            display, numeric = _cell_for(raw, lbl_orig)
+            row[lbl_disp] = display
+            change_series.append(numeric)
+        row[change_label] = (
+            _pct(change_series[-1], change_series[-2])
+            if len(change_series) >= 2 else 'N/A'
+        )
+        if is_monthly:
+            cur_v = change_series[-1] if change_series else 0
+            yoy_v = yoy_bucket.get(bucket)
+            row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v is not None else 'N/A'
+        section1_rows.append(row)
+
+    # "Other Pages" rollup row — sum of every bucket not in top_buckets
+    if rest_buckets:
+        other_row = {'Page Type': 'Other Pages'}
+        change_series = []
+        for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+            raw = sum(bucket_period_sessions.get(b, {}).get(lbl_orig, 0)
+                      for b in rest_buckets)
+            display, numeric = _cell_for(raw, lbl_orig)
+            other_row[lbl_disp] = display
+            change_series.append(numeric)
+        other_row[change_label] = (
+            _pct(change_series[-1], change_series[-2])
+            if len(change_series) >= 2 else 'N/A'
+        )
+        if is_monthly:
+            cur_v = change_series[-1] if change_series else 0
+            yoy_v = sum(yoy_bucket.get(b, 0) for b in rest_buckets) or None
+            other_row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v else 'N/A'
+        section1_rows.append(other_row)
+
+    tables = [{
+        'title':   'Organic Traffic Analysis (GA4)',
+        'columns': section1_cols,
+        'rows':    section1_rows,
+    }]
+
+    # ── Drill-down tables per top bucket (skip "Home Page") ─────────────────
+    for bucket in top_buckets:
+        if bucket == 'Home Page':
+            continue
+
+        # Per-URL aggregation for this bucket: {path: {label: sessions}}
+        per_url = defaultdict(lambda: defaultdict(int))
+        for label in range_labels:
+            for path, sess in bucket_paths.get(bucket, {}).get(label, []):
+                per_url[path][label] += sess
+
+        if not per_url:
+            continue
+
+        # YOY per-URL — for the same calendar month one year prior to last period
+        yoy_per_url = defaultdict(int)
+        for path, sess in yoy_paths:
+            if _bucket_of_path(path) == bucket:
+                yoy_per_url[path] += sess
+
+        # Sort URLs by latest period sessions, take top N
+        latest_label = range_labels[-1]
+        sorted_urls = sorted(
+            per_url.items(),
+            key=lambda kv: kv[1].get(latest_label, 0),
+            reverse=True,
+        )[:_DRILL_TOP_URLS]
+
+        sub_cols = ['Page URL', 'Category'] + period_cols + [change_label]
+        if is_monthly:
+            sub_cols.append('YOY %')
+        sub_rows = []
+        for path, period_sess in sorted_urls:
+            row = {
+                'Page URL': path,
+                'Category': _drill_topic_of_path(path),
+            }
+            change_series = []
+            for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+                raw = period_sess.get(lbl_orig, 0)
+                display, numeric = _cell_for(raw, lbl_orig)
+                row[lbl_disp] = display
+                change_series.append(numeric)
+            row[change_label] = (
+                _pct(change_series[-1], change_series[-2])
+                if len(change_series) >= 2 else 'N/A'
+            )
+            if is_monthly:
+                cur_v = change_series[-1] if change_series else 0
+                yoy_v = yoy_per_url.get(path)
+                row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v is not None else 'N/A'
+            sub_rows.append(row)
+
+        tables.append({
+            'title':   bucket,
+            'columns': sub_cols,
+            'rows':    sub_rows,
+        })
+
+    # ── Legacy single-table flat shape (kept for any caller that expects it) ─
+    # Re-uses Section 1's data so Excel fallback paths still work.
+    legacy_columns = section1_cols
+    legacy_rows    = section1_rows
+
+    return {
+        'columns':      legacy_columns,
+        'rows':         legacy_rows,
+        'total_rows':   len(legacy_rows),
+        'is_prorated':  is_prorated,
+        'days_elapsed': days_elapsed,
+        'total_days':   total_days,
+        'unsorted':     True,
+        'tables':       tables,
+    }
+
+
 def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
     """
     GA vs GSC Reconciliation — one row per period showing:
@@ -3707,6 +4028,13 @@ def seo_report_sheet_data(request):
                     data = _fetch_ga_overview_data(ga_integration, sheet)
                     report_entry.update(data)
 
+            elif sheet.sheet_type == 'ga_organic_traffic_breakup':
+                if not ga_integration:
+                    report_entry['error'] = 'Google Analytics not connected'
+                else:
+                    data = _fetch_ga_organic_traffic_breakup_data(ga_integration, sheet)
+                    report_entry.update(data)
+
             elif sheet.sheet_type == 'keyword_ranking_overview':
                 data = _fetch_keyword_ranking_overview(domain_id, sheet)
                 report_entry.update(data)
@@ -3813,6 +4141,9 @@ def seo_report_export_xlsx(request):
             elif sheet.sheet_type == 'ga_overview':
                 if ga_integration:
                     data = _fetch_ga_overview_data(ga_integration, sheet)
+            elif sheet.sheet_type == 'ga_organic_traffic_breakup':
+                if ga_integration:
+                    data = _fetch_ga_organic_traffic_breakup_data(ga_integration, sheet)
             elif sheet.sheet_type == 'keyword_ranking_overview':
                 data = _fetch_keyword_ranking_overview(domain_id, sheet)
         except Exception as e:

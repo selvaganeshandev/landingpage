@@ -46,6 +46,7 @@ const SHEET_TYPE_LABELS: Record<string, string> = {
   domain_metrics: "Domain Metrics",
   gsc_overview: "GSC Overview",
   keyword_ranking_overview: "Keyword Ranking Overview",
+  ga_organic_traffic_breakup: "GA Organic Traffic Breakup",
 };
 
 const SeoReports = () => {
@@ -311,6 +312,10 @@ const DIM_COL_NAMES = new Set([
   "Metric",
   "Month",
   "Months",
+  "Page Type",
+  "Blog Category",
+  "Page URL",
+  "Category",
 ]);
 
 // Extract a sortable number from any cell value.
