@@ -353,10 +353,19 @@ function pickDefaultSortCol(columns: string[]): string | null {
   return fullMonth[0] || eligible[0];
 }
 
-// Compact sub-table used by GSC Overview when the backend returns a `tables`
-// array. Months are on the Y axis; Total / Branded / Non-Branded are columns.
-// MoM / WoW / YoY / Total rows are detected by their label and rendered bold.
-const SUMMARY_LABELS = new Set(["MOM %", "WOW %", "YOY %", "Total"]);
+// Compact sub-table used by stacked-tables payloads (GSC Overview with months
+// down, GA Organic Traffic Breakup with months across). Two layouts coexist:
+//
+//   - GSC Overview: dim col is "Months". MoM / WoW / YoY are *summary rows*
+//     (rendered bold, with green/red coloured % cells).
+//   - GA Organic Traffic Breakup: dim col is "Page Type" / "Page URL". Periods
+//     are columns and MoM / WoW / YoY are *change columns*. Each cell in a
+//     change column gets coloured red/green individually.
+//
+// We detect both shapes — change row OR change column — so the same cell
+// renderer handles either layout and the up/down arrows always show up.
+const SUMMARY_ROW_LABELS = new Set(["MOM %", "WOW %", "YOY %", "Total"]);
+const CHANGE_COL_RE = /(MOM|WOW|YOY)\s*%/i;
 
 function SubTable({
   title,
@@ -367,6 +376,10 @@ function SubTable({
   columns: string[];
   rows: any[];
 }) {
+  // Detect dim column (first column that's a known dimension label).
+  const dimCol =
+    columns.find((c) => DIM_COL_NAMES.has(c)) ?? columns[0] ?? "";
+
   return (
     <div className="border rounded-lg overflow-hidden">
       <div className="px-4 py-2 bg-muted/20 border-b text-sm font-semibold uppercase tracking-wider text-foreground">
@@ -380,7 +393,7 @@ function SubTable({
                 <th
                   key={col}
                   className="px-4 py-2 text-left font-semibold text-xs whitespace-nowrap"
-                  style={{ minWidth: col === "Months" ? 140 : 120 }}
+                  style={{ minWidth: col === dimCol ? 160 : 120 }}
                 >
                   {col}
                 </th>
@@ -389,10 +402,10 @@ function SubTable({
           </thead>
           <tbody>
             {rows.map((row, rowIdx) => {
-              const monthsLabel = String(row["Months"] ?? "");
-              const isSummary = SUMMARY_LABELS.has(monthsLabel);
-              const isPR = monthsLabel.includes("(PR)");
-              const bg = isSummary
+              const dimLabel = String(row[dimCol] ?? "");
+              const isSummaryRow = SUMMARY_ROW_LABELS.has(dimLabel);
+              const isPR = dimLabel.includes("(PR)");
+              const bg = isSummaryRow
                 ? "#f0f5ff"
                 : rowIdx % 2 === 0
                   ? "#fff"
@@ -405,29 +418,30 @@ function SubTable({
                 >
                   {columns.map((col) => {
                     const value = row[col];
-                    const isMonthsCol = col === "Months";
-                    const isChangeRow =
-                      monthsLabel === "MOM %" ||
-                      monthsLabel === "WOW %" ||
-                      monthsLabel === "YOY %";
+                    const isDimColCell = col === dimCol;
+                    // A cell is "change" if either its row is a summary
+                    // change-row (months-down layout) or its column is a
+                    // change column (months-across layout).
+                    const isChangeRowCell =
+                      !isDimColCell &&
+                      (dimLabel === "MOM %" ||
+                        dimLabel === "WOW %" ||
+                        dimLabel === "YOY %");
+                    const isChangeColCell =
+                      !isDimColCell && CHANGE_COL_RE.test(col);
+                    const isChangeCell = isChangeRowCell || isChangeColCell;
                     const numVal =
                       typeof value === "number"
                         ? value
                         : parseFloat(String(value ?? "").replace(/[+%,]/g, ""));
                     const isNegative =
-                      isChangeRow &&
-                      !isMonthsCol &&
-                      !isNaN(numVal) &&
-                      numVal < 0;
+                      isChangeCell && !isNaN(numVal) && numVal < 0;
                     const isPositive =
-                      isChangeRow &&
-                      !isMonthsCol &&
-                      !isNaN(numVal) &&
-                      numVal > 0;
+                      isChangeCell && !isNaN(numVal) && numVal > 0;
                     return (
                       <td
                         key={col}
-                        className={`px-4 py-2 whitespace-nowrap text-sm ${isSummary || (isMonthsCol && isPR) ? "font-semibold" : ""}`}
+                        className={`px-4 py-2 whitespace-nowrap text-sm ${isSummaryRow || (isDimColCell && isPR) ? "font-semibold" : ""}`}
                       >
                         {isNegative ? (
                           <span className="text-red-500 font-medium">
