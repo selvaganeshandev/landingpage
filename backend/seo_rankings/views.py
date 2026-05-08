@@ -1734,7 +1734,7 @@ def seo_report_sheet_add(request):
     from integrations.models import Integration
 
     gsc_types = ('gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries', 'gsc_overview')
-    ga_types = ('ga_landing_pages', 'ga_other_sources', 'ga_overview')
+    ga_types = ('ga_landing_pages', 'ga_other_sources', 'ga_overview', 'ga_organic_traffic_breakup')
 
     if sheet_type in gsc_types:
         gsc_integration = Integration.objects.filter(
@@ -2455,11 +2455,58 @@ def _fetch_ga_report_data(integration, sheet):
     }
 
 
+_BRAND_STOPWORDS = {
+    'life', 'insurance', 'bank', 'the', 'ltd', 'limited', 'llc', 'inc',
+    'co', 'company', 'corp', 'corporation', 'group', 'india', 'online',
+    'pvt', 'private', 'gmbh', 'plc', 'sa', 'usa',
+}
+
+
+def _resolve_brand_tokens(integration):
+    """
+    Pick brand keyword tokens for branded/non-branded GSC splits.
+    Order of preference:
+      1. Tokens parsed from Domain.name (e.g. "Canara HSBC Life" → ["canara","hsbc"])
+      2. URL-derived single token (host first label, e.g. "canarahsbclife")
+    Stopwords like "life", "insurance" are dropped so generic suffixes don't
+    pollute the regex. Returns a list of unique lowercase tokens.
+    """
+    import re as _re
+
+    tokens = []
+    domain = getattr(integration, 'domain', None)
+    domain_name = getattr(domain, 'name', '') if domain else ''
+    if domain_name:
+        for raw in _re.split(r'[\s/_\-,&]+', domain_name):
+            t = _re.sub(r'[^a-z0-9]+', '', raw.lower())
+            if len(t) >= 3 and t not in _BRAND_STOPWORDS and t not in tokens:
+                tokens.append(t)
+
+    if not tokens:
+        site_url = getattr(integration, 'provider_id', '') or ''
+        host = (site_url
+                .replace('sc-domain:', '')
+                .replace('https://', '')
+                .replace('http://', '')
+                .split('/')[0])
+        first = host.split('.')[0] if host else ''
+        first = _re.sub(r'[^a-z0-9]+', '', first.lower())
+        if first:
+            tokens = [first]
+
+    return tokens[:5]
+
+
 def _fetch_gsc_overview_data(integration, sheet):
     """
     GSC Overview — N-period metric-down view. Columns honour sheet.duration:
       Metric | Period_1 | Period_2 | ... | Period_N | MOM%/WOW% | YOY% (monthly only)
-    Rows: Clicks, Impressions, CTR, Avg Position
+    Rows are expanded into Total / Branded / Non-Branded for Clicks,
+    Impressions and CTR, plus a single Avg Position row. Branded values come
+    from one extra GSC call per period filtered by brand-keyword regex (tokens
+    derived from the domain name). Non-Branded = Total − Branded for counts;
+    CTR is derived from clicks÷impressions for branded and non-branded so the
+    rate stays internally consistent with the prorated counts.
     Prorate applies only to the current incomplete calendar month (monthly
     schedule). Weekly reports include only complete weeks — no prorate.
     YOY comparison uses the same calendar month one year prior to the last
@@ -2505,74 +2552,119 @@ def _fetch_gsc_overview_data(integration, sheet):
                 break
     is_prorated = factor != 1.0
 
-    # Metric definition. 'Clicks'/'Impressions' are count-style (prorated).
-    # 'CTR'/'Avg Position' are rates (never prorated).
-    gsc_metrics = [
-        # (label, response_key, is_rate)
-        ('Clicks',       'clicks',      False),
-        ('Impressions',  'impressions', False),
-        ('CTR',          'ctr',         True),
-        ('Avg Position', 'position',    True),
-    ]
+    # ── Brand regex for branded/non-branded split ────────────────────────────
+    brand_tokens = _resolve_brand_tokens(integration)
+    brand_regex  = f"(?i)({'|'.join(brand_tokens)})" if brand_tokens else None
+    branded_filter = (
+        [{'dimension': 'query', 'operator': 'includingRegex', 'expression': brand_regex}]
+        if brand_regex else None
+    )
 
-    # ── Fetch each period's site-wide totals ────────────────────────────────
-    range_values = {}
-    api_errors   = []
+    def _query_totals(start_dt, end_dt, with_filter=False):
+        body = {
+            'startDate': start_dt.isoformat(),
+            'endDate':   end_dt.isoformat(),
+            'rowLimit':  1,
+        }
+        if with_filter and branded_filter:
+            body['dimensionFilterGroups'] = [{'filters': branded_filter}]
+        resp = service.searchanalytics().query(siteUrl=site_url, body=body).execute()
+        r_rows = resp.get('rows', [])
+        if not r_rows:
+            return {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
+        r = r_rows[0]
+        return {
+            'clicks':      r.get('clicks', 0),
+            'impressions': r.get('impressions', 0),
+            'ctr':         round(r.get('ctr', 0) * 100, 2),
+            'position':    round(r.get('position', 0), 1),
+        }
+
+    # ── Fetch each period's site-wide totals + branded totals ───────────────
+    range_total   = {}
+    range_branded = {}
+    api_errors    = []
     for s_dt, e_dt, label in date_ranges:
         try:
-            resp = service.searchanalytics().query(
-                siteUrl=site_url,
-                body={
-                    'startDate': s_dt.isoformat(),
-                    'endDate':   e_dt.isoformat(),
-                    'rowLimit':  1,
-                }
-            ).execute()
-            r_rows = resp.get('rows', [])
-            if r_rows:
-                r = r_rows[0]
-                range_values[label] = {
-                    'clicks':      r.get('clicks', 0),
-                    'impressions': r.get('impressions', 0),
-                    'ctr':         round(r.get('ctr', 0) * 100, 2),
-                    'position':    round(r.get('position', 0), 1),
-                }
-            else:
-                range_values[label] = {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
+            range_total[label] = _query_totals(s_dt, e_dt, with_filter=False)
         except Exception as e:
             logger.error(f"GSC Overview API error ({label}) for sheet {sheet.id}: {e}")
-            range_values[label] = {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
+            range_total[label] = {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
             api_errors.append(str(e))
 
-    # ── YOY fetch — monthly only ────────────────────────────────────────────
-    yoy_vals = {}
+        if branded_filter:
+            try:
+                range_branded[label] = _query_totals(s_dt, e_dt, with_filter=True)
+            except Exception as e:
+                logger.error(f"GSC Overview branded API error ({label}) for sheet {sheet.id}: {e}")
+                range_branded[label] = {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
+        else:
+            range_branded[label] = {'clicks': 0, 'impressions': 0, 'ctr': 0, 'position': 0}
+
+    # ── YOY fetch — monthly only (totals + branded) ─────────────────────────
+    yoy_total = {}
+    yoy_branded = {}
     if is_monthly:
         cur_s, cur_e, _ = date_ranges[-1]
         yoy_s = _date(cur_s.year - 1, cur_s.month, 1)
         yoy_e = _date(cur_e.year - 1, cur_e.month, cur_e.day)
         try:
-            resp = service.searchanalytics().query(
-                siteUrl=site_url,
-                body={
-                    'startDate': yoy_s.isoformat(),
-                    'endDate':   yoy_e.isoformat(),
-                    'rowLimit':  1,
-                }
-            ).execute()
-            r_rows = resp.get('rows', [])
-            if r_rows:
-                r = r_rows[0]
-                yoy_vals = {
-                    'clicks':      r.get('clicks', 0),
-                    'impressions': r.get('impressions', 0),
-                    'ctr':         round(r.get('ctr', 0) * 100, 2),
-                    'position':    round(r.get('position', 0), 1),
-                }
+            yoy_total = _query_totals(yoy_s, yoy_e, with_filter=False)
         except Exception as e:
             logger.error(f"GSC Overview YOY API error for sheet {sheet.id}: {e}")
+        if branded_filter:
+            try:
+                yoy_branded = _query_totals(yoy_s, yoy_e, with_filter=True)
+            except Exception as e:
+                logger.error(f"GSC Overview YOY branded API error for sheet {sheet.id}: {e}")
 
     if len(api_errors) == len(date_ranges) and api_errors:
         return {'columns': [], 'rows': [], 'total_rows': 0, 'error': f'GSC API error: {api_errors[0]}'}
+
+    # ── Helpers to derive non-branded + branded/non-branded CTR ─────────────
+    def _split(period_total, period_branded, key):
+        """Return (total, branded, non_branded) for a count metric."""
+        t = period_total.get(key, 0) or 0
+        b = period_branded.get(key, 0) or 0
+        nb = max(t - b, 0)
+        return t, b, nb
+
+    def _ctr(clicks, impressions):
+        if impressions and impressions > 0:
+            return round((clicks / impressions) * 100, 2)
+        return 0
+
+    # Build derived per-period values for each metric × bucket combination.
+    # bucket ∈ {'total', 'branded', 'non_branded'}
+    range_derived = {}   # range_derived[label][metric][bucket] = number
+    for s_dt, e_dt, label in date_ranges:
+        t = range_total.get(label, {})
+        b = range_branded.get(label, {})
+        clicks_t,  clicks_b,  clicks_nb  = _split(t, b, 'clicks')
+        impr_t,    impr_b,    impr_nb    = _split(t, b, 'impressions')
+        range_derived[label] = {
+            'clicks': {'total': clicks_t, 'branded': clicks_b, 'non_branded': clicks_nb},
+            'impressions': {'total': impr_t, 'branded': impr_b, 'non_branded': impr_nb},
+            'ctr': {
+                'total':       t.get('ctr', 0) or _ctr(clicks_t, impr_t),
+                'branded':     _ctr(clicks_b, impr_b),
+                'non_branded': _ctr(clicks_nb, impr_nb),
+            },
+            'position': {'total': t.get('position', 0)},
+        }
+
+    yoy_clicks_t,  yoy_clicks_b,  yoy_clicks_nb  = _split(yoy_total, yoy_branded, 'clicks')
+    yoy_impr_t,    yoy_impr_b,    yoy_impr_nb    = _split(yoy_total, yoy_branded, 'impressions')
+    yoy_derived = {
+        'clicks': {'total': yoy_clicks_t, 'branded': yoy_clicks_b, 'non_branded': yoy_clicks_nb},
+        'impressions': {'total': yoy_impr_t, 'branded': yoy_impr_b, 'non_branded': yoy_impr_nb},
+        'ctr': {
+            'total':       yoy_total.get('ctr', 0) or _ctr(yoy_clicks_t, yoy_impr_t),
+            'branded':     _ctr(yoy_clicks_b, yoy_impr_b),
+            'non_branded': _ctr(yoy_clicks_nb, yoy_impr_nb),
+        },
+        'position': {'total': yoy_total.get('position', 0)},
+    } if (yoy_total or yoy_branded) else {}
 
     # ── Columns ─────────────────────────────────────────────────────────────
     range_labels         = [r[2] for r in date_ranges]
@@ -2589,13 +2681,29 @@ def _fetch_gsc_overview_data(integration, sheet):
             return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
         return 'N/A'
 
-    # ── Rows ────────────────────────────────────────────────────────────────
+    # Row definition: (display label, metric_key, bucket, is_rate)
+    # Avg Position has no branded breakdown — kept as a single Total row.
+    row_defs = [
+        ('Clicks',                'clicks',      'total',       False),
+        ('Branded Clicks',        'clicks',      'branded',     False),
+        ('Non-Branded Clicks',    'clicks',      'non_branded', False),
+        ('Impressions',           'impressions', 'total',       False),
+        ('Branded Impressions',   'impressions', 'branded',     False),
+        ('Non-Branded Impressions','impressions','non_branded', False),
+        ('CTR',                   'ctr',         'total',       True),
+        ('Branded CTR',           'ctr',         'branded',     True),
+        ('Non-Branded CTR',       'ctr',         'non_branded', True),
+        ('Avg Position',          'position',    'total',       True),
+    ]
+
+    # ── Rows (legacy metric-down single table — kept for Excel export) ──────
     rows = []
-    for label, key, is_rate in gsc_metrics:
+    for label, mkey, bucket, is_rate in row_defs:
         row = {'Metric': label}
         values_for_change = []
         for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
-            raw = range_values.get(lbl_orig, {}).get(key, 0)
+            metric_buckets = range_derived.get(lbl_orig, {}).get(mkey, {})
+            raw = metric_buckets.get(bucket, 0)
             if is_prorated and lbl_orig == cur_label and not is_rate:
                 proj = round(raw * factor)
                 row[lbl_disp] = f"{raw} ({proj})"
@@ -2611,10 +2719,74 @@ def _fetch_gsc_overview_data(integration, sheet):
 
         if is_monthly:
             cur_v = values_for_change[-1] if values_for_change else 0
-            yoy_v = yoy_vals.get(key)
+            yoy_v = yoy_derived.get(mkey, {}).get(bucket) if yoy_derived else None
             row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v is not None else 'N/A'
 
         rows.append(row)
+
+    # ── Per-metric sub-tables (months-down × Total/Branded/Non-Branded) ─────
+    # Front-end renders these as three stacked tables (Clicks, Impressions, CTR)
+    # with Months on Y-axis. Avg Position has no branded split so it's skipped.
+    def _sub_table(metric_label, total_col_name, mkey, is_rate):
+        sub_cols = ['Months', total_col_name, 'Branded', 'Non-Branded']
+        sub_rows_out = []
+        # series per bucket — used for MoM/WoW/YoY/Total summary rows below
+        series = {'total': [], 'branded': [], 'non_branded': []}
+        bucket_to_col = [
+            ('total',        total_col_name),
+            ('branded',     'Branded'),
+            ('non_branded', 'Non-Branded'),
+        ]
+        for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+            buckets = range_derived.get(lbl_orig, {}).get(mkey, {})
+            r = {'Months': lbl_disp}
+            for bucket, col_name in bucket_to_col:
+                raw = buckets.get(bucket, 0)
+                if is_prorated and lbl_orig == cur_label and not is_rate:
+                    proj = round(raw * factor)
+                    r[col_name] = f"{raw} ({proj})"
+                    series[bucket].append(proj)
+                else:
+                    r[col_name] = raw
+                    series[bucket].append(raw)
+            sub_rows_out.append(r)
+
+        # MoM / WoW row
+        change_row = {'Months': change_label}
+        for bucket, col_name in bucket_to_col:
+            if len(series[bucket]) >= 2:
+                change_row[col_name] = _pct(series[bucket][-1], series[bucket][-2])
+            else:
+                change_row[col_name] = 'N/A'
+        sub_rows_out.append(change_row)
+
+        # YoY row — monthly only
+        if is_monthly:
+            yoy_row = {'Months': 'YOY %'}
+            for bucket, col_name in bucket_to_col:
+                yoy_v = (yoy_derived.get(mkey, {}) or {}).get(bucket) if yoy_derived else None
+                cur_v = series[bucket][-1] if series[bucket] else 0
+                yoy_row[col_name] = _pct(cur_v, yoy_v) if yoy_v is not None else 'N/A'
+            sub_rows_out.append(yoy_row)
+
+        # Total row — only for count metrics (sum is meaningless for a rate)
+        if not is_rate:
+            total_row = {'Months': 'Total'}
+            for bucket, col_name in bucket_to_col:
+                total_row[col_name] = sum(series[bucket]) if series[bucket] else 0
+            sub_rows_out.append(total_row)
+
+        return {
+            'title':   metric_label,
+            'columns': sub_cols,
+            'rows':    sub_rows_out,
+        }
+
+    tables = [
+        _sub_table('Clicks',      'Total Clicks',      'clicks',      False),
+        _sub_table('Impressions', 'Total Impressions', 'impressions', False),
+        _sub_table('CTR',         'Total CTR',         'ctr',         True),
+    ]
 
     return {
         'columns':      columns,
@@ -2623,6 +2795,15 @@ def _fetch_gsc_overview_data(integration, sheet):
         'is_prorated':  is_prorated,
         'days_elapsed': days_elapsed,
         'total_days':   total_days,
+        'brand_tokens': brand_tokens,
+        # Metric-down summary: rows are pre-grouped (Clicks → Impressions → CTR
+        # → Avg Position with Branded/Non-Branded under each). Per-column sort
+        # would scramble the grouping, so the front-end honours this flag.
+        'unsorted':     True,
+        # Three stacked sub-tables (months down, Total/Branded/Non-Branded
+        # across) for the on-screen render. Excel export still uses the
+        # legacy `rows`/`columns` so its layout is unchanged.
+        'tables':       tables,
     }
 
 
@@ -2784,6 +2965,327 @@ def _fetch_ga_overview_data(integration, sheet):
         'is_prorated':  is_prorated,
         'days_elapsed': days_elapsed,
         'total_days':   total_days,
+    }
+
+
+# ── GA Organic Traffic Breakup helpers ─────────────────────────────────────
+_BUCKET_TOP_N        = 8     # Number of buckets shown as separate rows; rest → "Other Pages"
+_DRILL_TOP_URLS      = 50    # Top URLs per drill-down sub-table (by latest-period sessions)
+
+
+def _bucket_of_path(path: str) -> str:
+    """Return the bucket display name for a URL path (first path segment, prettified)."""
+    if not path or path in ('/', ''):
+        return 'Home Page'
+    cleaned = path.lstrip('/')
+    seg = cleaned.split('/', 1)[0] if cleaned else ''
+    if not seg:
+        return 'Home Page'
+    pretty = seg.replace('-', ' ').replace('_', ' ').strip().title()
+    return pretty or 'Home Page'
+
+
+def _drill_topic_of_path(path: str) -> str:
+    """
+    Return a Category label for drill-down rows — the second path segment
+    prettified (matches the client's "Saving & Investment", "Term Insurance"
+    style). Empty string when the URL has no second segment.
+    """
+    cleaned = (path or '').lstrip('/')
+    parts = cleaned.split('/')
+    if len(parts) >= 2 and parts[1]:
+        return parts[1].replace('-', ' ').replace('_', ' ').strip().title()
+    return ''
+
+
+def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
+    """
+    GA Organic Traffic Breakup — auto-bucketed page-type summary.
+
+    Output is a stacked-tables payload (same shape as GSC Overview) so the
+    front-end <SubTable> renderer and the xlsx stacked-tables exporter pick it
+    up automatically. Three layers:
+      1. Page Type × Months matrix — top buckets (auto-discovered from URL
+         data by first path segment). Buckets beyond top-N collapse into
+         "Other Pages".
+      2. Per-bucket drill-down tables — second-segment topic rollup, then a
+         per-URL list (top 50 by latest-period sessions).
+    Bucket discovery is purely URL-structural — no per-domain/industry list
+    is hard-coded, so the same fetcher works for every project.
+
+    Prorate applies to the current incomplete calendar month (monthly only).
+    Weekly schedules are complete-only — no prorate.
+    YOY column added monthly only, comparing the rightmost period to the same
+    calendar month one year prior.
+    """
+    import calendar as _cal
+    from datetime import date as _date
+    from integrations.utils.prorate import calculate_prorate_factor
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service     = build('analyticsdata', 'v1beta', credentials=credentials)
+    property_id = integration.provider_id
+
+    order_asc   = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc, data_lag_days=1)
+    if not date_ranges:
+        return {'columns': [], 'rows': [], 'total_rows': 0}
+
+    is_monthly = sheet.schedule == 'monthly'
+    is_weekly  = sheet.schedule == 'weekly'
+
+    # ── Prorate setup: current calendar month only (monthly schedule) ───────
+    today        = _date.today()
+    cur_label    = None
+    factor       = 1.0
+    days_elapsed = total_days = None
+    if is_monthly:
+        for s_dt, _e_dt, lbl in date_ranges:
+            if s_dt.year == today.year and s_dt.month == today.month:
+                _, last_day  = _cal.monthrange(s_dt.year, s_dt.month)
+                cur_full_end = _date(s_dt.year, s_dt.month, last_day)
+                days_elapsed, total_days, factor = calculate_prorate_factor(
+                    s_dt, cur_full_end, data_lag_days=1
+                )
+                if factor != 1.0:
+                    cur_label = lbl
+                break
+    is_prorated = factor != 1.0
+
+    organic_filter = {
+        'filter': {
+            'fieldName':    'sessionDefaultChannelGroup',
+            'stringFilter': {'value': 'Organic Search', 'matchType': 'EXACT'},
+        }
+    }
+
+    def _runReport(start_dt, end_dt, dim='pagePath', limit=10000):
+        body = {
+            'dateRanges':      [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
+            'dimensions':      [{'name': dim}],
+            'metrics':         [{'name': 'sessions'}],
+            'dimensionFilter': organic_filter,
+            'limit':           limit,
+        }
+        return service.properties().runReport(property=property_id, body=body).execute()
+
+    # ── Fetch per-period page paths ─────────────────────────────────────────
+    range_paths = {}     # {label: [(path, sessions), ...]}
+    api_errors  = []
+    for s_dt, e_dt, label in date_ranges:
+        try:
+            resp = _runReport(s_dt, e_dt)
+            entries = []
+            for r in resp.get('rows', []):
+                path = r['dimensionValues'][0]['value']
+                sess = int(r['metricValues'][0]['value'])
+                entries.append((path, sess))
+            range_paths[label] = entries
+        except Exception as e:
+            logger.error(f"GA Breakup API error ({label}) for sheet {sheet.id}: {e}")
+            range_paths[label] = []
+            api_errors.append(str(e))
+
+    # ── YOY fetch — monthly only ────────────────────────────────────────────
+    yoy_paths = []
+    if is_monthly and date_ranges:
+        cur_s, cur_e, _ = date_ranges[-1]
+        yoy_s = _date(cur_s.year - 1, cur_s.month, cur_s.day)
+        yoy_e = _date(cur_e.year - 1, cur_e.month, cur_e.day)
+        try:
+            resp = _runReport(yoy_s, yoy_e)
+            for r in resp.get('rows', []):
+                yoy_paths.append((
+                    r['dimensionValues'][0]['value'],
+                    int(r['metricValues'][0]['value']),
+                ))
+        except Exception as e:
+            logger.error(f"GA Breakup YOY API error for sheet {sheet.id}: {e}")
+
+    if api_errors and len(api_errors) == len(date_ranges):
+        return {
+            'columns': [], 'rows': [], 'total_rows': 0,
+            'error':   f'GA API error: {api_errors[0]}',
+        }
+
+    # ── Bucket aggregation ──────────────────────────────────────────────────
+    # bucket_period_sessions[bucket][label] = sum of sessions for that bucket/period
+    # bucket_paths[bucket][label] = [(path, sessions), ...]
+    from collections import defaultdict
+    bucket_period_sessions = defaultdict(lambda: defaultdict(int))
+    bucket_paths           = defaultdict(lambda: defaultdict(list))
+
+    for label, entries in range_paths.items():
+        for path, sess in entries:
+            bucket = _bucket_of_path(path)
+            bucket_period_sessions[bucket][label] += sess
+            bucket_paths[bucket][label].append((path, sess))
+
+    yoy_bucket = defaultdict(int)
+    for path, sess in yoy_paths:
+        yoy_bucket[_bucket_of_path(path)] += sess
+
+    # Pick top-N buckets by total sessions across all periods. Always keep
+    # "Home Page" pinned at the top if present.
+    bucket_totals = {b: sum(v.values()) for b, v in bucket_period_sessions.items()}
+    sorted_buckets = sorted(bucket_totals.items(), key=lambda kv: kv[1], reverse=True)
+    top_buckets = []
+    if 'Home Page' in bucket_totals:
+        top_buckets.append('Home Page')
+    for b, _ in sorted_buckets:
+        if b == 'Home Page':
+            continue
+        if len(top_buckets) >= _BUCKET_TOP_N:
+            break
+        top_buckets.append(b)
+    rest_buckets = [b for b in bucket_totals if b not in top_buckets]
+
+    # ── Section 1: Page Type × Months matrix ────────────────────────────────
+    range_labels         = [r[2] for r in date_ranges]
+    range_labels_display = [
+        (f"{lbl} (PR)" if lbl == cur_label else lbl) for lbl in range_labels
+    ]
+    change_label = 'WOW %' if is_weekly else 'MOM %'
+    period_cols  = list(range_labels_display)
+    section1_cols = ['Page Type'] + period_cols + [change_label]
+    if is_monthly:
+        section1_cols.append('YOY %')
+
+    def _pct(cur_v, base_v):
+        if base_v and base_v != 0:
+            return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+        return 'N/A'
+
+    def _cell_for(raw, lbl_orig):
+        """Apply prorate to the current-month cell, else return raw."""
+        if is_prorated and lbl_orig == cur_label:
+            proj = round(raw * factor)
+            return f"{raw} ({proj})", proj
+        return raw, raw
+
+    section1_rows = []
+    for bucket in top_buckets:
+        row = {'Page Type': bucket}
+        change_series = []
+        for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+            raw = bucket_period_sessions.get(bucket, {}).get(lbl_orig, 0)
+            display, numeric = _cell_for(raw, lbl_orig)
+            row[lbl_disp] = display
+            change_series.append(numeric)
+        row[change_label] = (
+            _pct(change_series[-1], change_series[-2])
+            if len(change_series) >= 2 else 'N/A'
+        )
+        if is_monthly:
+            cur_v = change_series[-1] if change_series else 0
+            yoy_v = yoy_bucket.get(bucket)
+            row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v is not None else 'N/A'
+        section1_rows.append(row)
+
+    # "Other Pages" rollup row — sum of every bucket not in top_buckets
+    if rest_buckets:
+        other_row = {'Page Type': 'Other Pages'}
+        change_series = []
+        for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+            raw = sum(bucket_period_sessions.get(b, {}).get(lbl_orig, 0)
+                      for b in rest_buckets)
+            display, numeric = _cell_for(raw, lbl_orig)
+            other_row[lbl_disp] = display
+            change_series.append(numeric)
+        other_row[change_label] = (
+            _pct(change_series[-1], change_series[-2])
+            if len(change_series) >= 2 else 'N/A'
+        )
+        if is_monthly:
+            cur_v = change_series[-1] if change_series else 0
+            yoy_v = sum(yoy_bucket.get(b, 0) for b in rest_buckets) or None
+            other_row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v else 'N/A'
+        section1_rows.append(other_row)
+
+    tables = [{
+        'title':   'Organic Traffic Analysis (GA4)',
+        'columns': section1_cols,
+        'rows':    section1_rows,
+    }]
+
+    # ── Drill-down tables per top bucket (skip "Home Page") ─────────────────
+    for bucket in top_buckets:
+        if bucket == 'Home Page':
+            continue
+
+        # Per-URL aggregation for this bucket: {path: {label: sessions}}
+        per_url = defaultdict(lambda: defaultdict(int))
+        for label in range_labels:
+            for path, sess in bucket_paths.get(bucket, {}).get(label, []):
+                per_url[path][label] += sess
+
+        if not per_url:
+            continue
+
+        # YOY per-URL — for the same calendar month one year prior to last period
+        yoy_per_url = defaultdict(int)
+        for path, sess in yoy_paths:
+            if _bucket_of_path(path) == bucket:
+                yoy_per_url[path] += sess
+
+        # Sort URLs by latest period sessions, take top N
+        latest_label = range_labels[-1]
+        sorted_urls = sorted(
+            per_url.items(),
+            key=lambda kv: kv[1].get(latest_label, 0),
+            reverse=True,
+        )[:_DRILL_TOP_URLS]
+
+        sub_cols = ['Page URL', 'Category'] + period_cols + [change_label]
+        if is_monthly:
+            sub_cols.append('YOY %')
+        sub_rows = []
+        for path, period_sess in sorted_urls:
+            row = {
+                'Page URL': path,
+                'Category': _drill_topic_of_path(path),
+            }
+            change_series = []
+            for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+                raw = period_sess.get(lbl_orig, 0)
+                display, numeric = _cell_for(raw, lbl_orig)
+                row[lbl_disp] = display
+                change_series.append(numeric)
+            row[change_label] = (
+                _pct(change_series[-1], change_series[-2])
+                if len(change_series) >= 2 else 'N/A'
+            )
+            if is_monthly:
+                cur_v = change_series[-1] if change_series else 0
+                yoy_v = yoy_per_url.get(path)
+                row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v is not None else 'N/A'
+            sub_rows.append(row)
+
+        tables.append({
+            'title':   bucket,
+            'columns': sub_cols,
+            'rows':    sub_rows,
+        })
+
+    # ── Legacy single-table flat shape (kept for any caller that expects it) ─
+    # Re-uses Section 1's data so Excel fallback paths still work.
+    legacy_columns = section1_cols
+    legacy_rows    = section1_rows
+
+    return {
+        'columns':      legacy_columns,
+        'rows':         legacy_rows,
+        'total_rows':   len(legacy_rows),
+        'is_prorated':  is_prorated,
+        'days_elapsed': days_elapsed,
+        'total_days':   total_days,
+        'unsorted':     True,
+        'tables':       tables,
     }
 
 
@@ -3531,6 +4033,13 @@ def seo_report_sheet_data(request):
                     data = _fetch_ga_overview_data(ga_integration, sheet)
                     report_entry.update(data)
 
+            elif sheet.sheet_type == 'ga_organic_traffic_breakup':
+                if not ga_integration:
+                    report_entry['error'] = 'Google Analytics not connected'
+                else:
+                    data = _fetch_ga_organic_traffic_breakup_data(ga_integration, sheet)
+                    report_entry.update(data)
+
             elif sheet.sheet_type == 'keyword_ranking_overview':
                 data = _fetch_keyword_ranking_overview(domain_id, sheet)
                 report_entry.update(data)
@@ -3637,6 +4146,9 @@ def seo_report_export_xlsx(request):
             elif sheet.sheet_type == 'ga_overview':
                 if ga_integration:
                     data = _fetch_ga_overview_data(ga_integration, sheet)
+            elif sheet.sheet_type == 'ga_organic_traffic_breakup':
+                if ga_integration:
+                    data = _fetch_ga_organic_traffic_breakup_data(ga_integration, sheet)
             elif sheet.sheet_type == 'keyword_ranking_overview':
                 data = _fetch_keyword_ranking_overview(domain_id, sheet)
         except Exception as e:
@@ -3646,13 +4158,90 @@ def seo_report_export_xlsx(request):
         columns = data.get('columns', [])
         rows    = data.get('rows', [])
         metrics_headers = data.get('metrics_headers', [])
+        sub_tables      = data.get('tables') or []
 
-        if not columns:
+        if not columns and not sub_tables:
             continue
 
         # ── Create worksheet ──────────────────────────────────────────────
         ws_title = sheet.sheet_name[:31]  # Excel sheet name max 31 chars
         ws = wb.create_sheet(title=ws_title)
+
+        # ── Stacked sub-tables (e.g. GSC Overview: Clicks → Impressions →
+        #    CTR, each with months down × Total/Branded/Non-Branded across) ──
+        if sub_tables:
+            from openpyxl.styles import Font as _Font
+            bold_font = _Font(bold=True, color="000000")
+            cur_row = 2
+            for tbl in sub_tables:
+                tcols  = tbl.get('columns', [])
+                trows  = tbl.get('rows', [])
+                ttitle = tbl.get('title', '')
+                if not tcols:
+                    continue
+                ncols = len(tcols)
+
+                # Title bar — merged across all columns of this sub-table
+                title_cell = ws.cell(row=cur_row, column=1, value=ttitle.upper())
+                title_cell.fill      = metric_header_fill
+                title_cell.font      = metric_header_font
+                title_cell.alignment = center_align
+                if ncols > 1:
+                    ws.merge_cells(
+                        start_row=cur_row, start_column=1,
+                        end_row=cur_row,   end_column=ncols
+                    )
+                    for fc in range(2, ncols + 1):
+                        ws.cell(row=cur_row, column=fc).fill = metric_header_fill
+                cur_row += 1
+
+                # Column header row
+                for ci, col_name in enumerate(tcols, 1):
+                    cell = ws.cell(row=cur_row, column=ci, value=col_name)
+                    cell.fill      = col_fill
+                    cell.font      = col_font
+                    cell.alignment = center_align
+                cur_row += 1
+
+                # Data rows
+                for r in trows:
+                    months_label  = str(r.get('Months', ''))
+                    is_change_row = months_label in ('MOM %', 'WOW %', 'YOY %')
+                    is_total_row  = months_label == 'Total'
+                    is_pr_row     = '(PR)' in months_label
+                    for ci, col_name in enumerate(tcols, 1):
+                        val  = r.get(col_name, '')
+                        cell = ws.cell(row=cur_row, column=ci, value=val)
+                        if is_change_row and ci > 1:
+                            try:
+                                num = float(str(val).replace('%', '').replace('+', '').replace(',', ''))
+                                if num > 0:
+                                    cell.font = pos_font
+                                elif num < 0:
+                                    cell.font = neg_font
+                            except (ValueError, TypeError):
+                                pass
+                        elif is_total_row or is_pr_row:
+                            cell.font = bold_font
+                        cell.alignment = left_align if col_name == 'Months' else center_align
+                    cur_row += 1
+
+                # Blank separator row before next sub-table
+                cur_row += 1
+
+            # Auto-size columns based on the widest cell across all sub-tables
+            max_cols = max((len(t.get('columns', [])) for t in sub_tables), default=0)
+            for ci in range(1, max_cols + 1):
+                col_letter = get_column_letter(ci)
+                max_len = 14
+                for ri in range(2, cur_row):
+                    cv = ws.cell(row=ri, column=ci).value
+                    if cv is not None:
+                        max_len = max(max_len, len(str(cv)))
+                ws.column_dimensions[col_letter].width = min(max_len + 4, 40)
+
+            # Done with this sheet — skip the legacy single-table render below
+            continue
 
         # Row 1: empty (offset)
         data_start_row = 2

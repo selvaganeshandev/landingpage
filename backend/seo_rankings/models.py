@@ -394,6 +394,7 @@ class SeoReportSheet(models.Model):
         ('domain_metrics', 'Domain Metrics'),
         ('gsc_overview', 'GSC Overview'),
         ('keyword_ranking_overview', 'Keyword Ranking Overview'),
+        ('ga_organic_traffic_breakup', 'GA Organic Traffic Breakup'),
     ]
     SCHEDULE_CHOICES = [
         ('weekly', 'Weekly'),

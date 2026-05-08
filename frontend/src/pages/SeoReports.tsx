@@ -46,6 +46,7 @@ const SHEET_TYPE_LABELS: Record<string, string> = {
   domain_metrics: "Domain Metrics",
   gsc_overview: "GSC Overview",
   keyword_ranking_overview: "Keyword Ranking Overview",
+  ga_organic_traffic_breakup: "GA Organic Traffic Breakup",
 };
 
 const SeoReports = () => {
@@ -310,6 +311,11 @@ const DIM_COL_NAMES = new Set([
   "Source",
   "Metric",
   "Month",
+  "Months",
+  "Page Type",
+  "Blog Category",
+  "Page URL",
+  "Category",
 ]);
 
 // Extract a sortable number from any cell value.
@@ -347,6 +353,120 @@ function pickDefaultSortCol(columns: string[]): string | null {
   return fullMonth[0] || eligible[0];
 }
 
+// Compact sub-table used by stacked-tables payloads (GSC Overview with months
+// down, GA Organic Traffic Breakup with months across). Two layouts coexist:
+//
+//   - GSC Overview: dim col is "Months". MoM / WoW / YoY are *summary rows*
+//     (rendered bold, with green/red coloured % cells).
+//   - GA Organic Traffic Breakup: dim col is "Page Type" / "Page URL". Periods
+//     are columns and MoM / WoW / YoY are *change columns*. Each cell in a
+//     change column gets coloured red/green individually.
+//
+// We detect both shapes — change row OR change column — so the same cell
+// renderer handles either layout and the up/down arrows always show up.
+const SUMMARY_ROW_LABELS = new Set(["MOM %", "WOW %", "YOY %", "Total"]);
+const CHANGE_COL_RE = /(MOM|WOW|YOY)\s*%/i;
+
+function SubTable({
+  title,
+  columns,
+  rows,
+}: {
+  title: string;
+  columns: string[];
+  rows: any[];
+}) {
+  // Detect dim column (first column that's a known dimension label).
+  const dimCol =
+    columns.find((c) => DIM_COL_NAMES.has(c)) ?? columns[0] ?? "";
+
+  return (
+    <div className="border rounded-lg overflow-hidden">
+      <div className="px-4 py-2 bg-muted/20 border-b text-sm font-semibold uppercase tracking-wider text-foreground">
+        {title}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b" style={{ backgroundColor: "#f6f9fe" }}>
+              {columns.map((col) => (
+                <th
+                  key={col}
+                  className="px-4 py-2 text-left font-semibold text-xs whitespace-nowrap"
+                  style={{ minWidth: col === dimCol ? 160 : 120 }}
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIdx) => {
+              const dimLabel = String(row[dimCol] ?? "");
+              const isSummaryRow = SUMMARY_ROW_LABELS.has(dimLabel);
+              const isPR = dimLabel.includes("(PR)");
+              const bg = isSummaryRow
+                ? "#f0f5ff"
+                : rowIdx % 2 === 0
+                  ? "#fff"
+                  : "#faf8ff";
+              return (
+                <tr
+                  key={rowIdx}
+                  className="border-b"
+                  style={{ backgroundColor: bg }}
+                >
+                  {columns.map((col) => {
+                    const value = row[col];
+                    const isDimColCell = col === dimCol;
+                    // A cell is "change" if either its row is a summary
+                    // change-row (months-down layout) or its column is a
+                    // change column (months-across layout).
+                    const isChangeRowCell =
+                      !isDimColCell &&
+                      (dimLabel === "MOM %" ||
+                        dimLabel === "WOW %" ||
+                        dimLabel === "YOY %");
+                    const isChangeColCell =
+                      !isDimColCell && CHANGE_COL_RE.test(col);
+                    const isChangeCell = isChangeRowCell || isChangeColCell;
+                    const numVal =
+                      typeof value === "number"
+                        ? value
+                        : parseFloat(String(value ?? "").replace(/[+%,]/g, ""));
+                    const isNegative =
+                      isChangeCell && !isNaN(numVal) && numVal < 0;
+                    const isPositive =
+                      isChangeCell && !isNaN(numVal) && numVal > 0;
+                    return (
+                      <td
+                        key={col}
+                        className={`px-4 py-2 whitespace-nowrap text-sm ${isSummaryRow || (isDimColCell && isPR) ? "font-semibold" : ""}`}
+                      >
+                        {isNegative ? (
+                          <span className="text-red-500 font-medium">
+                            {value} <span className="text-xs">&#9660;</span>
+                          </span>
+                        ) : isPositive ? (
+                          <span className="text-green-600 font-medium">
+                            {value} <span className="text-xs">&#9650;</span>
+                          </span>
+                        ) : (
+                          <span>{value ?? "-"}</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ReportWidget({
   sheet,
   reportData,
@@ -372,6 +492,9 @@ function ReportWidget({
   const columns: string[] = reportData?.columns || [];
   const rawRows: any[] = reportData?.rows || [];
   const hasSrNo = columns.includes("Sr No");
+  // Backend signals that rows are pre-ordered and must not be sorted (metric-
+  // down summaries — sorting scrambles the Clicks/Impressions/CTR grouping).
+  const sortLocked: boolean = reportData?.unsorted === true;
 
   // Sort state — column + direction. Null col = use backend order.
   const [sortCol, setSortCol] = useState<string | null>(null);
@@ -381,7 +504,7 @@ function ReportWidget({
 
   // On first render / when columns change, auto-pick the default sort column
   // based on the sheet's saved order_by direction.
-  const defaultSortCol = pickDefaultSortCol(columns);
+  const defaultSortCol = sortLocked ? null : pickDefaultSortCol(columns);
   useEffect(() => {
     setSortCol(defaultSortCol);
     setSortDir(sheet.order_by === "Ascending" ? "asc" : "desc");
@@ -389,6 +512,7 @@ function ReportWidget({
   }, [defaultSortCol, sheet.order_by]);
 
   const sortedRows = (() => {
+    if (sortLocked) return rawRows;
     if (!sortCol || !columns.includes(sortCol)) return rawRows;
     const copy = [...rawRows];
     copy.sort((a, b) => {
@@ -412,6 +536,7 @@ function ReportWidget({
   );
 
   const handleSort = (col: string) => {
+    if (sortLocked) return;
     if (DIM_COL_NAMES.has(col)) return;
     if (sortCol === col) {
       setSortDir((d) => (d === "desc" ? "asc" : "desc"));
@@ -598,8 +723,24 @@ function ReportWidget({
         </div>
       )}
 
+      {/* Sub-tables view (months-down × Total/Branded/Non-Branded) — used by
+          GSC Overview when the backend returns a `tables` array. Falls
+          through to the legacy single-table render below otherwise. */}
+      {Array.isArray(reportData?.tables) && reportData.tables.length > 0 && (
+        <div className="px-5 py-4 space-y-6">
+          {reportData.tables.map((tbl: any, idx: number) => (
+            <SubTable
+              key={idx}
+              title={tbl.title}
+              columns={tbl.columns || []}
+              rows={tbl.rows || []}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Data Table */}
-      {hasData && (
+      {hasData && !(Array.isArray(reportData?.tables) && reportData.tables.length > 0) && (
         <>
           {/* Metric group header */}
           {metricsHeaders.length > 0 && (
@@ -616,7 +757,7 @@ function ReportWidget({
                 <tr className="border-b" style={{ backgroundColor: "#f6f9fe" }}>
                   {columns.map((col) => {
                     const isDimCol = DIM_COL_NAMES.has(col);
-                    const isSortable = !isDimCol;
+                    const isSortable = !isDimCol && !sortLocked;
                     const isActive = sortCol === col;
                     return (
                       <th
