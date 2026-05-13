@@ -83,17 +83,20 @@ class ClaudeContentGenerator:
     @classmethod
     def _calculate_max_tokens(cls, word_count, is_section=False):
         """Calculate dynamic max_tokens based on requested word count.
-        HTML content uses ~2 tokens per word (tags + text).
-        Tightened to the user's selected range upper bound so Claude
-        cannot physically generate far beyond the requested range.
+        HTML content uses ~2.5 tokens per word once h2/h3/<ul>/<li>/<strong>
+        markup is included. The previous 2.0 ratio + 500 buffer hit max_tokens
+        before Claude could finish long-form articles (3000+ words), causing
+        the last sections / subheadings to be dropped and the article to end
+        mid-thought. The bump gives Claude enough headroom to complete every
+        planned section and reach a proper conclusion.
         """
         if is_section:
             return max(4096, int(word_count * 2.5) + 500)
         upper = cls._upper_word_limit(word_count)
-        # 2 tokens per word (word + HTML markup) + modest buffer for structure.
-        tokens = int(upper * 2.0) + 500
-        # Floor of 2048 for tiny requests; cap at 20480 for very large ones.
-        return max(2048, min(tokens, 20480))
+        tokens = int(upper * 2.5) + 1500
+        # Floor 2048 for tiny requests; cap at 24576 for very large ones
+        # (still well within Sonnet 4.5's 64K output limit).
+        return max(2048, min(tokens, 24576))
 
     @classmethod
     def _calculate_outline_max_tokens(cls, word_count, extended=False):
@@ -1190,6 +1193,197 @@ AFTER (converted to <ul>):
             return truncated_html, 0
 
     @staticmethod
+    def _extract_heading_titles(html_content):
+        """Return a list of (level, normalized_text) for every heading in
+        the HTML. Used to detect which planned outline sections actually made
+        it into the generated content.
+        """
+        if not html_content:
+            return []
+        heading_pattern = re.compile(
+            r'<h([1-6])\b[^>]*>(.*?)</h\1>',
+            re.IGNORECASE | re.DOTALL
+        )
+        out = []
+        for m in heading_pattern.finditer(html_content):
+            level = int(m.group(1))
+            text = re.sub(r'<[^>]+>', '', m.group(2))
+            text = re.sub(r'\s+', ' ', text).strip().lower()
+            if text:
+                out.append((level, text))
+        return out
+
+    @classmethod
+    def _normalize_heading(cls, text):
+        text = re.sub(r'<[^>]+>', '', text or '')
+        text = re.sub(r'[^a-z0-9\s]', ' ', text.lower())
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+
+    @classmethod
+    def _heading_matches(cls, planned_title, generated_heading_text):
+        """Loose match: planned title and generated heading share enough
+        meaningful words. Catches small phrasing tweaks (e.g. planned
+        "Benefits of Solar Power" vs generated "Key Benefits of Solar").
+        """
+        a = cls._normalize_heading(planned_title)
+        b = cls._normalize_heading(generated_heading_text)
+        if not a or not b:
+            return False
+        if a == b or a in b or b in a:
+            return True
+        stop = {
+            'the', 'a', 'an', 'and', 'or', 'of', 'to', 'for', 'in', 'on',
+            'with', 'by', 'is', 'are', 'how', 'what', 'why', 'your', 'you'
+        }
+        a_words = {w for w in a.split() if w not in stop and len(w) > 2}
+        b_words = {w for w in b.split() if w not in stop and len(w) > 2}
+        if not a_words:
+            return False
+        overlap = a_words & b_words
+        return len(overlap) >= max(2, int(len(a_words) * 0.6))
+
+    def _complete_missing_outline_sections(self, content_html, outline, params):
+        """Detect outline sections that didn't make it into the generated
+        content and ask Claude to write ONLY those sections, then merge
+        them back in.
+
+        Fixes a recurring issue where the outline-driven path silently
+        skipped sections — typically when Claude ran long earlier and
+        truncated before reaching the trailing sections, or when the model
+        merged two planned subheadings into one.
+
+        Args:
+            content_html: HTML returned by the main generation call.
+            outline: List of outline section dicts (type/title/key_points/
+                estimated_words).
+            params: The original generation params (used to keep tone /
+                style / language consistent in the backfill call).
+
+        Returns:
+            tuple: (merged_html, extra_completion_tokens)
+        """
+        if not outline or not content_html:
+            return content_html, 0
+
+        generated_headings = self._extract_heading_titles(content_html)
+        if not generated_headings:
+            # No headings in output at all — leave untouched; the main
+            # generator already returned something the caller will trim.
+            return content_html, 0
+
+        missing = []
+        for section in outline:
+            planned_title = (section.get('title') or '').strip()
+            if not planned_title:
+                continue
+            if any(self._heading_matches(planned_title, gh_text)
+                   for _, gh_text in generated_headings):
+                continue
+            missing.append(section)
+
+        if not missing:
+            return content_html, 0
+
+        logger.warning(
+            f"Outline path: {len(missing)} planned section(s) missing from "
+            f"generated content — backfilling: "
+            f"{[s.get('title') for s in missing]}"
+        )
+
+        outline_text = ""
+        target_words = 0
+        for section in missing:
+            section_type = section.get('type', 'h2')
+            section_title = section.get('title', '')
+            key_points = section.get('key_points', [])
+            est_words = int(section.get('estimated_words', 150) or 150)
+            target_words += est_words
+            indent = "  " if section_type == 'h3' else ""
+            outline_text += (
+                f"\n{indent}{section_type.upper()}: {section_title} "
+                f"(~{est_words} words)\n"
+            )
+            for point in key_points:
+                outline_text += f"{indent}  - {point}\n"
+
+        tone = params.get('tone', 'professional')
+        style = params.get('style', 'informative')
+        audience = params.get('audience', 'general')
+        target_language = params.get('target_language', 'us_english')
+        language_display = target_language.replace('_', ' ').title()
+
+        system_prompt = (
+            "You are continuing an in-progress HTML article. Write ONLY the "
+            "missing sections requested below, using proper HTML semantic "
+            "tags (<h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>). "
+            "Do NOT repeat sections that already exist. Do NOT add a new "
+            "conclusion / wrap-up — the article already has one. Return "
+            "ONLY the HTML for the requested sections, no preamble, no "
+            "markdown, no code fences."
+        )
+
+        user_prompt = (
+            f"Write ONLY these missing sections of the article, in order:\n"
+            f"{outline_text}\n"
+            f"Tone: {tone}\n"
+            f"Style: {style}\n"
+            f"Target audience: {audience}\n"
+            f"Language: {language_display}\n\n"
+            f"Each section should hit its target word count. Cover the "
+            f"listed key points. Use <ul>/<ol> for any enumerations of 3+ "
+            f"parallel items.\n\n"
+            f"Return ONLY the new HTML."
+        )
+
+        max_tokens = self._calculate_max_tokens(max(target_words, 800))
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                temperature=0.7,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+            new_html = response.content[0].text
+            extra_tokens = response.usage.output_tokens
+            new_html = self._sanitize_html_response(new_html)
+            new_html = self._convert_markdown_to_html(new_html)
+
+            # Insert before the conclusion if we can identify one;
+            # otherwise append at the end of the article.
+            conclusion_re = re.compile(
+                r'<h[1-3]\b[^>]*>\s*[^<]*\b('
+                r'conclusion|final\s+verdict|key\s+takeaways|summary|'
+                r'wrap[\s\-]?up|closing\s+thoughts|in\s+conclusion|'
+                r'final\s+thoughts'
+                r')\b',
+                re.IGNORECASE
+            )
+            m = conclusion_re.search(content_html)
+            if m:
+                merged = (
+                    content_html[:m.start()]
+                    + new_html.strip()
+                    + '\n'
+                    + content_html[m.start():]
+                )
+            else:
+                merged = content_html.rstrip() + '\n' + new_html.strip()
+
+            logger.info(
+                f"Backfilled {len(missing)} missing outline section(s), "
+                f"{extra_tokens} extra tokens"
+            )
+            return merged, extra_tokens
+        except Exception as e:
+            logger.warning(
+                f"Missing-section backfill failed (non-fatal): {e}"
+            )
+            return content_html, 0
+
+    @staticmethod
     def _deduplicate_internal_links(html_content):
         """
         Remove duplicate internal link URLs from generated content.
@@ -1891,8 +2085,8 @@ LIST FORMATTING — USE <ul> / <ol> WHEREVER THEY IMPROVE SCANNABILITY:
         # Add references if provided (with fetched content when available)
         if references and len(references) > 0:
             user_prompt += """
-**Reference Materials:**
-Use ONLY the information provided below from these reference sources. Do NOT fabricate, invent, or assume any facts, statistics, prices, or data that are not explicitly stated in the provided content.
+**Reference Materials (research notes — read for FACTS, do NOT use as a template):**
+The content below is research material you have read. Treat it the way a journalist treats source interviews: extract facts, statistics, and data points, then write the article in your own original voice and structure. Do NOT base the article's wording, sentence flow, or section order on the references.
 """
             for i, ref in enumerate(references, 1):
                 ref_type = ref.get('type', 'article').capitalize()
@@ -1914,13 +2108,18 @@ Use ONLY the information provided below from these reference sources. Do NOT fab
 
             user_prompt += """
 
-CRITICAL RULES for using references:
-- Use ONLY facts, statistics, prices, and examples that appear in the extracted content above
-- Match the currency, units, and cultural context of the target country specified above
-- Do NOT invent or hallucinate any data not present in the reference content
-- If a reference could not be fetched, ignore it entirely — do not guess its content
-- Synthesize information naturally — do not copy verbatim
-- Cite or reference the source material where appropriate
+CRITICAL RULES for using references — STRICT ANTI-DUPLICATION:
+- Use ONLY facts, statistics, prices, and examples that appear in the extracted content above. Do NOT fabricate.
+- Match the currency, units, and cultural context of the target country specified above.
+- If a reference could not be fetched, ignore it entirely — do not guess its content.
+- ORIGINALITY IS MANDATORY. The final article MUST be substantially different from every reference in:
+  (a) Wording — never copy any sentence or 6+ consecutive words verbatim from a reference. Rephrase every fact in your own voice.
+  (b) Section structure — choose your OWN headings and section order. Do NOT mirror a reference's outline, headings, or paragraph order.
+  (c) Examples and analogies — invent your own framing, transitions, and examples; do not reuse the references' phrasings, openings, or closings.
+  (d) Sentence flow — vary sentence length, paragraph rhythm, and explanation style versus the references.
+- When multiple references are provided, SYNTHESISE across them — do not pattern your article after a single source.
+- If only one reference is provided, treat it strictly as a fact-source, NEVER as a writing template. The reader of your article must not be able to recognise which page you read.
+- Cite or reference the source material where appropriate (e.g. "according to [source]"), but the surrounding prose must be entirely your own.
 """
 
         # Add reference repository context if available
@@ -2267,14 +2466,15 @@ Reference Content:
         references = params.get('references', [])
         if references and len(references) > 0:
             user_prompt += """
-**Reference URLs (Plan Outline Using These):**
+**Reference URLs (facts source ONLY — do NOT copy the references' outline):**
 The content below was extracted from the reference URLs the user provided.
-Shape the outline so each section can be backed by facts from these references:
 
-- Create sections that cover the key themes, data points, and examples found below
-- Do NOT invent facts, statistics, or examples that do not appear in the reference content
-- If a reference could not be fetched, ignore it — do not guess its content
-- Use the extracted content as the primary source of truth for the outline's key_points
+- Use the references as a FACTS SOURCE: which data points, statistics, and examples are available to cite.
+- Do NOT replicate the references' section structure, heading wording, or order. Design an ORIGINAL outline tailored to the title, keywords, and target audience.
+- Section headings must be written in your own words — never reuse a reference page's headings verbatim.
+- key_points should describe what your section will cover, not paraphrase what the reference says.
+- Do NOT invent facts, statistics, or examples that do not appear in the reference content.
+- If a reference could not be fetched, ignore it — do not guess its content.
 """
             for i, ref in enumerate(references, 1):
                 ref_url = ref.get('url', '')
@@ -2528,8 +2728,8 @@ Reference Content:
         references = params.get('references', [])
         if references and len(references) > 0:
             user_prompt += """
-**Reference Materials:**
-Use ONLY the information provided below from these reference sources:
+**Reference Materials (research notes — read for FACTS, do NOT use as a template):**
+The content below is research material you have read. Extract facts only. Do NOT mirror the references' wording, sentence flow, or paragraph order.
 """
             for i, ref in enumerate(references, 1):
                 ref_url = ref.get('url', '')
@@ -2540,8 +2740,14 @@ Use ONLY the information provided below from these reference sources:
                 elif ref_url:
                     user_prompt += f"\n--- Reference {i}: {ref_url} [Content could not be fetched — do NOT guess] ---\n"
             user_prompt += """
+CRITICAL RULES for using references — STRICT ANTI-DUPLICATION:
 - Use ONLY facts from the extracted content above. Do NOT fabricate data.
 - Match the currency, units, and cultural context of the target country.
+- Originality is mandatory: rephrase every fact in your own voice. NEVER copy any sentence or 6+ consecutive words verbatim from a reference.
+- Section structure is yours to plan: do NOT mirror the references' headings or paragraph order. Use the approved outline above as the structure — references are facts only.
+- Examples, analogies, openings, transitions, and closings must be your own. The reader must not be able to identify which page you read.
+- When multiple references are given, synthesise across them — do not pattern after a single source.
+- Cite where appropriate (e.g. "according to [source]"), but the surrounding prose must be entirely original.
 """
 
         # Detect list / table requests inside the client's free-text fields
@@ -2698,6 +2904,18 @@ IMPORTANT:
                     content_html, requested_word_count
                 )
                 total_completion_tokens += extra_tokens
+
+            # Safety net 3 — Missing outline sections.
+            # If the main generation skipped any planned section heading
+            # (e.g. Claude ran long earlier and stopped before the trailing
+            # sections, or merged two planned subheadings into one), write
+            # ONLY the missing sections in a focused follow-up call and
+            # merge them back in before conclusion. Runs before word-count
+            # enforcement so the new sections are included in the budget.
+            content_html, extra_tokens = self._complete_missing_outline_sections(
+                content_html, outline, params
+            )
+            total_completion_tokens += extra_tokens
 
             # Post-processing: enforce the word count range the user
             # selected. Pass the outline so trimming preserves every planned
