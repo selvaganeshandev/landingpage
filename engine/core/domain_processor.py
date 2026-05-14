@@ -807,7 +807,10 @@ class DomainProcessor:
         platform_map = {
             'chatgpt': 'ChatGPT',
             'gemini': 'Google Gemini',
-            'perplexity': 'Perplexity'
+            'perplexity': 'Perplexity',
+            'claude': 'Claude',
+            'grok': 'Grok',
+            'deepseek': 'DeepSeek',
         }
         
         # Create default analytics for each enabled platform

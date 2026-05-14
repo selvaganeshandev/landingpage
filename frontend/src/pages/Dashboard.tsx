@@ -44,6 +44,9 @@ const Dashboard = () => {
     { value: "chatgpt", label: "ChatGPT" },
     { value: "gemini", label: "Gemini" },
     { value: "perplexity", label: "Perplexity" },
+    { value: "claude", label: "Claude" },
+    { value: "grok", label: "Grok" },
+    { value: "deepseek", label: "DeepSeek" },
   ];
   
   // Get domain name for display

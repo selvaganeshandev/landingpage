@@ -410,6 +410,9 @@ def prompt_analytics_status(request, domain_id):
             'chatgpt': 'ChatGPT',
             'gemini': 'Google Gemini',
             'perplexity': 'Perplexity',
+            'claude': 'Claude',
+            'grok': 'Grok',
+            'deepseek': 'DeepSeek',
         }
         for key, label in platform_map.items():
             # Use prompt__track_status because PromptAnalytics.track_status is never updated
@@ -421,16 +424,12 @@ def prompt_analytics_status(request, domain_id):
             }
         
         # Calculate overall progress
-        # Each prompt can have up to 3 analytics rows (one per platform)
-        total_platform_tasks = (
-            analytics.filter(platform='ChatGPT').count() +
-            analytics.filter(platform='Google Gemini').count() +
-            analytics.filter(platform='Perplexity').count()
-        ) or (total_prompts * 3)
-        completed_platform_tasks = (
-            platform_status['chatgpt']['completed'] +
-            platform_status['gemini']['completed'] +
-            platform_status['perplexity']['completed']
+        # Each prompt can have up to len(platform_map) analytics rows (one per platform)
+        total_platform_tasks = sum(
+            analytics.filter(platform=label).count() for label in platform_map.values()
+        ) or (total_prompts * len(platform_map))
+        completed_platform_tasks = sum(
+            platform_status[key]['completed'] for key in platform_map.keys()
         )
         
         progress_percentage = (completed_platform_tasks / total_platform_tasks * 100) if total_platform_tasks > 0 else 0
@@ -484,7 +483,7 @@ def prompt_analytics_summary(request, domain_id):
         
         # Get metrics by platform
         platform_metrics = {}
-        for platform in ['ChatGPT', 'Google Gemini', 'Perplexity']:
+        for platform in ['ChatGPT', 'Google Gemini', 'Perplexity', 'Claude', 'Grok', 'DeepSeek']:
             platform_analytics = analytics.filter(platform=platform)
             platform_metrics[platform] = platform_analytics.aggregate(
                 total_citations=Count('total_citations'),
@@ -728,7 +727,7 @@ def topic_analytics_status(request, domain_id):
         
         # Get platform-wise keyword analytics status
         platform_status = {}
-        for platform in ['ChatGPT', 'Google Gemini', 'Perplexity']:
+        for platform in ['ChatGPT', 'Google Gemini', 'Perplexity', 'Claude', 'Grok', 'DeepSeek']:
             platform_analytics = keyword_analytics.filter(platform=platform)
             platform_status[platform.lower().replace(' ', '_')] = {
                 'total': platform_analytics.count(),
@@ -805,7 +804,7 @@ def topic_analytics_summary(request, domain_id):
         platform_metrics = {}
         keyword_analytics = KeywordAnalytics.objects.filter(keyword__domain=domain, track_status='COMP')
         
-        for platform in ['ChatGPT', 'Google Gemini', 'Perplexity']:
+        for platform in ['ChatGPT', 'Google Gemini', 'Perplexity', 'Claude', 'Grok', 'DeepSeek']:
             platform_analytics = keyword_analytics.filter(platform=platform)
             platform_metrics[platform] = platform_analytics.aggregate(
                 total_mentions=Sum('mentions'),

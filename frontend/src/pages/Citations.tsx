@@ -485,6 +485,8 @@ const Citations = () => {
                   <SelectItem value="Claude">Claude</SelectItem>
                   <SelectItem value="Google Gemini">Gemini</SelectItem>
                   <SelectItem value="Perplexity">Perplexity</SelectItem>
+                  <SelectItem value="Grok">Grok</SelectItem>
+                  <SelectItem value="DeepSeek">DeepSeek</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -40,7 +40,7 @@ def schedule_domain_processing(domain: Domain) -> bool:
     # Mark as scheduled - processing loop will pick it up automatically
     with transaction.atomic():
         domain.refresh_from_db()
-        domain.processing_status = 'INIT'
+        domain.processing_status = 'SCHD'
         domain.track_message = 'Queued for initial processing'
         domain.tracked_at = timezone.now()
         domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])

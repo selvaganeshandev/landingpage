@@ -241,6 +241,9 @@ class PromptAnalyticsProcessor:
         self.openai_client = None
         self.gemini_client = None
         self.perplexity_client = None
+        self.anthropic_client = None
+        self.xai_client = None
+        self.deepseek_client = None
         # Lazy import helpers from views.py
         self._helpers_loaded = False
         self._load_helpers()
@@ -255,19 +258,31 @@ class PromptAnalyticsProcessor:
                 process_prompt_with_chatgpt,
                 process_prompt_with_gemini,
                 process_prompt_with_perplexity,
+                process_prompt_with_claude,
+                process_prompt_with_grok,
+                process_prompt_with_deepseek,
                 extract_position_from_response,
                 get_openai_client,
                 get_gemini_client,
                 get_perplexity_client,
+                get_anthropic_client,
+                get_xai_client,
+                get_deepseek_client,
             )
             self._process_prompt_with_chatgpt = process_prompt_with_chatgpt
             self._process_prompt_with_gemini = process_prompt_with_gemini
             self._process_prompt_with_perplexity = process_prompt_with_perplexity
+            self._process_prompt_with_claude = process_prompt_with_claude
+            self._process_prompt_with_grok = process_prompt_with_grok
+            self._process_prompt_with_deepseek = process_prompt_with_deepseek
             self._extract_position = extract_position_from_response
             self._get_openai_client = get_openai_client
             self._get_gemini_client = get_gemini_client
             self._get_perplexity_client = get_perplexity_client
-            
+            self._get_anthropic_client = get_anthropic_client
+            self._get_xai_client = get_xai_client
+            self._get_deepseek_client = get_deepseek_client
+
             # Initialize clients
             try:
                 self.openai_client = self._get_openai_client()
@@ -281,6 +296,18 @@ class PromptAnalyticsProcessor:
                 self.perplexity_client = self._get_perplexity_client()
             except Exception as e:
                 logger.warning(f"Perplexity client unavailable: {str(e)}")
+            try:
+                self.anthropic_client = self._get_anthropic_client()
+            except Exception as e:
+                logger.warning(f"Claude (Anthropic) client unavailable: {str(e)}")
+            try:
+                self.xai_client = self._get_xai_client()
+            except Exception as e:
+                logger.warning(f"Grok (xAI) client unavailable: {str(e)}")
+            try:
+                self.deepseek_client = self._get_deepseek_client()
+            except Exception as e:
+                logger.warning(f"DeepSeek client unavailable: {str(e)}")
             self._helpers_loaded = True
         except Exception as e:
             logger.warning(f"Analytics helpers not available; using fallback processing: {str(e)}")
@@ -432,6 +459,18 @@ class PromptAnalyticsProcessor:
                         result = self._process_prompt_with_perplexity(
                             prompt.prompt, user_domain, self.perplexity_client, group
                         )
+                    elif platform == 'claude' and self.anthropic_client is not None:
+                        result = self._process_prompt_with_claude(
+                            prompt.prompt, user_domain, self.anthropic_client, group
+                        )
+                    elif platform == 'grok' and self.xai_client is not None:
+                        result = self._process_prompt_with_grok(
+                            prompt.prompt, user_domain, self.xai_client, group
+                        )
+                    elif platform == 'deepseek' and self.deepseek_client is not None:
+                        result = self._process_prompt_with_deepseek(
+                            prompt.prompt, user_domain, self.deepseek_client, group
+                        )
                     else:
                         # Fallback processing
                         result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
@@ -522,6 +561,12 @@ class PromptAnalyticsProcessor:
                     platform_label = 'Google Gemini'
                 elif platform_key == 'perplexity':
                     platform_label = 'Perplexity'
+                elif platform_key == 'claude':
+                    platform_label = 'Claude'
+                elif platform_key == 'grok':
+                    platform_label = 'Grok'
+                elif platform_key == 'deepseek':
+                    platform_label = 'DeepSeek'
                 else:
                     platform_label = platform_key
 

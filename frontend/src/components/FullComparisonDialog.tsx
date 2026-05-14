@@ -69,6 +69,7 @@ const platformLabels: Record<string, string> = {
   gemini: "Gemini",
   perplexity: "Perplexity",
   grok: "Grok",
+  deepseek: "DeepSeek",
 };
 
 export function FullComparisonDialog({
