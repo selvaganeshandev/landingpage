@@ -589,12 +589,12 @@ def process_single_report_email_task(self, scheduled_report_id: int):
 @shared_task(bind=True, ignore_result=True, max_retries=1)
 def process_seo_keyword_task(self, seo_keyword_rank_id: int):
     """
-    Process a single SEO keyword: fetch SERP data via ScrapingDog, parse, save rank.
+    Process a single SEO keyword: fetch SERP data via DataBlue, parse, save rank.
 
-    max_retries=1 (not 3) because process_single_keyword already handles retries
-    internally via fetch_serp_data (2 retries per page × 3 pages). A Celery-level
-    retry would re-run the entire fetch, burning 3-9 extra ScrapingDog credits
-    per retry. One Celery retry covers transient infra issues (DB connection, OOM).
+    max_retries=1 (not 3) because each Celery retry re-issues a full DataBlue
+    request, burning an extra credit. One Celery retry covers transient infra
+    issues (DB connection, OOM); transport-level failures inside the request
+    surface as auto_call_status='fail' and get retried by the daily scheduler.
 
     Args:
         seo_keyword_rank_id: ID of SeoKeywordRank to process
@@ -619,22 +619,25 @@ def process_seo_keyword_task(self, seo_keyword_rank_id: int):
     acks_late=True,         # Re-deliver task if worker crashes before completion
     reject_on_worker_lost=True,  # Reject task if worker is killed (prevents re-queue loop)
 )
-def process_seo_domain_task(self, domain_id: int, batch_num: int = 1):
+def process_seo_domain_task(self, domain_id: int, batch_num: int = 1, retry_round: int = 0):
     """
     Process SEO keywords for a domain in batches of 500.
 
-    If unprocessed ('avail') keywords remain after a batch, a follow-up task is
-    automatically scheduled for the next batch. Failed keywords are NOT retried
-    within the same run — they are left as 'fail' and retried by the daily scheduler
-    next day to avoid wasting ScrapingDog API credits on persistent failures.
+    Each batch picks up only 'avail' keywords. When all 'avail' have drained,
+    we do exactly ONE retry round: any 'fail' keywords (DataBlue timeouts,
+    transient `success:false`, etc.) are reset to 'avail' and the chain
+    continues. After the retry round, anything still in 'fail' stays there
+    and will be picked up by tomorrow's daily scheduler — this caps the cost
+    of persistent failures at 2 attempts per keyword per run.
 
-    Chains batches until all keywords are processed. No infinite loop risk because
-    each batch only picks up 'avail' keywords (not 'fail'), so the remaining count
-    strictly decreases with every batch.
+    Chains batches until all keywords are either 'done' or 'fail' (after one
+    retry). No infinite loop risk: retry_round is capped at 1 and each batch
+    only picks 'avail', so the unprocessed pool strictly shrinks.
 
     Args:
         domain_id: ID of Domain to process SEO keywords for
         batch_num: Current batch number (1-based), used for logging
+        retry_round: 0 = first pass, 1 = retry-failed pass. Capped at 1.
     """
 
     result = None
@@ -660,14 +663,20 @@ def process_seo_domain_task(self, domain_id: int, batch_num: int = 1):
             pass
 
         # Auto-schedule follow-up task for remaining unprocessed keywords.
-        # Only check 'avail' (not 'fail') to avoid retrying already-failed keywords
-        # which would waste ScrapingDog credits on the same errors.
+        # Only check 'avail' here — 'fail' keywords are handled separately
+        # by the retry round below (so they get exactly one second chance
+        # before being deferred to tomorrow's scheduler).
         remaining = 0
+        failed_count = 0
         try:
             from shared_models.seo_models import SeoKeywordRank
             remaining = SeoKeywordRank.objects.filter(
                 domain_id=domain_id,
                 auto_call_status='avail'
+            ).count()
+            failed_count = SeoKeywordRank.objects.filter(
+                domain_id=domain_id,
+                auto_call_status='fail'
             ).count()
         except Exception:
             pass
@@ -680,11 +689,33 @@ def process_seo_domain_task(self, domain_id: int, batch_num: int = 1):
             try:
                 process_seo_domain_task.apply_async(
                     args=[domain_id],
-                    kwargs={'batch_num': batch_num + 1},
+                    kwargs={'batch_num': batch_num + 1, 'retry_round': retry_round},
                     countdown=10,
                 )
             except Exception as e:
                 logger.error(f"[SEO] Failed to schedule follow-up for domain {domain_id}: {e}")
+        elif retry_round < 1 and failed_count > 0:
+            # Single retry pass: reset transient failures (DataBlue timeouts,
+            # success:false, etc.) back to 'avail' and run them through once
+            # more. Bounded by retry_round < 1 so a keyword that fails twice
+            # in the same run stays 'fail' for tomorrow's scheduler.
+            try:
+                from shared_models.seo_models import SeoKeywordRank
+                reset = SeoKeywordRank.objects.filter(
+                    domain_id=domain_id,
+                    auto_call_status='fail'
+                ).update(auto_call_status='avail')
+                logger.info(
+                    f"[SEO] Domain {domain_id}: retry round 1 — reset {reset} "
+                    f"failed keywords back to 'avail', scheduling in 10s"
+                )
+                process_seo_domain_task.apply_async(
+                    args=[domain_id],
+                    kwargs={'batch_num': 1, 'retry_round': 1},
+                    countdown=10,
+                )
+            except Exception as e:
+                logger.error(f"[SEO] Failed to schedule retry for domain {domain_id}: {e}")
 
 
 @shared_task(bind=True, ignore_result=True)

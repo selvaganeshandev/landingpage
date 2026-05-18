@@ -1,72 +1,29 @@
 """
 SEO Ranking Processor — Engine-side processor for SEO keyword rank checking.
-Uses ScrapingDog API to fetch Google SERP data, parses it, and saves to PostgreSQL.
 
-This processor runs within the Celery engine and directly accesses the
-seo_rankings tables via shared_models (managed=False).
+Uses DataBlue API (replaces ScrapingDog as of the SERP migration) to fetch
+Google SERP data, parses it, and saves to PostgreSQL.
+
+Two paths:
+  - process_single_keyword(seo_kw_id):   one keyword, one HTTP call (Celery per-keyword task)
+  - process_domain_rankings(domain_id):  batch — async pipelined fetch + DB writes
+                                         (rankmax automation_engine pattern)
 """
 import logging
-import time
-import base64
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
 from django.utils import timezone
 
-import requests
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.db import connection, transaction
 
-# Concurrency for ScrapingDog API calls (configurable via Django settings)
-SCRAPINGDOG_CONCURRENCY = getattr(settings, 'SCRAPINGDOG_CONCURRENCY', 10)
+from core import datablue_service
+
+# Concurrency for DataBlue API calls (configurable via Django settings)
+DATABLUE_CONCURRENCY = getattr(settings, 'DATABLUE_CONCURRENCY', 100)
 
 logger = logging.getLogger(__name__)
-
-# ScrapingDog API endpoint
-SCRAPINGDOG_URL = "https://api.scrapingdog.com/google"
-
-
-def _get_api_key():
-    """Get ScrapingDog API key from Django settings."""
-    return getattr(settings, 'SCRAPINGDOG_API_KEY', None) or ''
-
-
-def _generate_uule(location):
-    """Generate UULE parameter for Google location targeting."""
-    if not location:
-        return ''
-
-    canonical_char_codes = {
-        4: "E", 5: "F", 6: "G", 7: "H", 8: "I", 9: "J", 10: "K", 11: "L",
-        12: "M", 13: "N", 14: "O", 15: "P", 16: "Q", 17: "R", 18: "S",
-        19: "T", 20: "U", 21: "V", 22: "W", 23: "X", 24: "Y", 25: "Z",
-        26: "a", 27: "b", 28: "c", 29: "d", 30: "e", 31: "f", 32: "g",
-        33: "h", 34: "i", 35: "j", 36: "k", 37: "l", 38: "m", 39: "n",
-        40: "o", 41: "p", 42: "q", 43: "r", 44: "s", 45: "t", 46: "u",
-        47: "v", 48: "w", 49: "x", 50: "y", 51: "z",
-    }
-
-    loc_len = len(location)
-    canonical_value = canonical_char_codes.get(loc_len)
-    if not canonical_value:
-        return ''
-
-    prefix = "w+CAIQICI" + canonical_value
-    encoded_location = base64.urlsafe_b64encode(location.encode("utf-8")).decode("utf-8")
-    uule = prefix + encoded_location
-    return uule.rstrip('=')
-
-
-def _find_location(location_string):
-    """Extract location from parentheses. E.g. 'New York (New York, US)' -> 'New York, US'"""
-    if not location_string:
-        return None
-    start = location_string.find('(')
-    end = location_string.find(')')
-    if start != -1 and end != -1:
-        return location_string[start + 1:end].strip()
-    return None
 
 
 def _extract_domain(url):
@@ -85,119 +42,23 @@ def _extract_domain(url):
 
 def fetch_serp_data(keyword_text, region, isocode, language_code, uule='', platform='desktop'):
     """
-    Call ScrapingDog API to fetch Google SERP data.
-    Makes up to 3 paginated calls (page 0-2) = ~30 results.
-    Includes retry with backoff for rate-limited (429) responses.
+    Fetch Google SERP data via DataBlue.
+
+    Signature kept stable so existing callers don't break; `region`, `uule`,
+    and `platform` are accepted but not forwarded — DataBlue handles geo via
+    country+language and returns DATABLUE_NUM_RESULTS in one call.
     """
-    api_key = _get_api_key()
-    if not api_key:
-        logger.error("SCRAPINGDOG_API_KEY not configured")
-        return None
-
-    session = requests.Session()
-    all_organic = []
-    merged_json = {}
-    base_rank = 0
-
-    for page_num in range(3):
-        params = {
-            'api_key': api_key,
-            'query': keyword_text,
-            'country': isocode,
-            'language': language_code,
-            'domain': region,
-            'page': page_num,
-            'advance_search': 'false',
-        }
-        if uule:
-            params['uule'] = uule
-
-        # Retry up to 2 times per page on rate-limit or transient errors
-        max_retries = 2
-        for attempt in range(max_retries + 1):
-            try:
-                resp = session.get(SCRAPINGDOG_URL, params=params, timeout=(3.05, 15))
-
-                if resp.status_code == 200:
-                    try:
-                        page_json = resp.json()
-                    except (ValueError, TypeError):
-                        logger.warning(f"ScrapingDog returned non-JSON on page {page_num} for '{keyword_text}'")
-                        break  # skip this page
-                    if not isinstance(page_json, dict):
-                        break  # skip this page
-
-                    if page_num == 0:
-                        merged_json = page_json.copy()
-                        page_organic = page_json.get('organic_results', [])
-                        first_ranks = [
-                            x.get('rank') for x in page_organic
-                            if isinstance(x, dict) and isinstance(x.get('rank'), int)
-                        ]
-                        base_rank = max(first_ranks) if first_ranks else len(page_organic)
-                        all_organic.extend(page_organic)
-                    else:
-                        page_organic = page_json.get('organic_results', [])
-                        for item in page_organic:
-                            if isinstance(item, dict):
-                                base_rank += 1
-                                item['rank'] = base_rank
-                        all_organic.extend(page_organic)
-                    break  # success, move to next page
-
-                elif resp.status_code == 429:
-                    if attempt < max_retries:
-                        wait = 3 * (attempt + 1)  # 3s, 6s backoff
-                        logger.warning(
-                            f"ScrapingDog rate limit on page {page_num} for '{keyword_text}', "
-                            f"retry {attempt + 1}/{max_retries} in {wait}s"
-                        )
-                        time.sleep(wait)
-                        continue
-                    else:
-                        logger.warning(f"ScrapingDog rate limit on page {page_num} for '{keyword_text}', giving up")
-                        break
-
-                elif resp.status_code >= 500:
-                    # Server error — retry
-                    if attempt < max_retries:
-                        wait = 2 * (attempt + 1)
-                        logger.warning(
-                            f"ScrapingDog server error {resp.status_code} on page {page_num} for '{keyword_text}', "
-                            f"retry {attempt + 1}/{max_retries} in {wait}s"
-                        )
-                        time.sleep(wait)
-                        continue
-                    else:
-                        logger.warning(f"ScrapingDog error {resp.status_code} on page {page_num} for '{keyword_text}'")
-                        break
-
-                else:
-                    logger.warning(f"ScrapingDog error {resp.status_code} on page {page_num} for '{keyword_text}'")
-                    break
-
-            except requests.RequestException as e:
-                if attempt < max_retries:
-                    wait = 2 * (attempt + 1)
-                    logger.warning(
-                        f"ScrapingDog request failed for '{keyword_text}' page {page_num}: {e}, "
-                        f"retry {attempt + 1}/{max_retries} in {wait}s"
-                    )
-                    time.sleep(wait)
-                    continue
-                else:
-                    logger.error(f"ScrapingDog request failed for '{keyword_text}' page {page_num}: {e}")
-                    break
-
-    if merged_json:
-        merged_json['organic_results'] = all_organic
-
-    return merged_json if merged_json else None
+    return datablue_service.fetch_one(
+        keyword_text=keyword_text,
+        isocode=isocode,
+        language_code=language_code,
+    )
 
 
 def parse_json_serp_response(json_data, target_url, exact_domain=False):
     """
-    Parse ScrapingDog JSON response to extract rank and SERP features.
+    Parse SERP JSON response (DataBlue, normalized to ScrapingDog shape) to
+    extract rank and SERP features.
     """
     result = {
         'rank': 0,
@@ -341,10 +202,15 @@ def _check_status(num):
 
 
 class SeoRankingProcessor:
-    """Processes SEO keyword rankings using ScrapingDog API."""
+    """Processes SEO keyword rankings using DataBlue API."""
 
     def process_single_keyword(self, seo_kw_id):
-        """Process a single keyword: fetch SERP -> parse -> save to PostgreSQL."""
+        """Process a single keyword: fetch SERP -> parse -> save to PostgreSQL.
+
+        Used by the Celery per-keyword task (process_seo_keyword_task). For
+        domain-wide batches use process_domain_rankings, which pipelines fetch
+        and DB writes via async fetch_many.
+        """
         from shared_models.seo_models import SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory
 
         try:
@@ -371,25 +237,15 @@ class SeoRankingProcessor:
         except Exception:
             pass
 
-        # Build UULE for location targeting
-        uule = seo_kw.geo_target_uule
-        if not uule and seo_kw.geo_target:
-            location = _find_location(seo_kw.geo_target)
-            if location:
-                uule = _generate_uule(location)
-
         # Mark as busy
         SeoKeywordRank.objects.filter(id=seo_kw.id).update(auto_call_status='busy')
 
         try:
             # Step 1: Fetch SERP data
-            json_data = fetch_serp_data(
+            json_data = datablue_service.fetch_one(
                 keyword_text=keyword_text,
-                region=seo_kw.region,
                 isocode=seo_kw.isocode,
                 language_code=seo_kw.language_code,
-                uule=uule or '',
-                platform=seo_kw.platform,
             )
 
             if not json_data:
@@ -404,100 +260,113 @@ class SeoRankingProcessor:
                 exact_domain=False,
             )
 
-            live_rank = parsed['rank']
-            today = date.today()
-
-            with transaction.atomic():
-                # Step 3: Save rank history
-                SeoRankHistory.objects.update_or_create(
-                    seo_keyword_rank_id=seo_kw.id,
-                    snapshot_date=today,
-                    defaults={'rank_position': live_rank}
-                )
-
-                # Step 4: Compute rank changes from history
-                changes = self._compute_rank_changes(seo_kw.id, live_rank)
-
-                # Step 5: Calculate best rank
-                if live_rank > 0:
-                    if seo_kw.top_rank and seo_kw.top_rank > 0:
-                        top_rank = min(live_rank, seo_kw.top_rank)
-                    else:
-                        top_rank = live_rank
-                else:
-                    top_rank = seo_kw.top_rank
-
-                # Step 6: Build snippets
-                kw_snip = seo_kw.keyword_snippet or {'tdy': {}, 'best': {}}
-                kw_snip['tdy'] = parsed.get('today_snippet', {})
-                if live_rank > 0 and top_rank and live_rank <= top_rank:
-                    kw_snip['best'] = parsed.get('today_snippet', {})
-
-                # Step 7: Update keyword rank record
-                SeoKeywordRank.objects.filter(id=seo_kw.id).update(
-                    rank_now=live_rank,
-                    top_rank=top_rank,
-                    site_url=parsed.get('url', ''),
-                    day_val=changes['day_val'],
-                    day_mark=changes['day_mark'],
-                    week_val=changes['week_val'],
-                    week_mark=changes['week_mark'],
-                    half_month_val=changes['half_month_val'],
-                    half_month_mark=changes['half_month_mark'],
-                    month_val=changes['month_val'],
-                    month_mark=changes['month_mark'],
-                    status_from_start=changes['status_from_start'],
-                    featured_snippet=parsed['featured_snippet'],
-                    knowledge_panel=parsed['knowledge_panel'],
-                    ads=parsed['ads'],
-                    review=parsed['review'],
-                    total_rating=parsed['total_rating'],
-                    total_review=parsed['total_review'],
-                    snippets_details=parsed['snippets_details'],
-                    keyword_snippet=kw_snip,
-                    search_results=parsed['search_results'],
-                    cannibalisation=parsed['cannibalisation'],
-                    last_ranked_date=timezone.now(),
-                    auto_call_status='done',
-                    auto_refresh_count=seo_kw.auto_refresh_count + 1,
-                )
-
-                # Step 8: Update SERP feature history
-                SeoSerpFeatureHistory.objects.update_or_create(
-                    seo_keyword_rank_id=seo_kw.id,
-                    defaults={
-                        'featured_snippet_url_list': parsed['snippets_details'].get('featured_box', {}).get('link', ''),
-                        'featured_snippet_history': parsed['snippets_details'].get('featured_box', {}),
-                        'ad_snippet_history': parsed['snippets_details'].get('ads', {}),
-                        'comp_today': parsed['competitors'],
-                    }
-                )
-
-            logger.info(f"Ranked keyword '{keyword_text}' -> position {live_rank} (ID: {seo_kw.id})")
-            return True
+            return self._persist_parsed(seo_kw, parsed)
 
         except Exception as e:
             logger.error(f"Error processing keyword '{keyword_text}' (ID: {seo_kw.id}): {e}", exc_info=True)
             SeoKeywordRank.objects.filter(id=seo_kw.id).update(auto_call_status='fail')
             return False
 
+    def _persist_parsed(self, seo_kw, parsed):
+        """Write a parsed SERP result to the rank/history/snippet tables.
+
+        Shared by process_single_keyword and the batch on_result callback so
+        both code paths follow identical DB semantics.
+        """
+        from shared_models.seo_models import SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory
+
+        live_rank = parsed['rank']
+        today = date.today()
+        keyword_text = seo_kw.keyword.keyword if seo_kw.keyword else ''
+
+        with transaction.atomic():
+            # Save rank history
+            SeoRankHistory.objects.update_or_create(
+                seo_keyword_rank_id=seo_kw.id,
+                snapshot_date=today,
+                defaults={'rank_position': live_rank}
+            )
+
+            # Compute rank changes from history
+            changes = self._compute_rank_changes(seo_kw.id, live_rank)
+
+            # Calculate best rank
+            if live_rank > 0:
+                if seo_kw.top_rank and seo_kw.top_rank > 0:
+                    top_rank = min(live_rank, seo_kw.top_rank)
+                else:
+                    top_rank = live_rank
+            else:
+                top_rank = seo_kw.top_rank
+
+            # Build snippets
+            kw_snip = seo_kw.keyword_snippet or {'tdy': {}, 'best': {}}
+            kw_snip['tdy'] = parsed.get('today_snippet', {})
+            if live_rank > 0 and top_rank and live_rank <= top_rank:
+                kw_snip['best'] = parsed.get('today_snippet', {})
+
+            # Update keyword rank record
+            SeoKeywordRank.objects.filter(id=seo_kw.id).update(
+                rank_now=live_rank,
+                top_rank=top_rank,
+                site_url=parsed.get('url', ''),
+                day_val=changes['day_val'],
+                day_mark=changes['day_mark'],
+                week_val=changes['week_val'],
+                week_mark=changes['week_mark'],
+                half_month_val=changes['half_month_val'],
+                half_month_mark=changes['half_month_mark'],
+                month_val=changes['month_val'],
+                month_mark=changes['month_mark'],
+                status_from_start=changes['status_from_start'],
+                featured_snippet=parsed['featured_snippet'],
+                knowledge_panel=parsed['knowledge_panel'],
+                ads=parsed['ads'],
+                review=parsed['review'],
+                total_rating=parsed['total_rating'],
+                total_review=parsed['total_review'],
+                snippets_details=parsed['snippets_details'],
+                keyword_snippet=kw_snip,
+                search_results=parsed['search_results'],
+                cannibalisation=parsed['cannibalisation'],
+                last_ranked_date=timezone.now(),
+                auto_call_status='done',
+                auto_refresh_count=seo_kw.auto_refresh_count + 1,
+            )
+
+            # Update SERP feature history
+            SeoSerpFeatureHistory.objects.update_or_create(
+                seo_keyword_rank_id=seo_kw.id,
+                defaults={
+                    'featured_snippet_url_list': parsed['snippets_details'].get('featured_box', {}).get('link', ''),
+                    'featured_snippet_history': parsed['snippets_details'].get('featured_box', {}),
+                    'ad_snippet_history': parsed['snippets_details'].get('ads', {}),
+                    'comp_today': parsed['competitors'],
+                }
+            )
+
+        logger.info(f"Ranked keyword '{keyword_text}' -> position {live_rank} (ID: {seo_kw.id})")
+        return True
+
     def process_domain_rankings(self, domain_id, batch_size=500):
-        """Process all keywords for a domain in batches, then recalculate metrics.
+        """Process all keywords for a domain in batches via async pipelined
+        fetch + DB writes (rankmax pattern).
 
-        Designed to never crash: every keyword is wrapped in its own
-        try/except so a single bad keyword can never kill the batch.
-        DB connections are kept short-lived to survive long runs (3000+ kw).
+        Flow per batch:
+          1. Load up to batch_size 'avail' keyword rows.
+          2. datablue_service.fetch_many(items, on_result=cb) dispatches all
+             HTTP requests concurrently (capped by DATABLUE_CONCURRENCY).
+          3. As each SERP response lands, the on_result callback runs in a
+             thread pool — it parses + writes to DB while later fetches are
+             still in flight.
 
-        Processes in batches of `batch_size` to avoid Celery time limits.
-        Returns remaining_count > 0 if there are still unprocessed keywords,
-        signalling the caller to schedule a follow-up task.
+        Returns a dict including `remaining` so the caller can reschedule for
+        any leftover 'avail' rows. Failed rows are NOT retried in the same run
+        (preserves the existing daily-scheduler retry semantics).
         """
         from shared_models.seo_models import SeoKeywordRank, SeoDomainDailyMetrics
-        from django.db import connection
+        from shared_models.models import Domain
 
-        # Only pick up 'avail' keywords (unprocessed). Do NOT retry 'fail' keywords
-        # here — they already consumed API credits and will be retried by the daily
-        # scheduler next day. Retrying within the same run wastes ScrapingDog credits.
         keyword_ids = list(
             SeoKeywordRank.objects.filter(
                 domain_id=domain_id,
@@ -515,7 +384,50 @@ class SeoRankingProcessor:
             logger.info(f"No SEO keywords to process for domain {domain_id}")
             return {'processed': 0, 'success': 0, 'failed': 0, 'remaining': 0}
 
-        concurrency = SCRAPINGDOG_CONCURRENCY
+        # Load keyword rows + their text in one pass
+        seo_kw_rows = list(
+            SeoKeywordRank.objects.select_related('keyword').filter(id__in=keyword_ids)
+        )
+        seo_kw_by_id = {row.id: row for row in seo_kw_rows}
+
+        # Resolve domain target URL once (used as fallback for parser matching)
+        try:
+            domain_obj = Domain.objects.get(id=domain_id)
+            domain_url = domain_obj.url or ''
+        except Exception:
+            domain_url = ''
+
+        # Build the items dict for fetch_many; skip rows with no keyword link
+        items = {}
+        skipped_no_keyword = []
+        for row in seo_kw_rows:
+            if not row.keyword:
+                skipped_no_keyword.append(row.id)
+                continue
+            items[row.id] = {
+                'keyword': row.keyword.keyword,
+                'isocode': row.isocode or '',
+                'language_code': row.language_code or '',
+            }
+
+        # Mark all to-be-processed rows busy in one query (atomic batch flip)
+        if items:
+            SeoKeywordRank.objects.filter(id__in=list(items.keys())).update(
+                auto_call_status='busy'
+            )
+        if skipped_no_keyword:
+            SeoKeywordRank.objects.filter(id__in=skipped_no_keyword).update(
+                auto_call_status='fail'
+            )
+            logger.error(
+                f"[SEO] {len(skipped_no_keyword)} keyword rows had no linked keyword — marked fail"
+            )
+
+        # Read at call-time so .env / settings tweaks take effect on the next
+        # batch without needing a worker restart. The module-level constant
+        # only captures the value at first import, which silently locks in
+        # whatever was set when the worker started.
+        concurrency = getattr(settings, 'DATABLUE_CONCURRENCY', DATABLUE_CONCURRENCY)
         logger.info(
             f"Starting SEO rank check for domain {domain_id}: "
             f"batch={total}/{total_pending} pending, concurrency={concurrency}"
@@ -523,67 +435,69 @@ class SeoRankingProcessor:
 
         success_count = 0
         fail_count = 0
-        processed_count = 0
         timed_out = False
 
-        def _safe_process(kw_id):
-            """Wrapper that never raises — returns (kw_id, True/False).
-            Each thread gets its own DB connection which is cleaned up after use."""
+        def _on_result(fetch_result):
+            """Per-result callback — runs in a thread pool while other fetches
+            are still in flight. Wrap everything so a single failure can never
+            kill the pipeline.
+            """
+            from django.db import connection as thread_conn
             try:
-                from django.db import connection as thread_conn
                 thread_conn.close_if_unusable_or_obsolete()
-                result = self.process_single_keyword(kw_id)
-                return (kw_id, result)
+
+                kw_id = fetch_result.get('item_id')
+                seo_kw = seo_kw_by_id.get(kw_id)
+                if seo_kw is None:
+                    return False
+
+                if not fetch_result.get('success'):
+                    SeoKeywordRank.objects.filter(id=kw_id).update(auto_call_status='fail')
+                    return False
+
+                json_data = fetch_result.get('data')
+                target_url = seo_kw.target_url or domain_url
+                parsed = parse_json_serp_response(
+                    json_data=json_data,
+                    target_url=target_url,
+                    exact_domain=False,
+                )
+                return self._persist_parsed(seo_kw, parsed)
             except Exception as e:
+                kw_id = fetch_result.get('item_id') if isinstance(fetch_result, dict) else None
                 logger.error(
-                    f"[SEO] Unexpected error processing keyword ID {kw_id}: {e}",
-                    exc_info=True
+                    f"[SEO] on_result callback failed for keyword ID {kw_id}: {e}",
+                    exc_info=True,
                 )
                 try:
-                    SeoKeywordRank.objects.filter(id=kw_id).update(auto_call_status='fail')
+                    if kw_id is not None:
+                        SeoKeywordRank.objects.filter(id=kw_id).update(auto_call_status='fail')
                 except Exception:
                     pass
-                return (kw_id, False)
+                return False
             finally:
-                # Close this thread's DB connection to avoid connection leaks
-                from django.db import connection as thread_conn
-                thread_conn.close()
+                try:
+                    thread_conn.close()
+                except Exception:
+                    pass
 
         try:
-            with ThreadPoolExecutor(max_workers=concurrency) as executor:
-                futures = {
-                    executor.submit(_safe_process, kw_id): kw_id
-                    for kw_id in keyword_ids
-                }
-
-                for future in as_completed(futures):
-                    kw_id, result = future.result()
-                    processed_count += 1
-                    if result:
-                        success_count += 1
-                    else:
-                        fail_count += 1
-
-                    # Log progress every 50 keywords
-                    if processed_count % 50 == 0:
-                        logger.info(
-                            f"[SEO] Domain {domain_id} progress: {processed_count}/{total} "
-                            f"(success={success_count}, failed={fail_count})"
-                        )
-
-                    # Close stale DB connections in main thread every 100 keywords
-                    if processed_count % 100 == 0:
-                        connection.close_if_unusable_or_obsolete()
-
+            results = datablue_service.fetch_many(
+                items=items,
+                on_result=_on_result,
+                concurrency=concurrency,
+            )
+            for r in results:
+                cb_ok = r.get('cb') is True
+                if cb_ok:
+                    success_count += 1
+                else:
+                    fail_count += 1
         except SoftTimeLimitExceeded:
             timed_out = True
             logger.warning(
-                f"[SEO] Domain {domain_id} hit time limit at {processed_count}/{total}. "
-                f"Will schedule follow-up task for remaining keywords."
+                f"[SEO] Domain {domain_id} hit time limit during fetch_many."
             )
-            # Cancel pending futures
-            for f in futures:
-                f.cancel()
 
         # Recalculate domain metrics (wrapped so it never kills the task)
         metrics = None
@@ -598,6 +512,7 @@ class SeoRankingProcessor:
             auto_call_status='avail'
         ).count()
 
+        processed_count = success_count + fail_count
         logger.info(
             f"Domain {domain_id} SEO batch complete: "
             f"{success_count} success, {fail_count} failed, {remaining} remaining"

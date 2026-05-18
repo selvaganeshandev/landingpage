@@ -447,14 +447,17 @@ export const GenerateContentDialog = ({
     const isSocialMedia = socialMediaTypes.some(t => t.id === formData.articleType);
     const isCommunity = communityPostTypes.some(t => t.id === formData.articleType);
 
-    if (isSocialMedia && formData.wordCount > 500) {
-      // Default to medium length for social media
+    // Allowed dropdown values for each content-type bucket. Must match the
+    // <SelectItem value="..."> entries rendered below.
+    const mainArticleOptions = [300, 800, 1500, 2500, 3500];
+    const socialMediaOptions = [50, 150, 300, 500];
+    const communityOptions = [150, 400, 800, 1500];
+
+    if (isSocialMedia && !socialMediaOptions.includes(formData.wordCount)) {
       setFormData(prev => ({ ...prev, wordCount: 150 }));
-    } else if (isCommunity && (formData.wordCount > 1500 || formData.wordCount < 150)) {
-      // Default to standard length for community
+    } else if (isCommunity && !communityOptions.includes(formData.wordCount)) {
       setFormData(prev => ({ ...prev, wordCount: 400 }));
-    } else if (!isSocialMedia && !isCommunity && formData.wordCount < 800) {
-      // Reset to standard length for articles/webpages
+    } else if (!isSocialMedia && !isCommunity && !mainArticleOptions.includes(formData.wordCount)) {
       setFormData(prev => ({ ...prev, wordCount: 1500 }));
     }
   }, [formData.articleType]);
@@ -591,6 +594,9 @@ export const GenerateContentDialog = ({
         article_type: formData.articleType,
         target_country: formData.targetCountry,
         target_language: formData.targetLanguage,
+        // Send the same filtered references the content step uses so the
+        // outline is planned around the actual URL content, not blind.
+        references: formData.references.filter(ref => ref.type === 'text' ? ref.description.trim() !== '' : ref.url.trim() !== ''),
         tone: formData.tone,
         style: formData.style,
         audience: formData.audience,
@@ -1812,6 +1818,7 @@ export const GenerateContentDialog = ({
                         </>
                       ) : (
                         <>
+                          <SelectItem value="700">Below 800 words</SelectItem>
                           <SelectItem value="800">800-1,000 words</SelectItem>
                           <SelectItem value="1500">1,000-2,000 words</SelectItem>
                           <SelectItem value="2500">2,000-3,000 words</SelectItem>

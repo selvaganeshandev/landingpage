@@ -258,6 +258,27 @@ def create_template():
         attr_text=f"'_Lookup'!$M$2:$M${1 + len(PRIORITIES)}"
     ))
 
+    # Named ranges for cascading Word Count dropdown — one per Content
+    # Category. The data validation in column H uses INDIRECT against these
+    # so users only see word counts that apply to the category they picked
+    # (e.g. Articles/Web Pages show 800+, Social Media shows 50-500).
+    wb.defined_names.add(DefinedName(
+        name="WC_Social_Media",
+        attr_text=f"'_Lookup'!$J$2:$J${1 + len(WORD_COUNTS_SOCIAL)}"
+    ))
+    wb.defined_names.add(DefinedName(
+        name="WC_Community",
+        attr_text=f"'_Lookup'!$K$2:$K${1 + len(WORD_COUNTS_COMMUNITY)}"
+    ))
+    wb.defined_names.add(DefinedName(
+        name="WC_Articles",
+        attr_text=f"'_Lookup'!$L$2:$L${1 + len(WORD_COUNTS_ARTICLES_PAGES)}"
+    ))
+    wb.defined_names.add(DefinedName(
+        name="WC_Web_Pages",
+        attr_text=f"'_Lookup'!$L$2:$L${1 + len(WORD_COUNTS_ARTICLES_PAGES)}"
+    ))
+
     # ── Data Validations on "Bulk Upload" sheet ───────────────────────────
     data_range = f"2:{MAX_DATA_ROWS + 1}"
 
@@ -337,21 +358,30 @@ def create_template():
     dv_audience.add(f"G2:G{MAX_DATA_ROWS + 1}")
     ws.add_data_validation(dv_audience)
 
-    # H: Word Count — combined all valid word counts
-    all_word_counts = sorted(set(
-        WORD_COUNTS_SOCIAL + WORD_COUNTS_COMMUNITY + WORD_COUNTS_ARTICLES_PAGES
-    ), key=int)
-    wc_list = ",".join(all_word_counts)
+    # H: Word Count — cascading dropdown using INDIRECT, scoped to the
+    # category picked in column A. Only valid word counts for that category
+    # show up — Articles/Web Pages: 800-3500, Social Media: 50-500,
+    # Community: 150-1500. Mirrors the cascading pattern used for column B.
     dv_wordcount = DataValidation(
         type="list",
-        formula1=f'"{wc_list}"',
+        formula1='=INDIRECT("WC_"&SUBSTITUTE(A2," ","_"))',
         allow_blank=False,
         showErrorMessage=True,
         errorTitle="Invalid Word Count",
-        error=f"Please select a valid word count: {wc_list}",
+        error=(
+            "Please first select a Content Category in column A, then choose "
+            "a valid Word Count for that category. "
+            "Articles/Web Pages: 800-3500 | Social Media: 50-500 | "
+            "Community: 150-1500"
+        ),
         showInputMessage=True,
         promptTitle="Word Count",
-        prompt="Social Media: 50-500 | Community: 150-1500 | Articles/Pages: 800-3500",
+        prompt=(
+            "First select Content Category (column A), then pick a Word "
+            "Count valid for that category. "
+            "Articles/Web Pages: 800-3500 | Social Media: 50-500 | "
+            "Community: 150-1500"
+        ),
     )
     dv_wordcount.add(f"H2:H{MAX_DATA_ROWS + 1}")
     ws.add_data_validation(dv_wordcount)
@@ -399,7 +429,7 @@ def create_template():
         ("Target Country *", "Dropdown: Select from 31 countries or Global"),
         ("Target Language *", "Dropdown: Select English variant (US, UK, Australian, etc.)"),
         ("Target Audience *", "Dropdown: General | Beginners | Professionals | Experts"),
-        ("Word Count *", "Dropdown: Social Media(50-500) | Community(150-1500) | Articles/Pages(800-3500)"),
+        ("Word Count *", "Cascading Dropdown: Options change based on Content Category. Articles/Web Pages: 800-3500 | Social Media: 50-500 | Community: 150-1500"),
         ("Tone of Voice", "Free text: e.g., Professional, Friendly, Casual, Persuasive, Enthusiastic"),
         ("Content Style", "Free text: e.g., Informative, Analytical, Technical, Storytelling, Engaging"),
         ("Key Messages", "Free text: Key messages or brand values to incorporate in the content"),

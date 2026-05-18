@@ -130,6 +130,10 @@ def generate_content(request):
             'reference_repository_context': reference_repository_context,
         }
 
+        # Enrich reference URLs with actual fetched content to prevent hallucination
+        if generation_params.get('references'):
+            generation_params['references'] = _enrich_references_with_content(generation_params['references'])
+
         # Generate content using Claude
         logger.info(f"Generating content for domain {domain.id}: {validated_data['title']}")
         generation_result = generator.generate_content(generation_params)
@@ -250,6 +254,7 @@ def generate_outline(request):
             'article_type': validated_data.get('article_type', 'blog'),
             'target_country': validated_data.get('target_country', 'united_states'),
             'target_language': validated_data.get('target_language', 'us_english'),
+            'references': validated_data.get('references', []),
             'tone': validated_data.get('tone', 'professional'),
             'style': validated_data.get('style', 'informative'),
             'audience': validated_data.get('audience', 'general'),
@@ -259,6 +264,12 @@ def generate_outline(request):
             'additional_instructions': validated_data.get('additional_instructions', ''),
             'reference_repository_context': reference_repository_context,
         }
+
+        # Enrich reference URLs with actual fetched content so the outline
+        # is shaped by what the URLs actually contain (same treatment the
+        # content-generation step already applies).
+        if generation_params.get('references'):
+            generation_params['references'] = _enrich_references_with_content(generation_params['references'])
 
         # Generate outline
         logger.info(f"Generating outline for domain {domain.id}: {validated_data['title']}")
@@ -357,8 +368,13 @@ def generate_content_from_outline(request):
             'topics_to_avoid': validated_data.get('topics_to_avoid', ''),
             'additional_instructions': validated_data.get('additional_instructions', ''),
             'brand_values': validated_data.get('brand_values', ''),
+            'references': validated_data.get('references', []),
             'reference_repository_context': reference_repository_context,
         }
+
+        # Enrich reference URLs with actual fetched content to prevent hallucination
+        if generation_params.get('references'):
+            generation_params['references'] = _enrich_references_with_content(generation_params['references'])
 
         # Generate content from outline
         logger.info(f"Generating content from outline for domain {domain.id}: {validated_data['title']}")
@@ -1992,6 +2008,58 @@ BULK_EXCEL_COLUMNS = [
 ]
 
 
+def _validate_bulk_outline(outline, generation_params):
+    # Guard against the LLM silently truncating the outline JSON for long
+    # articles, which previously caused trailing sections (and their
+    # keywords) to vanish from bulk-upload output. Returns (is_valid, reason).
+    if not outline or not isinstance(outline, list):
+        return False, "outline is empty or not a list"
+
+    if len(outline) < 2:
+        return False, f"outline has only {len(outline)} section(s); expected at least 2"
+
+    for i, section in enumerate(outline):
+        if not isinstance(section, dict):
+            return False, f"section {i} is not a JSON object"
+        title = (section.get('title') or '').strip()
+        if not title:
+            return False, f"section {i} has no title"
+        key_points = section.get('key_points', [])
+        if key_points and not isinstance(key_points, list):
+            return False, f"section {i} key_points is malformed"
+
+    # If estimated_words sum is far below the requested target, the outline
+    # was almost certainly truncated mid-array and lost the trailing sections.
+    word_count = generation_params.get('word_count', 1500) or 1500
+    total_estimated = sum(
+        s.get('estimated_words', 0) for s in outline
+        if isinstance(s.get('estimated_words'), int)
+    )
+    if total_estimated > 0 and total_estimated < int(word_count * 0.5):
+        return False, (
+            f"estimated_words sum ({total_estimated}) is below 50% of target "
+            f"({word_count}); outline likely truncated"
+        )
+
+    # Every target keyword must be represented in at least one section's
+    # title or key_points — matches the explicit instruction the outline
+    # prompt gives the LLM.
+    keywords_str = generation_params.get('keywords', '') or ''
+    if keywords_str.strip():
+        keyword_list = [
+            k.strip().lower() for k in re.split(r'[,;]', keywords_str) if k.strip()
+        ]
+        outline_text = ' '.join(
+            (s.get('title') or '') + ' ' + ' '.join(s.get('key_points') or [])
+            for s in outline
+        ).lower()
+        missing = [k for k in keyword_list if k and k not in outline_text]
+        if missing:
+            return False, f"keywords missing from outline: {missing}"
+
+    return True, ""
+
+
 def _run_bulk_generation_queue(batch_id):
     """
     Background thread: processes all 'processed' items in a batch ONE BY ONE.
@@ -2008,6 +2076,9 @@ def _run_bulk_generation_queue(batch_id):
         ).order_by('row_number')
 
         generator = ClaudeContentGenerator()
+        # Per-batch URL cache so identical reference URLs across rows are
+        # fetched once rather than once per row.
+        url_fetch_cache = {}
 
         for item in items:
             try:
@@ -2049,18 +2120,64 @@ def _run_bulk_generation_queue(batch_id):
                     'brand_values': '',
                 }
 
+                # Enrich reference URLs with actual fetched content to prevent hallucination.
+                # The per-batch cache avoids re-fetching the same URL for multiple rows.
+                if generation_params.get('references'):
+                    generation_params['references'] = _enrich_references_with_content(
+                        generation_params['references'], cache=url_fetch_cache
+                    )
+
                 # Generate content using 2-step process for better structure:
                 # Step 1: Generate outline, Step 2: Generate from outline
-                # This ensures the content follows a logical flow (Issue 11)
+                # This ensures the content follows a logical flow (Issue 11).
+                # Outline JSON is validated for completeness before content
+                # generation; if it's truncated/incomplete we retry once with
+                # a larger token budget, then fall back to direct generation.
                 logger.info(f"Bulk item {item.id} (row {item.row_number}): generating outline for '{item.title}'")
+                generation_result = None
                 try:
                     outline_result = generator.generate_outline(generation_params)
                     outline = outline_result.get('outline', [])
-                    if outline:
-                        logger.info(f"Bulk item {item.id}: generating content from {len(outline)}-section outline")
-                        generation_result = generator.generate_content_from_outline(generation_params, outline)
+
+                    is_valid, reason = _validate_bulk_outline(outline, generation_params)
+
+                    if not is_valid:
+                        logger.warning(
+                            f"Bulk item {item.id}: outline validation failed "
+                            f"({reason}); retrying with extended token budget"
+                        )
+                        try:
+                            outline_result = generator.generate_outline(
+                                generation_params, extended_tokens=True
+                            )
+                            outline = outline_result.get('outline', [])
+                            is_valid, reason = _validate_bulk_outline(
+                                outline, generation_params
+                            )
+                            if is_valid:
+                                logger.info(
+                                    f"Bulk item {item.id}: outline retry produced "
+                                    f"a valid {len(outline)}-section outline"
+                                )
+                        except Exception as retry_err:
+                            logger.warning(
+                                f"Bulk item {item.id}: outline retry failed: {retry_err}"
+                            )
+                            is_valid = False
+
+                    if is_valid and outline:
+                        logger.info(
+                            f"Bulk item {item.id}: generating content from "
+                            f"{len(outline)}-section outline"
+                        )
+                        generation_result = generator.generate_content_from_outline(
+                            generation_params, outline
+                        )
                     else:
-                        logger.info(f"Bulk item {item.id}: outline empty, falling back to direct generation")
+                        logger.info(
+                            f"Bulk item {item.id}: falling back to direct generation "
+                            f"(reason: {reason or 'empty outline'})"
+                        )
                         generation_result = generator.generate_content(generation_params)
                 except Exception as outline_err:
                     logger.warning(
@@ -2218,6 +2335,11 @@ def _run_single_item_generation(item_id):
             'additional_instructions': item.additional_instructions or '',
             'brand_values': '',
         }
+
+        # Enrich reference URLs with actual fetched content to prevent hallucination.
+        # (The original batch path already does this; the retry path was missing it.)
+        if generation_params.get('references'):
+            generation_params['references'] = _enrich_references_with_content(generation_params['references'])
 
         generator = ClaudeContentGenerator()
         generation_result = generator.generate_content(generation_params)
@@ -3133,6 +3255,127 @@ def _fetch_image_metadata(url):
     except Exception as e:
         logger.warning(f"Image metadata fetch failed for {url}: {e}")
         return None
+
+
+def _fetch_url_content(url, max_words=3500, timeout=15):
+    """
+    Fetch and extract readable text content from a URL for use in content generation.
+    Returns dict with 'title', 'text_content', 'word_count', 'url' or None on failure.
+    """
+    try:
+        if not url or not url.strip():
+            return None
+
+        url = url.strip()
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+
+        url_lower = url.lower()
+        # Skip non-text URLs
+        image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico')
+        if any(url_lower.split('?')[0].endswith(ext) for ext in image_extensions):
+            return None
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; PromptmaxxBot/1.0)',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+
+        resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+        resp.raise_for_status()
+
+        content_type = resp.headers.get('Content-Type', '')
+        if content_type.startswith('image/'):
+            return None
+
+        html_content = resp.text
+
+        # Try trafilatura for clean text extraction
+        try:
+            import trafilatura
+            extracted = trafilatura.extract(html_content, include_comments=False, include_tables=True)
+            if extracted and len(extracted.strip()) > 50:
+                words = extracted.split()
+                if len(words) > max_words:
+                    extracted = ' '.join(words[:max_words]) + '\n[Content truncated]'
+                metadata = trafilatura.extract_metadata(html_content)
+                title = metadata.title if metadata and metadata.title else ''
+                return {
+                    'title': title,
+                    'text_content': extracted,
+                    'word_count': len(extracted.split()),
+                    'url': url,
+                }
+        except ImportError:
+            pass
+
+        # Fallback: basic BeautifulSoup extraction
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, 'html.parser')
+            for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'form', 'iframe', 'noscript']):
+                tag.decompose()
+            main_content = (
+                soup.find('article') or soup.find('main') or
+                soup.find('div', {'role': 'main'}) or soup.body or soup
+            )
+            text = main_content.get_text(separator='\n', strip=True)
+            words = text.split()
+            if len(words) > max_words:
+                text = ' '.join(words[:max_words]) + '\n[Content truncated]'
+            title_tag = soup.find('title')
+            title = title_tag.get_text(strip=True) if title_tag else ''
+            return {
+                'title': title,
+                'text_content': text,
+                'word_count': len(text.split()),
+                'url': url,
+            }
+        except ImportError:
+            pass
+
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to fetch URL content for {url}: {e}")
+        return None
+
+
+def _enrich_references_with_content(references, max_refs=5, cache=None):
+    """
+    Fetch actual content for reference URLs to prevent AI hallucination.
+    Adds 'fetched_content' and 'fetched_title' keys to each reference dict.
+
+    Pass ``cache`` (a dict) to reuse fetched content across multiple calls —
+    the bulk generation queue passes a single cache so the same URL appearing
+    in many rows is only fetched once per batch.
+    """
+    enriched = []
+    for ref in references[:max_refs]:
+        url = ref.get('url', '')
+        if not url:
+            enriched.append(ref)
+            continue
+
+        # Normalize URL for cache key so trailing spaces / case don't miss.
+        cache_key = url.strip().lower()
+        if cache is not None and cache_key in cache:
+            fetched = cache[cache_key]
+        else:
+            fetched = _fetch_url_content(url, max_words=3500, timeout=15)
+            if cache is not None:
+                cache[cache_key] = fetched
+
+        ref_copy = dict(ref)
+        if fetched and fetched.get('text_content'):
+            ref_copy['fetched_content'] = fetched['text_content']
+            ref_copy['fetched_title'] = fetched.get('title', '')
+            logger.info(f"[REF-URL] Using {fetched['word_count']} words from {url}")
+        else:
+            ref_copy['fetched_content'] = None
+            logger.warning(f"[REF-URL] Could not fetch content from {url}")
+        enriched.append(ref_copy)
+
+    return enriched
 
 
 @api_view(['POST'])

@@ -168,9 +168,14 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 GEMINI_API_KEY = config('GEMINI_API_KEY', default=None)
 PERPLEXITY_API_KEY = config('PERPLEXITY_API_KEY', default=None)
 
-# ScrapingDog API Configuration (for web crawling in misinformation detection)
+# ScrapingDog API Configuration (still used by misinformation crawler — /scrape endpoint)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
-SCRAPINGDOG_CONCURRENCY = config('SCRAPINGDOG_CONCURRENCY', default=10, cast=int)
+
+# DataBlue API Configuration (SEO keyword ranking / SERP — /v1/data/google/search)
+DATABLUE_API_KEY = config('DATABLUE_API_KEY', default='')
+DATABLUE_NUM_RESULTS = config('DATABLUE_NUM_RESULTS', default=50, cast=int)
+DATABLUE_CONCURRENCY = config('DATABLUE_CONCURRENCY', default=100, cast=int)
+DATABLUE_TIMEOUT = config('DATABLUE_TIMEOUT', default=60, cast=int)
 
 # ==================== EMAIL CONFIGURATION (MAILGUN HTTP API) ====================
 # Mailgun HTTP API Configuration for report email delivery
@@ -206,6 +211,18 @@ CELERY_ACCEPT_CONTENT = [config('CELERY_ACCEPT_CONTENT', default='json')]
 CELERY_TASK_SERIALIZER = config('CELERY_TASK_SERIALIZER', default='json')
 CELERY_RESULT_SERIALIZER = config('CELERY_RESULT_SERIALIZER', default='json')
 CELERY_TIMEZONE = TIME_ZONE
+
+# Route SEO ranking tasks to a dedicated queue so user-triggered refreshes
+# don't get stuck behind the prompt/competitor analytics backlog on the
+# default queue (which can pile up to thousands of tasks during scheduler
+# bursts). Other tasks keep their existing routing — the default 'celery'
+# queue. A dedicated worker must be running with `-Q seo` for SEO tasks to
+# be processed; see start-celery.sh.
+CELERY_TASK_ROUTES = {
+    'core.processing_tasks.process_seo_domain_task': {'queue': 'seo'},
+    'core.processing_tasks.process_seo_keyword_task': {'queue': 'seo'},
+    'core.processing_tasks.seo_rankings_daily_scheduler': {'queue': 'seo'},
+}
 
 # Auto-expire task results after 1 day (reduce Redis usage); set to None if not needed
 from datetime import timedelta

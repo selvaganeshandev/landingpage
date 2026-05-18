@@ -109,6 +109,46 @@ const buildHtmlTable = (rows: string[]): string => {
 };
 
 /**
+ * Strips leading/trailing markdown code fences ```html ... ``` that the AI
+ * sometimes wraps the entire response in. Without this, the fences leak into
+ * the editor and the tags inside the fence stay as literal text.
+ */
+const stripCodeFences = (html: string): string => {
+  let result = html.trim();
+  result = result.replace(/^```[a-zA-Z]*\s*\r?\n/, '');
+  result = result.replace(/\r?\n```\s*$/, '');
+  return result.trim();
+};
+
+/**
+ * When stored content comes back entity-escaped (e.g. "&lt;h2&gt;...") the
+ * editor's innerHTML shows the tags as literal text instead of structure.
+ * Decode only when the content is predominantly escaped so we don't corrupt
+ * legitimate entities inside normal HTML.
+ */
+const decodeEscapedHtml = (html: string): string => {
+  const escapedCount = (html.match(/&lt;|&gt;/g) || []).length;
+  const rawCount = (html.match(/[<>]/g) || []).length;
+  if (escapedCount === 0 || escapedCount <= rawCount) return html;
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = html;
+  return textarea.value;
+};
+
+/**
+ * Removes an outer <pre><code>...</code></pre> wrapper around the whole
+ * document — otherwise every inner tag renders as text inside the code block.
+ */
+const unwrapOuterCodeBlock = (html: string): string => {
+  const trimmed = html.trim();
+  const preMatch = trimmed.match(/^<pre[^>]*>\s*<code[^>]*>([\s\S]*)<\/code>\s*<\/pre>$/i);
+  if (preMatch) return preMatch[1].trim();
+  const codeMatch = trimmed.match(/^<code[^>]*>([\s\S]*)<\/code>$/i);
+  if (codeMatch) return codeMatch[1].trim();
+  return html;
+};
+
+/**
  * Converts leftover markdown tables and images in HTML content to proper HTML elements.
  *
  * Problem: The AI backend sometimes returns content_html with markdown syntax:
@@ -244,6 +284,7 @@ const ContentEditor = () => {
   const [headingsCount, setHeadingsCount] = useState(0);
   const [paragraphsCount, setParagraphsCount] = useState(0);
   const [imagesCount, setImagesCount] = useState(0);
+  const [listsCount, setListsCount] = useState(0);
   const [contentScore, setContentScore] = useState(0);
   const [scoreInfoOpen, setScoreInfoOpen] = useState(false);
 
@@ -464,6 +505,12 @@ const ContentEditor = () => {
           // Strip H1 from content since title is now shown separately
           // Also remove any inline line-height styles that might cause inconsistent spacing
           let htmlContent = contentRecord.content_html || "";
+          // Safety net for older records: strip code fences, unwrap outer
+          // <pre><code> wrappers, and decode entity-escaped HTML so tags
+          // render as structure instead of literal "<h2>..." text.
+          htmlContent = stripCodeFences(htmlContent);
+          htmlContent = unwrapOuterCodeBlock(htmlContent);
+          htmlContent = decodeEscapedHtml(htmlContent);
           htmlContent = htmlContent.replace(/<h1[^>]*>.*?<\/h1>/gi, '').trim();
           // Remove line-height from inline styles
           htmlContent = htmlContent.replace(/line-height:\s*[^;"}]+;?/gi, '');
@@ -941,6 +988,10 @@ const ContentEditor = () => {
     const imgCount = (html.match(/<img/gi) || []).length;
     setImagesCount(imgCount);
 
+    // Lists count (<ul> and <ol>)
+    const listCount = (html.match(/<(?:ul|ol)\b/gi) || []).length;
+    setListsCount(listCount);
+
     // Section word counts (Issue 10)
     const sections: Array<{ heading: string; wordCount: number }> = [];
     const h2Regex = /<h2[^>]*>(.*?)<\/h2>/gi;
@@ -1265,27 +1316,75 @@ const ContentEditor = () => {
         domain_id: contentData?.domain_id
       });
 
-      if (response.status === 'success' && response.rewritten_text) {
-        // Focus editor and restore selection
-        editorRef.current?.focus();
+      if (response.status === 'success' && response.rewritten_text && editorRef.current) {
+        // Replace the selected text with the rewritten content.
+        //
+        // We deliberately AVOID document.execCommand('insertHTML', ...) here.
+        // execCommand inherits the selection's active formatting state — so
+        // if the user's selection happened to start inside a <strong> (or
+        // any inline wrapper), every block of the inserted HTML (h2, p, li,
+        // …) ended up inheriting bold/italic and the whole rewrite rendered
+        // bold. That was the visible bug in the editor screenshots.
+        //
+        // Instead, we use the SAME pattern the "Add new content" flow uses
+        // (see line where editorRef.current.innerHTML = content): direct
+        // innerHTML write. To do that without losing track of which part of
+        // the article was selected, we drop two unique text-node markers at
+        // the selection boundaries, read editorRef.innerHTML, and splice
+        // the rewritten HTML between the markers.
+        //
+        // Why this matches Add's behaviour: both flows now go through a
+        // plain `innerHTML = ...` assignment, which the browser parses as
+        // fresh top-level HTML — no inherited formatting state, no execCommand.
+        const rewritten = response.rewritten_text;
 
-        const selection = window.getSelection();
-        if (selection && selectedRangeRef.current) {
-          selection.removeAllRanges();
-          selection.addRange(selectedRangeRef.current);
+        const sessionId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        const START_MARKER = `__REWRITE_START_${sessionId}__`;
+        const END_MARKER = `__REWRITE_END_${sessionId}__`;
 
-          // Replace selected text with rewritten content
-          document.execCommand('insertText', false, response.rewritten_text);
+        // Insert end marker first so the end position doesn't drift when
+        // we then insert the start marker.
+        const endRange = selectedRangeRef.current.cloneRange();
+        endRange.collapse(false);
+        endRange.insertNode(document.createTextNode(END_MARKER));
 
-          // Update content state
-          handleContentChange();
+        const startRange = selectedRangeRef.current.cloneRange();
+        startRange.collapse(true);
+        startRange.insertNode(document.createTextNode(START_MARKER));
 
+        let html = editorRef.current.innerHTML;
+        const startIdx = html.indexOf(START_MARKER);
+        const endIdx = html.indexOf(END_MARKER);
+
+        if (startIdx !== -1 && endIdx > startIdx) {
+          // Splice the rewritten HTML in place of the marker-bracketed region.
+          html =
+            html.substring(0, startIdx) +
+            rewritten +
+            html.substring(endIdx + END_MARKER.length);
+          editorRef.current.innerHTML = html;
+        } else {
+          // Failsafe: markers got mangled (e.g. by a CSS transform or other
+          // mutation observer) — strip any stragglers and bail out without
+          // corrupting the article.
+          html = html.split(START_MARKER).join('').split(END_MARKER).join('');
+          editorRef.current.innerHTML = html;
           toast({
-            title: "Content rewritten",
-            description: "The selected text has been rewritten successfully.",
+            title: "Rewrite failed",
+            description: "Could not locate the selected text in the editor. Please re-select and try again.",
+            variant: "destructive",
           });
+          return;
         }
-      } else {
+
+        // Sync React state with the new editor HTML
+        handleContentChange();
+
+        toast({
+          title: "Content rewritten",
+          description: "The selected text has been rewritten successfully.",
+        });
+      } else if (response.status !== 'success' || !response.rewritten_text) {
         toast({
           title: "Rewrite failed",
           description: response.message || "Failed to rewrite content",
@@ -3051,7 +3150,7 @@ const ContentEditor = () => {
                 <h3 className="font-semibold">Content Structure</h3>
               </div>
 
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-5 gap-1.5">
                 <div className="bg-muted/30 rounded-md p-1.5 text-center">
                   <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Words</div>
                   <div className="text-sm font-bold leading-tight">{wordCount}</div>
@@ -3071,6 +3170,13 @@ const ContentEditor = () => {
                   <div className="text-sm font-bold leading-tight">{paragraphsCount}</div>
                   <div className={`text-[9px] leading-tight ${wordCount > 0 ? (paragraphsCount >= Math.floor(wordCount / 150) ? 'text-green-600' : 'text-amber-600') : 'text-muted-foreground'}`}>
                     {wordCount > 0 ? `≥${Math.floor(wordCount / 150)}` : '—'}
+                  </div>
+                </div>
+                <div className="bg-muted/30 rounded-md p-1.5 text-center">
+                  <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Lists</div>
+                  <div className="text-sm font-bold leading-tight">{listsCount}</div>
+                  <div className={`text-[9px] leading-tight ${wordCount > 0 ? (listsCount >= (wordCount >= 1000 ? 2 : wordCount >= 500 ? 1 : 0) ? 'text-green-600' : 'text-amber-600') : 'text-muted-foreground'}`}>
+                    {wordCount > 0 ? (wordCount >= 1000 ? '≥2' : wordCount >= 500 ? '≥1' : '—') : '—'}
                   </div>
                 </div>
                 <div className="bg-muted/30 rounded-md p-1.5 text-center">
