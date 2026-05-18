@@ -53,10 +53,7 @@ instance/
 .webassets-cache
 
 # Celery
-celerybeat-schedule
-celerybeat-schedule.db
-celerybeat-schedule-shm
-celerybeat-schedule-wal
+celerybeat-schedule*
 
 # Database dumps
 *.rdb

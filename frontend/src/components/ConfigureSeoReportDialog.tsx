@@ -114,6 +114,7 @@ export function ConfigureSeoReportDialog({
       gaType: "Landing Pages",
       rankMetrics: [] as string[],
       summaryMetric: "google_analytics",
+      summaryEventNames: "Register_submit, otp_verified, Live_account",
       schedule: "Weekly Schedule",
       weekInterval: "Past 2 weeks",
       monthInterval: "Past 3 months",
@@ -274,10 +275,12 @@ export function ConfigureSeoReportDialog({
           google_search_console: "gsc_overview",
           keyword_ranking: "keyword_ranking_overview",
           ga_organic_traffic_breakup: "ga_organic_traffic_breakup",
+          ga_country_events: "ga_country_events",
         };
         const needsGa =
           formState.summaryMetric === "google_analytics" ||
-          formState.summaryMetric === "ga_organic_traffic_breakup";
+          formState.summaryMetric === "ga_organic_traffic_breakup" ||
+          formState.summaryMetric === "ga_country_events";
         if (needsGa && !isGaConnected) {
           toast({
             title: "Validation",
@@ -299,6 +302,20 @@ export function ConfigureSeoReportDialog({
           return;
         }
         sheetType = summaryMap[formState.summaryMetric] || "ga_overview";
+        if (formState.summaryMetric === "ga_country_events") {
+          metrics = (formState.summaryEventNames || "")
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter((s: string) => s.length > 0);
+          if (metrics.length === 0) {
+            toast({
+              title: "Validation",
+              description: "Enter at least one event name (comma-separated) for Country-wise Events.",
+              variant: "destructive",
+            });
+            return;
+          }
+        }
         break;
       }
     }
@@ -711,6 +728,10 @@ function OverviewForm({
             value: "ga_organic_traffic_breakup",
             label: "GA Organic Traffic Breakup",
           },
+          {
+            value: "ga_country_events",
+            label: "GA Country-wise Events",
+          },
         ].map((item) => (
           <label
             key={item.value}
@@ -733,6 +754,28 @@ function OverviewForm({
           </label>
         ))}
       </div>
+      {formState.summaryMetric === "ga_country_events" && (
+        <div className="mt-4">
+          <Label className="text-xs text-muted-foreground">
+            Event Names <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            type="text"
+            placeholder="Register_submit, otp_verified, Live_account"
+            value={formState.summaryEventNames || ""}
+            onChange={(e) =>
+              setFormState((p: any) => ({
+                ...p,
+                summaryEventNames: e.target.value,
+              }))
+            }
+            className="mt-1"
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Comma-separated GA4 event names to track per country (Organic Search).
+          </p>
+        </div>
+      )}
     </FormSection>
   );
 }
