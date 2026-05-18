@@ -3629,7 +3629,11 @@ def _fetch_ga_country_events_data(integration, sheet):
             row = {'Country': country}
             for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
                 cnt = range_country_event.get(lbl_orig, {}).get(ev, {}).get(country, 0)
-                row[lbl_disp] = cnt
+                if is_prorated and lbl_orig == cur_label:
+                    proj = round(cnt * factor)
+                    row[lbl_disp] = f"{cnt} ({proj})"
+                else:
+                    row[lbl_disp] = cnt
             sub_rows.append(row)
         tables.append({
             'title':   f'Organic Search — {ev}',
@@ -4434,10 +4438,13 @@ def seo_report_export_xlsx(request):
     """
     from io import BytesIO
     import openpyxl
+    import re as _re
     from openpyxl.styles import Font, Alignment, PatternFill
     from openpyxl.utils import get_column_letter
     from django.http import HttpResponse
     from integrations.models import Integration
+
+    _CHANGE_COL_RE = _re.compile(r'(MOM|WOW|YOY)\s*%', _re.IGNORECASE)
 
     domain_id = request.query_params.get('domain_id')
     if not domain_id:
@@ -4574,16 +4581,29 @@ def seo_report_export_xlsx(request):
                     cell.alignment = center_align
                 cur_row += 1
 
+                # Dim column is the first column of the sub-table. Layouts vary:
+                #   GSC Overview ........ 'Months'    (change indicators as rows)
+                #   GA Traffic Breakup .. 'Page Type' / 'Page URL' (change as cols)
+                #   Country-wise Events . 'Metric' / 'Country'     (change as cols
+                #                          in Section 1; none in country sub-tables)
+                dim_col = tcols[0]
+                change_col_flags = [
+                    bool(_CHANGE_COL_RE.search(c)) for c in tcols
+                ]
+
                 # Data rows
                 for r in trows:
-                    months_label  = str(r.get('Months', ''))
-                    is_change_row = months_label in ('MOM %', 'WOW %', 'YOY %')
-                    is_total_row  = months_label == 'Total'
-                    is_pr_row     = '(PR)' in months_label
+                    dim_label     = str(r.get(dim_col, ''))
+                    is_change_row = dim_label in ('MOM %', 'WOW %', 'YOY %')
+                    is_total_row  = dim_label == 'Total'
+                    is_pr_row     = '(PR)' in dim_label
                     for ci, col_name in enumerate(tcols, 1):
                         val  = r.get(col_name, '')
                         cell = ws.cell(row=cur_row, column=ci, value=val)
-                        if is_change_row and ci > 1:
+                        is_change_cell = ci > 1 and (
+                            is_change_row or change_col_flags[ci - 1]
+                        )
+                        if is_change_cell:
                             try:
                                 num = float(str(val).replace('%', '').replace('+', '').replace(',', ''))
                                 if num > 0:
@@ -4594,7 +4614,7 @@ def seo_report_export_xlsx(request):
                                 pass
                         elif is_total_row or is_pr_row:
                             cell.font = bold_font
-                        cell.alignment = left_align if col_name == 'Months' else center_align
+                        cell.alignment = left_align if col_name == dim_col else center_align
                     cur_row += 1
 
                 # Blank separator row before next sub-table
