@@ -65,6 +65,27 @@ def get_perplexity_client() -> Dict[str, Any]:
 	return {"api_key": api_key, "timeout": 60}
 
 
+def get_anthropic_client() -> Dict[str, Any]:
+	api_key = getattr(settings, "ANTHROPIC_API_KEY", None)
+	if not api_key:
+		raise Exception("Anthropic API key not configured")
+	return {"api_key": api_key, "timeout": 60}
+
+
+def get_xai_client() -> Dict[str, Any]:
+	api_key = getattr(settings, "XAI_API_KEY", None)
+	if not api_key:
+		raise Exception("xAI (Grok) API key not configured")
+	return {"api_key": api_key, "base_url": "https://api.x.ai/v1", "timeout": 60}
+
+
+def get_deepseek_client() -> Dict[str, Any]:
+	api_key = getattr(settings, "DEEPSEEK_API_KEY", None)
+	if not api_key:
+		raise Exception("DeepSeek API key not configured")
+	return {"api_key": api_key, "base_url": "https://api.deepseek.com/v1", "timeout": 60}
+
+
 def _get_domain_from_url(value: str) -> str:
 	try:
 		from urllib.parse import urlparse
@@ -592,8 +613,124 @@ def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, c
             logger.error(f"Perplexity API call failed: {str(lib_error)}")
             # Return empty string instead of the prompt text
             text = ""
-        
+
         return _basic_text_metrics(text, user_domain)
     except Exception as e:
         logger.error(f"Perplexity processing failed: {e}")
+        raise
+
+
+def _build_analytics_user_prompt(prompt_text: str, country_text: str) -> str:
+    """Shared user-message body for the new providers — same shape as ChatGPT/Gemini paths."""
+    return (
+        f"Original Question: {prompt_text}\n\n"
+        f"Context: Always provide answers in the context of {country_text} unless the user specifies another country.\n\n"
+        "Based on your knowledge, please provide a comprehensive and detailed response with:\n\n"
+        "1. A thorough answer incorporating the latest information\n"
+        "2. Include all relevant URLs and links\n"
+        "3. Mention specific companies, tools, platforms, and services\n"
+        "4. Provide detailed citations with current sources and dates where possible\n"
+        "5. Include pricing information, features, and comparisons from the most recent data\n"
+        "6. Add any additional current resources, alternatives, or related tools\n"
+        "7. Highlight which information comes from recent sources vs general knowledge\n\n"
+        "Format your response with proper current links, detailed descriptions, and up-to-date references. "
+        "Focus on providing the most current and relevant information available."
+    )
+
+
+def _resolve_country_text(group: Any) -> str:
+    if group and hasattr(group, 'domain') and group.domain and hasattr(group.domain, 'country'):
+        return group.domain.country or "United States"
+    return "United States"
+
+
+def process_prompt_with_claude(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
+    try:
+        from anthropic import Anthropic
+        cfg = client or {}
+        anthropic_client = Anthropic(api_key=cfg.get('api_key'), timeout=cfg.get('timeout', 60))
+        country_text = _resolve_country_text(group)
+        system_prompt = (
+            "You are a helpful assistant. Provide comprehensive, well-cited answers. "
+            f"Always provide answers in the context of {country_text} unless the user specifies another country."
+        )
+        model_name = getattr(settings, 'ANTHROPIC_MODEL', 'claude-sonnet-4-6')
+        response = anthropic_client.messages.create(
+            model=model_name,
+            max_tokens=3000,
+            temperature=0.7,
+            system=system_prompt,
+            messages=[{"role": "user", "content": _build_analytics_user_prompt(prompt_text, country_text)}],
+        )
+        text = ""
+        for block in getattr(response, 'content', []) or []:
+            if getattr(block, 'type', None) == 'text':
+                text += getattr(block, 'text', '') or ''
+        return _basic_text_metrics(text, user_domain)
+    except Exception as e:
+        logger.error(f"Claude processing failed: {e}")
+        raise
+
+
+def process_prompt_with_grok(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
+    try:
+        from openai import OpenAI
+        cfg = client or {}
+        xai_client = OpenAI(
+            api_key=cfg.get('api_key'),
+            base_url=cfg.get('base_url', 'https://api.x.ai/v1'),
+            timeout=cfg.get('timeout', 60),
+        )
+        country_text = _resolve_country_text(group)
+        system_prompt = (
+            "You are a helpful assistant with access to current information. Provide comprehensive, well-cited answers. "
+            f"Always provide answers in the context of {country_text} unless the user specifies another country."
+        )
+        model_name = getattr(settings, 'XAI_MODEL', 'grok-2-latest')
+        response = xai_client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": _build_analytics_user_prompt(prompt_text, country_text)},
+            ],
+            temperature=0.7,
+            max_tokens=3000,
+            timeout=60,
+        )
+        text = response.choices[0].message.content if response.choices else ""
+        return _basic_text_metrics(text or "", user_domain)
+    except Exception as e:
+        logger.error(f"Grok processing failed: {e}")
+        raise
+
+
+def process_prompt_with_deepseek(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
+    try:
+        from openai import OpenAI
+        cfg = client or {}
+        ds_client = OpenAI(
+            api_key=cfg.get('api_key'),
+            base_url=cfg.get('base_url', 'https://api.deepseek.com/v1'),
+            timeout=cfg.get('timeout', 60),
+        )
+        country_text = _resolve_country_text(group)
+        system_prompt = (
+            "You are a helpful assistant. Provide comprehensive, well-cited answers. "
+            f"Always provide answers in the context of {country_text} unless the user specifies another country."
+        )
+        model_name = getattr(settings, 'DEEPSEEK_MODEL', 'deepseek-chat')
+        response = ds_client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": _build_analytics_user_prompt(prompt_text, country_text)},
+            ],
+            temperature=0.7,
+            max_tokens=3000,
+            timeout=60,
+        )
+        text = response.choices[0].message.content if response.choices else ""
+        return _basic_text_metrics(text or "", user_domain)
+    except Exception as e:
+        logger.error(f"DeepSeek processing failed: {e}")
         raise

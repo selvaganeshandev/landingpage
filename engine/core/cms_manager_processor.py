@@ -77,14 +77,10 @@ class CMSManagerProcessor:
                     sp.error_message = None
                     if provider.provider_type == 'wordpress':
                         sp.wordpress_post_id = data.get('id')
-                        sp.wordpress_post_url = data.get('link')
-                    if provider.provider_type == 'strapi':
-                        sp.strapi_entry_id = data.get('id')
-                        sp.strapi_entry_url = data.get('link') or data.get('url') or data.get('data', {}).get('url')
+                        sp.wordpress_url = data.get('link')
                     sp.save(update_fields=[
                         'status', 'published_at', 'error_message',
-                        'wordpress_post_id', 'wordpress_post_url',
-                        'strapi_entry_id', 'strapi_entry_url',
+                        'wordpress_post_id', 'wordpress_url',
                         'modified_at'
                     ])
                     # Update content status

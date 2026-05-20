@@ -8,10 +8,22 @@ interface Mention {
   color: string;
 }
 
+const PLATFORM_COLORS = [
+  "bg-chart-1",
+  "bg-chart-3",
+  "bg-chart-4",
+  "bg-chart-2",
+  "bg-chart-5",
+  "bg-primary",
+];
+
 const defaultPlatforms: Mention[] = [
   { platform: "ChatGPT", count: 0, avgPosition: 0, color: "bg-chart-1" },
   { platform: "Perplexity", count: 0, avgPosition: 0, color: "bg-chart-3" },
   { platform: "Google Gemini", count: 0, avgPosition: 0, color: "bg-chart-4" },
+  { platform: "Claude", count: 0, avgPosition: 0, color: "bg-chart-2" },
+  { platform: "Grok", count: 0, avgPosition: 0, color: "bg-chart-5" },
+  { platform: "DeepSeek", count: 0, avgPosition: 0, color: "bg-primary" },
 ];
 
 export interface PlatformMentionsProps {
@@ -23,13 +35,16 @@ export const PlatformMentions = ({ data }: PlatformMentionsProps) => {
     ChatGPT: { platform: "ChatGPT", count: 0, avgPosition: 0, color: "bg-chart-1" },
     Perplexity: { platform: "Perplexity", count: 0, avgPosition: 0, color: "bg-chart-3" },
     "Google Gemini": { platform: "Google Gemini", count: 0, avgPosition: 0, color: "bg-chart-4" },
+    Claude: { platform: "Claude", count: 0, avgPosition: 0, color: "bg-chart-2" },
+    Grok: { platform: "Grok", count: 0, avgPosition: 0, color: "bg-chart-5" },
+    DeepSeek: { platform: "DeepSeek", count: 0, avgPosition: 0, color: "bg-primary" },
   };
   const platforms: Mention[] = (data && data.length)
     ? data.map((p, idx) => ({
         platform: p.platform,
         count: p.count,
         avgPosition: typeof p.avg_position === 'number' ? p.avg_position : 0,
-        color: Object.values(map)[idx % 3].color,
+        color: map[p.platform]?.color ?? PLATFORM_COLORS[idx % PLATFORM_COLORS.length],
       }))
     : defaultPlatforms;
   const maxCount = Math.max(1, ...platforms.map(p => p.count));

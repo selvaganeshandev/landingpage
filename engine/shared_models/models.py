@@ -299,10 +299,8 @@ class ScheduledPublication(models.Model):
     published_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
     error_message = models.TextField(null=True, blank=True)
-    wordpress_post_id = models.CharField(max_length=255, blank=True, null=True)
-    wordpress_post_url = models.URLField(max_length=500, blank=True, null=True)
-    strapi_entry_id = models.CharField(max_length=255, blank=True, null=True)
-    strapi_entry_url = models.URLField(max_length=500, blank=True, null=True)
+    wordpress_post_id = models.IntegerField(blank=True, null=True)
+    wordpress_url = models.URLField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
 

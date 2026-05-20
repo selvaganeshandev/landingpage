@@ -28,6 +28,9 @@ AI_PLATFORMS = {
     'bard.google.com': 'Gemini',
     'perplexity.ai': 'Perplexity',
     'grok.x.ai': 'Grok',
+    'grok.com': 'Grok',
+    'chat.deepseek.com': 'DeepSeek',
+    'deepseek.com': 'DeepSeek',
     'you.com': 'You.com',
     'poe.com': 'Poe',
 }

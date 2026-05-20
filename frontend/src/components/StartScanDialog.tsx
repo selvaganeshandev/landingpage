@@ -45,6 +45,8 @@ export function StartScanDialog({
     { id: "claude", name: "Claude", status: "online" },
     { id: "gemini", name: "Gemini", status: "online" },
     { id: "perplexity", name: "Perplexity", status: "online" },
+    { id: "grok", name: "Grok", status: "online" },
+    { id: "deepseek", name: "DeepSeek", status: "online" },
     { id: "copilot", name: "Microsoft Copilot", status: "online" },
   ];
 

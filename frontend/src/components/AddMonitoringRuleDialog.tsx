@@ -208,7 +208,7 @@ export function AddMonitoringRuleDialog({
           <div className="space-y-2">
             <Label>Monitor on Platforms</Label>
             <div className="grid grid-cols-2 gap-2">
-              {["All Platforms", "ChatGPT", "Gemini", "Perplexity", "Copilot"].map((platform) => (
+              {["All Platforms", "ChatGPT", "Gemini", "Perplexity", "Claude", "Grok", "DeepSeek", "Copilot"].map((platform) => (
                 <label key={platform} className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"

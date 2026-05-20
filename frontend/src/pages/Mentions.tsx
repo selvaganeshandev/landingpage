@@ -81,7 +81,7 @@ const Mentions = () => {
   const limit = 20;
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [availablePlatforms, setAvailablePlatforms] = useState<string[]>(["ChatGPT", "Google Gemini", "Perplexity"]);
+  const [availablePlatforms, setAvailablePlatforms] = useState<string[]>(["ChatGPT", "Google Gemini", "Perplexity", "Claude", "Grok", "DeepSeek"]);
   const [availableSentiments, setAvailableSentiments] = useState<string[]>(["Positive", "Negative", "Neutral"]);
   const [showAll, setShowAll] = useState(false);
   const { toast } = useToast();
