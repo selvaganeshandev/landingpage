@@ -631,8 +631,31 @@ Example format:
 
 Provide the response as a valid JSON array only, no additional text."""
 
-        response = model.generate_content(prompt)
-        result_text = response.text.strip()
+        used_provider = 'gemini'
+        try:
+            response = model.generate_content(prompt)
+            result_text = response.text.strip()
+        except Exception as gemini_err:
+            err_str = str(gemini_err)
+            # Fall back to OpenAI ONLY for quota/429 errors. Other failures bubble up.
+            if '429' in err_str or 'quota' in err_str.lower() or 'spend cap' in err_str.lower():
+                logger.warning(f"Gemini quota/429 hit, falling back to OpenAI: {err_str}")
+                used_provider = 'openai'
+                openai_client = get_openai_client()
+                openai_response = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are an expert brand/industry analyst. Respond with a JSON array only — no markdown, no commentary."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.7,
+                    max_tokens=500,
+                )
+                result_text = openai_response.choices[0].message.content.strip()
+            else:
+                raise
+
+        logger.info(f"brand_niches served by: {used_provider}")
 
         # Try to parse the JSON response
         try:
