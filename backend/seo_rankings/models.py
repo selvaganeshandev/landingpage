@@ -396,6 +396,8 @@ class SeoReportSheet(models.Model):
         ('keyword_ranking_overview', 'Keyword Ranking Overview'),
         ('ga_organic_traffic_breakup', 'GA Organic Traffic Breakup'),
         ('ga_country_events', 'GA Country-wise Events'),
+        ('keyword_ranking_summary', 'Keyword Ranking Summary'),
+        ('competitor_ranking_summary', 'Competitor Ranking Summary'),
     ]
     SCHEDULE_CHOICES = [
         ('weekly', 'Weekly'),
