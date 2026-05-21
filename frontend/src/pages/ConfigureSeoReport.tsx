@@ -223,6 +223,8 @@ const ConfigureSeoReport = () => {
           domain_metrics: "domain_metrics",
           ga_organic_traffic_breakup: "ga_organic_traffic_breakup",
           ga_country_events: "ga_country_events",
+          keyword_ranking_summary: "keyword_ranking_summary",
+          competitor_ranking_summary: "competitor_ranking_summary",
         };
         const needsGa =
           formState.summaryMetric === "google_analytics" ||
@@ -364,7 +366,15 @@ const ConfigureSeoReport = () => {
               formState={formState}
               setFormState={setFormState}
               isMonthly={isMonthly}
-              hideOrderBy={activeTab === "overview" && formState.summaryMetric === "keyword_ranking"}
+              hideOrderBy={
+                activeTab === "overview" &&
+                (formState.summaryMetric === "keyword_ranking" ||
+                  formState.summaryMetric === "competitor_ranking_summary")
+              }
+              hideDuration={
+                activeTab === "overview" &&
+                formState.summaryMetric === "competitor_ranking_summary"
+              }
             />
           ) : (
             <BaseDurationSection formState={formState} setFormState={setFormState} />
@@ -545,6 +555,8 @@ function OverviewForm({ formState, setFormState }: { formState: any; setFormStat
           { value: "domain_metrics", label: "Domain Metrics" },
           { value: "ga_organic_traffic_breakup", label: "GA Organic Traffic Breakup" },
           { value: "ga_country_events", label: "GA Country-wise Events" },
+          { value: "keyword_ranking_summary", label: "Keyword Ranking Summary" },
+          { value: "competitor_ranking_summary", label: "Competitor Ranking Summary" },
         ].map((item) => (
           <label key={item.value} className="flex items-center gap-2 cursor-pointer">
             <input
@@ -582,10 +594,12 @@ function OverviewForm({ formState, setFormState }: { formState: any; setFormStat
 
 // ─── Duration & Order By ─────────────────────────────────────────────────────
 
-function DurationOrderSection({ formState, setFormState, isMonthly, hideOrderBy = false }: { formState: any; setFormState: React.Dispatch<React.SetStateAction<any>>; isMonthly: boolean; hideOrderBy?: boolean }) {
+function DurationOrderSection({ formState, setFormState, isMonthly, hideOrderBy = false, hideDuration = false }: { formState: any; setFormState: React.Dispatch<React.SetStateAction<any>>; isMonthly: boolean; hideOrderBy?: boolean; hideDuration?: boolean }) {
+  if (hideDuration && hideOrderBy) return null;
   return (
     <div className="bg-white rounded-lg p-5">
       <div className="flex flex-wrap gap-12">
+        {!hideDuration && (
         <div>
           <h3 className="text-sm font-semibold mb-3 pb-2 border-b">Duration</h3>
           <Label className="text-xs text-muted-foreground">
@@ -616,6 +630,7 @@ function DurationOrderSection({ formState, setFormState, isMonthly, hideOrderBy 
             )}
           </div>
         </div>
+        )}
         {!hideOrderBy && (
           <div>
             <h3 className="text-sm font-semibold mb-3 pb-2 border-b">Order By</h3>
