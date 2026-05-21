@@ -3,12 +3,55 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, TrendingUp, DollarSign, MousePointerClick } from "lucide-react";
+import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3 } from "lucide-react";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/PageLoader";
 import { useDomainStore } from "@/stores/domainStore";
 import { useNavigate } from "react-router-dom";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend, AreaChart, Area,
+} from "recharts";
+
+const DONUT_COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6"];
+const SPARK_COLOR = "#8b5cf6";
+
+function Sparkline({ data, dataKey, color = SPARK_COLOR }: { data: any[]; dataKey: string; color?: string }) {
+  if (!data || data.length === 0) return null;
+  return (
+    <div className="h-10 -mx-2">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data}>
+          <defs>
+            <linearGradient id={`grad-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.4} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <Area type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.5}
+                fill={`url(#grad-${dataKey})`} dot={false} isAnimationActive={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function formatDurationSec(seconds: number): string {
+  if (!seconds) return "00:00:00";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+function formatGADate(yyyymmdd: string): string {
+  if (!yyyymmdd || yyyymmdd.length !== 8) return yyyymmdd;
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const m = parseInt(yyyymmdd.slice(4, 6), 10);
+  const d = parseInt(yyyymmdd.slice(6, 8), 10);
+  return `${d} ${months[m - 1] ?? ""}`;
+}
 
 export default function TrafficAttribution() {
   const { selectedDomain, loadDomains, domains, isLoading } = useDomainStore();
@@ -16,7 +59,8 @@ export default function TrafficAttribution() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [trafficData, setTrafficData] = useState<any>(null);
-  
+  const [dailySeries, setDailySeries] = useState<any[]>([]);
+
   useEffect(() => {
     const ensureDomain = async () => {
       if (!selectedDomain && !isLoading) {
@@ -40,6 +84,20 @@ export default function TrafficAttribution() {
       setLoading(true);
       const data = await apiClient.getTrafficInsights(selectedDomain.id);
       setTrafficData(data);
+      // Fire daily-series fetch in the background — it's a live GA call (~3s)
+      // and shouldn't block the cached aggregate render.
+      apiClient.getGAData(selectedDomain.id).then((res: any) => {
+        const daily = res?.data?.daily || [];
+        setDailySeries(daily.map((row: any) => ({
+          date: row.date,
+          label: formatGADate(row.date),
+          sessions: Number(row.sessions || 0),
+          totalUsers: Number(row.totalUsers || 0),
+          screenPageViews: Number(row.screenPageViews || 0),
+          bounceRate: Number(row.bounceRate || 0),
+          avgDuration: Number(row.averageSessionDuration || 0),
+        })));
+      }).catch(() => { /* GA may be disconnected — keep page usable */ });
     } catch (error: any) {
       console.error('Failed to load traffic data:', error);
       toast({
@@ -153,6 +211,33 @@ export default function TrafficAttribution() {
     { metric: "ROI", value: "N/A", unit: "%" },
   ];
 
+  // ===== Derived data for the new Overview tab =====
+  const totalPageViews = gaData?.total_page_views || 0;
+  const avgSessionDuration = gaData?.avg_session_duration || 0;
+  const bounceRate = gaData?.bounce_rate || 0;
+  const engagedSessions = Math.max(0, Math.round(totalTraffic * (1 - bounceRate / 100)));
+  const revenuePerSession = totalTraffic > 0 ? totalRevenue / totalTraffic : 0;
+
+  const sourceSummary = platformSources
+    .slice()
+    .sort((a, b) => b.visits - a.visits);
+  const sourceTotal = sourceSummary.reduce((s, p) => s + p.visits, 0) || 1;
+
+  const deviceDonut = deviceBreakdown.map((d) => ({
+    name: d.device,
+    value: d.sessions,
+  }));
+  const deviceTotal = deviceDonut.reduce((s, d) => s + d.value, 0);
+
+  const countryMetrics = geographicData
+    .slice()
+    .sort((a, b) => b.sessions - a.sessions);
+
+  const revenueBySource = sourceSummary
+    .map((s) => ({ platform: s.platform, revenue: s.revenue, share: s.visits / sourceTotal }))
+    .filter((r) => r.revenue > 0);
+  const revenueTotal = revenueBySource.reduce((s, r) => s + r.revenue, 0) || totalRevenue;
+
   // Derive attribution model estimates from conversion paths if available, otherwise use industry defaults
   const conversionPathTotal = conversionPaths.reduce((sum: number, p: any) => sum + (p.value || 0), 0);
   const hasConversionData = conversionPathTotal > 0;
@@ -199,14 +284,302 @@ export default function TrafficAttribution() {
         ))}
       </div>
 
-      <Tabs defaultValue="sources" className="space-y-6">
+      <Tabs defaultValue="overview" className="space-y-6">
         <TabsList className="bg-muted/50 p-1 border border-border">
+          <TabsTrigger value="overview" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">AI Source Analytics</TabsTrigger>
           <TabsTrigger value="sources" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Traffic Sources</TabsTrigger>
           <TabsTrigger value="search" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Search Console</TabsTrigger>
           <TabsTrigger value="devices" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Devices & Geo</TabsTrigger>
           <TabsTrigger value="pages" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Landing Pages</TabsTrigger>
           <TabsTrigger value="attribution" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Attribution Models</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="overview" className="space-y-6">
+          {/* Top metrics with sparklines */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+            {[
+              { title: "Total AI Visits", value: totalTraffic.toLocaleString(), key: "sessions", icon: MousePointerClick },
+              { title: "Engaged Sessions", value: engagedSessions.toLocaleString(), key: "sessions", icon: BarChart3 },
+              { title: "Avg Duration", value: formatDurationSec(avgSessionDuration), key: "avgDuration", icon: TrendingUp },
+              { title: "Total Users", value: (gaData?.total_users || 0).toLocaleString(), key: "totalUsers", icon: Users },
+              { title: "Page Views", value: totalPageViews.toLocaleString(), key: "screenPageViews", icon: Eye },
+            ].map((m, i) => {
+              const Icon = m.icon;
+              return (
+                <Card key={i} className="border border-border">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">{m.title}</CardTitle>
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{m.value}</div>
+                    <Sparkline data={dailySeries} dataKey={m.key} />
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* AI Source Visitors trend + Source Summary */}
+          <div className="grid gap-6 lg:grid-cols-3">
+            <Card className="border border-border lg:col-span-2">
+              <CardHeader>
+                <CardTitle>AI Source Visitors</CardTitle>
+                <CardDescription>Total visitors from AI sources over time</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  {dailySeries.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={dailySeries}>
+                        <defs>
+                          <linearGradient id="visitors-grad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.3} />
+                            <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Area type="monotone" dataKey="sessions" stroke="#3b82f6" fill="url(#visitors-grad)" strokeWidth={2} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                      Connect Google Analytics to see daily visitor trends.
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border border-border">
+              <CardHeader>
+                <CardTitle>Source Summary</CardTitle>
+                <CardDescription>Top AI traffic sources</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {sourceSummary.length > 0 ? (
+                  <div className="space-y-4">
+                    {sourceSummary.map((s, i) => {
+                      const pct = ((s.visits / sourceTotal) * 100).toFixed(1);
+                      return (
+                        <div key={i} className="space-y-1">
+                          <div className="flex justify-between items-baseline">
+                            <span className="font-medium text-sm">{s.platform}</span>
+                            <span className="text-sm font-bold">{s.visits.toLocaleString()}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 bg-secondary rounded-full h-2">
+                              <div className="bg-primary h-2 rounded-full" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="text-xs text-muted-foreground min-w-[40px] text-right">{pct}%</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-8">No AI source data yet.</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Device Analytics + User Activity Trend */}
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card className="border border-border">
+              <CardHeader>
+                <CardTitle>Device Analytics</CardTitle>
+                <CardDescription>Device usage breakdown</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  {deviceDonut.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={deviceDonut} dataKey="value" nameKey="name" cx="50%" cy="50%"
+                             innerRadius={55} outerRadius={90} paddingAngle={2} label={(d: any) => d.name}>
+                          {deviceDonut.map((_, idx) => (
+                            <Cell key={idx} fill={DONUT_COLORS[idx % DONUT_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(v: any) => `${(v as number).toLocaleString()} sessions`} />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                      No device breakdown available.
+                    </div>
+                  )}
+                </div>
+                {deviceTotal > 0 && (
+                  <p className="text-center text-sm text-muted-foreground mt-2">
+                    {deviceTotal.toLocaleString()} total sessions
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border border-border">
+              <CardHeader>
+                <CardTitle>User Activity Trend</CardTitle>
+                <CardDescription>Total users over time</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  {dailySeries.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={dailySeries}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Legend />
+                        <Line type="monotone" dataKey="totalUsers" stroke="#ef4444" strokeWidth={2}
+                              dot={false} name="Total users" />
+                        <Line type="monotone" dataKey="sessions" stroke="#f59e0b" strokeWidth={2}
+                              dot={false} name="Sessions" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                      Connect Google Analytics to see user activity.
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Landing Pages by LLM */}
+          <Card className="border border-border">
+            <CardHeader>
+              <CardTitle>Landing Pages</CardTitle>
+              <CardDescription>Top landing pages from AI traffic</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {topLandingPages.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="py-2 pr-4">Landing Page</th>
+                        <th className="py-2 pr-4 text-right">Sessions</th>
+                        <th className="py-2 pr-4 text-right">Conversions</th>
+                        <th className="py-2 pr-4 text-right">Bounce Rate</th>
+                        <th className="py-2 text-right">Avg Duration</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topLandingPages.slice(0, 10).map((p: any, i: number) => (
+                        <tr key={i} className="border-b last:border-0">
+                          <td className="py-2 pr-4 font-medium truncate max-w-xs">{p.page}</td>
+                          <td className="py-2 pr-4 text-right">{(p.sessions || 0).toLocaleString()}</td>
+                          <td className="py-2 pr-4 text-right">{p.conversions || 0}</td>
+                          <td className="py-2 pr-4 text-right">{p.bounceRate || "0%"}</td>
+                          <td className="py-2 text-right">{p.avgDuration || "0:00"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-8">No landing page data yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Country Metrics */}
+          <Card className="border border-border">
+            <CardHeader>
+              <CardTitle>Sessions by Country</CardTitle>
+              <CardDescription>Geographical distribution of sessions</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {countryMetrics.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="py-2 pr-4">Country</th>
+                        <th className="py-2 pr-4 text-right">Sessions</th>
+                        <th className="py-2 pr-4 text-right">Share</th>
+                        <th className="py-2 text-right">Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {countryMetrics.slice(0, 15).map((c, i) => (
+                        <tr key={i} className="border-b last:border-0">
+                          <td className="py-2 pr-4 font-medium">{c.country}</td>
+                          <td className="py-2 pr-4 text-right">{c.sessions.toLocaleString()}</td>
+                          <td className="py-2 pr-4 text-right">{c.percentage.toFixed(1)}%</td>
+                          <td className="py-2 text-right">${c.revenue.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-8">No geographic data yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Revenue Attribution */}
+          <Card className="border border-border">
+            <CardHeader>
+              <CardTitle>Revenue Attribution</CardTitle>
+              <CardDescription>Revenue from AI-referred sessions</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-4">
+                <div className="p-4 border rounded-lg">
+                  <div className="text-sm text-muted-foreground">Total Revenue</div>
+                  <div className="text-2xl font-bold mt-1">${totalRevenue.toLocaleString()}</div>
+                </div>
+                <div className="p-4 border rounded-lg">
+                  <div className="text-sm text-muted-foreground">Purchases</div>
+                  <div className="text-2xl font-bold mt-1">{totalConversions.toLocaleString()}</div>
+                </div>
+                <div className="p-4 border rounded-lg">
+                  <div className="text-sm text-muted-foreground">Conversion Rate</div>
+                  <div className="text-2xl font-bold mt-1">{conversionRate}%</div>
+                </div>
+                <div className="p-4 border rounded-lg">
+                  <div className="text-sm text-muted-foreground">Rev / Session</div>
+                  <div className="text-2xl font-bold mt-1">${revenuePerSession.toFixed(2)}</div>
+                </div>
+              </div>
+
+              {revenueBySource.length > 0 && (
+                <div>
+                  <div className="text-sm font-medium mb-3">Revenue by AI Source</div>
+                  <div className="space-y-3">
+                    {revenueBySource.map((r, i) => {
+                      const pct = ((r.revenue / revenueTotal) * 100).toFixed(1);
+                      return (
+                        <div key={i} className="flex items-center gap-3">
+                          <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium text-sm flex-1">{r.platform}</span>
+                          <div className="flex-1 bg-secondary rounded-full h-2 max-w-xs">
+                            <div className="bg-primary h-2 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="text-sm font-bold min-w-[100px] text-right">
+                            ${r.revenue.toLocaleString()}
+                          </span>
+                          <span className="text-xs text-muted-foreground min-w-[50px] text-right">{pct}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="sources" className="space-y-6">
           <Card className="border border-border">

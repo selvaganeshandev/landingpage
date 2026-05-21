@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, FolderOpen, TrendingUp, Eye, Edit, Sparkles, Loader2, Clock, CheckCircle } from "lucide-react";
+import { Plus, FolderOpen, TrendingUp, Eye, Edit, Sparkles, Loader2, Clock, CheckCircle, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Breadcrumb,
@@ -34,6 +34,7 @@ const Prompts = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
 
   const { selectedDomain, setDomainSwitching } = useDomainStore();
   const { user } = useAuth();
@@ -169,10 +170,40 @@ const Prompts = () => {
             Track and group prompts to monitor brand visibility
           </p>
         </div>
-        <Button onClick={() => setAddDialogOpen(true)} className="gradient-primary shadow-md shadow-primary/20">
-          <Plus className="h-4 w-4 mr-2" />
-          Add Prompt Group
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={async () => {
+              const activeDomainId = selectedDomain?.id ?? getActiveDomainIdNumber(user);
+              if (!activeDomainId) {
+                toast({ title: "No domain selected", description: "Please select a domain before exporting.", variant: "destructive" });
+                return;
+              }
+              try {
+                setIsExporting(true);
+                toast({ title: "Exporting Report", description: "Your AI Prompt Data export is being generated..." });
+                const safeName = (selectedDomain?.name || "domain").replace(/\s+/g, "_");
+                const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+                await apiClient.exportPromptsReport({
+                  domain_id: activeDomainId,
+                  filename: `${safeName}_AI_Prompt_Data_Export_${timestamp}.xlsx`,
+                });
+              } catch (e: any) {
+                toast({ title: "Export Failed", description: e?.message || String(e), variant: "destructive" });
+              } finally {
+                setIsExporting(false);
+              }
+            }}
+            disabled={isExporting}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            {isExporting ? "Exporting..." : "Export"}
+          </Button>
+          <Button onClick={() => setAddDialogOpen(true)} className="gradient-primary shadow-md shadow-primary/20">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Prompt Group
+          </Button>
+        </div>
       </div>
 
       {/* Search and organize controls removed as per requirements */}

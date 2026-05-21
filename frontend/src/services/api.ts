@@ -706,6 +706,13 @@ export const apiClient = {
     return apiRequest(`/prompts/prompts/${queryParams}`);
   },
 
+  exportPromptsReport: (params: { domain_id: string | number; filename?: string }) => {
+    const queryParams = new URLSearchParams({ domain_id: String(params.domain_id) });
+    const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const filename = params.filename || `AI_Prompt_Data_Export_${timestamp}.xlsx`;
+    return downloadFile(`/prompts/export/?${queryParams.toString()}`, filename);
+  },
+
   createPrompt: (data: any) => apiRequest('/prompts/prompts/', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -1133,6 +1140,17 @@ export const apiClient = {
     });
     // Use backend API endpoint
     return apiClient.get(`/analytics/dashboard/summary/?${queryParams.toString()}`);
+  },
+
+  exportDashboardReport: (params: { domain_id: string; days?: number; llm_model?: string; filename?: string }) => {
+    const queryParams = new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.days ? { days: String(params.days) } : {}),
+      ...(params.llm_model ? { llm_model: params.llm_model } : {}),
+    });
+    const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const filename = params.filename || `AI_Visibility_${timestamp}.xlsx`;
+    return downloadFile(`/analytics/dashboard/export/?${queryParams.toString()}`, filename);
   },
 
   // ===== Integrations =====
