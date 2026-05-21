@@ -4307,25 +4307,9 @@ _SUMMARY_BUCKETS = [
     ('Above 50',    lambda r: r > 50),
 ]
 
-# Cells with rank > 50 / 0 / unknown render as "NR" to match the Rankings
-# detail page. The bucket calculation still uses the real numeric rank.
-_NR_LABEL = 'NR'
-
-
-def _display_rank(rank):
-    """Return numeric rank when 1..50, else 'NR'."""
-    if isinstance(rank, int) and 1 <= rank <= 50:
-        return rank
-    return _NR_LABEL
-
-
-def _diff_display(latest, prev):
-    """Difference shown only when both periods are ranked (1..50); else '-'."""
-    if not (isinstance(latest, int) and 1 <= latest <= 50):
-        return '-'
-    if not (isinstance(prev, int) and 1 <= prev <= 50):
-        return '-'
-    return prev - latest
+# Excel uses 101 as the "Not Ranked" sentinel — keep the same value-shape
+# in the cells so the report mirrors the sample workbook.
+_NOT_RANKED = 101
 
 
 def _build_snapshot_dates(sheet, last_ranked):
@@ -4457,10 +4441,9 @@ def _fetch_keyword_ranking_summary(domain_id, sheet):
         diff_label = f"Difference ({ordered_labels[-1]} vs {ordered_labels[-2]})"
         main_cols.append(diff_label)
 
-    # Underlying numeric rank kept per keyword for the Overview bucket math;
-    # the displayed cells go through _display_rank (which renders NR for
-    # rank > 50 / unranked).
-    kw_ranks_raw = {}  # kw_id -> {label -> int|None (real rank)}
+    # Cells store the raw rank (1..N) or _NOT_RANKED (101) — matches the
+    # Excel sample. Bucket math below uses the same values.
+    kw_ranks = {}  # kw_id -> {label -> int}
 
     main_rows = []
     for idx, kw in enumerate(kws, 1):
@@ -4473,11 +4456,11 @@ def _fetch_keyword_ranking_summary(domain_id, sheet):
         intent = intent_raw.title() if intent_raw else ''
         site_url = kw.site_url or ''
 
-        ranks_raw = {}
+        ranks_for_kw = {}
         for d, lbl in zip(ordered_dates, ordered_labels):
             r = _get_rank(kw.id, d)
-            ranks_raw[lbl] = r if (isinstance(r, int) and r > 0) else None
-        kw_ranks_raw[kw.id] = ranks_raw
+            ranks_for_kw[lbl] = r if (isinstance(r, int) and r > 0) else _NOT_RANKED
+        kw_ranks[kw.id] = ranks_for_kw
 
         row = {
             'Sr No': idx,
@@ -4488,12 +4471,12 @@ def _fetch_keyword_ranking_summary(domain_id, sheet):
             'New Ranking URL': site_url,
         }
         for lbl in ordered_labels:
-            row[lbl] = _display_rank(ranks_raw[lbl])
+            row[lbl] = ranks_for_kw[lbl]
         if diff_label:
-            row[diff_label] = _diff_display(
-                ranks_raw[ordered_labels[-1]],
-                ranks_raw[ordered_labels[-2]],
-            )
+            latest = ranks_for_kw[ordered_labels[-1]]
+            prev = ranks_for_kw[ordered_labels[-2]]
+            # Improvement is rank dropping (smaller = better) → positive number.
+            row[diff_label] = prev - latest
         main_rows.append(row)
 
     # ── 2. Overview (Count) and 3. Overview (Search Volumes) ─────────────
@@ -4504,10 +4487,10 @@ def _fetch_keyword_ranking_summary(domain_id, sheet):
 
     for kw in kws:
         sv = kw.search_volume or 0
-        ranks_raw = kw_ranks_raw[kw.id]
+        ranks_for_kw = kw_ranks[kw.id]
         for lbl in ordered_labels:
-            rank = ranks_raw[lbl]
-            if rank is None:
+            rank = ranks_for_kw[lbl]
+            if rank == _NOT_RANKED:
                 continue
             bucket = _bucket_for_rank(rank)
             if bucket is None:
@@ -4612,9 +4595,8 @@ def _fetch_competitor_ranking_summary(domain_id, sheet):
         by_kw[r.seo_keyword_rank_id].append(r)
 
     # Build per-keyword data, sorted by search volume desc so the busiest
-    # keywords are at the top (matches the Excel sample order). Ranks are
-    # stored as the raw int (or None when unranked) — display goes through
-    # _display_rank later.
+    # keywords are at the top (matches the Excel sample order). Unranked
+    # entries are stored as _NOT_RANKED (101) — the Excel sentinel.
     main_rows = []
     kw_records = []
     for kw_id, rows in by_kw.items():
@@ -4631,14 +4613,14 @@ def _fetch_competitor_ranking_summary(domain_id, sheet):
         site_url = (skr.site_url if skr else '') or first.our_url or ''
         search_volume = (skr.search_volume if skr else 0) or 0
         our_rank_raw = (skr.rank_now if skr else first.our_rank) or 0
-        our_rank = our_rank_raw if our_rank_raw > 0 else None
+        our_rank = our_rank_raw if our_rank_raw > 0 else _NOT_RANKED
 
         comp_rank_map = {}
         for r in rows:
             if not r.competitor:
                 continue
             tr = r.their_rank or 0
-            comp_rank_map[r.competitor.competitor_domain] = tr if tr > 0 else None
+            comp_rank_map[r.competitor.competitor_domain] = tr if tr > 0 else _NOT_RANKED
 
         kw_records.append({
             'kw_id': kw_id,
@@ -4669,10 +4651,10 @@ def _fetch_competitor_ranking_summary(domain_id, sheet):
             'Search Volume - USA': kr['search_volume'],
             'Keyword Intent': kr['intent'],
             our_url_col: kr['site_url'],
-            our_label: _display_rank(kr['our_rank']),
+            our_label: kr['our_rank'],
         }
         for cname in competitor_names:
-            row[cname] = _display_rank(kr['comp_ranks'].get(cname))
+            row[cname] = kr['comp_ranks'].get(cname, _NOT_RANKED)
         main_rows.append(row)
 
     # ── Overview (count + volume) per series ─────────────────────────────
@@ -4685,7 +4667,7 @@ def _fetch_competitor_ranking_summary(domain_id, sheet):
         total_vol = 0
         for kr in kw_records:
             rank = rank_picker(kr)
-            if rank is None:
+            if rank == _NOT_RANKED:
                 continue
             bucket = _bucket_for_rank(rank)
             if bucket is None:
@@ -4698,7 +4680,7 @@ def _fetch_competitor_ranking_summary(domain_id, sheet):
 
     series_aggs = [(our_label, *_aggregate(lambda r: r['our_rank']))]
     for cname in competitor_names:
-        series_aggs.append((cname, *_aggregate(lambda r, c=cname: r['comp_ranks'].get(c))))
+        series_aggs.append((cname, *_aggregate(lambda r, c=cname: r['comp_ranks'].get(c, _NOT_RANKED))))
 
     def _build_overview(title, picker_idx, total_label):
         """picker_idx: 0=counts, 1=vol_sum, 2=total_count, 3=total_vol."""
