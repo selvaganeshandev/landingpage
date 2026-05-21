@@ -7,7 +7,7 @@ import { MentionTable } from "@/components/MentionTable";
 import { TrendChart } from "@/components/TrendChart";
 import { TimeFilter } from "@/components/TimeFilter";
 import { PageLoader } from "@/components/PageLoader";
-import { Eye, TrendingUp, Target, Bell, Link2, FileText } from "lucide-react";
+import { Eye, TrendingUp, Target, Bell, Link2, FileText, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/services/api";
@@ -73,11 +73,42 @@ const Dashboard = () => {
     }
   }, [user, selectedDomain?.id, domainId]);
 
-  const handleExportReport = () => {
-    toast({
-      title: "Exporting Report",
-      description: "Your dashboard report is being generated...",
-    });
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportReport = async () => {
+    const currentDomainId = selectedDomain?.id ? String(selectedDomain.id) : domainId || '';
+    if (!currentDomainId) {
+      toast({
+        title: "No Domain Selected",
+        description: "Please select a domain before exporting.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      setExporting(true);
+      toast({
+        title: "Exporting Report",
+        description: "Your AI Visibility report is being generated...",
+      });
+      const safeName = (selectedDomain?.name || 'domain').replace(/\s+/g, '_');
+      const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      await api.exportDashboardReport({
+        domain_id: currentDomainId,
+        days: Number(timePeriod),
+        llm_model: selectedLLM !== 'all' ? selectedLLM : undefined,
+        filename: `${safeName}_AI_Visibility_${timestamp}.xlsx`,
+      });
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      toast({
+        title: "Export Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleRefreshData = () => {
@@ -196,7 +227,10 @@ const Dashboard = () => {
               </SelectContent>
             </Select>
             {/* <TimeFilter selected={timePeriod} onSelect={setTimePeriod} /> */}
-            {/* <Button variant="outline" onClick={handleExportReport}>Export Report</Button> */}
+            <Button variant="outline" onClick={handleExportReport} disabled={exporting || loading}>
+              <Download className="h-4 w-4 mr-2" />
+              {exporting ? "Exporting..." : "Export Report"}
+            </Button>
             <Button onClick={handleRefreshData} className="gradient-primary shadow-md shadow-primary/20" disabled={loading}>
               {loading ? "Loading..." : "Refresh Data"}
             </Button>
