@@ -446,6 +446,7 @@ export const apiClient = {
     apiRequest('/domains/generate-semantic-keywords/', {
       method: 'POST',
       body: JSON.stringify(data),
+      timeout: 300000, // 5 minutes - Gemini LLM keyword generation can exceed the 2-min default in production
     }),
 
   automatedDomainOnboard: (data: { domain_name: string; brand_name: string; country: string; niches?: string[] }) =>

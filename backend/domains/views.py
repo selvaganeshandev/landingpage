@@ -777,7 +777,13 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
 
         used_provider = 'gemini'
         try:
-            response = model.generate_content(prompt)
+            # Bounded timeout so a quota/429 error surfaces in ~15s instead of
+            # letting google.api_core silently exponential-back-off retry for
+            # ~60s before raising. Successful Gemini calls finish well under 15s.
+            response = model.generate_content(
+                prompt,
+                request_options={'timeout': 15},
+            )
             result_text = response.text.strip()
         except Exception as gemini_err:
             err_str = str(gemini_err)
@@ -793,8 +799,13 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.7,
-                    max_tokens=16000,
+                    # 50 keywords × 9 fields ≈ 7-9k tokens; 8000 is enough and
+                    # cuts ~20-40s off gpt-4o-mini's generation time vs 16000.
+                    max_tokens=8000,
                     response_format={"type": "json_object"},
+                    # Hard cap so a stalled OpenAI request can't hold the
+                    # connection beyond the frontend's 5-min window.
+                    timeout=180,
                 )
                 result_text = openai_response.choices[0].message.content.strip()
             else:
