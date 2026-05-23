@@ -180,3 +180,50 @@ def prompts_export(request):
     )
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def prompts_export_data(request):
+    """
+    GET /prompts/export/data/?domain_id=...
+
+    JSON sibling of prompts_export — same row shape and formatting helpers, so
+    the on-screen Sources page shows exactly what the .xlsx download contains.
+    """
+    domain_id = request.query_params.get("domain_id")
+    if not domain_id:
+        return Response(
+            {"error": "domain_id is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    domain = get_object_or_404(Domain, id=domain_id)
+
+    qs = (
+        PromptAnalytics.objects
+        .filter(prompt__group__domain_id=domain_id, is_published=True)
+        .select_related("prompt", "prompt__group")
+        .order_by("-created_at")
+    )
+
+    rows = []
+    for a in qs.iterator():
+        prompt_text = a.prompt.prompt if a.prompt else ""
+        rows.append({
+            "source_urls": _format_source_urls(a.citation_list),
+            "prompt_text": prompt_text,
+            "model": _display_platform(a.platform),
+            "avg_sentiment": _scale_sentiment(a.sentiment_score),
+            "avg_position": float(a.position or 0),
+            "mentions": int(a.total_mentions or 0),
+            "created": _format_created(a.created_at),
+        })
+
+    return Response({
+        "domain_id": int(domain_id),
+        "domain_name": domain.name,
+        "columns": COLUMN_HEADERS,
+        "rows": rows,
+        "total_rows": len(rows),
+    })

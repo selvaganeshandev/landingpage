@@ -1,7 +1,7 @@
 from django.urls import path
 from . import views
 from . import test_views
-from .views_prompt_export import prompts_export
+from .views_prompt_export import prompts_export, prompts_export_data
 
 urlpatterns = [
     # Test endpoint
@@ -9,6 +9,8 @@ urlpatterns = [
 
     # AI Prompt Data Export (xlsx)
     path('export/', prompts_export, name='prompts_export'),
+    # AI Prompt Data Export (JSON sibling, drives Sources page)
+    path('export/data/', prompts_export_data, name='prompts_export_data'),
     # Mentions endpoints
     path('mentions/', views.get_mentions, name='get_mentions'),
     path('mentions/filters/', views.get_mention_filters, name='get_mention_filters'),

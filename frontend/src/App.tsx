@@ -47,6 +47,7 @@ import TeamMemberPermissions from "./pages/TeamMemberPermissions";
 import DomainSettings from "./pages/DomainSettings";
 import MisinformationAlerts from "./pages/MisinformationAlerts";
 import Citations from "./pages/Citations";
+import Sources from "./pages/Sources";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import NotFound from "./pages/NotFound";
 import Profile from "./pages/Profile";
@@ -118,6 +119,11 @@ const App = () => (
               <Route path="/citations" element={
                 <ProtectedRoute requiredPermission={MODULES.CITATIONS}>
                   <Citations />
+                </ProtectedRoute>
+              } />
+              <Route path="/sources" element={
+                <ProtectedRoute requiredPermission={MODULES.CITATIONS}>
+                  <Sources />
                 </ProtectedRoute>
               } />
 
