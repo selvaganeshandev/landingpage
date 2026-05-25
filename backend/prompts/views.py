@@ -1402,8 +1402,29 @@ def prompt_groups_list(request):
                 domain=domain
             )
             
-            # Platforms to create analytics for
-            platforms = ["ChatGPT", "Google Gemini", "Perplexity"]
+            # Platforms to create analytics placeholders for.
+            # Derive from settings.ENABLED_PLATFORMS so the list never goes
+            # out of sync with what the engine actually dispatches. Defaults
+            # match the previous hardcoded list when the setting is missing.
+            from django.conf import settings as _settings
+            _PLATFORM_LABELS = {
+                'chatgpt':    'ChatGPT',
+                'gemini':     'Google Gemini',
+                'perplexity': 'Perplexity',
+                'claude':     'Claude',
+                'grok':       'Grok',
+                'deepseek':   'DeepSeek',
+            }
+            _enabled = getattr(_settings, 'ENABLED_PLATFORMS', None) or [
+                'chatgpt', 'gemini', 'perplexity'
+            ]
+            platforms = [
+                _PLATFORM_LABELS[p] for p in _enabled
+                if p in _PLATFORM_LABELS
+            ]
+            if not platforms:
+                # Defensive fallback so no row ends up with no platforms.
+                platforms = ["ChatGPT", "Google Gemini", "Claude"]
             
             # Create prompts and analytics
             created_prompts = []

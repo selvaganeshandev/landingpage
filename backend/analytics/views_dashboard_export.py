@@ -128,34 +128,32 @@ def _platforms_for_report(sov_latest_rows):
     return ordered + extras
 
 
-def _mention_matrix(sov_latest_rows, brands, platforms):
-    """Build {(competitor_id_or_None, platform_label): mention_count}."""
+def _mention_matrix(sov_period_rows, brands, platforms):
+    """Build {(competitor_id_or_None, platform_label): mention_count} —
+    summed across every snapshot day in the selected period (Q1b)."""
     matrix = {}
-    for row in sov_latest_rows.exclude(platform__isnull=True).exclude(platform=""):
+    for row in sov_period_rows.exclude(platform__isnull=True).exclude(platform=""):
         key = (row.competitor_id, row.platform)
         matrix[key] = (matrix.get(key) or 0) + (row.mention_count or 0)
     return matrix
 
 
-def _brand_totals(sov_latest_rows, brands):
-    """Aggregate row (platform IS NULL) per brand → total mentions."""
-    totals = {}
-    for row in sov_latest_rows.filter(platform__isnull=True):
-        totals[row.competitor_id] = row.mention_count or 0
-    # Fallback: if aggregate row missing for some brand, sum its platform rows.
-    for b in brands:
-        if b["competitor_id"] not in totals:
-            totals[b["competitor_id"]] = sum(
-                (row.mention_count or 0)
-                for row in sov_latest_rows.filter(
-                    competitor_id=b["competitor_id"]
-                ).exclude(platform__isnull=True).exclude(platform="")
-            )
+def _brand_totals(sov_period_rows, brands):
+    """Total mentions per brand across the period — summed from per-platform
+    rows so we never under-count when the daily aggregate row is missing for
+    some days."""
+    totals = {b["competitor_id"]: 0 for b in brands}
+    for row in sov_period_rows.exclude(platform__isnull=True).exclude(platform=""):
+        if row.competitor_id in totals:
+            totals[row.competitor_id] = totals.get(row.competitor_id, 0) + (row.mention_count or 0)
     return totals
 
 
 def _brand_visibility(sov_latest_rows, brands):
-    """share_percentage of the aggregate (platform IS NULL) row per brand, 0-100."""
+    """share_percentage of the aggregate (platform IS NULL) row per brand on
+    the latest snapshot day, 0-100. Visibility is a "current state" metric,
+    not a sum, so we intentionally keep this on the latest day even though
+    mentions are now period-summed."""
     vis = {}
     for row in sov_latest_rows.filter(platform__isnull=True):
         vis[row.competitor_id] = float(row.share_percentage or 0)
@@ -194,7 +192,7 @@ def _write_header_label(ws, cell_ref, value, *, bold=True, fill=None):
 
 
 def _build_workbook(domain, brands, platforms, mention_matrix, brand_totals,
-                    brand_visibility, your_llm_citations):
+                    brand_visibility, your_llm_citations, period_label=None):
     wb = Workbook()
     ws = wb.active
     ws.title = "AI Visibility"
@@ -210,26 +208,39 @@ def _build_workbook(domain, brands, platforms, mention_matrix, brand_totals,
     HEADER_FILL = "F2F2F2"
     BLOCK_FILL = "E8E8FF"
 
-    # ---------- Block 1 ----------
-    _write_header_label(ws, "B1", "Pillars", fill=BLOCK_FILL)
-    _write_header_label(ws, "C1", "URL", fill=BLOCK_FILL)
+    # ---------- Period header (Q1a) ----------
+    # Tiny meta row above the data so users know the time-range semantics
+    # (Mentions are period-summed, Visibility is snapshot-of-latest).
+    if period_label:
+        cell = ws.cell(row=1, column=2, value=period_label)
+        cell.font = Font(italic=True, color="555555")
+        cell.alignment = Alignment(vertical="center")
+        # Merge across C + the brand columns for visibility.
+        last_col = 3 + max(len(brands), 1)
+        ws.merge_cells(start_row=1, start_column=2, end_row=1, end_column=last_col)
+        ws.row_dimensions[1].height = 20
 
-    _write_header_label(ws, "C2", "Defination", fill=HEADER_FILL)
+    # ---------- Block 1 ----------
+    _write_header_label(ws, "B2", "Pillars", fill=BLOCK_FILL)
+    _write_header_label(ws, "C2", "URL", fill=BLOCK_FILL)
+
+    _write_header_label(ws, "C3", "Defination", fill=HEADER_FILL)
     for i, b in enumerate(brands):
-        _write_header_label(ws, ws.cell(row=2, column=4 + i).coordinate, b["name"],
+        _write_header_label(ws, ws.cell(row=3, column=4 + i).coordinate, b["name"],
                             fill=HEADER_FILL)
 
-    # Row 3: AI Visibility Score
-    ws["B3"] = "AI Visibility Score"
-    ws["B3"].font = Font(bold=True)
-    ws["C3"] = VISIBILITY_DEFINITION
-    ws["C3"].alignment = Alignment(wrap_text=True, vertical="center")
+    # Row 4: AI Visibility Score (shifted down by 1 to make room for the
+    # period-info header on row 1).
+    ws["B4"] = "AI Visibility Score"
+    ws["B4"].font = Font(bold=True)
+    ws["C4"] = VISIBILITY_DEFINITION
+    ws["C4"].alignment = Alignment(wrap_text=True, vertical="center")
     for i, b in enumerate(brands):
         score = brand_visibility.get(b["competitor_id"], 0.0)
-        ws.cell(row=3, column=4 + i, value=f"{int(round(score))}/100")
+        ws.cell(row=4, column=4 + i, value=f"{int(round(score))}/100")
 
-    # Rows 4..N: per-LLM mentions
-    row = 4
+    # Rows 5..N: per-LLM mentions
+    row = 5
     for idx, platform in enumerate(platforms):
         ws.cell(row=row, column=2, value=platform).font = Font(bold=True)
         if idx == 0:
@@ -347,21 +358,33 @@ def dashboard_export(request):
         latest_day = sov_qs.order_by("-timestamp").first().timestamp
         latest_rows = sov_qs.filter(timestamp=latest_day)
     else:
+        latest_day = None
         latest_rows = sov_qs.none()
 
+    # Q1b: mentions are now summed across the period (every snapshot day in
+    # the date range) so a competitor with mentions earlier in the window
+    # doesn't show as 0 just because the latest day was quiet.
+    period_rows = sov_qs
+
     brands = _build_brand_columns(domain, latest_rows)
-    platforms = _platforms_for_report(latest_rows)
+    platforms = _platforms_for_report(period_rows)
     if platform_filter:
         # Honor the LLM dropdown: only include the selected platform's row.
         platforms = [platform_filter]
 
-    matrix = _mention_matrix(latest_rows, brands, platforms)
-    totals = _brand_totals(latest_rows, brands)
+    matrix = _mention_matrix(period_rows, brands, platforms)
+    totals = _brand_totals(period_rows, brands)
+    # Visibility remains a current-state percentage from the latest day.
     visibility = _brand_visibility(latest_rows, brands)
     your_citations = _your_brand_llm_citations(domain_id, start_date, end_date)
 
+    period_label = (
+        f"Mentions summed: {start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}"
+        f" · Visibility snapshot: {latest_day.strftime('%Y-%m-%d') if latest_day else 'n/a'}"
+    )
+
     wb = _build_workbook(domain, brands, platforms, matrix, totals, visibility,
-                         your_citations)
+                         your_citations, period_label=period_label)
 
     buf = BytesIO()
     wb.save(buf)

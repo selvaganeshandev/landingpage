@@ -168,10 +168,15 @@ const Sources = () => {
       (r) => r.source_urls && r.source_urls !== "No sources available",
     ).length;
     const totalMentions = filteredRows.reduce((s, r) => s + (r.mentions || 0), 0);
-    const sentimentSum = filteredRows.reduce((s, r) => s + (r.avg_sentiment || 0), 0);
-    const avgSentiment = total > 0 ? sentimentSum / total : 0;
+    // Sentiment is meaningful only when the AI actually mentioned the brand.
+    // Rows with mentions=0 stay at the DB default sentiment=0 → 50.0 after
+    // scaling, which would drag the average toward neutral. Exclude them.
+    const mentionedRows = filteredRows.filter((r) => r.mentions > 0);
+    const sentimentSum = mentionedRows.reduce((s, r) => s + (r.avg_sentiment || 0), 0);
+    const avgSentiment = mentionedRows.length > 0 ? sentimentSum / mentionedRows.length : 0;
+    const hasSentiment = mentionedRows.length > 0;
     const activeModels = new Set(filteredRows.map((r) => r.model)).size;
-    return { total, withSources, totalMentions, avgSentiment, activeModels };
+    return { total, withSources, totalMentions, avgSentiment, hasSentiment, activeModels };
   }, [filteredRows]);
 
   const totalRows = filteredRows.length;
@@ -304,16 +309,24 @@ const Sources = () => {
         <StatCard
           icon={<Smile className="h-4 w-4" />}
           label="Avg Sentiment"
-          value={stats.avgSentiment.toFixed(1)}
+          value={stats.hasSentiment ? stats.avgSentiment.toFixed(1) : "—"}
           sub={
-            stats.avgSentiment >= 66
-              ? "Positive overall"
-              : stats.avgSentiment <= 33
-                ? "Negative overall"
-                : "Neutral overall"
+            !stats.hasSentiment
+              ? "No mentions to score"
+              : stats.avgSentiment >= 66
+                ? "Positive across mentions"
+                : stats.avgSentiment <= 33
+                  ? "Negative across mentions"
+                  : "Neutral across mentions"
           }
           tone={
-            stats.avgSentiment >= 66 ? "good" : stats.avgSentiment <= 33 ? "bad" : "warn"
+            !stats.hasSentiment
+              ? "default"
+              : stats.avgSentiment >= 66
+                ? "good"
+                : stats.avgSentiment <= 33
+                  ? "bad"
+                  : "warn"
           }
         />
         <StatCard
@@ -561,12 +574,21 @@ const Sources = () => {
                           </span>
                         </td>
                         <td className="px-4 py-3 align-top text-center whitespace-nowrap">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${sentimentChipClass(row.avg_sentiment)}`}
-                            title={`${sentimentBucket(row.avg_sentiment)} (${row.avg_sentiment.toFixed(1)})`}
-                          >
-                            {row.avg_sentiment.toFixed(1)}
-                          </span>
+                          {row.mentions > 0 ? (
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${sentimentChipClass(row.avg_sentiment)}`}
+                              title={`${sentimentBucket(row.avg_sentiment)} (${row.avg_sentiment.toFixed(1)})`}
+                            >
+                              {row.avg_sentiment.toFixed(1)}
+                            </span>
+                          ) : (
+                            <span
+                              className="text-muted-foreground text-xs"
+                              title="Sentiment is only meaningful when the AI mentioned the brand"
+                            >
+                              —
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 align-top text-center whitespace-nowrap">
                           {row.avg_position > 0 ? (
