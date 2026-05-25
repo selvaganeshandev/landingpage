@@ -1734,7 +1734,7 @@ def seo_report_sheet_add(request):
     from integrations.models import Integration
 
     gsc_types = ('gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries', 'gsc_overview')
-    ga_types = ('ga_landing_pages', 'ga_other_sources', 'ga_overview', 'ga_organic_traffic_breakup')
+    ga_types = ('ga_landing_pages', 'ga_other_sources', 'ga_overview', 'ga_organic_traffic_breakup', 'ga_country_events')
 
     if sheet_type in gsc_types:
         gsc_integration = Integration.objects.filter(
@@ -3289,6 +3289,367 @@ def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
     }
 
 
+# ── GA Country-wise Events helpers ─────────────────────────────────────────
+_COUNTRY_EVENTS_PINNED   = ['India', 'United Arab Emirates']
+_COUNTRY_EVENTS_TOP_N    = 10
+
+
+def _fetch_ga_country_events_data(integration, sheet):
+    """
+    GA Country-wise Events — combined report sheet.
+
+      Section 1 — Overall Metrics (metric-down, with WoW/MoM + YoY monthly):
+        Rows: Organic Sessions, Users, Engagement Rate, New Users, then one
+        row per configured event (e.g. Register_submit, OTP_verified,
+        Live_account). Channel filter: Organic Search.
+
+      Sections 2..N — Country × Period sub-tables, one per configured event:
+        Rows: India, UAE (always pinned), then top 10 countries by total
+        Organic Search sessions across the displayed periods.
+        Columns: Country | Period_1 | ... | Period_N. No change columns —
+        the Excel reference does not show them at the per-country level.
+        Values: eventCount, Organic Search + that eventName.
+
+    sheet.metrics holds the per-project list of event names. When it is empty
+    Section 1 still renders (just the standard 4 metric rows) and no country
+    sub-tables are produced — the section degrades gracefully.
+    """
+    import calendar as _cal
+    from collections import defaultdict
+    from datetime import date as _date
+    from integrations.utils.prorate import calculate_prorate_factor
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service     = build('analyticsdata', 'v1beta', credentials=credentials)
+    property_id = integration.provider_id
+
+    order_asc   = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc, data_lag_days=1)
+    if not date_ranges:
+        return {'columns': [], 'rows': [], 'total_rows': 0}
+
+    is_monthly = sheet.schedule == 'monthly'
+    is_weekly  = sheet.schedule == 'weekly'
+
+    event_names = [e for e in (sheet.metrics or []) if e]
+
+    # ── Prorate setup: current calendar month only (monthly schedule) ───────
+    today        = _date.today()
+    cur_label    = None
+    factor       = 1.0
+    days_elapsed = total_days = None
+    if is_monthly:
+        for s_dt, _e_dt, lbl in date_ranges:
+            if s_dt.year == today.year and s_dt.month == today.month:
+                _, last_day  = _cal.monthrange(s_dt.year, s_dt.month)
+                cur_full_end = _date(s_dt.year, s_dt.month, last_day)
+                days_elapsed, total_days, factor = calculate_prorate_factor(
+                    s_dt, cur_full_end, data_lag_days=1
+                )
+                if factor != 1.0:
+                    cur_label = lbl
+                break
+    is_prorated = factor != 1.0
+
+    organic_filter = {
+        'filter': {
+            'fieldName':    'sessionDefaultChannelGroup',
+            'stringFilter': {'value': 'Organic Search', 'matchType': 'EXACT'},
+        }
+    }
+
+    def _organic_and_events_filter():
+        return {
+            'andGroup': {
+                'expressions': [
+                    organic_filter,
+                    {
+                        'filter': {
+                            'fieldName':    'eventName',
+                            'inListFilter': {'values': event_names},
+                        }
+                    },
+                ]
+            }
+        }
+
+    api_errors = []
+
+    # ── Per-period overall metrics (Organic Search) ─────────────────────────
+    ga_metrics     = ['sessions', 'totalUsers', 'engagementRate', 'newUsers']
+    metric_labels  = ['Organic Sessions', 'Users', 'Engagement Rate', 'New Users']
+    metric_is_rate = [False, False, True, False]
+
+    range_metric_values = {}
+    for s_dt, e_dt, label in date_ranges:
+        try:
+            resp = service.properties().runReport(
+                property=property_id,
+                body={
+                    'dateRanges':      [{'startDate': s_dt.isoformat(), 'endDate': e_dt.isoformat()}],
+                    'metrics':         [{'name': m} for m in ga_metrics],
+                    'dimensionFilter': organic_filter,
+                }
+            ).execute()
+            rows = resp.get('rows', [])
+            vals = {}
+            if rows:
+                for i, ml in enumerate(metric_labels):
+                    raw = rows[0]['metricValues'][i]['value']
+                    if metric_is_rate[i]:
+                        # GA4 returns rates as fractions 0..1 — display as percent
+                        vals[ml] = round(float(raw) * 100, 2)
+                    else:
+                        vals[ml] = round(float(raw), 2) if '.' in raw else int(raw)
+            else:
+                vals = {ml: 0 for ml in metric_labels}
+            range_metric_values[label] = vals
+        except Exception as e:
+            logger.error(f"GA CountryEvents metrics API error ({label}) for sheet {sheet.id}: {e}")
+            range_metric_values[label] = {ml: 0 for ml in metric_labels}
+            api_errors.append(str(e))
+
+    # ── Per-period aggregated event counts (no country dimension) ───────────
+    range_event_total = {lbl: {ev: 0 for ev in event_names} for _, _, lbl in date_ranges}
+    if event_names:
+        for s_dt, e_dt, label in date_ranges:
+            try:
+                resp = service.properties().runReport(
+                    property=property_id,
+                    body={
+                        'dateRanges':      [{'startDate': s_dt.isoformat(), 'endDate': e_dt.isoformat()}],
+                        'dimensions':      [{'name': 'eventName'}],
+                        'metrics':         [{'name': 'eventCount'}],
+                        'dimensionFilter': _organic_and_events_filter(),
+                        'limit':           1000,
+                    }
+                ).execute()
+                for r in resp.get('rows', []):
+                    ev = r['dimensionValues'][0]['value']
+                    if ev in event_names:
+                        range_event_total[label][ev] = int(r['metricValues'][0]['value'])
+            except Exception as e:
+                logger.error(f"GA CountryEvents event-total API error ({label}) for sheet {sheet.id}: {e}")
+                api_errors.append(str(e))
+
+    # ── Per-period country × event matrix ───────────────────────────────────
+    range_country_event = {lbl: defaultdict(lambda: defaultdict(int)) for _, _, lbl in date_ranges}
+    if event_names:
+        for s_dt, e_dt, label in date_ranges:
+            try:
+                resp = service.properties().runReport(
+                    property=property_id,
+                    body={
+                        'dateRanges':      [{'startDate': s_dt.isoformat(), 'endDate': e_dt.isoformat()}],
+                        'dimensions':      [{'name': 'country'}, {'name': 'eventName'}],
+                        'metrics':         [{'name': 'eventCount'}],
+                        'dimensionFilter': _organic_and_events_filter(),
+                        'limit':           100000,
+                    }
+                ).execute()
+                for r in resp.get('rows', []):
+                    country = r['dimensionValues'][0]['value']
+                    ev      = r['dimensionValues'][1]['value']
+                    cnt     = int(r['metricValues'][0]['value'])
+                    if ev in event_names:
+                        range_country_event[label][ev][country] += cnt
+            except Exception as e:
+                logger.error(f"GA CountryEvents country×event API error ({label}) for sheet {sheet.id}: {e}")
+                api_errors.append(str(e))
+
+    # ── Country ranking: India + UAE pinned, then top-10 others by Organic
+    #    Search sessions across the displayed span. One call for full range.
+    other_countries = []
+    if event_names and date_ranges:
+        full_start = min(r[0] for r in date_ranges).isoformat()
+        full_end   = max(r[1] for r in date_ranges).isoformat()
+        try:
+            resp = service.properties().runReport(
+                property=property_id,
+                body={
+                    'dateRanges':      [{'startDate': full_start, 'endDate': full_end}],
+                    'dimensions':      [{'name': 'country'}],
+                    'metrics':         [{'name': 'sessions'}],
+                    'dimensionFilter': organic_filter,
+                    'limit':           1000,
+                }
+            ).execute()
+            ranked = []
+            for r in resp.get('rows', []):
+                country = r['dimensionValues'][0]['value']
+                sess    = int(r['metricValues'][0]['value'])
+                if country not in _COUNTRY_EVENTS_PINNED and country:
+                    ranked.append((country, sess))
+            ranked.sort(key=lambda x: x[1], reverse=True)
+            other_countries = [c for c, _ in ranked[:_COUNTRY_EVENTS_TOP_N]]
+        except Exception as e:
+            logger.error(f"GA CountryEvents top-countries API error for sheet {sheet.id}: {e}")
+            api_errors.append(str(e))
+
+    countries = _COUNTRY_EVENTS_PINNED + other_countries
+
+    # ── YOY fetch — monthly only ────────────────────────────────────────────
+    yoy_metric_values = {}
+    yoy_event_total   = {ev: 0 for ev in event_names}
+    if is_monthly and date_ranges:
+        cur_s, cur_e, _ = date_ranges[-1]
+        yoy_s = _date(cur_s.year - 1, cur_s.month, 1)
+        yoy_e = _date(cur_e.year - 1, cur_e.month, cur_e.day)
+        try:
+            resp = service.properties().runReport(
+                property=property_id,
+                body={
+                    'dateRanges':      [{'startDate': yoy_s.isoformat(), 'endDate': yoy_e.isoformat()}],
+                    'metrics':         [{'name': m} for m in ga_metrics],
+                    'dimensionFilter': organic_filter,
+                }
+            ).execute()
+            rows = resp.get('rows', [])
+            if rows:
+                for i, ml in enumerate(metric_labels):
+                    raw = rows[0]['metricValues'][i]['value']
+                    if metric_is_rate[i]:
+                        yoy_metric_values[ml] = round(float(raw) * 100, 2)
+                    else:
+                        yoy_metric_values[ml] = round(float(raw), 2) if '.' in raw else int(raw)
+        except Exception as e:
+            logger.error(f"GA CountryEvents YOY metrics API error for sheet {sheet.id}: {e}")
+
+        if event_names:
+            try:
+                resp = service.properties().runReport(
+                    property=property_id,
+                    body={
+                        'dateRanges':      [{'startDate': yoy_s.isoformat(), 'endDate': yoy_e.isoformat()}],
+                        'dimensions':      [{'name': 'eventName'}],
+                        'metrics':         [{'name': 'eventCount'}],
+                        'dimensionFilter': _organic_and_events_filter(),
+                        'limit':           1000,
+                    }
+                ).execute()
+                for r in resp.get('rows', []):
+                    ev = r['dimensionValues'][0]['value']
+                    if ev in event_names:
+                        yoy_event_total[ev] = int(r['metricValues'][0]['value'])
+            except Exception as e:
+                logger.error(f"GA CountryEvents YOY event-total API error for sheet {sheet.id}: {e}")
+
+    # Bail only if every period errored on the overall-metrics fetch
+    if api_errors and all(
+        sum(v for v in range_metric_values.get(lbl, {}).values()) == 0
+        for _, _, lbl in date_ranges
+    ):
+        return {
+            'columns': [], 'rows': [], 'total_rows': 0,
+            'error':   f'GA API error: {api_errors[0]}',
+        }
+
+    # ── Display labels ──────────────────────────────────────────────────────
+    range_labels         = [r[2] for r in date_ranges]
+    range_labels_display = [
+        (f"{lbl} (PR)" if lbl == cur_label else lbl) for lbl in range_labels
+    ]
+    change_label = 'WOW %' if is_weekly else 'MOM %'
+
+    def _pct(cur_v, base_v):
+        if base_v and base_v != 0:
+            return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+        return 'N/A'
+
+    # ── Section 1: Overall Metrics ──────────────────────────────────────────
+    section1_cols = ['Metric'] + range_labels_display + [change_label]
+    if is_monthly:
+        section1_cols.append('YOY %')
+
+    section1_rows = []
+
+    for ml, is_rate in zip(metric_labels, metric_is_rate):
+        row = {'Metric': ml}
+        change_series = []
+        for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+            raw = range_metric_values.get(lbl_orig, {}).get(ml, 0)
+            if is_rate:
+                row[lbl_disp] = f"{raw}%"
+                change_series.append(raw)
+            elif is_prorated and lbl_orig == cur_label:
+                proj = round(raw * factor)
+                row[lbl_disp] = f"{raw} ({proj})"
+                change_series.append(proj)
+            else:
+                row[lbl_disp] = raw
+                change_series.append(raw)
+        row[change_label] = (
+            _pct(change_series[-1], change_series[-2]) if len(change_series) >= 2 else 'N/A'
+        )
+        if is_monthly:
+            cur_v = change_series[-1] if change_series else 0
+            yoy_v = yoy_metric_values.get(ml)
+            row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v is not None else 'N/A'
+        section1_rows.append(row)
+
+    # One additional row per configured event (count metric — prorate applies)
+    for ev in event_names:
+        row = {'Metric': ev}
+        change_series = []
+        for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+            raw = range_event_total.get(lbl_orig, {}).get(ev, 0)
+            if is_prorated and lbl_orig == cur_label:
+                proj = round(raw * factor)
+                row[lbl_disp] = f"{raw} ({proj})"
+                change_series.append(proj)
+            else:
+                row[lbl_disp] = raw
+                change_series.append(raw)
+        row[change_label] = (
+            _pct(change_series[-1], change_series[-2]) if len(change_series) >= 2 else 'N/A'
+        )
+        if is_monthly:
+            cur_v = change_series[-1] if change_series else 0
+            yoy_v = yoy_event_total.get(ev)
+            row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v else 'N/A'
+        section1_rows.append(row)
+
+    tables = [{
+        'title':   'Organic Search — Overall Metrics',
+        'columns': section1_cols,
+        'rows':    section1_rows,
+    }]
+
+    # ── Sections 2..N: Country × Period per event (no change cols) ──────────
+    country_cols = ['Country'] + range_labels_display
+
+    for ev in event_names:
+        sub_rows = []
+        for country in countries:
+            row = {'Country': country}
+            for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+                cnt = range_country_event.get(lbl_orig, {}).get(ev, {}).get(country, 0)
+                row[lbl_disp] = cnt
+            sub_rows.append(row)
+        tables.append({
+            'title':   f'Organic Search — {ev}',
+            'columns': country_cols,
+            'rows':    sub_rows,
+        })
+
+    # Legacy flat shape (Section 1) for callers that only read columns/rows
+    return {
+        'columns':      section1_cols,
+        'rows':         section1_rows,
+        'total_rows':   len(section1_rows),
+        'is_prorated':  is_prorated,
+        'days_elapsed': days_elapsed,
+        'total_days':   total_days,
+        'unsorted':     True,
+        'tables':       tables,
+    }
+
+
 def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
     """
     GA vs GSC Reconciliation — one row per period showing:
@@ -4040,6 +4401,13 @@ def seo_report_sheet_data(request):
                     data = _fetch_ga_organic_traffic_breakup_data(ga_integration, sheet)
                     report_entry.update(data)
 
+            elif sheet.sheet_type == 'ga_country_events':
+                if not ga_integration:
+                    report_entry['error'] = 'Google Analytics not connected'
+                else:
+                    data = _fetch_ga_country_events_data(ga_integration, sheet)
+                    report_entry.update(data)
+
             elif sheet.sheet_type == 'keyword_ranking_overview':
                 data = _fetch_keyword_ranking_overview(domain_id, sheet)
                 report_entry.update(data)
@@ -4149,6 +4517,9 @@ def seo_report_export_xlsx(request):
             elif sheet.sheet_type == 'ga_organic_traffic_breakup':
                 if ga_integration:
                     data = _fetch_ga_organic_traffic_breakup_data(ga_integration, sheet)
+            elif sheet.sheet_type == 'ga_country_events':
+                if ga_integration:
+                    data = _fetch_ga_country_events_data(ga_integration, sheet)
             elif sheet.sheet_type == 'keyword_ranking_overview':
                 data = _fetch_keyword_ranking_overview(domain_id, sheet)
         except Exception as e:
