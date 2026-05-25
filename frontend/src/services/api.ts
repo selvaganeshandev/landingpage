@@ -714,6 +714,12 @@ export const apiClient = {
     return downloadFile(`/prompts/export/?${queryParams.toString()}`, filename);
   },
 
+  // JSON sibling of exportPromptsReport — same rows, used by the Sources page.
+  getPromptSourcesData: (domainId: string | number) => {
+    const queryParams = new URLSearchParams({ domain_id: String(domainId) });
+    return apiRequest(`/prompts/export/data/?${queryParams.toString()}`);
+  },
+
   createPrompt: (data: any) => apiRequest('/prompts/prompts/', {
     method: 'POST',
     body: JSON.stringify(data),
