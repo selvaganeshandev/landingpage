@@ -1016,6 +1016,7 @@ AFTER (converted to <ul>):
         body_budget = max(upper - conclusion_words, int(upper * 0.5))
 
         kept_body = []
+        kept_block_words = []
         kept_words = 0
         for m in body_matches:
             block_html = m.group(0)
@@ -1023,8 +1024,22 @@ AFTER (converted to <ul>):
             if kept_body and kept_words + block_words > body_budget:
                 break
             kept_body.append(block_html)
+            kept_block_words.append(block_words)
             kept_words += block_words
             if kept_words >= body_budget:
+                break
+
+        # If the greedy fill stopped right after a setup paragraph (one
+        # ending with ":"), the dependent list/paragraph got dropped — leaving
+        # an orphaned "...following:" line. Sweep those trailing setup lines
+        # off so the body never ends mid-thought before the conclusion.
+        while kept_body:
+            tail_text = re.sub(r'<[^>]+>', '', kept_body[-1]).strip()
+            if tail_text.endswith(':'):
+                kept_words -= kept_block_words[-1]
+                kept_body.pop()
+                kept_block_words.pop()
+            else:
                 break
 
         kept_parts = kept_body + conclusion_blocks
@@ -1084,20 +1099,41 @@ AFTER (converted to <ul>):
         )
         target = int(upper * 1.05)
 
+        # A paragraph ending with ":" is a setup line for the block that
+        # follows (e.g. "exposes you to multiple financial risks:" before a
+        # <ul>). Popping the list but keeping the setup orphans the colon,
+        # producing the visible "content cut off mid-section" bug.
+        def _setup_orphan_after_pop(s):
+            if len(s["blocks"]) < 2:
+                return False
+            new_last = s["blocks"][-2]
+            return re.sub(r'<[^>]+>', '', new_last).strip().endswith(':')
+
         # Greedy trim: drop the trailing body block of whichever section
         # has the most trimmable content (>1 body block first, so we don't
         # gut shorter sections). Section headings are never dropped.
         while total_words > target:
             best_i = -1
             best_words = 0
+            # Prefer multi-block sections where popping won't orphan a
+            # setup paragraph.
             for i, s in enumerate(sections):
-                if len(s["blocks"]) > 1:
+                if len(s["blocks"]) > 1 and not _setup_orphan_after_pop(s):
                     last = s["block_words"][-1]
                     if last > best_words:
                         best_words = last
                         best_i = i
-            # Fallback: if every section is down to one body block, keep
-            # trimming the longest trailing block (heading still preserved).
+            # Next, multi-block sections even if popping would orphan
+            # (we'll clean the orphan up below).
+            if best_i < 0:
+                for i, s in enumerate(sections):
+                    if len(s["blocks"]) > 1:
+                        last = s["block_words"][-1]
+                        if last > best_words:
+                            best_words = last
+                            best_i = i
+            # Final fallback: every section is down to one body block —
+            # keep trimming the longest trailing block (heading preserved).
             if best_i < 0:
                 for i, s in enumerate(sections):
                     if s["blocks"]:
@@ -1108,9 +1144,24 @@ AFTER (converted to <ul>):
             if best_i < 0:
                 break
 
-            sections[best_i]["blocks"].pop()
-            sections[best_i]["block_words"].pop()
+            target_section = sections[best_i]
+            target_section["blocks"].pop()
+            target_section["block_words"].pop()
             total_words -= best_words
+
+            # Sweep up any setup paragraphs left dangling at the tail of
+            # this section so we never render "...risks:" with nothing
+            # following it.
+            while target_section["blocks"]:
+                tail_text = re.sub(
+                    r'<[^>]+>', '', target_section["blocks"][-1]
+                ).strip()
+                if tail_text.endswith(':'):
+                    total_words -= target_section["block_words"][-1]
+                    target_section["blocks"].pop()
+                    target_section["block_words"].pop()
+                else:
+                    break
 
         parts = []
         for s in sections:
