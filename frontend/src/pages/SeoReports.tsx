@@ -47,6 +47,9 @@ const SHEET_TYPE_LABELS: Record<string, string> = {
   gsc_overview: "GSC Overview",
   keyword_ranking_overview: "Keyword Ranking Overview",
   ga_organic_traffic_breakup: "GA Organic Traffic Breakup",
+  ga_country_events: "GA Country-wise Events",
+  keyword_ranking_summary: "Keyword Ranking Summary",
+  competitor_ranking_summary: "Competitor Ranking Summary",
 };
 
 const SeoReports = () => {
@@ -364,8 +367,8 @@ function pickDefaultSortCol(columns: string[]): string | null {
 //
 // We detect both shapes — change row OR change column — so the same cell
 // renderer handles either layout and the up/down arrows always show up.
-const SUMMARY_ROW_LABELS = new Set(["MOM %", "WOW %", "YOY %", "Total"]);
-const CHANGE_COL_RE = /(MOM|WOW|YOY)\s*%/i;
+const SUMMARY_ROW_LABELS = new Set(["MOM %", "WOW %", "YOY %", "Total", "Total Keywords"]);
+const CHANGE_COL_RE = /(MOM|WOW|YOY)\s*%|Difference|^Change\b/i;
 
 function SubTable({
   title,
@@ -438,6 +441,9 @@ function SubTable({
                       isChangeCell && !isNaN(numVal) && numVal < 0;
                     const isPositive =
                       isChangeCell && !isNaN(numVal) && numVal > 0;
+                    const isUrl =
+                      typeof value === "string" &&
+                      (value.startsWith("http://") || value.startsWith("https://"));
                     return (
                       <td
                         key={col}
@@ -451,6 +457,16 @@ function SubTable({
                           <span className="text-green-600 font-medium">
                             {value} <span className="text-xs">&#9650;</span>
                           </span>
+                        ) : isUrl ? (
+                          <a
+                            href={value}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline truncate block max-w-[260px]"
+                            title={value}
+                          >
+                            {value}
+                          </a>
                         ) : (
                           <span>{value ?? "-"}</span>
                         )}
@@ -712,7 +728,11 @@ function ReportWidget({
       {/* No data yet (API returned but no rows) */}
       {!dataLoading && reportData && !hasData && !errorMsg && (
         <div className="px-5 py-8 text-center text-muted-foreground text-sm">
-          No data found for the selected date ranges. Data may take some time to appear in Google Search Console.
+          {sheet.sheet_type === "competitor_ranking_summary"
+            ? "No competitor data found. Configure tracked competitors for this domain first."
+            : sheet.sheet_type === "keyword_ranking_summary"
+              ? "No keyword ranking data available yet. Snapshots will appear as rank history is collected."
+              : "No data found for the selected date ranges. Data may take some time to appear in Google Search Console."}
         </div>
       )}
 

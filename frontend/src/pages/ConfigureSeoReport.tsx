@@ -88,6 +88,7 @@ const ConfigureSeoReport = () => {
     gaType: "Landing Pages",
     rankMetrics: [] as string[],
     summaryMetric: "google_analytics",
+    summaryEventNames: "Register_submit, otp_verified, Live_account",
     schedule: "Weekly Schedule",
     weekInterval: "Past 2 weeks",
     monthInterval: "Past 3 months",
@@ -221,10 +222,14 @@ const ConfigureSeoReport = () => {
           keyword_ranking: "keyword_ranking_overview",
           domain_metrics: "domain_metrics",
           ga_organic_traffic_breakup: "ga_organic_traffic_breakup",
+          ga_country_events: "ga_country_events",
+          keyword_ranking_summary: "keyword_ranking_summary",
+          competitor_ranking_summary: "competitor_ranking_summary",
         };
         const needsGa =
           formState.summaryMetric === "google_analytics" ||
-          formState.summaryMetric === "ga_organic_traffic_breakup";
+          formState.summaryMetric === "ga_organic_traffic_breakup" ||
+          formState.summaryMetric === "ga_country_events";
         if (needsGa && !isGaConnected) {
           toast({ title: "Validation", description: "Connect Google Analytics to add GA sheet.", variant: "destructive" });
           return;
@@ -234,6 +239,20 @@ const ConfigureSeoReport = () => {
           return;
         }
         sheetType = summaryMap[formState.summaryMetric] || "ga_overview";
+        if (formState.summaryMetric === "ga_country_events") {
+          metrics = formState.summaryEventNames
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter(Boolean);
+          if (metrics.length === 0) {
+            toast({
+              title: "Validation",
+              description: "Enter at least one event name (comma-separated) for Country-wise Events.",
+              variant: "destructive",
+            });
+            return;
+          }
+        }
         break;
       }
     }
@@ -347,7 +366,15 @@ const ConfigureSeoReport = () => {
               formState={formState}
               setFormState={setFormState}
               isMonthly={isMonthly}
-              hideOrderBy={activeTab === "overview" && formState.summaryMetric === "keyword_ranking"}
+              hideOrderBy={
+                activeTab === "overview" &&
+                (formState.summaryMetric === "keyword_ranking" ||
+                  formState.summaryMetric === "competitor_ranking_summary")
+              }
+              hideDuration={
+                activeTab === "overview" &&
+                formState.summaryMetric === "competitor_ranking_summary"
+              }
             />
           ) : (
             <BaseDurationSection formState={formState} setFormState={setFormState} />
@@ -527,6 +554,9 @@ function OverviewForm({ formState, setFormState }: { formState: any; setFormStat
           { value: "keyword_ranking", label: "Keyword Ranking" },
           { value: "domain_metrics", label: "Domain Metrics" },
           { value: "ga_organic_traffic_breakup", label: "GA Organic Traffic Breakup" },
+          { value: "ga_country_events", label: "GA Country-wise Events" },
+          { value: "keyword_ranking_summary", label: "Keyword Ranking Summary" },
+          { value: "competitor_ranking_summary", label: "Competitor Ranking Summary" },
         ].map((item) => (
           <label key={item.value} className="flex items-center gap-2 cursor-pointer">
             <input
@@ -541,16 +571,35 @@ function OverviewForm({ formState, setFormState }: { formState: any; setFormStat
           </label>
         ))}
       </div>
+      {formState.summaryMetric === "ga_country_events" && (
+        <div className="mt-4">
+          <Label className="text-xs text-muted-foreground">
+            Event Names <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            type="text"
+            placeholder="Register_submit, otp_verified, Live_account"
+            value={formState.summaryEventNames}
+            onChange={(e) => setFormState((p: any) => ({ ...p, summaryEventNames: e.target.value }))}
+            className="mt-1"
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Comma-separated GA4 event names to track per country (Organic Search).
+          </p>
+        </div>
+      )}
     </FormSection>
   );
 }
 
 // ─── Duration & Order By ─────────────────────────────────────────────────────
 
-function DurationOrderSection({ formState, setFormState, isMonthly, hideOrderBy = false }: { formState: any; setFormState: React.Dispatch<React.SetStateAction<any>>; isMonthly: boolean; hideOrderBy?: boolean }) {
+function DurationOrderSection({ formState, setFormState, isMonthly, hideOrderBy = false, hideDuration = false }: { formState: any; setFormState: React.Dispatch<React.SetStateAction<any>>; isMonthly: boolean; hideOrderBy?: boolean; hideDuration?: boolean }) {
+  if (hideDuration && hideOrderBy) return null;
   return (
     <div className="bg-white rounded-lg p-5">
       <div className="flex flex-wrap gap-12">
+        {!hideDuration && (
         <div>
           <h3 className="text-sm font-semibold mb-3 pb-2 border-b">Duration</h3>
           <Label className="text-xs text-muted-foreground">
@@ -581,6 +630,7 @@ function DurationOrderSection({ formState, setFormState, isMonthly, hideOrderBy 
             )}
           </div>
         </div>
+        )}
         {!hideOrderBy && (
           <div>
             <h3 className="text-sm font-semibold mb-3 pb-2 border-b">Order By</h3>

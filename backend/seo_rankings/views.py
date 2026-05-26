@@ -1734,7 +1734,7 @@ def seo_report_sheet_add(request):
     from integrations.models import Integration
 
     gsc_types = ('gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries', 'gsc_overview')
-    ga_types = ('ga_landing_pages', 'ga_other_sources', 'ga_overview', 'ga_organic_traffic_breakup')
+    ga_types = ('ga_landing_pages', 'ga_other_sources', 'ga_overview', 'ga_organic_traffic_breakup', 'ga_country_events')
 
     if sheet_type in gsc_types:
         gsc_integration = Integration.objects.filter(
@@ -3289,6 +3289,371 @@ def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
     }
 
 
+# ── GA Country-wise Events helpers ─────────────────────────────────────────
+_COUNTRY_EVENTS_PINNED   = ['India', 'United Arab Emirates']
+_COUNTRY_EVENTS_TOP_N    = 10
+
+
+def _fetch_ga_country_events_data(integration, sheet):
+    """
+    GA Country-wise Events — combined report sheet.
+
+      Section 1 — Overall Metrics (metric-down, with WoW/MoM + YoY monthly):
+        Rows: Organic Sessions, Users, Engagement Rate, New Users, then one
+        row per configured event (e.g. Register_submit, OTP_verified,
+        Live_account). Channel filter: Organic Search.
+
+      Sections 2..N — Country × Period sub-tables, one per configured event:
+        Rows: India, UAE (always pinned), then top 10 countries by total
+        Organic Search sessions across the displayed periods.
+        Columns: Country | Period_1 | ... | Period_N. No change columns —
+        the Excel reference does not show them at the per-country level.
+        Values: eventCount, Organic Search + that eventName.
+
+    sheet.metrics holds the per-project list of event names. When it is empty
+    Section 1 still renders (just the standard 4 metric rows) and no country
+    sub-tables are produced — the section degrades gracefully.
+    """
+    import calendar as _cal
+    from collections import defaultdict
+    from datetime import date as _date
+    from integrations.utils.prorate import calculate_prorate_factor
+    from integrations.google_oauth import get_credentials_from_integration
+    from googleapiclient.discovery import build
+
+    credentials = get_credentials_from_integration(integration)
+    if not credentials:
+        return {'columns': [], 'rows': [], 'error': 'Invalid credentials'}
+
+    service     = build('analyticsdata', 'v1beta', credentials=credentials)
+    property_id = integration.provider_id
+
+    order_asc   = sheet.order_by == 'Ascending'
+    date_ranges = _get_date_ranges(sheet.schedule, sheet.duration, order_asc, data_lag_days=1)
+    if not date_ranges:
+        return {'columns': [], 'rows': [], 'total_rows': 0}
+
+    is_monthly = sheet.schedule == 'monthly'
+    is_weekly  = sheet.schedule == 'weekly'
+
+    event_names = [e for e in (sheet.metrics or []) if e]
+
+    # ── Prorate setup: current calendar month only (monthly schedule) ───────
+    today        = _date.today()
+    cur_label    = None
+    factor       = 1.0
+    days_elapsed = total_days = None
+    if is_monthly:
+        for s_dt, _e_dt, lbl in date_ranges:
+            if s_dt.year == today.year and s_dt.month == today.month:
+                _, last_day  = _cal.monthrange(s_dt.year, s_dt.month)
+                cur_full_end = _date(s_dt.year, s_dt.month, last_day)
+                days_elapsed, total_days, factor = calculate_prorate_factor(
+                    s_dt, cur_full_end, data_lag_days=1
+                )
+                if factor != 1.0:
+                    cur_label = lbl
+                break
+    is_prorated = factor != 1.0
+
+    organic_filter = {
+        'filter': {
+            'fieldName':    'sessionDefaultChannelGroup',
+            'stringFilter': {'value': 'Organic Search', 'matchType': 'EXACT'},
+        }
+    }
+
+    def _organic_and_events_filter():
+        return {
+            'andGroup': {
+                'expressions': [
+                    organic_filter,
+                    {
+                        'filter': {
+                            'fieldName':    'eventName',
+                            'inListFilter': {'values': event_names},
+                        }
+                    },
+                ]
+            }
+        }
+
+    api_errors = []
+
+    # ── Per-period overall metrics (Organic Search) ─────────────────────────
+    ga_metrics     = ['sessions', 'totalUsers', 'engagementRate', 'newUsers']
+    metric_labels  = ['Organic Sessions', 'Users', 'Engagement Rate', 'New Users']
+    metric_is_rate = [False, False, True, False]
+
+    range_metric_values = {}
+    for s_dt, e_dt, label in date_ranges:
+        try:
+            resp = service.properties().runReport(
+                property=property_id,
+                body={
+                    'dateRanges':      [{'startDate': s_dt.isoformat(), 'endDate': e_dt.isoformat()}],
+                    'metrics':         [{'name': m} for m in ga_metrics],
+                    'dimensionFilter': organic_filter,
+                }
+            ).execute()
+            rows = resp.get('rows', [])
+            vals = {}
+            if rows:
+                for i, ml in enumerate(metric_labels):
+                    raw = rows[0]['metricValues'][i]['value']
+                    if metric_is_rate[i]:
+                        # GA4 returns rates as fractions 0..1 — display as percent
+                        vals[ml] = round(float(raw) * 100, 2)
+                    else:
+                        vals[ml] = round(float(raw), 2) if '.' in raw else int(raw)
+            else:
+                vals = {ml: 0 for ml in metric_labels}
+            range_metric_values[label] = vals
+        except Exception as e:
+            logger.error(f"GA CountryEvents metrics API error ({label}) for sheet {sheet.id}: {e}")
+            range_metric_values[label] = {ml: 0 for ml in metric_labels}
+            api_errors.append(str(e))
+
+    # ── Per-period aggregated event counts (no country dimension) ───────────
+    range_event_total = {lbl: {ev: 0 for ev in event_names} for _, _, lbl in date_ranges}
+    if event_names:
+        for s_dt, e_dt, label in date_ranges:
+            try:
+                resp = service.properties().runReport(
+                    property=property_id,
+                    body={
+                        'dateRanges':      [{'startDate': s_dt.isoformat(), 'endDate': e_dt.isoformat()}],
+                        'dimensions':      [{'name': 'eventName'}],
+                        'metrics':         [{'name': 'eventCount'}],
+                        'dimensionFilter': _organic_and_events_filter(),
+                        'limit':           1000,
+                    }
+                ).execute()
+                for r in resp.get('rows', []):
+                    ev = r['dimensionValues'][0]['value']
+                    if ev in event_names:
+                        range_event_total[label][ev] = int(r['metricValues'][0]['value'])
+            except Exception as e:
+                logger.error(f"GA CountryEvents event-total API error ({label}) for sheet {sheet.id}: {e}")
+                api_errors.append(str(e))
+
+    # ── Per-period country × event matrix ───────────────────────────────────
+    range_country_event = {lbl: defaultdict(lambda: defaultdict(int)) for _, _, lbl in date_ranges}
+    if event_names:
+        for s_dt, e_dt, label in date_ranges:
+            try:
+                resp = service.properties().runReport(
+                    property=property_id,
+                    body={
+                        'dateRanges':      [{'startDate': s_dt.isoformat(), 'endDate': e_dt.isoformat()}],
+                        'dimensions':      [{'name': 'country'}, {'name': 'eventName'}],
+                        'metrics':         [{'name': 'eventCount'}],
+                        'dimensionFilter': _organic_and_events_filter(),
+                        'limit':           100000,
+                    }
+                ).execute()
+                for r in resp.get('rows', []):
+                    country = r['dimensionValues'][0]['value']
+                    ev      = r['dimensionValues'][1]['value']
+                    cnt     = int(r['metricValues'][0]['value'])
+                    if ev in event_names:
+                        range_country_event[label][ev][country] += cnt
+            except Exception as e:
+                logger.error(f"GA CountryEvents country×event API error ({label}) for sheet {sheet.id}: {e}")
+                api_errors.append(str(e))
+
+    # ── Country ranking: India + UAE pinned, then top-10 others by Organic
+    #    Search sessions across the displayed span. One call for full range.
+    other_countries = []
+    if event_names and date_ranges:
+        full_start = min(r[0] for r in date_ranges).isoformat()
+        full_end   = max(r[1] for r in date_ranges).isoformat()
+        try:
+            resp = service.properties().runReport(
+                property=property_id,
+                body={
+                    'dateRanges':      [{'startDate': full_start, 'endDate': full_end}],
+                    'dimensions':      [{'name': 'country'}],
+                    'metrics':         [{'name': 'sessions'}],
+                    'dimensionFilter': organic_filter,
+                    'limit':           1000,
+                }
+            ).execute()
+            ranked = []
+            for r in resp.get('rows', []):
+                country = r['dimensionValues'][0]['value']
+                sess    = int(r['metricValues'][0]['value'])
+                if country not in _COUNTRY_EVENTS_PINNED and country:
+                    ranked.append((country, sess))
+            ranked.sort(key=lambda x: x[1], reverse=True)
+            other_countries = [c for c, _ in ranked[:_COUNTRY_EVENTS_TOP_N]]
+        except Exception as e:
+            logger.error(f"GA CountryEvents top-countries API error for sheet {sheet.id}: {e}")
+            api_errors.append(str(e))
+
+    countries = _COUNTRY_EVENTS_PINNED + other_countries
+
+    # ── YOY fetch — monthly only ────────────────────────────────────────────
+    yoy_metric_values = {}
+    yoy_event_total   = {ev: 0 for ev in event_names}
+    if is_monthly and date_ranges:
+        cur_s, cur_e, _ = date_ranges[-1]
+        yoy_s = _date(cur_s.year - 1, cur_s.month, 1)
+        yoy_e = _date(cur_e.year - 1, cur_e.month, cur_e.day)
+        try:
+            resp = service.properties().runReport(
+                property=property_id,
+                body={
+                    'dateRanges':      [{'startDate': yoy_s.isoformat(), 'endDate': yoy_e.isoformat()}],
+                    'metrics':         [{'name': m} for m in ga_metrics],
+                    'dimensionFilter': organic_filter,
+                }
+            ).execute()
+            rows = resp.get('rows', [])
+            if rows:
+                for i, ml in enumerate(metric_labels):
+                    raw = rows[0]['metricValues'][i]['value']
+                    if metric_is_rate[i]:
+                        yoy_metric_values[ml] = round(float(raw) * 100, 2)
+                    else:
+                        yoy_metric_values[ml] = round(float(raw), 2) if '.' in raw else int(raw)
+        except Exception as e:
+            logger.error(f"GA CountryEvents YOY metrics API error for sheet {sheet.id}: {e}")
+
+        if event_names:
+            try:
+                resp = service.properties().runReport(
+                    property=property_id,
+                    body={
+                        'dateRanges':      [{'startDate': yoy_s.isoformat(), 'endDate': yoy_e.isoformat()}],
+                        'dimensions':      [{'name': 'eventName'}],
+                        'metrics':         [{'name': 'eventCount'}],
+                        'dimensionFilter': _organic_and_events_filter(),
+                        'limit':           1000,
+                    }
+                ).execute()
+                for r in resp.get('rows', []):
+                    ev = r['dimensionValues'][0]['value']
+                    if ev in event_names:
+                        yoy_event_total[ev] = int(r['metricValues'][0]['value'])
+            except Exception as e:
+                logger.error(f"GA CountryEvents YOY event-total API error for sheet {sheet.id}: {e}")
+
+    # Bail only if every period errored on the overall-metrics fetch
+    if api_errors and all(
+        sum(v for v in range_metric_values.get(lbl, {}).values()) == 0
+        for _, _, lbl in date_ranges
+    ):
+        return {
+            'columns': [], 'rows': [], 'total_rows': 0,
+            'error':   f'GA API error: {api_errors[0]}',
+        }
+
+    # ── Display labels ──────────────────────────────────────────────────────
+    range_labels         = [r[2] for r in date_ranges]
+    range_labels_display = [
+        (f"{lbl} (PR)" if lbl == cur_label else lbl) for lbl in range_labels
+    ]
+    change_label = 'WOW %' if is_weekly else 'MOM %'
+
+    def _pct(cur_v, base_v):
+        if base_v and base_v != 0:
+            return f"{round((cur_v - base_v) / base_v * 100, 1):+.1f}%"
+        return 'N/A'
+
+    # ── Section 1: Overall Metrics ──────────────────────────────────────────
+    section1_cols = ['Metric'] + range_labels_display + [change_label]
+    if is_monthly:
+        section1_cols.append('YOY %')
+
+    section1_rows = []
+
+    for ml, is_rate in zip(metric_labels, metric_is_rate):
+        row = {'Metric': ml}
+        change_series = []
+        for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+            raw = range_metric_values.get(lbl_orig, {}).get(ml, 0)
+            if is_rate:
+                row[lbl_disp] = f"{raw}%"
+                change_series.append(raw)
+            elif is_prorated and lbl_orig == cur_label:
+                proj = round(raw * factor)
+                row[lbl_disp] = f"{raw} ({proj})"
+                change_series.append(proj)
+            else:
+                row[lbl_disp] = raw
+                change_series.append(raw)
+        row[change_label] = (
+            _pct(change_series[-1], change_series[-2]) if len(change_series) >= 2 else 'N/A'
+        )
+        if is_monthly:
+            cur_v = change_series[-1] if change_series else 0
+            yoy_v = yoy_metric_values.get(ml)
+            row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v is not None else 'N/A'
+        section1_rows.append(row)
+
+    # One additional row per configured event (count metric — prorate applies)
+    for ev in event_names:
+        row = {'Metric': ev}
+        change_series = []
+        for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+            raw = range_event_total.get(lbl_orig, {}).get(ev, 0)
+            if is_prorated and lbl_orig == cur_label:
+                proj = round(raw * factor)
+                row[lbl_disp] = f"{raw} ({proj})"
+                change_series.append(proj)
+            else:
+                row[lbl_disp] = raw
+                change_series.append(raw)
+        row[change_label] = (
+            _pct(change_series[-1], change_series[-2]) if len(change_series) >= 2 else 'N/A'
+        )
+        if is_monthly:
+            cur_v = change_series[-1] if change_series else 0
+            yoy_v = yoy_event_total.get(ev)
+            row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v else 'N/A'
+        section1_rows.append(row)
+
+    tables = [{
+        'title':   'Organic Search — Overall Metrics',
+        'columns': section1_cols,
+        'rows':    section1_rows,
+    }]
+
+    # ── Sections 2..N: Country × Period per event (no change cols) ──────────
+    country_cols = ['Country'] + range_labels_display
+
+    for ev in event_names:
+        sub_rows = []
+        for country in countries:
+            row = {'Country': country}
+            for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
+                cnt = range_country_event.get(lbl_orig, {}).get(ev, {}).get(country, 0)
+                if is_prorated and lbl_orig == cur_label:
+                    proj = round(cnt * factor)
+                    row[lbl_disp] = f"{cnt} ({proj})"
+                else:
+                    row[lbl_disp] = cnt
+            sub_rows.append(row)
+        tables.append({
+            'title':   f'Organic Search — {ev}',
+            'columns': country_cols,
+            'rows':    sub_rows,
+        })
+
+    # Legacy flat shape (Section 1) for callers that only read columns/rows
+    return {
+        'columns':      section1_cols,
+        'rows':         section1_rows,
+        'total_rows':   len(section1_rows),
+        'is_prorated':  is_prorated,
+        'days_elapsed': days_elapsed,
+        'total_days':   total_days,
+        'unsorted':     True,
+        'tables':       tables,
+    }
+
+
 def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
     """
     GA vs GSC Reconciliation — one row per period showing:
@@ -3927,6 +4292,430 @@ def _fetch_keyword_ranking_monthly(domain_id, sheet):
     }
 
 
+# ---------------------------------------------------------------------------
+# Keyword Ranking Summary  (matches Excel "Organic Keyword Ranking" overview)
+# Two stacked sub-tables: keyword counts per bucket, then search-volume sums
+# per bucket. Both span weekly/monthly snapshot date columns + Change.
+# ---------------------------------------------------------------------------
+
+_SUMMARY_BUCKETS = [
+    ('Top 5',       lambda r: 1 <= r <= 5),
+    ('Top 6 - 10',  lambda r: 6 <= r <= 10),
+    ('Top 11 - 20', lambda r: 11 <= r <= 20),
+    ('Top 21 - 30', lambda r: 21 <= r <= 30),
+    ('Top 31 - 50', lambda r: 31 <= r <= 50),
+    ('Above 50',    lambda r: r > 50),
+]
+
+# Excel uses 101 as the "Not Ranked" sentinel — keep the same value-shape
+# in the cells so the report mirrors the sample workbook.
+_NOT_RANKED = 101
+
+
+def _build_snapshot_dates(sheet, last_ranked):
+    """
+    Build the list of (sample_date, label) pairs for a summary sheet.
+    Mirrors the date logic in _fetch_keyword_ranking_weekly / _monthly so the
+    summary uses the same snapshots as the matching detail report.
+    """
+    duration_limit = sheet.duration or 2
+    if sheet.schedule == 'monthly':
+        import calendar  # noqa: F401  (kept for parity with _monthly)
+        today = last_ranked or date.today()
+        sample_dates = []
+        for i in range(duration_limit):
+            month = today.month - i
+            year = today.year
+            while month <= 0:
+                month += 12
+                year -= 1
+            sample_dates.append(date(year, month, 4))
+        labels = [d.strftime('%b/%Y') for d in sample_dates]
+        return list(zip(sample_dates, labels))
+
+    # Weekly path — matches _fetch_keyword_ranking_weekly.
+    if not last_ranked:
+        last_ranked = date.today()
+    today_weekday = last_ranked.weekday()
+    target_day = 0  # Monday
+    remain_count = (today_weekday - target_day + 7) % 7
+    sample_dates = [
+        last_ranked - timedelta(days=remain_count + 7 * i)
+        for i in range(duration_limit)
+    ]
+    labels = [_ordinal_day_convert(d) for d in sample_dates]
+    return list(zip(sample_dates, labels))
+
+
+def _bucket_for_rank(rank):
+    """Return bucket label for a numeric rank, or None when not ranked (0/None)."""
+    if rank is None or rank <= 0:
+        return None
+    for label, predicate in _SUMMARY_BUCKETS:
+        if predicate(rank):
+            return label
+    return None
+
+
+def _fetch_keyword_ranking_summary(domain_id, sheet):
+    """
+    Organic Keyword Ranking — matches Excel sheet "Organic Keyword Ranking".
+
+    Emits three stacked sub-tables on the API response:
+      1. Organic Keyword Ranking — Category, Primary Keywords, Search Volume,
+         Intent, New Ranking URL, [snapshot date columns], Difference.
+      2. Overview                — keyword count per rank bucket per period.
+      3. Overview (Search Volumes) — search-volume sum per rank bucket per period.
+
+    The Excel export uses a custom side-by-side layout (main on the left,
+    overviews on the right). Other sheet types are not affected.
+    """
+    from collections import defaultdict
+
+    order_asc = (sheet.order_by or 'Ascending').lower() in ('ascending', 'asc')
+
+    kws = list(
+        SeoKeywordRank.objects.select_related('keyword').filter(
+            domain_id=domain_id
+        ).order_by('-search_volume', 'keyword__keyword')[:500]
+    )
+    if not kws:
+        return {
+            'tables': [],
+            'columns': [],
+            'rows': [],
+            'total_rows': 0,
+            'unsorted': True,
+        }
+
+    # Determine reference date from the latest ranked timestamp.
+    last_ranked = None
+    for kw in kws:
+        if kw.last_ranked_date:
+            d = kw.last_ranked_date.date() if hasattr(kw.last_ranked_date, 'date') else kw.last_ranked_date
+            if last_ranked is None or d > last_ranked:
+                last_ranked = d
+
+    date_pairs = _build_snapshot_dates(sheet, last_ranked)
+    if not date_pairs:
+        return {'tables': [], 'columns': [], 'rows': [], 'total_rows': 0, 'unsorted': True}
+
+    sample_dates = [d for d, _ in date_pairs]
+    sample_labels = [l for _, l in date_pairs]
+
+    # Pre-load rank history within the relevant window.
+    min_date = min(sample_dates) - timedelta(days=5)
+    max_date = max(sample_dates) + timedelta(days=5)
+    kw_ids = [kw.id for kw in kws]
+    history_qs = SeoRankHistory.objects.filter(
+        seo_keyword_rank_id__in=kw_ids,
+        snapshot_date__gte=min_date,
+        snapshot_date__lte=max_date,
+    ).values_list('seo_keyword_rank_id', 'snapshot_date', 'rank_position')
+
+    history_map = defaultdict(dict)
+    for kw_id, snap_date, rank_pos in history_qs:
+        history_map[kw_id][snap_date] = rank_pos
+
+    def _get_rank(kw_id, target_date):
+        h = history_map.get(kw_id, {})
+        if target_date in h:
+            return h[target_date]
+        for offset in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5]:
+            d = target_date + timedelta(days=offset)
+            if d in h:
+                return h[d]
+        return None
+
+    # Order date columns oldest→newest if ascending, else newest→oldest.
+    ordered_labels = list(reversed(sample_labels)) if order_asc else sample_labels
+    ordered_dates = list(reversed(sample_dates)) if order_asc else sample_dates
+
+    # ── 1. Main keyword table ────────────────────────────────────────────
+    main_cols = [
+        'Sr No', 'Category', 'Primary Keywords', 'Search Volume - USA',
+        'Intent', 'New Ranking URL',
+    ] + ordered_labels
+    diff_label = None
+    if len(ordered_labels) >= 2:
+        diff_label = f"Difference ({ordered_labels[-1]} vs {ordered_labels[-2]})"
+        main_cols.append(diff_label)
+
+    # Cells store the raw rank (1..N) or _NOT_RANKED (101) — matches the
+    # Excel sample. Bucket math below uses the same values.
+    kw_ranks = {}  # kw_id -> {label -> int}
+
+    main_rows = []
+    for idx, kw in enumerate(kws, 1):
+        kw_obj = kw.keyword
+        kw_text = kw_obj.keyword if kw_obj else ''
+        category = (getattr(kw_obj, 'topic', None)
+                    or (kw.tags[0] if kw.tags else '')
+                    or '')
+        intent_raw = getattr(kw_obj, 'intent', None) or ''
+        intent = intent_raw.title() if intent_raw else ''
+        site_url = kw.site_url or ''
+
+        ranks_for_kw = {}
+        for d, lbl in zip(ordered_dates, ordered_labels):
+            r = _get_rank(kw.id, d)
+            ranks_for_kw[lbl] = r if (isinstance(r, int) and r > 0) else _NOT_RANKED
+        kw_ranks[kw.id] = ranks_for_kw
+
+        row = {
+            'Sr No': idx,
+            'Category': category,
+            'Primary Keywords': kw_text,
+            'Search Volume - USA': kw.search_volume or 0,
+            'Intent': intent,
+            'New Ranking URL': site_url,
+        }
+        for lbl in ordered_labels:
+            row[lbl] = ranks_for_kw[lbl]
+        if diff_label:
+            latest = ranks_for_kw[ordered_labels[-1]]
+            prev = ranks_for_kw[ordered_labels[-2]]
+            # Improvement is rank dropping (smaller = better) → positive number.
+            row[diff_label] = prev - latest
+        main_rows.append(row)
+
+    # ── 2. Overview (Count) and 3. Overview (Search Volumes) ─────────────
+    counts = {lbl: {bk: 0 for bk, _ in _SUMMARY_BUCKETS} for lbl in ordered_labels}
+    volumes = {lbl: {bk: 0 for bk, _ in _SUMMARY_BUCKETS} for lbl in ordered_labels}
+    totals_count = {lbl: 0 for lbl in ordered_labels}
+    totals_volume = {lbl: 0 for lbl in ordered_labels}
+
+    for kw in kws:
+        sv = kw.search_volume or 0
+        ranks_for_kw = kw_ranks[kw.id]
+        for lbl in ordered_labels:
+            rank = ranks_for_kw[lbl]
+            if rank == _NOT_RANKED:
+                continue
+            bucket = _bucket_for_rank(rank)
+            if bucket is None:
+                continue
+            counts[lbl][bucket] += 1
+            volumes[lbl][bucket] += sv
+            totals_count[lbl] += 1
+            totals_volume[lbl] += sv
+
+    def _build_overview(title, bucket_data, totals, total_label):
+        cols = ['Overview'] + ordered_labels
+        change_label = None
+        if len(ordered_labels) >= 2:
+            change_label = f"Difference ({ordered_labels[-1]} vs {ordered_labels[-2]})"
+            cols.append(change_label)
+
+        rows = []
+        for bucket_name, _ in _SUMMARY_BUCKETS:
+            row = {'Overview': bucket_name}
+            for lbl in ordered_labels:
+                row[lbl] = bucket_data[lbl][bucket_name]
+            if change_label:
+                row[change_label] = bucket_data[ordered_labels[-1]][bucket_name] - bucket_data[ordered_labels[-2]][bucket_name]
+            rows.append(row)
+
+        total_row = {'Overview': total_label}
+        for lbl in ordered_labels:
+            total_row[lbl] = totals[lbl]
+        if change_label:
+            total_row[change_label] = totals[ordered_labels[-1]] - totals[ordered_labels[-2]]
+        rows.append(total_row)
+
+        return {'title': title, 'columns': cols, 'rows': rows}
+
+    tables = [
+        {'title': 'Organic Keyword Ranking',
+         'columns': main_cols,
+         'rows': main_rows},
+        _build_overview('Overview', counts, totals_count, 'Total Keywords'),
+        _build_overview('Overview (Search Volumes)', volumes, totals_volume, 'Total Keywords'),
+    ]
+
+    return {
+        'tables': tables,
+        # Legacy single-table fallback — first sub-table for any caller still
+        # reading `columns`/`rows` directly.
+        'columns': tables[0]['columns'],
+        'rows': tables[0]['rows'],
+        'total_rows': len(tables[0]['rows']),
+        'unsorted': True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Competitor Ranking Summary  (matches Excel "Competition Organic Ranking"
+# overview). Per-competitor bucket distribution: keyword counts + summed
+# search volume. Uses SeoCompetitorKeyword (current rank snapshot only).
+# ---------------------------------------------------------------------------
+
+def _fetch_competitor_ranking_summary(domain_id, sheet):
+    """
+    Competition Organic Ranking — matches Excel sheet "Competition Organic
+    Ranking".
+
+    Emits three stacked sub-tables on the API response:
+      1. Competition Organic Ranking — Sr No, Category, Keywords, Search
+         Volume, Keyword Intent, [Domain] Ranking URL, then one current-rank
+         column per tracked competitor (and our domain).
+      2. Overview                — keyword count per rank bucket per series.
+      3. Overview (Search Volumes) — summed search volume per rank bucket per series.
+
+    SeoCompetitorKeyword stores current ranks only, so this is a single-
+    snapshot report (no Difference column).
+    """
+    from collections import defaultdict
+
+    try:
+        domain = Domain.objects.get(id=domain_id)
+    except Domain.DoesNotExist:
+        return {'tables': [], 'columns': [], 'rows': [], 'total_rows': 0, 'unsorted': True}
+
+    our_label = domain.name or 'Our Domain'
+
+    comp_rows = list(
+        SeoCompetitorKeyword.objects.select_related(
+            'competitor', 'seo_keyword_rank', 'seo_keyword_rank__keyword',
+        ).filter(domain_id=domain_id)
+    )
+    if not comp_rows:
+        return {'tables': [], 'columns': [], 'rows': [], 'total_rows': 0, 'unsorted': True}
+
+    # Discover the set of tracked competitor domains (column headers).
+    competitor_names = sorted({
+        r.competitor.competitor_domain
+        for r in comp_rows if r.competitor
+    })
+
+    # Group rows by keyword so each keyword becomes one row of the main
+    # table with one column per competitor.
+    by_kw = defaultdict(list)
+    for r in comp_rows:
+        by_kw[r.seo_keyword_rank_id].append(r)
+
+    # Build per-keyword data, sorted by search volume desc so the busiest
+    # keywords are at the top (matches the Excel sample order). Unranked
+    # entries are stored as _NOT_RANKED (101) — the Excel sentinel.
+    main_rows = []
+    kw_records = []
+    for kw_id, rows in by_kw.items():
+        first = rows[0]
+        skr = first.seo_keyword_rank
+        kw_obj = skr.keyword if skr else None
+
+        kw_text = kw_obj.keyword if kw_obj else (first.keyword_text or '')
+        category = (getattr(kw_obj, 'topic', None)
+                    or (skr.tags[0] if (skr and skr.tags) else '')
+                    or '')
+        intent_raw = getattr(kw_obj, 'intent', None) or ''
+        intent = intent_raw.title() if intent_raw else ''
+        site_url = (skr.site_url if skr else '') or first.our_url or ''
+        search_volume = (skr.search_volume if skr else 0) or 0
+        our_rank_raw = (skr.rank_now if skr else first.our_rank) or 0
+        our_rank = our_rank_raw if our_rank_raw > 0 else _NOT_RANKED
+
+        comp_rank_map = {}
+        for r in rows:
+            if not r.competitor:
+                continue
+            tr = r.their_rank or 0
+            comp_rank_map[r.competitor.competitor_domain] = tr if tr > 0 else _NOT_RANKED
+
+        kw_records.append({
+            'kw_id': kw_id,
+            'kw_text': kw_text,
+            'category': category,
+            'intent': intent,
+            'site_url': site_url,
+            'search_volume': search_volume,
+            'our_rank': our_rank,
+            'comp_ranks': comp_rank_map,
+        })
+
+    kw_records.sort(key=lambda r: (-r['search_volume'], r['kw_text']))
+    kw_records = kw_records[:1500]   # safety cap to keep payload reasonable
+
+    # Header for the "our" URL column uses the domain name, per Excel.
+    our_url_col = f'{our_label} Ranking URL'
+    main_cols = [
+        'Sr No', 'Category', 'Keywords', 'Search Volume - USA',
+        'Keyword Intent', our_url_col, our_label,
+    ] + competitor_names
+
+    for idx, kr in enumerate(kw_records, 1):
+        row = {
+            'Sr No': idx,
+            'Category': kr['category'],
+            'Keywords': kr['kw_text'],
+            'Search Volume - USA': kr['search_volume'],
+            'Keyword Intent': kr['intent'],
+            our_url_col: kr['site_url'],
+            our_label: kr['our_rank'],
+        }
+        for cname in competitor_names:
+            row[cname] = kr['comp_ranks'].get(cname, _NOT_RANKED)
+        main_rows.append(row)
+
+    # ── Overview (count + volume) per series ─────────────────────────────
+    series_labels = [our_label] + competitor_names
+
+    def _aggregate(rank_picker):
+        counts = {bk: 0 for bk, _ in _SUMMARY_BUCKETS}
+        vol_sum = {bk: 0 for bk, _ in _SUMMARY_BUCKETS}
+        total_count = 0
+        total_vol = 0
+        for kr in kw_records:
+            rank = rank_picker(kr)
+            if rank == _NOT_RANKED:
+                continue
+            bucket = _bucket_for_rank(rank)
+            if bucket is None:
+                continue
+            counts[bucket] += 1
+            vol_sum[bucket] += kr['search_volume']
+            total_count += 1
+            total_vol += kr['search_volume']
+        return counts, vol_sum, total_count, total_vol
+
+    series_aggs = [(our_label, *_aggregate(lambda r: r['our_rank']))]
+    for cname in competitor_names:
+        series_aggs.append((cname, *_aggregate(lambda r, c=cname: r['comp_ranks'].get(c, _NOT_RANKED))))
+
+    def _build_overview(title, picker_idx, total_label):
+        """picker_idx: 0=counts, 1=vol_sum, 2=total_count, 3=total_vol."""
+        cols = ['Overview'] + series_labels
+        rows = []
+        for bucket_name, _ in _SUMMARY_BUCKETS:
+            row = {'Overview': bucket_name}
+            for entry in series_aggs:
+                label = entry[0]
+                bucket_map = entry[picker_idx + 1]
+                row[label] = bucket_map[bucket_name]
+            rows.append(row)
+        total_row = {'Overview': total_label}
+        for entry in series_aggs:
+            total_row[entry[0]] = entry[picker_idx + 3]
+        rows.append(total_row)
+        return {'title': title, 'columns': cols, 'rows': rows}
+
+    tables = [
+        {'title': 'Competition Organic Ranking',
+         'columns': main_cols,
+         'rows': main_rows},
+        _build_overview('Overview', 0, 'Total Keywords'),
+        _build_overview('Overview (Search Volumes)', 1, 'Total Keywords'),
+    ]
+
+    return {
+        'tables': tables,
+        'columns': tables[0]['columns'],
+        'rows': tables[0]['rows'],
+        'total_rows': len(tables[0]['rows']),
+        'unsorted': True,
+    }
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def seo_report_sheet_data(request):
@@ -4040,8 +4829,23 @@ def seo_report_sheet_data(request):
                     data = _fetch_ga_organic_traffic_breakup_data(ga_integration, sheet)
                     report_entry.update(data)
 
+            elif sheet.sheet_type == 'ga_country_events':
+                if not ga_integration:
+                    report_entry['error'] = 'Google Analytics not connected'
+                else:
+                    data = _fetch_ga_country_events_data(ga_integration, sheet)
+                    report_entry.update(data)
+
             elif sheet.sheet_type == 'keyword_ranking_overview':
                 data = _fetch_keyword_ranking_overview(domain_id, sheet)
+                report_entry.update(data)
+
+            elif sheet.sheet_type == 'keyword_ranking_summary':
+                data = _fetch_keyword_ranking_summary(domain_id, sheet)
+                report_entry.update(data)
+
+            elif sheet.sheet_type == 'competitor_ranking_summary':
+                data = _fetch_competitor_ranking_summary(domain_id, sheet)
                 report_entry.update(data)
 
             else:
@@ -4066,10 +4870,13 @@ def seo_report_export_xlsx(request):
     """
     from io import BytesIO
     import openpyxl
+    import re as _re
     from openpyxl.styles import Font, Alignment, PatternFill
     from openpyxl.utils import get_column_letter
     from django.http import HttpResponse
     from integrations.models import Integration
+
+    _CHANGE_COL_RE = _re.compile(r'(MOM|WOW|YOY)\s*%', _re.IGNORECASE)
 
     domain_id = request.query_params.get('domain_id')
     if not domain_id:
@@ -4149,8 +4956,15 @@ def seo_report_export_xlsx(request):
             elif sheet.sheet_type == 'ga_organic_traffic_breakup':
                 if ga_integration:
                     data = _fetch_ga_organic_traffic_breakup_data(ga_integration, sheet)
+            elif sheet.sheet_type == 'ga_country_events':
+                if ga_integration:
+                    data = _fetch_ga_country_events_data(ga_integration, sheet)
             elif sheet.sheet_type == 'keyword_ranking_overview':
                 data = _fetch_keyword_ranking_overview(domain_id, sheet)
+            elif sheet.sheet_type == 'keyword_ranking_summary':
+                data = _fetch_keyword_ranking_summary(domain_id, sheet)
+            elif sheet.sheet_type == 'competitor_ranking_summary':
+                data = _fetch_competitor_ranking_summary(domain_id, sheet)
         except Exception as e:
             logger.error(f"Export: error fetching sheet {sheet.id}: {e}")
             data['error'] = str(e)
@@ -4166,6 +4980,139 @@ def seo_report_export_xlsx(request):
         # ── Create worksheet ──────────────────────────────────────────────
         ws_title = sheet.sheet_name[:31]  # Excel sheet name max 31 chars
         ws = wb.create_sheet(title=ws_title)
+
+        # ── Side-by-side layout for the two "Excel-mirror" summary sheets:
+        #    main keyword table on the left, Overview tables stacked on the
+        #    right (a 1-column gap separates them). Matches the workbook in
+        #    /home/hts-005/Downloads/Sample Export Report_AI Prompt
+        #    Visibility_and_Organic Ranking Visibilty.xlsx. ────────────────
+        if (
+            sheet.sheet_type in ('keyword_ranking_summary', 'competitor_ranking_summary')
+            and len(sub_tables) >= 1
+        ):
+            main_tbl = sub_tables[0]
+            overview_tables = sub_tables[1:]
+
+            mcols = main_tbl.get('columns', [])
+            mrows = main_tbl.get('rows', [])
+
+            # Main table starts at row 1. Header row in yellow, data rows below.
+            if mcols:
+                for ci, col_name in enumerate(mcols, 1):
+                    cell = ws.cell(row=1, column=ci, value=col_name)
+                    if _is_change_col(col_name) or 'Difference' in col_name:
+                        cell.fill = change_col_fill
+                        cell.font = change_col_font
+                    else:
+                        cell.fill = col_fill
+                        cell.font = col_font
+                    cell.alignment = center_align
+
+                for ri, rdata in enumerate(mrows, 2):
+                    for ci, col_name in enumerate(mcols, 1):
+                        val = rdata.get(col_name, '')
+                        cell = ws.cell(row=ri, column=ci, value=val)
+                        if _is_change_col(col_name) or 'Difference' in col_name:
+                            try:
+                                num = float(str(val).replace('%', '').replace('+', '').replace(',', ''))
+                                if num > 0:
+                                    cell.font = pos_font
+                                elif num < 0:
+                                    cell.font = neg_font
+                            except (ValueError, TypeError):
+                                pass
+                            cell.alignment = center_align
+                        elif col_name in ('Sr No',):
+                            cell.alignment = center_align
+                        elif col_name in ('Category', 'Primary Keywords', 'Keywords',
+                                          'Intent', 'Keyword Intent') or col_name.endswith('Ranking URL'):
+                            cell.alignment = left_align
+                        else:
+                            cell.alignment = center_align
+
+                # Auto-size main-table columns.
+                for ci, col_name in enumerate(mcols, 1):
+                    letter = get_column_letter(ci)
+                    max_len = len(str(col_name))
+                    for ri in range(2, 2 + min(len(mrows), 80)):
+                        cv = ws.cell(row=ri, column=ci).value
+                        if cv is not None:
+                            max_len = max(max_len, len(str(cv)))
+                    ws.column_dimensions[letter].width = min(max(max_len + 2, 12), 45)
+
+            # Overview tables start one column to the right of the main table,
+            # stacked vertically with a blank-row separator.
+            ov_start_col = (len(mcols) + 2) if mcols else 1   # +1 for gap
+            cur_row = 1
+            for ov in overview_tables:
+                ocols = ov.get('columns', [])
+                orows = ov.get('rows', [])
+                otitle = ov.get('title', '')
+                if not ocols:
+                    continue
+                ncols = len(ocols)
+
+                # Title bar
+                title_cell = ws.cell(row=cur_row, column=ov_start_col, value=otitle.upper())
+                title_cell.fill = metric_header_fill
+                title_cell.font = metric_header_font
+                title_cell.alignment = center_align
+                if ncols > 1:
+                    ws.merge_cells(
+                        start_row=cur_row, start_column=ov_start_col,
+                        end_row=cur_row, end_column=ov_start_col + ncols - 1,
+                    )
+                    for fc in range(ov_start_col + 1, ov_start_col + ncols):
+                        ws.cell(row=cur_row, column=fc).fill = metric_header_fill
+                cur_row += 1
+
+                # Column headers
+                for ci, col_name in enumerate(ocols):
+                    cell = ws.cell(row=cur_row, column=ov_start_col + ci, value=col_name)
+                    if _is_change_col(col_name) or 'Difference' in col_name:
+                        cell.fill = change_col_fill
+                        cell.font = change_col_font
+                    else:
+                        cell.fill = col_fill
+                        cell.font = col_font
+                    cell.alignment = center_align
+                cur_row += 1
+
+                # Data rows
+                for r in orows:
+                    dim_label = str(r.get(ocols[0], ''))
+                    is_total = dim_label.startswith('Total')
+                    for ci, col_name in enumerate(ocols):
+                        val = r.get(col_name, '')
+                        cell = ws.cell(row=cur_row, column=ov_start_col + ci, value=val)
+                        if ci > 0 and (_is_change_col(col_name) or 'Difference' in col_name):
+                            try:
+                                num = float(str(val).replace('%', '').replace('+', '').replace(',', ''))
+                                if num > 0:
+                                    cell.font = pos_font
+                                elif num < 0:
+                                    cell.font = neg_font
+                            except (ValueError, TypeError):
+                                pass
+                        elif is_total:
+                            cell.font = Font(bold=True)
+                        cell.alignment = left_align if ci == 0 else center_align
+                    cur_row += 1
+
+                # Blank row between overview blocks
+                cur_row += 1
+
+                # Auto-size the overview columns (run per block — last wins).
+                for ci, col_name in enumerate(ocols):
+                    letter = get_column_letter(ov_start_col + ci)
+                    max_len = len(str(col_name))
+                    for ri in range(1, cur_row):
+                        cv = ws.cell(row=ri, column=ov_start_col + ci).value
+                        if cv is not None:
+                            max_len = max(max_len, len(str(cv)))
+                    ws.column_dimensions[letter].width = min(max(max_len + 2, 14), 30)
+
+            continue   # skip generic stacked-sub-table branch below
 
         # ── Stacked sub-tables (e.g. GSC Overview: Clicks → Impressions →
         #    CTR, each with months down × Total/Branded/Non-Branded across) ──
@@ -4203,16 +5150,29 @@ def seo_report_export_xlsx(request):
                     cell.alignment = center_align
                 cur_row += 1
 
+                # Dim column is the first column of the sub-table. Layouts vary:
+                #   GSC Overview ........ 'Months'    (change indicators as rows)
+                #   GA Traffic Breakup .. 'Page Type' / 'Page URL' (change as cols)
+                #   Country-wise Events . 'Metric' / 'Country'     (change as cols
+                #                          in Section 1; none in country sub-tables)
+                dim_col = tcols[0]
+                change_col_flags = [
+                    bool(_CHANGE_COL_RE.search(c)) for c in tcols
+                ]
+
                 # Data rows
                 for r in trows:
-                    months_label  = str(r.get('Months', ''))
-                    is_change_row = months_label in ('MOM %', 'WOW %', 'YOY %')
-                    is_total_row  = months_label == 'Total'
-                    is_pr_row     = '(PR)' in months_label
+                    dim_label     = str(r.get(dim_col, ''))
+                    is_change_row = dim_label in ('MOM %', 'WOW %', 'YOY %')
+                    is_total_row  = dim_label == 'Total'
+                    is_pr_row     = '(PR)' in dim_label
                     for ci, col_name in enumerate(tcols, 1):
                         val  = r.get(col_name, '')
                         cell = ws.cell(row=cur_row, column=ci, value=val)
-                        if is_change_row and ci > 1:
+                        is_change_cell = ci > 1 and (
+                            is_change_row or change_col_flags[ci - 1]
+                        )
+                        if is_change_cell:
                             try:
                                 num = float(str(val).replace('%', '').replace('+', '').replace(',', ''))
                                 if num > 0:
@@ -4223,7 +5183,7 @@ def seo_report_export_xlsx(request):
                                 pass
                         elif is_total_row or is_pr_row:
                             cell.font = bold_font
-                        cell.alignment = left_align if col_name == 'Months' else center_align
+                        cell.alignment = left_align if col_name == dim_col else center_align
                     cur_row += 1
 
                 # Blank separator row before next sub-table
