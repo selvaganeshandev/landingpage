@@ -4550,7 +4550,7 @@ def _fetch_keyword_ranking_summary(domain_id, sheet):
 # search volume. Uses SeoCompetitorKeyword (current rank snapshot only).
 # ---------------------------------------------------------------------------
 
-def _fetch_competitor_ranking_summary(domain_id, sheet):
+def _fetch_competitor_ranking_summary(domain_id, sheet, include_urls=False):
     """
     Competition Organic Ranking — matches Excel sheet "Competition Organic
     Ranking".
@@ -4564,6 +4564,10 @@ def _fetch_competitor_ranking_summary(domain_id, sheet):
 
     SeoCompetitorKeyword stores current ranks only, so this is a single-
     snapshot report (no Difference column).
+
+    include_urls=True appends a "[Competitor] Ranking URL" column next to
+    each competitor's rank column. Used by the XLSX export only — the UI
+    keeps the rank-only layout.
     """
     from collections import defaultdict
 
@@ -4616,11 +4620,14 @@ def _fetch_competitor_ranking_summary(domain_id, sheet):
         our_rank = our_rank_raw if our_rank_raw > 0 else _NOT_RANKED
 
         comp_rank_map = {}
+        comp_url_map = {}
         for r in rows:
             if not r.competitor:
                 continue
             tr = r.their_rank or 0
-            comp_rank_map[r.competitor.competitor_domain] = tr if tr > 0 else _NOT_RANKED
+            cdomain = r.competitor.competitor_domain
+            comp_rank_map[cdomain] = tr if tr > 0 else _NOT_RANKED
+            comp_url_map[cdomain] = r.their_url or ''
 
         kw_records.append({
             'kw_id': kw_id,
@@ -4631,6 +4638,7 @@ def _fetch_competitor_ranking_summary(domain_id, sheet):
             'search_volume': search_volume,
             'our_rank': our_rank,
             'comp_ranks': comp_rank_map,
+            'comp_urls': comp_url_map,
         })
 
     kw_records.sort(key=lambda r: (-r['search_volume'], r['kw_text']))
@@ -4641,7 +4649,17 @@ def _fetch_competitor_ranking_summary(domain_id, sheet):
     main_cols = [
         'Sr No', 'Category', 'Keywords', 'Search Volume - USA',
         'Keyword Intent', our_url_col, our_label,
-    ] + competitor_names
+    ]
+    # In the UI we only show competitor rank columns. For the export we
+    # interleave a "[Competitor] Ranking URL" column right after each
+    # competitor's rank so the URL sits next to the rank it belongs to.
+    comp_url_cols = {
+        cname: f'{cname} Ranking URL' for cname in competitor_names
+    }
+    for cname in competitor_names:
+        main_cols.append(cname)
+        if include_urls:
+            main_cols.append(comp_url_cols[cname])
 
     for idx, kr in enumerate(kw_records, 1):
         row = {
@@ -4655,6 +4673,8 @@ def _fetch_competitor_ranking_summary(domain_id, sheet):
         }
         for cname in competitor_names:
             row[cname] = kr['comp_ranks'].get(cname, _NOT_RANKED)
+            if include_urls:
+                row[comp_url_cols[cname]] = kr['comp_urls'].get(cname, '')
         main_rows.append(row)
 
     # ── Overview (count + volume) per series ─────────────────────────────
@@ -4964,7 +4984,7 @@ def seo_report_export_xlsx(request):
             elif sheet.sheet_type == 'keyword_ranking_summary':
                 data = _fetch_keyword_ranking_summary(domain_id, sheet)
             elif sheet.sheet_type == 'competitor_ranking_summary':
-                data = _fetch_competitor_ranking_summary(domain_id, sheet)
+                data = _fetch_competitor_ranking_summary(domain_id, sheet, include_urls=True)
         except Exception as e:
             logger.error(f"Export: error fetching sheet {sheet.id}: {e}")
             data['error'] = str(e)
