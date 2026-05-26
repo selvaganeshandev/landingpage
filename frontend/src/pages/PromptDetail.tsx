@@ -26,7 +26,9 @@ import {
   Loader2,
   MessageSquare,
   GitBranch,
-  Target
+  Target,
+  LinkIcon,
+  AlertCircle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
@@ -525,6 +527,59 @@ const PromptDetail = () => {
                 );
               })}
             </Tabs>
+          </div>
+        </Card>
+      )}
+
+      {/* Missed Page URLs Section: URLs cited in the previous LLM run but
+          absent from the latest one. Backend computes per (prompt, platform). */}
+      {Array.isArray(promptGroup?.missed_urls) && promptGroup.missed_urls.length > 0 && (
+        <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+          <div className="space-y-4">
+            <div className="flex items-start justify-between pb-4 border-b border-border/50">
+              <div>
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5 text-amber-500" />
+                  <h3 className="text-lg font-semibold font-inter">Missed Page URLs</h3>
+                  <Badge variant="outline" className="ml-2">{promptGroup.missed_urls.length}</Badge>
+                </div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Pages cited in the previous LLM response but missing from the latest one.
+                </p>
+              </div>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>URL</TableHead>
+                  <TableHead>Platform</TableHead>
+                  <TableHead>Last Seen</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {promptGroup.missed_urls.map((m: any, idx: number) => (
+                  <TableRow key={`${m.prompt_id}-${m.platform}-${idx}`}>
+                    <TableCell>
+                      <a
+                        href={m.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 text-sm text-primary hover:underline break-all"
+                      >
+                        <LinkIcon className="h-3.5 w-3.5 shrink-0" />
+                        <span className="break-all">{m.url}</span>
+                      </a>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="capitalize">{m.platform}</Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {m.last_seen_at ? formatDate(m.last_seen_at) : '—'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         </Card>
       )}

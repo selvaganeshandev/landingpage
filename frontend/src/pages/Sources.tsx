@@ -31,11 +31,22 @@ import {
   TrendingUp,
   Smile,
   RefreshCw,
+  CalendarIcon,
 } from "lucide-react";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
+
+type SourceUrlGroup = {
+  domain: string;
+  urls: string[];
+};
 
 type SourceRow = {
   source_urls: string;
+  source_url_groups?: SourceUrlGroup[];
   prompt_text: string;
   model: string;
   avg_sentiment: number;
@@ -94,11 +105,22 @@ const Sources = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [exporting, setExporting] = useState(false);
+  const [startDate, setStartDate] = useState<Date | undefined>(undefined);
+  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+
+  const dateRangeReady =
+    (!startDate && !endDate) ||
+    (Boolean(startDate) && Boolean(endDate) && startDate! <= endDate!);
+  const startStr = startDate ? format(startDate, "yyyy-MM-dd") : undefined;
+  const endStr = endDate ? format(endDate, "yyyy-MM-dd") : undefined;
 
   const { data, isLoading, isError, isFetching, refetch } = useQuery({
-    queryKey: ["promptSourcesData", domainId],
+    queryKey: ["promptSourcesData", domainId, startStr, endStr],
     queryFn: async () => {
-      const res = await apiClient.getPromptSourcesData(domainId!);
+      const res = await apiClient.getPromptSourcesData(domainId!, {
+        start_date: startStr,
+        end_date: endStr,
+      });
       return res as {
         domain_id: number;
         domain_name: string;
@@ -107,7 +129,8 @@ const Sources = () => {
         total_rows: number;
       };
     },
-    enabled: !!domainId,
+    // Only fetch when domain is set and (no range selected, OR a complete valid range is selected)
+    enabled: !!domainId && dateRangeReady,
   });
 
   const allRows: SourceRow[] = data?.rows || [];
@@ -126,9 +149,13 @@ const Sources = () => {
     const q = search.trim().toLowerCase();
     let rows = allRows.filter((r) => {
       if (q) {
+        const fullUrls = Array.isArray(r.source_url_groups)
+          ? r.source_url_groups.flatMap((g) => [g.domain, ...g.urls]).join(" ").toLowerCase()
+          : "";
         const hit =
           r.prompt_text.toLowerCase().includes(q) ||
           r.source_urls.toLowerCase().includes(q) ||
+          fullUrls.includes(q) ||
           r.model.toLowerCase().includes(q);
         if (!hit) return false;
       }
@@ -205,9 +232,29 @@ const Sources = () => {
 
   const handleExport = async () => {
     if (!domainId) return;
+    if ((startDate && !endDate) || (!startDate && endDate)) {
+      toast({
+        title: "Incomplete date range",
+        description: "Please pick both a start and end date, or clear both.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (startDate && endDate && startDate > endDate) {
+      toast({
+        title: "Invalid date range",
+        description: "Start date must be on or before end date.",
+        variant: "destructive",
+      });
+      return;
+    }
     setExporting(true);
     try {
-      await apiClient.exportPromptsReport({ domain_id: domainId });
+      await apiClient.exportPromptsReport({
+        domain_id: domainId,
+        start_date: startStr,
+        end_date: endStr,
+      });
       toast({ title: "Export started", description: "Your .xlsx download has begun." });
     } catch (err: any) {
       toast({
@@ -265,7 +312,61 @@ const Sources = () => {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn("justify-start text-left font-normal", !startDate && "text-muted-foreground")}
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {startDate ? format(startDate, "MMM d, yyyy") : <span>Start date</span>}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={startDate}
+                onSelect={setStartDate}
+                disabled={(date) => date > new Date()}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn("justify-start text-left font-normal", !endDate && "text-muted-foreground")}
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {endDate ? format(endDate, "MMM d, yyyy") : <span>End date</span>}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={endDate}
+                onSelect={setEndDate}
+                disabled={(date) => date > new Date() || (startDate ? date < startDate : false)}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+          {(startDate || endDate) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setStartDate(undefined);
+                setEndDate(undefined);
+              }}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -521,41 +622,74 @@ const Sources = () => {
                 <tbody>
                   {pageRows.map((row, idx) => {
                     const bg = idx % 2 === 0 ? "#fff" : "#faf8ff";
-                    const domains =
-                      row.source_urls === "No sources available" || !row.source_urls
-                        ? []
-                        : row.source_urls
-                            .split(",")
-                            .map((d) => d.trim())
-                            .filter(Boolean);
+                    // Prefer the new grouped structure (domain + subpage URLs).
+                    // Fall back to the legacy comma-separated domain string so
+                    // older cached responses still render correctly.
+                    const groups: SourceUrlGroup[] =
+                      Array.isArray(row.source_url_groups) && row.source_url_groups.length > 0
+                        ? row.source_url_groups
+                        : row.source_urls && row.source_urls !== "No sources available"
+                          ? row.source_urls
+                              .split(",")
+                              .map((d) => d.trim())
+                              .filter(Boolean)
+                              .map((d) => ({ domain: d, urls: [] }))
+                          : [];
                     return (
                       <tr key={page * rowsPerPage + idx} className="border-b hover:bg-muted/10 transition-colors" style={{ backgroundColor: bg }}>
                         <td className="px-4 py-3 align-top">
-                          {domains.length === 0 ? (
+                          {groups.length === 0 ? (
                             <span className="text-muted-foreground italic text-xs">
                               No sources available
                             </span>
                           ) : (
-                            <div className="flex flex-wrap gap-1.5 max-w-[420px]">
-                              {domains.slice(0, 6).map((d) => (
-                                <a
-                                  key={d}
-                                  href={d.startsWith("http") ? d : `https://${d}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-border bg-muted/30 text-xs text-primary hover:underline hover:bg-muted/50 transition-colors"
-                                  title={d}
-                                >
-                                  {d}
-                                  <ExternalLink className="h-3 w-3 opacity-60" />
-                                </a>
-                              ))}
-                              {domains.length > 6 && (
+                            <div className="space-y-2 max-w-[460px]">
+                              {groups.slice(0, 4).map((g) => {
+                                const domainHref = g.urls[0] || (g.domain.startsWith("http") ? g.domain : `https://${g.domain}`);
+                                const visibleUrls = g.urls.slice(0, 3);
+                                const hiddenCount = Math.max(0, g.urls.length - visibleUrls.length);
+                                return (
+                                  <div key={g.domain} className="rounded border border-border bg-muted/20 px-2 py-1.5">
+                                    <a
+                                      href={domainHref}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                                      title={g.domain}
+                                    >
+                                      {g.domain}
+                                      <ExternalLink className="h-3 w-3 opacity-60" />
+                                    </a>
+                                    {visibleUrls.length > 0 && (
+                                      <ul className="mt-1 space-y-0.5 pl-2">
+                                        {visibleUrls.map((u) => (
+                                          <li key={u} className="text-[11px] leading-snug text-muted-foreground truncate" title={u}>
+                                            <a
+                                              href={u}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="hover:text-primary hover:underline break-all"
+                                            >
+                                              {u}
+                                            </a>
+                                          </li>
+                                        ))}
+                                        {hiddenCount > 0 && (
+                                          <li className="text-[11px] text-muted-foreground italic" title={g.urls.slice(visibleUrls.length).join("\n")}>
+                                            + {hiddenCount} more page{hiddenCount === 1 ? "" : "s"}
+                                          </li>
+                                        )}
+                                      </ul>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              {groups.length > 4 && (
                                 <span
                                   className="inline-flex items-center px-2 py-0.5 rounded border border-border bg-muted/20 text-xs text-muted-foreground"
-                                  title={domains.slice(6).join(", ")}
+                                  title={groups.slice(4).map((g) => g.domain).join(", ")}
                                 >
-                                  +{domains.length - 6} more
+                                  +{groups.length - 4} more domain{groups.length - 4 === 1 ? "" : "s"}
                                 </span>
                               )}
                             </div>

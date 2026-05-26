@@ -343,8 +343,27 @@ def dashboard_export(request):
     platform_filter = _normalize_platform_filter(request.query_params.get("llm_model"))
     domain = get_object_or_404(Domain, id=domain_id)
 
+    # Optional explicit date range overrides `days`. Accepts ISO YYYY-MM-DD.
+    start_param = request.query_params.get("start_date")
+    end_param = request.query_params.get("end_date")
     end_date = timezone.now().date()
     start_date = end_date - timedelta(days=days - 1)
+    if start_param or end_param:
+        try:
+            if end_param:
+                end_date = datetime.strptime(end_param, "%Y-%m-%d").date()
+            if start_param:
+                start_date = datetime.strptime(start_param, "%Y-%m-%d").date()
+        except ValueError:
+            return Response(
+                {"error": "start_date and end_date must be YYYY-MM-DD"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if start_date > end_date:
+            return Response(
+                {"error": "start_date cannot be after end_date"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     sov_qs = ShareOfVoiceAnalytics.objects.filter(
         domain_id=domain_id,

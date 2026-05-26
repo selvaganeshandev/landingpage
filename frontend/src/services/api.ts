@@ -707,16 +707,23 @@ export const apiClient = {
     return apiRequest(`/prompts/prompts/${queryParams}`);
   },
 
-  exportPromptsReport: (params: { domain_id: string | number; filename?: string }) => {
+  exportPromptsReport: (params: { domain_id: string | number; start_date?: string; end_date?: string; filename?: string }) => {
     const queryParams = new URLSearchParams({ domain_id: String(params.domain_id) });
+    if (params.start_date) queryParams.set('start_date', params.start_date);
+    if (params.end_date) queryParams.set('end_date', params.end_date);
     const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const filename = params.filename || `AI_Prompt_Data_Export_${timestamp}.xlsx`;
     return downloadFile(`/prompts/export/?${queryParams.toString()}`, filename);
   },
 
   // JSON sibling of exportPromptsReport — same rows, used by the Sources page.
-  getPromptSourcesData: (domainId: string | number) => {
+  getPromptSourcesData: (
+    domainId: string | number,
+    options?: { start_date?: string; end_date?: string },
+  ) => {
     const queryParams = new URLSearchParams({ domain_id: String(domainId) });
+    if (options?.start_date) queryParams.set('start_date', options.start_date);
+    if (options?.end_date) queryParams.set('end_date', options.end_date);
     return apiRequest(`/prompts/export/data/?${queryParams.toString()}`);
   },
 
@@ -1139,21 +1146,25 @@ export const apiClient = {
   },
 
   // ===== Dashboard =====
-  getDashboardSummary: (params: { domain_id: string; days?: number; llm_model?: string }) => {
+  getDashboardSummary: (params: { domain_id: string; days?: number; llm_model?: string; start_date?: string; end_date?: string }) => {
     const queryParams = new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
       ...(params.llm_model ? { llm_model: params.llm_model } : {}),
+      ...(params.start_date ? { start_date: params.start_date } : {}),
+      ...(params.end_date ? { end_date: params.end_date } : {}),
     });
     // Use backend API endpoint
     return apiClient.get(`/analytics/dashboard/summary/?${queryParams.toString()}`);
   },
 
-  exportDashboardReport: (params: { domain_id: string; days?: number; llm_model?: string; filename?: string }) => {
+  exportDashboardReport: (params: { domain_id: string; days?: number; llm_model?: string; start_date?: string; end_date?: string; filename?: string }) => {
     const queryParams = new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
       ...(params.llm_model ? { llm_model: params.llm_model } : {}),
+      ...(params.start_date ? { start_date: params.start_date } : {}),
+      ...(params.end_date ? { end_date: params.end_date } : {}),
     });
     const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const filename = params.filename || `AI_Visibility_${timestamp}.xlsx`;

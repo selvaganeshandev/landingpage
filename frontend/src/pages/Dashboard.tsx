@@ -7,7 +7,7 @@ import { MentionTable } from "@/components/MentionTable";
 import { TrendChart } from "@/components/TrendChart";
 import { TimeFilter } from "@/components/TimeFilter";
 import { PageLoader } from "@/components/PageLoader";
-import { Eye, TrendingUp, Target, Bell, Link2, FileText, Download } from "lucide-react";
+import { Eye, TrendingUp, Target, Bell, Link2, FileText, Download, CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/services/api";
@@ -21,6 +21,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -37,6 +41,8 @@ const Dashboard = () => {
   const currentDomainIdRef = useRef<string>("");
   const currentTimePeriodRef = useRef<string>("");
   const currentSelectedLLMRef = useRef<string>("");
+  const currentStartDateRef = useRef<string>("");
+  const currentEndDateRef = useRef<string>("");
 
   // LLM modules configuration
   const llmModules = [
@@ -74,6 +80,8 @@ const Dashboard = () => {
   }, [user, selectedDomain?.id, domainId]);
 
   const [exporting, setExporting] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState<Date | undefined>(undefined);
+  const [exportEndDate, setExportEndDate] = useState<Date | undefined>(undefined);
 
   const handleExportReport = async () => {
     const currentDomainId = selectedDomain?.id ? String(selectedDomain.id) : domainId || '';
@@ -81,6 +89,22 @@ const Dashboard = () => {
       toast({
         title: "No Domain Selected",
         description: "Please select a domain before exporting.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if ((exportStartDate && !exportEndDate) || (!exportStartDate && exportEndDate)) {
+      toast({
+        title: "Incomplete Date Range",
+        description: "Please select both a start and end date, or clear both.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (exportStartDate && exportEndDate && exportStartDate > exportEndDate) {
+      toast({
+        title: "Invalid Date Range",
+        description: "Start date must be on or before end date.",
         variant: "destructive",
       });
       return;
@@ -93,10 +117,15 @@ const Dashboard = () => {
       });
       const safeName = (selectedDomain?.name || 'domain').replace(/\s+/g, '_');
       const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const useRange = Boolean(exportStartDate && exportEndDate);
       await api.exportDashboardReport({
         domain_id: currentDomainId,
-        days: Number(timePeriod),
+        // Only send `days` when no explicit range is chosen, so backend
+        // falls back to its existing behavior unchanged.
+        ...(useRange ? {} : { days: Number(timePeriod) }),
         llm_model: selectedLLM !== 'all' ? selectedLLM : undefined,
+        ...(useRange ? { start_date: format(exportStartDate!, 'yyyy-MM-dd') } : {}),
+        ...(useRange ? { end_date: format(exportEndDate!, 'yyyy-MM-dd') } : {}),
         filename: `${safeName}_AI_Visibility_${timestamp}.xlsx`,
       });
     } catch (e) {
@@ -135,13 +164,22 @@ const Dashboard = () => {
       return;
     }
 
+    // A complete date range overrides the `days` window. A partial range
+    // (only start OR only end) is treated as "not applied" to avoid sending
+    // an ambiguous request — the user picks both, or neither.
+    const useRange = Boolean(exportStartDate && exportEndDate);
+    const startStr = useRange ? format(exportStartDate!, 'yyyy-MM-dd') : '';
+    const endStr = useRange ? format(exportEndDate!, 'yyyy-MM-dd') : '';
+
     // Check if all parameters are the same - only skip if nothing has changed
     const domainChanged = currentDomainIdRef.current !== currentDomainId;
     const timePeriodChanged = currentTimePeriodRef.current !== timePeriod;
     const llmChanged = currentSelectedLLMRef.current !== selectedLLM;
+    const startChanged = currentStartDateRef.current !== startStr;
+    const endChanged = currentEndDateRef.current !== endStr;
 
     // If nothing has changed, don't re-fetch (unless explicitly forced via refresh button)
-    if (!forceRefresh && !domainChanged && !timePeriodChanged && !llmChanged && summary) {
+    if (!forceRefresh && !domainChanged && !timePeriodChanged && !llmChanged && !startChanged && !endChanged && summary) {
       return;
     }
 
@@ -149,13 +187,18 @@ const Dashboard = () => {
     currentDomainIdRef.current = currentDomainId;
     currentTimePeriodRef.current = timePeriod;
     currentSelectedLLMRef.current = selectedLLM;
+    currentStartDateRef.current = startStr;
+    currentEndDateRef.current = endStr;
 
     try {
       setLoading(true);
       const data = await api.getDashboardSummary({
         domain_id: currentDomainId,
-        days: Number(timePeriod),
-        llm_model: selectedLLM !== 'all' ? selectedLLM : undefined
+        // Only send `days` when no explicit range is applied — the backend
+        // falls back to its existing behavior unchanged.
+        ...(useRange ? {} : { days: Number(timePeriod) }),
+        llm_model: selectedLLM !== 'all' ? selectedLLM : undefined,
+        ...(useRange ? { start_date: startStr, end_date: endStr } : {}),
       });
       setSummary(data);
     } catch (e) {
@@ -190,13 +233,17 @@ const Dashboard = () => {
     }
   }
 
-  // Fetch summary when dependencies change
+  // Fetch summary when dependencies change. The date range is included as
+  // a dependency so the cards (Total Mentions, Citations, Visibility,
+  // Platform Distribution …) refetch the moment the user picks a range.
+  // A partial range (only start or only end) is ignored — fetchSummary
+  // only sends start_date/end_date when both are set.
   useEffect(() => {
     if (user && domainId) {
       void fetchSummary();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, domainId, timePeriod, selectedLLM]);
+  }, [user, domainId, timePeriod, selectedLLM, exportStartDate, exportEndDate]);
 
   // Show loading state whenever we're fetching data
   if (loading || !summary) {
@@ -227,6 +274,64 @@ const Dashboard = () => {
               </SelectContent>
             </Select>
             {/* <TimeFilter selected={timePeriod} onSelect={setTimePeriod} /> */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "justify-start text-left font-normal",
+                    !exportStartDate && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {exportStartDate ? format(exportStartDate, "MMM d, yyyy") : <span>Start date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={exportStartDate}
+                  onSelect={setExportStartDate}
+                  disabled={(date) => date > new Date()}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "justify-start text-left font-normal",
+                    !exportEndDate && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {exportEndDate ? format(exportEndDate, "MMM d, yyyy") : <span>End date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={exportEndDate}
+                  onSelect={setExportEndDate}
+                  disabled={(date) => date > new Date() || (exportStartDate ? date < exportStartDate : false)}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+            {(exportStartDate || exportEndDate) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setExportStartDate(undefined);
+                  setExportEndDate(undefined);
+                }}
+              >
+                Clear
+              </Button>
+            )}
             <Button variant="outline" onClick={handleExportReport} disabled={exporting || loading}>
               <Download className="h-4 w-4 mr-2" />
               {exporting ? "Exporting..." : "Export Report"}
