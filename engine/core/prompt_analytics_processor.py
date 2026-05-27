@@ -322,6 +322,43 @@ class PromptAnalyticsProcessor:
         - Process all INIT prompts in that group.
         """
         try:
+            # Reaper: a single SCHD group whose worker died (deploy, kill -9, OOM)
+            # blocks every future prompt-analytics run because of the
+            # "group_in_progress" early-return below. Reset stale SCHD groups and
+            # their stuck PROC/SCHD prompts back to INIT so the next tick can
+            # pick them up. Same threshold as the domain reaper.
+            from datetime import timedelta
+            stale_minutes = int(getattr(settings, 'STALE_SCHD_MINUTES', 15))
+            cutoff = timezone.now() - timedelta(minutes=stale_minutes)
+
+            stale_groups = list(
+                PromptGroup.objects.filter(
+                    track_status='SCHD',
+                    tracked_at__lt=cutoff,
+                ).values_list('id', flat=True)
+            )
+            if stale_groups:
+                now = timezone.now()
+                # Reap the groups
+                PromptGroup.objects.filter(id__in=stale_groups).update(
+                    track_status='INIT',
+                    track_message=f'Auto-reaped stale SCHD after {stale_minutes}m',
+                    modified_at=now,
+                )
+                # Also reap any prompts in those groups still stuck in PROC/SCHD
+                stuck_prompts = Prompt.objects.filter(
+                    group_id__in=stale_groups,
+                    track_status__in=['PROC', 'SCHD'],
+                ).update(
+                    track_status='INIT',
+                    track_message=f'Auto-reaped (group reaped at {now.isoformat()})',
+                    modified_at=now,
+                )
+                logger.warning(
+                    "[prompt schedule_tick] Reaped %s stale SCHD group(s) and %s stuck prompt(s) back to INIT",
+                    len(stale_groups), stuck_prompts,
+                )
+
             # If a group is in progress, skip scheduling
             if PromptGroup.objects.filter(track_status='SCHD').exists():
                 return {'scheduled': False, 'reason': 'group_in_progress'}

@@ -33,6 +33,23 @@ def process_domain_task(self, domain_id: int):
 def scheduler_tick(self):
     max_concurrent = getattr(settings, 'MAX_CONCURRENT_DOMAINS', 10)
 
+    # Reaper: any domain stuck in SCHD past STALE_SCHD_MINUTES is from a worker
+    # that died (deploy, kill -9, OOM). Reset it to INIT so the picker below
+    # re-queues it on this same tick. Default 15min — long enough that healthy
+    # in-progress work isn't disturbed, short enough that crashes self-heal.
+    from datetime import timedelta
+    stale_minutes = getattr(settings, 'STALE_SCHD_MINUTES', 15)
+    stale_cutoff = timezone.now() - timedelta(minutes=stale_minutes)
+    reaped = Domain.objects.filter(
+        processing_status='SCHD',
+        tracked_at__lt=stale_cutoff,
+    ).update(processing_status='INIT', modified_at=timezone.now())
+    if reaped:
+        logger.warning(
+            "[scheduler_tick] Reaped %s stale SCHD domain(s) (older than %sm) back to INIT",
+            reaped, stale_minutes,
+        )
+
     # Count current in-flight (scheduled) domains
     currently_processing = Domain.objects.filter(processing_status='SCHD').count()
     available_slots = max(0, max_concurrent - currently_processing)
