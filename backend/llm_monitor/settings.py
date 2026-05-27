@@ -266,6 +266,10 @@ GOOGLE_PAGESPEED_API_KEY = config('GOOGLE_PAGESPEED_API_KEY', default=None)
 MOZ_ACCESS_ID = config('MOZ_ACCESS_ID', default=None)
 MOZ_SECRET_KEY = config('MOZ_SECRET_KEY', default=None)
 
+# DataForSEO API Configuration (for Backlink Portfolio in dashboard export)
+DATAFORSEO_LOGIN = config('DATAFORSEO_LOGIN', default=None)
+DATAFORSEO_PASSWORD = config('DATAFORSEO_PASSWORD', default=None)
+
 # Google OAuth Configuration
 GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='1080254283876-0o3ur4sr7ii1kh4ugaij4c7n1ptibn4j.apps.googleusercontent.com')
 GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='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')
