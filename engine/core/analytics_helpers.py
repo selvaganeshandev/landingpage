@@ -396,7 +396,18 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
         if group and hasattr(group, 'domain') and group.domain and hasattr(group.domain, 'country'):
             country_text = group.domain.country or "United States"
         
-        system_prompt = f"You are a helpful assistant with access to current web search results. When answering questions, analyze the provided search results and combine them with your knowledge to provide comprehensive, up-to-date responses with current citations and links. Always prioritize the most recent and relevant information from the search results. Always provide answers in the context of {country_text} unless the user specifies another country."
+        # Honest system prompt: do NOT claim "web search results" when no
+        # search tool is wired up — that misleads the model into presenting
+        # training-era info as current. State the actual situation and let
+        # the model flag stale knowledge appropriately.
+        system_prompt = (
+            f"{_today_context_line()} "
+            "You are a helpful assistant answering from your training knowledge "
+            "(no live web search is available in this call). Provide comprehensive, "
+            "well-cited answers and clearly flag any information that may be out "
+            "of date relative to today. "
+            f"Always provide answers in the context of {country_text} unless the user specifies another country."
+        )
 
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -405,7 +416,7 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
                 {"role": "user", "content": (
                     "Original Question: " + prompt_text +
                     "\n\nBased on your knowledge, please provide a comprehensive and detailed response with:\n\n"
-                    "1. A thorough answer incorporating the latest information\n"
+                    "1. A thorough answer incorporating the latest information you have, with explicit labels when content may be outdated relative to today\n"
                     "2. Include all relevant URLs and links\n"
                     "3. Mention specific companies, tools, platforms, and services\n"
                     "4. Provide detailed citations with current sources and dates where possible\n"
@@ -512,6 +523,7 @@ def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, clien
         genai.configure(api_key=(client or {}).get('api_key'), transport="rest")
         model = genai.GenerativeModel('gemini-2.0-flash')
         prompt = (
+            f"{_today_context_line()}\n\n"
             f"Original Question: {prompt_text}\n\n"
             f"Context: Always provide answers in the context of {country_text} unless the user specifies another country.\n\n"
             "Based on your knowledge, please provide a comprehensive and detailed response with:\n\n"
@@ -550,9 +562,17 @@ def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, c
         
         try:
             from perplexity import Perplexity
+            from datetime import date as _date
             perplexity_client = Perplexity(api_key=(client or {}).get('api_key'))
-            # Include country context in the prompt
-            user_message = f"{prompt_text} (Context: Provide answers in the context of {country_text} unless the user specifies another country.)"
+            # Include country context in the prompt. Perplexity has live web
+            # search built in, so a short "[As of YYYY-MM-DD]" prefix is enough
+            # to nudge it toward current sources without blowing the 250-char
+            # query cap. Keep the date prefix first so truncation preserves it.
+            today_iso = _date.today().isoformat()
+            user_message = (
+                f"[As of {today_iso}] {prompt_text} "
+                f"(Context: Provide answers in the context of {country_text} unless the user specifies another country.)"
+            )
             if len(user_message) > 250:
                 user_message = user_message[:250].rsplit(' ', 1)[0] + "..."
             
@@ -620,9 +640,29 @@ def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, c
         raise
 
 
+def _today_context_line() -> str:
+    """Single line of date/recency context injected into every LLM call.
+
+    Without this, LLMs answer as of their training cutoff and confidently
+    cite years-old articles as "current" — leading to responses that
+    reference 2023 sources when the actual date is years later. Telling
+    the model what date it is doesn't grant new knowledge, but it forces
+    the model to flag stale info instead of presenting it as current."""
+    from datetime import date as _date
+    today = _date.today()
+    return (
+        f"Today's date is {today.strftime('%B %d, %Y')} ({today.isoformat()}). "
+        "Prioritize the most recent information you have. If your knowledge of a "
+        "topic is older than 6 months relative to today, say so explicitly and "
+        "label that information as potentially outdated. Do not present pre-cutoff "
+        "information as 'current' or 'recent' without qualifying it."
+    )
+
+
 def _build_analytics_user_prompt(prompt_text: str, country_text: str) -> str:
     """Shared user-message body for the new providers — same shape as ChatGPT/Gemini paths."""
     return (
+        f"{_today_context_line()}\n\n"
         f"Original Question: {prompt_text}\n\n"
         f"Context: Always provide answers in the context of {country_text} unless the user specifies another country.\n\n"
         "Based on your knowledge, please provide a comprehensive and detailed response with:\n\n"
@@ -651,6 +691,7 @@ def process_prompt_with_claude(prompt_text: str, user_domain: str, client: Any =
         anthropic_client = Anthropic(api_key=cfg.get('api_key'), timeout=cfg.get('timeout', 60))
         country_text = _resolve_country_text(group)
         system_prompt = (
+            f"{_today_context_line()} "
             "You are a helpful assistant. Provide comprehensive, well-cited answers. "
             f"Always provide answers in the context of {country_text} unless the user specifies another country."
         )
@@ -683,7 +724,9 @@ def process_prompt_with_grok(prompt_text: str, user_domain: str, client: Any = N
         )
         country_text = _resolve_country_text(group)
         system_prompt = (
-            "You are a helpful assistant with access to current information. Provide comprehensive, well-cited answers. "
+            f"{_today_context_line()} "
+            "You are a helpful assistant. Provide comprehensive, well-cited answers and "
+            "flag any information that may be out of date relative to today. "
             f"Always provide answers in the context of {country_text} unless the user specifies another country."
         )
         model_name = getattr(settings, 'XAI_MODEL', 'grok-2-latest')
@@ -715,7 +758,9 @@ def process_prompt_with_deepseek(prompt_text: str, user_domain: str, client: Any
         )
         country_text = _resolve_country_text(group)
         system_prompt = (
-            "You are a helpful assistant. Provide comprehensive, well-cited answers. "
+            f"{_today_context_line()} "
+            "You are a helpful assistant. Provide comprehensive, well-cited answers and "
+            "flag any information that may be out of date relative to today. "
             f"Always provide answers in the context of {country_text} unless the user specifies another country."
         )
         model_name = getattr(settings, 'DEEPSEEK_MODEL', 'deepseek-chat')
