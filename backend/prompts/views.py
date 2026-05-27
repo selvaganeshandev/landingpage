@@ -1402,8 +1402,29 @@ def prompt_groups_list(request):
                 domain=domain
             )
             
-            # Platforms to create analytics for
-            platforms = ["ChatGPT", "Google Gemini", "Perplexity"]
+            # Platforms to create analytics placeholders for.
+            # Derive from settings.ENABLED_PLATFORMS so the list never goes
+            # out of sync with what the engine actually dispatches. Defaults
+            # match the previous hardcoded list when the setting is missing.
+            from django.conf import settings as _settings
+            _PLATFORM_LABELS = {
+                'chatgpt':    'ChatGPT',
+                'gemini':     'Google Gemini',
+                'perplexity': 'Perplexity',
+                'claude':     'Claude',
+                'grok':       'Grok',
+                'deepseek':   'DeepSeek',
+            }
+            _enabled = getattr(_settings, 'ENABLED_PLATFORMS', None) or [
+                'chatgpt', 'gemini', 'perplexity'
+            ]
+            platforms = [
+                _PLATFORM_LABELS[p] for p in _enabled
+                if p in _PLATFORM_LABELS
+            ]
+            if not platforms:
+                # Defensive fallback so no row ends up with no platforms.
+                platforms = ["ChatGPT", "Google Gemini", "Claude"]
             
             # Create prompts and analytics
             created_prompts = []
@@ -1566,16 +1587,30 @@ def prompt_group_detail(request, group_id):
                     # Use all analytics for this prompt
                     prompt_analytics = list(all_prompt_analytics)
                 
-                # Sum total_mentions from all published analytics (consistent with snapshot aggregation)
+                # Mentions/citations must reflect what each LLM ACTUALLY returns
+                # right now, not a cumulative sum across every historical run.
+                # For each (prompt, platform) keep only the most recent published
+                # PromptAnalytics record — that record IS one real LLM call. Sum
+                # mentions across those latest-per-platform records and count
+                # UNIQUE URLs across their citation_lists.
                 published_analytics = [a for a in prompt_analytics if a.is_published]
-                mention_analytics = [a for a in published_analytics if a.is_mention]
-                prompt_mentions = sum(analytic.total_mentions or 0 for analytic in published_analytics)
-                
-                # Calculate citations count
-                total_citations = 0
-                for analytic in prompt_analytics:
-                    citation_list = getattr(analytic, 'citation_list', []) or []
-                    total_citations += len(citation_list) if citation_list else 0
+                latest_by_platform = {}
+                for a in published_analytics:
+                    if not a.platform:
+                        continue
+                    existing = latest_by_platform.get(a.platform)
+                    if existing is None or a.created_at > existing.created_at:
+                        latest_by_platform[a.platform] = a
+                latest_records = list(latest_by_platform.values())
+                mention_analytics = [a for a in latest_records if a.is_mention]
+                prompt_mentions = sum((a.total_mentions or 0) for a in latest_records)
+
+                unique_citation_urls = set()
+                for a in latest_records:
+                    for url in (getattr(a, 'citation_list', None) or []):
+                        if isinstance(url, str) and url.strip():
+                            unique_citation_urls.add(url.strip().rstrip('/').lower())
+                total_citations = len(unique_citation_urls)
                 
                 # Calculate sentiment breakdown - use sentiment_category directly (like Mentions page)
                 # This matches how mentions display sentiment, using the actual sentiment_category field
@@ -1874,6 +1909,51 @@ def prompt_group_detail(request, group_id):
                 logger.warning(f"Error calculating average position for group {group.id}: {e}")
                 calculated_avg_position = float(group.average_position)
 
+            # Missed Page URLs: per-prompt per-platform, diff latest vs previous
+            # PromptAnalytics.citation_list. A URL that was cited in the previous
+            # run but is absent from the latest run is "missed".
+            missed_urls_seen = set()
+            missed_urls = []
+            for prompt in prompts:
+                analytics_for_prompt = list(prompt.analytics.all())
+                if platform_filter:
+                    analytics_for_prompt = [a for a in analytics_for_prompt if a.platform == platform_filter]
+                by_platform = {}
+                for a in analytics_for_prompt:
+                    if not a.platform:
+                        continue
+                    by_platform.setdefault(a.platform, []).append(a)
+                for plat, recs in by_platform.items():
+                    if len(recs) < 2:
+                        continue
+                    recs_sorted = sorted(recs, key=lambda x: x.created_at, reverse=True)
+                    latest_rec, previous_rec = recs_sorted[0], recs_sorted[1]
+                    latest_cites = getattr(latest_rec, 'citation_list', None) or []
+                    previous_cites = getattr(previous_rec, 'citation_list', None) or []
+                    latest_set = {
+                        (u.strip().rstrip('/').lower())
+                        for u in latest_cites
+                        if isinstance(u, str) and u.strip()
+                    }
+                    for url in previous_cites:
+                        if not isinstance(url, str) or not url.strip():
+                            continue
+                        norm = url.strip().rstrip('/').lower()
+                        if norm in latest_set:
+                            continue
+                        dedupe_key = (prompt.id, plat, norm)
+                        if dedupe_key in missed_urls_seen:
+                            continue
+                        missed_urls_seen.add(dedupe_key)
+                        missed_urls.append({
+                            'url': url.strip(),
+                            'platform': plat,
+                            'prompt_id': prompt.id,
+                            'prompt_text': prompt.prompt,
+                            'last_seen_at': previous_rec.created_at.isoformat(),
+                            'compared_against_at': latest_rec.created_at.isoformat(),
+                        })
+
             return Response({
                 'group': {
                     'id': group.id,
@@ -1900,7 +1980,8 @@ def prompt_group_detail(request, group_id):
                     },
                     'platform_distribution': platform_dist,
                     'variants_performance': variants_perf,
-                    'mention_trends': trends
+                    'mention_trends': trends,
+                    'missed_urls': missed_urls,
                 }
             })
         

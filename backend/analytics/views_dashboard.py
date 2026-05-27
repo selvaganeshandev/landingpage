@@ -215,17 +215,44 @@ def dashboard_summary(request):
     # If days=7 and today is Dec 15, we want Dec 9-15 (7 days: Dec 9, 10, 11, 12, 13, 14, 15)
     end_date = timezone.now().date()
     start_date = end_date - timedelta(days=days - 1)  # Subtract (days-1) to include today in the count
-    
+
+    # Optional explicit date range overrides the `days` window. Accepts ISO
+    # YYYY-MM-DD. When provided, every date-windowed metric on the response
+    # (mentions, citations, visibility, position, platform distribution,
+    # recent mentions) honors this range. Cumulative fields like
+    # total_prompts remain unfiltered by design.
+    start_param = request.query_params.get('start_date')
+    end_param = request.query_params.get('end_date')
+    if start_param or end_param:
+        try:
+            if end_param:
+                end_date = datetime.strptime(end_param, '%Y-%m-%d').date()
+            if start_param:
+                start_date = datetime.strptime(start_param, '%Y-%m-%d').date()
+        except ValueError:
+            return Response(
+                {'error': 'start_date and end_date must be YYYY-MM-DD'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if start_date > end_date:
+            return Response(
+                {'error': 'start_date cannot be after end_date'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Keep `days` consistent with the explicit range so previous-period
+        # comparison + period_type fallback behave sensibly.
+        days = (end_date - start_date).days + 1
+
     # Debug: Log calculated dates
     logger.info(f"Dashboard API: Calculated date range for {days} days - start_date: {start_date}, end_date: {end_date}")
-    
+
     # Calculate previous period for change comparison
     prev_end_date = start_date - timedelta(days=1)
     prev_start_date = prev_end_date - timedelta(days=days)
-    
+
     # Determine period type based on days (for display/trends)
     period_type = get_period_type(days)
-    
+
     # Get period types to query (with fallback to more granular types)
     period_types = get_period_types_for_query(days)
     

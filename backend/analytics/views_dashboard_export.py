@@ -4,16 +4,25 @@ Excel export for the Insights (Dashboard) page.
 Produces an .xlsx matching the "AI Visibility" reference template:
   Block 1: per-LLM mentions for your brand + each competitor + totals row.
   Block 2: per-LLM page citations + total cited pages.
-  Block 3: Backlink Portfolio — placeholders (not tracked per competitor here).
+  Block 3: Backlink Portfolio — referring domains, total backlinks and CAT A/B/C
+           breakdown fetched live from DataForSEO (primary) / Moz (fallback) for
+           your brand and each competitor URL.
 
 This module is intentionally standalone — it reuses the same models/querysets
 as dashboard_summary but does not import or call it, so existing behavior is
 untouched.
 """
 
+import base64
+import logging
+import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from io import BytesIO
+from urllib.parse import urlparse
 
+import requests
+from django.conf import settings
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -28,6 +37,8 @@ from analytics.models import ShareOfVoiceAnalytics
 from competitors.models import Competitor
 from domains.models import Domain
 from prompts.models import PromptGroupMetricSnapshot
+
+logger = logging.getLogger(__name__)
 
 
 # Order in which LLM platforms appear in the exported report.
@@ -128,34 +139,32 @@ def _platforms_for_report(sov_latest_rows):
     return ordered + extras
 
 
-def _mention_matrix(sov_latest_rows, brands, platforms):
-    """Build {(competitor_id_or_None, platform_label): mention_count}."""
+def _mention_matrix(sov_period_rows, brands, platforms):
+    """Build {(competitor_id_or_None, platform_label): mention_count} —
+    summed across every snapshot day in the selected period (Q1b)."""
     matrix = {}
-    for row in sov_latest_rows.exclude(platform__isnull=True).exclude(platform=""):
+    for row in sov_period_rows.exclude(platform__isnull=True).exclude(platform=""):
         key = (row.competitor_id, row.platform)
         matrix[key] = (matrix.get(key) or 0) + (row.mention_count or 0)
     return matrix
 
 
-def _brand_totals(sov_latest_rows, brands):
-    """Aggregate row (platform IS NULL) per brand → total mentions."""
-    totals = {}
-    for row in sov_latest_rows.filter(platform__isnull=True):
-        totals[row.competitor_id] = row.mention_count or 0
-    # Fallback: if aggregate row missing for some brand, sum its platform rows.
-    for b in brands:
-        if b["competitor_id"] not in totals:
-            totals[b["competitor_id"]] = sum(
-                (row.mention_count or 0)
-                for row in sov_latest_rows.filter(
-                    competitor_id=b["competitor_id"]
-                ).exclude(platform__isnull=True).exclude(platform="")
-            )
+def _brand_totals(sov_period_rows, brands):
+    """Total mentions per brand across the period — summed from per-platform
+    rows so we never under-count when the daily aggregate row is missing for
+    some days."""
+    totals = {b["competitor_id"]: 0 for b in brands}
+    for row in sov_period_rows.exclude(platform__isnull=True).exclude(platform=""):
+        if row.competitor_id in totals:
+            totals[row.competitor_id] = totals.get(row.competitor_id, 0) + (row.mention_count or 0)
     return totals
 
 
 def _brand_visibility(sov_latest_rows, brands):
-    """share_percentage of the aggregate (platform IS NULL) row per brand, 0-100."""
+    """share_percentage of the aggregate (platform IS NULL) row per brand on
+    the latest snapshot day, 0-100. Visibility is a "current state" metric,
+    not a sum, so we intentionally keep this on the latest day even though
+    mentions are now period-summed."""
     vis = {}
     for row in sov_latest_rows.filter(platform__isnull=True):
         vis[row.competitor_id] = float(row.share_percentage or 0)
@@ -183,6 +192,253 @@ def _your_brand_llm_citations(domain_id, start_date, end_date):
     return totals
 
 
+# ---------------------------------------------------------------------------
+# Backlink Portfolio — dynamic providers
+# ---------------------------------------------------------------------------
+# Block 3 of the AI Visibility export used to render hard-coded "N/A" for every
+# brand. The helpers below fetch real numbers per-brand from the first provider
+# that is configured (DataForSEO preferred — broader index — then Moz as a
+# fallback because it's already wired up in the project). Pages Indexed in SERP
+# comes from a Scrapingdog `site:` query. If no provider is configured, the
+# corresponding cell stays "N/A" — same behaviour as before for self-hosted
+# installs without API keys, so nothing else in the system is impacted.
+
+_BACKLINK_EMPTY = {
+    "referring_domains": None,
+    "total_backlinks": None,
+    "cat_a_domains": None,
+    "cat_b_domains": None,
+    "cat_c_domains": None,
+    "cat_a_backlinks": None,
+    "cat_b_backlinks": None,
+    "cat_c_backlinks": None,
+    "pages_indexed": None,
+}
+
+
+def _root_domain(url):
+    """Return bare host (no scheme/path) from a URL or already-bare host string."""
+    if not url:
+        return ""
+    raw = url.strip()
+    if "://" not in raw:
+        raw = "http://" + raw
+    parsed = urlparse(raw)
+    host = (parsed.netloc or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def _classify_by_da(da):
+    """Moz Domain Authority (0-100) → CAT A/B/C — mirrors domains/views.py thresholds."""
+    if da is None:
+        return None
+    if da >= 70:
+        return "A"
+    if da >= 40:
+        return "B"
+    return "C"
+
+
+def _classify_by_rank(rank):
+    """DataForSEO rank (0-1000) → CAT A/B/C using the same 70 / 40 cutoffs scaled ×10."""
+    if rank is None:
+        return None
+    if rank >= 700:
+        return "A"
+    if rank >= 400:
+        return "B"
+    return "C"
+
+
+def _fetch_dataforseo_backlinks(host):
+    login = getattr(settings, "DATAFORSEO_LOGIN", None)
+    password = getattr(settings, "DATAFORSEO_PASSWORD", None)
+    if not login or not password or not host:
+        return None
+
+    try:
+        token = base64.b64encode(f"{login}:{password}".encode("utf-8")).decode("utf-8")
+        headers = {"Authorization": f"Basic {token}", "Content-Type": "application/json"}
+
+        s_resp = requests.post(
+            "https://api.dataforseo.com/v3/backlinks/summary/live",
+            headers=headers,
+            json=[{
+                "target": host,
+                "internal_list_limit": 10,
+                "backlinks_status_type": "live",
+            }],
+            timeout=20,
+        )
+        if s_resp.status_code != 200:
+            logger.warning(
+                "DataForSEO summary returned %s for %s: %s",
+                s_resp.status_code, host, s_resp.text[:200],
+            )
+            return None
+        s_payload = s_resp.json() or {}
+        tasks = s_payload.get("tasks") or []
+        summary_results = (tasks[0].get("result") if tasks else None) or []
+        summary = summary_results[0] if summary_results else {}
+        ref_domains = int(summary.get("referring_domains") or 0)
+        total_backlinks = int(summary.get("backlinks") or 0)
+
+        cat_domains = {"A": 0, "B": 0, "C": 0}
+        cat_backlinks = {"A": 0, "B": 0, "C": 0}
+
+        d_resp = requests.post(
+            "https://api.dataforseo.com/v3/backlinks/referring_domains/live",
+            headers=headers,
+            json=[{
+                "target": host,
+                "limit": 1000,
+                "order_by": ["rank,desc"],
+                "backlinks_status_type": "live",
+            }],
+            timeout=30,
+        )
+        if d_resp.status_code == 200:
+            d_payload = d_resp.json() or {}
+            d_tasks = d_payload.get("tasks") or []
+            d_results = (d_tasks[0].get("result") if d_tasks else None) or []
+            items = (d_results[0].get("items") if d_results else None) or []
+            for entry in items:
+                cat = _classify_by_rank(entry.get("rank"))
+                if not cat:
+                    continue
+                cat_domains[cat] += 1
+                cat_backlinks[cat] += int(entry.get("backlinks") or 0)
+        else:
+            logger.warning(
+                "DataForSEO referring_domains returned %s for %s: %s",
+                d_resp.status_code, host, d_resp.text[:200],
+            )
+
+        return {
+            "referring_domains": ref_domains,
+            "total_backlinks": total_backlinks,
+            "cat_a_domains": cat_domains["A"],
+            "cat_b_domains": cat_domains["B"],
+            "cat_c_domains": cat_domains["C"],
+            "cat_a_backlinks": cat_backlinks["A"],
+            "cat_b_backlinks": cat_backlinks["B"],
+            "cat_c_backlinks": cat_backlinks["C"],
+            "pages_indexed": None,
+        }
+    except Exception as exc:
+        logger.warning("DataForSEO backlink fetch failed for %s: %s", host, exc)
+        return None
+
+
+def _fetch_moz_backlinks(host):
+    """Fallback to Moz when DataForSEO isn't configured.
+    Re-uses the Moz helpers already defined in domains.views so we don't fork the
+    auth/parsing logic. Import is local so the export module doesn't take a hard
+    dependency on the domains app at import time.
+    """
+    if not host:
+        return None
+    try:
+        from domains.views import _fetch_moz_url_metrics, _fetch_moz_links
+    except Exception as exc:
+        logger.warning("Could not import Moz helpers: %s", exc)
+        return None
+
+    target = f"https://{host}"
+    metrics = _fetch_moz_url_metrics(target)
+    if metrics is None:
+        return None
+
+    links = _fetch_moz_links(target, limit=50) or []
+    cat_domains = {"A": set(), "B": set(), "C": set()}
+    cat_backlinks = {"A": 0, "B": 0, "C": 0}
+    for link in links:
+        cat = _classify_by_da(link.get("source_domain_authority") or 0)
+        if not cat:
+            continue
+        src_domain = link.get("source_root_domain") or ""
+        if src_domain:
+            cat_domains[cat].add(src_domain)
+        cat_backlinks[cat] += 1
+
+    return {
+        "referring_domains": int(metrics.get("linking_root_domains") or 0),
+        "total_backlinks": int(metrics.get("external_links") or 0),
+        "cat_a_domains": len(cat_domains["A"]),
+        "cat_b_domains": len(cat_domains["B"]),
+        "cat_c_domains": len(cat_domains["C"]),
+        "cat_a_backlinks": cat_backlinks["A"],
+        "cat_b_backlinks": cat_backlinks["B"],
+        "cat_c_backlinks": cat_backlinks["C"],
+        "pages_indexed": None,
+    }
+
+
+def _fetch_pages_indexed(host):
+    """Approximate Google's `About N results` count for `site:host`.
+    Uses the Scrapingdog key that's already configured for brand-mention scraping.
+    """
+    api_key = getattr(settings, "SCRAPINGDOG_API_KEY", None)
+    if not api_key or not host:
+        return None
+    try:
+        search_url = f"https://www.google.com/search?q=site:{host}"
+        resp = requests.get(
+            "https://api.scrapingdog.com/scrape",
+            params={"api_key": api_key, "url": search_url, "dynamic": "false"},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return None
+        match = re.search(r"About\s+([\d,]+)\s+results", resp.text) \
+            or re.search(r"([\d,]+)\s+results", resp.text)
+        if match:
+            return int(match.group(1).replace(",", ""))
+    except Exception as exc:
+        logger.warning("Pages-indexed fetch failed for %s: %s", host, exc)
+    return None
+
+
+def _fetch_brand_backlinks(brand):
+    host = _root_domain(brand.get("url"))
+    if not host:
+        return _BACKLINK_EMPTY.copy()
+    data = _fetch_dataforseo_backlinks(host) or _fetch_moz_backlinks(host)
+    if data is None:
+        data = _BACKLINK_EMPTY.copy()
+    if data.get("pages_indexed") is None:
+        data["pages_indexed"] = _fetch_pages_indexed(host)
+    return data
+
+
+def _build_backlinks_map(brands):
+    """Return {competitor_id_or_None: backlink_dict} fetched concurrently.
+    Falls back to empty dict for any brand that fails — those cells render N/A.
+    """
+    result = {}
+    if not brands:
+        return result
+    with ThreadPoolExecutor(max_workers=min(8, len(brands))) as pool:
+        futures = {pool.submit(_fetch_brand_backlinks, b): b for b in brands}
+        for fut, brand in futures.items():
+            try:
+                result[brand["competitor_id"]] = fut.result(timeout=60) or _BACKLINK_EMPTY.copy()
+            except Exception as exc:
+                logger.warning("Backlink fetch failed for %s: %s", brand.get("name"), exc)
+                result[brand["competitor_id"]] = _BACKLINK_EMPTY.copy()
+    return result
+
+
+def _cell_value(num):
+    """None → "N/A", otherwise integer (so Excel renders a number, not a string)."""
+    if num is None:
+        return "N/A"
+    try:
+        return int(num)
+    except (TypeError, ValueError):
+        return "N/A"
+
+
 def _write_header_label(ws, cell_ref, value, *, bold=True, fill=None):
     cell = ws[cell_ref]
     cell.value = value
@@ -194,7 +450,9 @@ def _write_header_label(ws, cell_ref, value, *, bold=True, fill=None):
 
 
 def _build_workbook(domain, brands, platforms, mention_matrix, brand_totals,
-                    brand_visibility, your_llm_citations):
+                    brand_visibility, your_llm_citations, backlinks_map=None,
+                    period_label=None):
+    backlinks_map = backlinks_map or {}
     wb = Workbook()
     ws = wb.active
     ws.title = "AI Visibility"
@@ -210,26 +468,39 @@ def _build_workbook(domain, brands, platforms, mention_matrix, brand_totals,
     HEADER_FILL = "F2F2F2"
     BLOCK_FILL = "E8E8FF"
 
-    # ---------- Block 1 ----------
-    _write_header_label(ws, "B1", "Pillars", fill=BLOCK_FILL)
-    _write_header_label(ws, "C1", "URL", fill=BLOCK_FILL)
+    # ---------- Period header (Q1a) ----------
+    # Tiny meta row above the data so users know the time-range semantics
+    # (Mentions are period-summed, Visibility is snapshot-of-latest).
+    if period_label:
+        cell = ws.cell(row=1, column=2, value=period_label)
+        cell.font = Font(italic=True, color="555555")
+        cell.alignment = Alignment(vertical="center")
+        # Merge across C + the brand columns for visibility.
+        last_col = 3 + max(len(brands), 1)
+        ws.merge_cells(start_row=1, start_column=2, end_row=1, end_column=last_col)
+        ws.row_dimensions[1].height = 20
 
-    _write_header_label(ws, "C2", "Defination", fill=HEADER_FILL)
+    # ---------- Block 1 ----------
+    _write_header_label(ws, "B2", "Pillars", fill=BLOCK_FILL)
+    _write_header_label(ws, "C2", "URL", fill=BLOCK_FILL)
+
+    _write_header_label(ws, "C3", "Defination", fill=HEADER_FILL)
     for i, b in enumerate(brands):
-        _write_header_label(ws, ws.cell(row=2, column=4 + i).coordinate, b["name"],
+        _write_header_label(ws, ws.cell(row=3, column=4 + i).coordinate, b["name"],
                             fill=HEADER_FILL)
 
-    # Row 3: AI Visibility Score
-    ws["B3"] = "AI Visibility Score"
-    ws["B3"].font = Font(bold=True)
-    ws["C3"] = VISIBILITY_DEFINITION
-    ws["C3"].alignment = Alignment(wrap_text=True, vertical="center")
+    # Row 4: AI Visibility Score (shifted down by 1 to make room for the
+    # period-info header on row 1).
+    ws["B4"] = "AI Visibility Score"
+    ws["B4"].font = Font(bold=True)
+    ws["C4"] = VISIBILITY_DEFINITION
+    ws["C4"].alignment = Alignment(wrap_text=True, vertical="center")
     for i, b in enumerate(brands):
         score = brand_visibility.get(b["competitor_id"], 0.0)
-        ws.cell(row=3, column=4 + i, value=f"{int(round(score))}/100")
+        ws.cell(row=4, column=4 + i, value=f"{int(round(score))}/100")
 
-    # Rows 4..N: per-LLM mentions
-    row = 4
+    # Rows 5..N: per-LLM mentions
+    row = 5
     for idx, platform in enumerate(platforms):
         ws.cell(row=row, column=2, value=platform).font = Font(bold=True)
         if idx == 0:
@@ -254,12 +525,19 @@ def _build_workbook(domain, brands, platforms, mention_matrix, brand_totals,
         ws.cell(row=row, column=4 + i, value=int(total))
     row += 1
 
-    # Rows for Referring Domains / Total Backlinks / Pages Indexed in SERP — N/A
-    for label in ("Number of Referring Domains", "Number of Total Backlinks",
-                  "Pages Indexed in SERP"):
+    # Rows for Referring Domains / Total Backlinks / Pages Indexed in SERP.
+    # Values are populated per-brand from the backlinks provider (DataForSEO/Moz)
+    # and Scrapingdog's site: query. Unconfigured providers leave the cell as N/A.
+    block1_metric_keys = (
+        ("Number of Referring Domains", "referring_domains"),
+        ("Number of Total Backlinks", "total_backlinks"),
+        ("Pages Indexed in SERP", "pages_indexed"),
+    )
+    for label, key in block1_metric_keys:
         ws.cell(row=row, column=2, value=label).font = Font(bold=True)
-        for i, _ in enumerate(brands):
-            ws.cell(row=row, column=4 + i, value="N/A")
+        for i, b in enumerate(brands):
+            payload = backlinks_map.get(b["competitor_id"]) or {}
+            ws.cell(row=row, column=4 + i, value=_cell_value(payload.get(key)))
         row += 1
 
     # ---------- Block 2 ----------
@@ -293,7 +571,7 @@ def _build_workbook(domain, brands, platforms, mention_matrix, brand_totals,
         ws.cell(row=row, column=4 + i, value="N/A")
     row += 1
 
-    # ---------- Block 3: Backlink Portfolio (placeholders) ----------
+    # ---------- Block 3: Backlink Portfolio ----------
     row += 1
     _write_header_label(ws, ws.cell(row=row, column=3).coordinate,
                         "Backlink Portfolio", fill=BLOCK_FILL)
@@ -301,11 +579,22 @@ def _build_workbook(domain, brands, platforms, mention_matrix, brand_totals,
         _write_header_label(ws, ws.cell(row=row, column=4 + i).coordinate,
                             b["name"], fill=BLOCK_FILL)
     row += 1
-    for label in ("Referring Domains", "CAT A", "CAT B", "CAT C",
-                  "Number of Total Backlinks", "CAT A", "CAT B", "CAT C"):
+    # (label, lookup-key) — sub-rows pull CAT A/B/C from the same backlinks payload.
+    portfolio_rows = (
+        ("Referring Domains", "referring_domains"),
+        ("CAT A", "cat_a_domains"),
+        ("CAT B", "cat_b_domains"),
+        ("CAT C", "cat_c_domains"),
+        ("Number of Total Backlinks", "total_backlinks"),
+        ("CAT A", "cat_a_backlinks"),
+        ("CAT B", "cat_b_backlinks"),
+        ("CAT C", "cat_c_backlinks"),
+    )
+    for label, key in portfolio_rows:
         ws.cell(row=row, column=3, value=label)
-        for i, _ in enumerate(brands):
-            ws.cell(row=row, column=4 + i, value="N/A")
+        for i, b in enumerate(brands):
+            payload = backlinks_map.get(b["competitor_id"]) or {}
+            ws.cell(row=row, column=4 + i, value=_cell_value(payload.get(key)))
         row += 1
 
     return wb
@@ -332,8 +621,27 @@ def dashboard_export(request):
     platform_filter = _normalize_platform_filter(request.query_params.get("llm_model"))
     domain = get_object_or_404(Domain, id=domain_id)
 
+    # Optional explicit date range overrides `days`. Accepts ISO YYYY-MM-DD.
+    start_param = request.query_params.get("start_date")
+    end_param = request.query_params.get("end_date")
     end_date = timezone.now().date()
     start_date = end_date - timedelta(days=days - 1)
+    if start_param or end_param:
+        try:
+            if end_param:
+                end_date = datetime.strptime(end_param, "%Y-%m-%d").date()
+            if start_param:
+                start_date = datetime.strptime(start_param, "%Y-%m-%d").date()
+        except ValueError:
+            return Response(
+                {"error": "start_date and end_date must be YYYY-MM-DD"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if start_date > end_date:
+            return Response(
+                {"error": "start_date cannot be after end_date"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     sov_qs = ShareOfVoiceAnalytics.objects.filter(
         domain_id=domain_id,
@@ -347,21 +655,38 @@ def dashboard_export(request):
         latest_day = sov_qs.order_by("-timestamp").first().timestamp
         latest_rows = sov_qs.filter(timestamp=latest_day)
     else:
+        latest_day = None
         latest_rows = sov_qs.none()
 
+    # Q1b: mentions are now summed across the period (every snapshot day in
+    # the date range) so a competitor with mentions earlier in the window
+    # doesn't show as 0 just because the latest day was quiet.
+    period_rows = sov_qs
+
     brands = _build_brand_columns(domain, latest_rows)
-    platforms = _platforms_for_report(latest_rows)
+    platforms = _platforms_for_report(period_rows)
     if platform_filter:
         # Honor the LLM dropdown: only include the selected platform's row.
         platforms = [platform_filter]
 
-    matrix = _mention_matrix(latest_rows, brands, platforms)
-    totals = _brand_totals(latest_rows, brands)
+    matrix = _mention_matrix(period_rows, brands, platforms)
+    totals = _brand_totals(period_rows, brands)
+    # Visibility remains a current-state percentage from the latest day.
     visibility = _brand_visibility(latest_rows, brands)
     your_citations = _your_brand_llm_citations(domain_id, start_date, end_date)
+    # Per-brand backlink metrics (referring domains, total backlinks, CAT A/B/C,
+    # pages indexed in SERP). Runs in parallel; if no provider is configured each
+    # brand returns an empty payload and the cells render N/A — same as before.
+    backlinks_map = _build_backlinks_map(brands)
+
+    period_label = (
+        f"Mentions summed: {start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}"
+        f" · Visibility snapshot: {latest_day.strftime('%Y-%m-%d') if latest_day else 'n/a'}"
+    )
 
     wb = _build_workbook(domain, brands, platforms, matrix, totals, visibility,
-                         your_citations)
+                         your_citations, backlinks_map=backlinks_map,
+                         period_label=period_label)
 
     buf = BytesIO()
     wb.save(buf)

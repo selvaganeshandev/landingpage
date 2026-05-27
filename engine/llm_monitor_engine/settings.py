@@ -171,6 +171,22 @@ ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default=None)
 XAI_API_KEY = config('XAI_API_KEY', default=None)
 DEEPSEEK_API_KEY = config('DEEPSEEK_API_KEY', default=None)
 
+# LLM web-search grounding — when enabled, each provider's prompt-analytics call
+# uses that provider's live web-search tool so responses reflect the *current*
+# date/year (matching real ChatGPT/Claude/Gemini/Grok UIs). If a provider's
+# Responses/Search API errors out or isn't available, the code falls back to the
+# pre-existing chat-completions path automatically — set any of these to False to
+# disable grounding for that provider without changing code.
+OPENAI_CHATGPT_WEB_SEARCH = config('OPENAI_CHATGPT_WEB_SEARCH', default=True, cast=bool)
+OPENAI_CHATGPT_MODEL = config('OPENAI_CHATGPT_MODEL', default='gpt-4o')
+ANTHROPIC_WEB_SEARCH = config('ANTHROPIC_WEB_SEARCH', default=True, cast=bool)
+ANTHROPIC_MODEL = config('ANTHROPIC_MODEL', default='claude-sonnet-4-6')
+XAI_WEB_SEARCH = config('XAI_WEB_SEARCH', default=True, cast=bool)
+XAI_MODEL = config('XAI_MODEL', default='grok-2-latest')
+GEMINI_WEB_SEARCH = config('GEMINI_WEB_SEARCH', default=True, cast=bool)
+GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-2.0-flash')
+DEEPSEEK_MODEL = config('DEEPSEEK_MODEL', default='deepseek-chat')
+
 # ScrapingDog API Configuration (still used by misinformation crawler — /scrape endpoint)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
 

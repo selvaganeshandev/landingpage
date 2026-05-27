@@ -391,37 +391,64 @@ def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
 
 def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any, group: Any = None) -> Dict[str, Any]:
     try:
-        # Get country from domain, default to "United States" if not available
-        country_text = "United States"
-        if group and hasattr(group, 'domain') and group.domain and hasattr(group.domain, 'country'):
-            country_text = group.domain.country or "United States"
-        
-        system_prompt = f"You are a helpful assistant with access to current web search results. When answering questions, analyze the provided search results and combine them with your knowledge to provide comprehensive, up-to-date responses with current citations and links. Always prioritize the most recent and relevant information from the search results. Always provide answers in the context of {country_text} unless the user specifies another country."
+        country_text = _resolve_country_text(group)
+        model_name = getattr(settings, 'OPENAI_CHATGPT_MODEL', 'gpt-4o')
+        user_message = _build_analytics_user_prompt(prompt_text, country_text)
 
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": (
-                    "Original Question: " + prompt_text +
-                    "\n\nBased on your knowledge, please provide a comprehensive and detailed response with:\n\n"
-                    "1. A thorough answer incorporating the latest information\n"
-                    "2. Include all relevant URLs and links\n"
-                    "3. Mention specific companies, tools, platforms, and services\n"
-                    "4. Provide detailed citations with current sources and dates where possible\n"
-                    "5. Include pricing information, features, and comparisons from the most recent data\n"
-                    "6. Add any additional current resources, alternatives, or related tools\n"
-                    "7. Highlight which information comes from recent sources vs general knowledge\n\n"
-                    "Format your response with proper current links, detailed descriptions, and up-to-date references. "
-                    "Focus on providing the most current and relevant information available."
-                )}
-            ],
-            temperature=0.7,
-            max_tokens=3000,
-            timeout=60
-        )
+        text = ""
+        # Prefer the Responses API with the web_search tool so the model browses
+        # before answering (mirrors ChatGPT.com behaviour and unblocks current-year
+        # info even when the training cutoff is older). Falls back silently if the
+        # installed SDK / model / key doesn't support it.
+        if getattr(settings, 'OPENAI_CHATGPT_WEB_SEARCH', True):
+            try:
+                grounded_system = (
+                    f"{_today_context_line()} "
+                    "You are a helpful assistant with live web search. Use the web_search tool "
+                    "for any information that could be time-sensitive, then cite the sources you "
+                    f"found. Always answer in the context of {country_text} unless the user specifies otherwise."
+                )
+                resp = client.responses.create(
+                    model=model_name,
+                    tools=[{"type": "web_search"}],
+                    input=[
+                        {"role": "system", "content": grounded_system},
+                        {"role": "user", "content": user_message},
+                    ],
+                    timeout=90,
+                )
+                text = getattr(resp, "output_text", "") or ""
+                if not text and getattr(resp, "output", None):
+                    parts = []
+                    for item in resp.output:
+                        for c in getattr(item, "content", []) or []:
+                            chunk = getattr(c, "text", None)
+                            if chunk:
+                                parts.append(chunk)
+                    text = "\n".join(parts)
+            except Exception as ws_err:
+                logger.warning(f"ChatGPT web_search path failed, falling back: {ws_err}")
+                text = ""
 
-        text = response.choices[0].message.content
+        if not text:
+            system_prompt = (
+                f"{_today_context_line()} "
+                "You are a helpful assistant answering from your training knowledge. "
+                "Provide comprehensive, well-cited answers and clearly flag any information "
+                "that may be out of date relative to today. "
+                f"Always provide answers in the context of {country_text} unless the user specifies another country."
+            )
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.7,
+                max_tokens=3000,
+                timeout=60,
+            )
+            text = response.choices[0].message.content
 
         domain_clean = _get_domain_from_url(user_domain)
         sld = domain_clean.split('.') [0] if domain_clean else ""
@@ -503,15 +530,12 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
 
 def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
     try:
-        # Get country from domain, default to "United States" if not available
-        country_text = "United States"
-        if group and hasattr(group, 'domain') and group.domain and hasattr(group.domain, 'country'):
-            country_text = group.domain.country or "United States"
-        
+        country_text = _resolve_country_text(group)
         import google.generativeai as genai
         genai.configure(api_key=(client or {}).get('api_key'), transport="rest")
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model_name = getattr(settings, 'GEMINI_MODEL', 'gemini-2.0-flash')
         prompt = (
+            f"{_today_context_line()}\n\n"
             f"Original Question: {prompt_text}\n\n"
             f"Context: Always provide answers in the context of {country_text} unless the user specifies another country.\n\n"
             "Based on your knowledge, please provide a comprehensive and detailed response with:\n\n"
@@ -525,16 +549,33 @@ def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, clien
             "Format your response with proper current links, detailed descriptions, and up-to-date references. "
             "Focus on providing the most current and relevant information available."
         )
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.7,
-                top_k=40,
-                top_p=0.95,
-                max_output_tokens=3000,
-            )
+        gen_config = genai.types.GenerationConfig(
+            temperature=0.7,
+            top_k=40,
+            top_p=0.95,
+            max_output_tokens=3000,
         )
-        text = response.text if getattr(response, 'text', None) else ""
+
+        text = ""
+        # Use Google Search grounding when enabled so Gemini browses live (matches
+        # the Gemini app behaviour). Falls back to ungrounded generate_content if
+        # the SDK / model on this key doesn't support the tool.
+        if getattr(settings, 'GEMINI_WEB_SEARCH', True):
+            try:
+                grounded_model = genai.GenerativeModel(
+                    model_name,
+                    tools=[{"google_search_retrieval": {}}],
+                )
+                grounded = grounded_model.generate_content(prompt, generation_config=gen_config)
+                text = grounded.text if getattr(grounded, 'text', None) else ""
+            except Exception as ws_err:
+                logger.warning(f"Gemini google_search_retrieval path failed, falling back: {ws_err}")
+                text = ""
+
+        if not text:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt, generation_config=gen_config)
+            text = response.text if getattr(response, 'text', None) else ""
         return _basic_text_metrics(text, user_domain)
     except Exception as e:
         logger.error(f"Gemini processing failed: {e}")
@@ -550,9 +591,17 @@ def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, c
         
         try:
             from perplexity import Perplexity
+            from datetime import date as _date
             perplexity_client = Perplexity(api_key=(client or {}).get('api_key'))
-            # Include country context in the prompt
-            user_message = f"{prompt_text} (Context: Provide answers in the context of {country_text} unless the user specifies another country.)"
+            # Include country context in the prompt. Perplexity has live web
+            # search built in, so a short "[As of YYYY-MM-DD]" prefix is enough
+            # to nudge it toward current sources without blowing the 250-char
+            # query cap. Keep the date prefix first so truncation preserves it.
+            today_iso = _date.today().isoformat()
+            user_message = (
+                f"[As of {today_iso}] {prompt_text} "
+                f"(Context: Provide answers in the context of {country_text} unless the user specifies another country.)"
+            )
             if len(user_message) > 250:
                 user_message = user_message[:250].rsplit(' ', 1)[0] + "..."
             
@@ -620,9 +669,29 @@ def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, c
         raise
 
 
+def _today_context_line() -> str:
+    """Single line of date/recency context injected into every LLM call.
+
+    Without this, LLMs answer as of their training cutoff and confidently
+    cite years-old articles as "current" — leading to responses that
+    reference 2023 sources when the actual date is years later. Telling
+    the model what date it is doesn't grant new knowledge, but it forces
+    the model to flag stale info instead of presenting it as current."""
+    from datetime import date as _date
+    today = _date.today()
+    return (
+        f"Today's date is {today.strftime('%B %d, %Y')} ({today.isoformat()}). "
+        "Prioritize the most recent information you have. If your knowledge of a "
+        "topic is older than 6 months relative to today, say so explicitly and "
+        "label that information as potentially outdated. Do not present pre-cutoff "
+        "information as 'current' or 'recent' without qualifying it."
+    )
+
+
 def _build_analytics_user_prompt(prompt_text: str, country_text: str) -> str:
     """Shared user-message body for the new providers — same shape as ChatGPT/Gemini paths."""
     return (
+        f"{_today_context_line()}\n\n"
         f"Original Question: {prompt_text}\n\n"
         f"Context: Always provide answers in the context of {country_text} unless the user specifies another country.\n\n"
         "Based on your knowledge, please provide a comprehensive and detailed response with:\n\n"
@@ -650,22 +719,56 @@ def process_prompt_with_claude(prompt_text: str, user_domain: str, client: Any =
         cfg = client or {}
         anthropic_client = Anthropic(api_key=cfg.get('api_key'), timeout=cfg.get('timeout', 60))
         country_text = _resolve_country_text(group)
-        system_prompt = (
-            "You are a helpful assistant. Provide comprehensive, well-cited answers. "
-            f"Always provide answers in the context of {country_text} unless the user specifies another country."
-        )
         model_name = getattr(settings, 'ANTHROPIC_MODEL', 'claude-sonnet-4-6')
-        response = anthropic_client.messages.create(
-            model=model_name,
-            max_tokens=3000,
-            temperature=0.7,
-            system=system_prompt,
-            messages=[{"role": "user", "content": _build_analytics_user_prompt(prompt_text, country_text)}],
-        )
+        user_message = _build_analytics_user_prompt(prompt_text, country_text)
+
         text = ""
-        for block in getattr(response, 'content', []) or []:
-            if getattr(block, 'type', None) == 'text':
-                text += getattr(block, 'text', '') or ''
+        # Try Claude's server-side web_search tool first so the model browses live
+        # (matches Claude.ai behaviour for time-sensitive queries). Falls back to
+        # the plain messages call below if tools aren't available on this key/model.
+        if getattr(settings, 'ANTHROPIC_WEB_SEARCH', True):
+            try:
+                grounded_system = (
+                    f"{_today_context_line()} "
+                    "You are a helpful assistant with live web search. Use the web_search tool "
+                    "whenever information could be time-sensitive, and cite the sources you find. "
+                    f"Always answer in the context of {country_text} unless the user specifies otherwise."
+                )
+                grounded = anthropic_client.messages.create(
+                    model=model_name,
+                    max_tokens=3000,
+                    temperature=0.7,
+                    system=grounded_system,
+                    tools=[{
+                        "type": "web_search_20250305",
+                        "name": "web_search",
+                        "max_uses": 5,
+                    }],
+                    messages=[{"role": "user", "content": user_message}],
+                )
+                for block in getattr(grounded, 'content', []) or []:
+                    if getattr(block, 'type', None) == 'text':
+                        text += getattr(block, 'text', '') or ''
+            except Exception as ws_err:
+                logger.warning(f"Claude web_search path failed, falling back: {ws_err}")
+                text = ""
+
+        if not text:
+            system_prompt = (
+                f"{_today_context_line()} "
+                "You are a helpful assistant. Provide comprehensive, well-cited answers. "
+                f"Always provide answers in the context of {country_text} unless the user specifies another country."
+            )
+            response = anthropic_client.messages.create(
+                model=model_name,
+                max_tokens=3000,
+                temperature=0.7,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_message}],
+            )
+            for block in getattr(response, 'content', []) or []:
+                if getattr(block, 'type', None) == 'text':
+                    text += getattr(block, 'text', '') or ''
         return _basic_text_metrics(text, user_domain)
     except Exception as e:
         logger.error(f"Claude processing failed: {e}")
@@ -682,22 +785,55 @@ def process_prompt_with_grok(prompt_text: str, user_domain: str, client: Any = N
             timeout=cfg.get('timeout', 60),
         )
         country_text = _resolve_country_text(group)
-        system_prompt = (
-            "You are a helpful assistant with access to current information. Provide comprehensive, well-cited answers. "
-            f"Always provide answers in the context of {country_text} unless the user specifies another country."
-        )
         model_name = getattr(settings, 'XAI_MODEL', 'grok-2-latest')
-        response = xai_client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": _build_analytics_user_prompt(prompt_text, country_text)},
-            ],
-            temperature=0.7,
-            max_tokens=3000,
-            timeout=60,
-        )
-        text = response.choices[0].message.content if response.choices else ""
+        user_message = _build_analytics_user_prompt(prompt_text, country_text)
+
+        text = ""
+        # Use xAI Live Search (search_parameters) to ground the answer in current
+        # web data when enabled. xAI extends the OpenAI-compatible API with this
+        # extra_body param. Falls back to a plain completion on any error.
+        if getattr(settings, 'XAI_WEB_SEARCH', True):
+            try:
+                grounded_system = (
+                    f"{_today_context_line()} "
+                    "You are a helpful assistant with live web search. Browse for any "
+                    "time-sensitive information and cite your sources. "
+                    f"Always answer in the context of {country_text} unless the user specifies otherwise."
+                )
+                grounded = xai_client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": grounded_system},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=0.7,
+                    max_tokens=3000,
+                    timeout=90,
+                    extra_body={"search_parameters": {"mode": "auto"}},
+                )
+                text = grounded.choices[0].message.content if grounded.choices else ""
+            except Exception as ws_err:
+                logger.warning(f"Grok live-search path failed, falling back: {ws_err}")
+                text = ""
+
+        if not text:
+            system_prompt = (
+                f"{_today_context_line()} "
+                "You are a helpful assistant. Provide comprehensive, well-cited answers and "
+                "flag any information that may be out of date relative to today. "
+                f"Always provide answers in the context of {country_text} unless the user specifies another country."
+            )
+            response = xai_client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.7,
+                max_tokens=3000,
+                timeout=60,
+            )
+            text = response.choices[0].message.content if response.choices else ""
         return _basic_text_metrics(text or "", user_domain)
     except Exception as e:
         logger.error(f"Grok processing failed: {e}")
@@ -715,7 +851,9 @@ def process_prompt_with_deepseek(prompt_text: str, user_domain: str, client: Any
         )
         country_text = _resolve_country_text(group)
         system_prompt = (
-            "You are a helpful assistant. Provide comprehensive, well-cited answers. "
+            f"{_today_context_line()} "
+            "You are a helpful assistant. Provide comprehensive, well-cited answers and "
+            "flag any information that may be out of date relative to today. "
             f"Always provide answers in the context of {country_text} unless the user specifies another country."
         )
         model_name = getattr(settings, 'DEEPSEEK_MODEL', 'deepseek-chat')

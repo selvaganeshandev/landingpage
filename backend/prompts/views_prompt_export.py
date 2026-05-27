@@ -60,7 +60,8 @@ def _extract_domain(url: str) -> str:
 
 
 def _format_source_urls(citation_list) -> str:
-    """Reference format: comma-separated domains, or 'No sources available'."""
+    """Reference format: comma-separated domains, or 'No sources available'.
+    Kept for backward-compat with consumers that expect the legacy string."""
     if not citation_list or not isinstance(citation_list, list):
         return "No sources available"
     domains, seen = [], set()
@@ -71,6 +72,47 @@ def _format_source_urls(citation_list) -> str:
             seen.add(d.lower())
             domains.append(d)
     return ", ".join(domains) if domains else "No sources available"
+
+
+def _group_urls_by_domain(citation_list):
+    """Group full citation URLs under their parent domain so the UI can show
+    each subpage that was actually cited. Returns a list of
+    ``{"domain": str, "urls": [str, ...]}`` entries in first-seen order."""
+    if not citation_list or not isinstance(citation_list, list):
+        return []
+    grouped = {}
+    order = []
+    for item in citation_list:
+        url = item if isinstance(item, str) else (item.get("url") if isinstance(item, dict) else None)
+        if not url or not isinstance(url, str):
+            continue
+        full = url.strip()
+        if not full:
+            continue
+        domain = _extract_domain(full)
+        if not domain:
+            continue
+        key = domain.lower()
+        if key not in grouped:
+            grouped[key] = {"domain": domain, "urls": []}
+            order.append(key)
+        if full not in grouped[key]["urls"]:
+            grouped[key]["urls"].append(full)
+    return [grouped[k] for k in order]
+
+
+def _format_source_urls_full(citation_list) -> str:
+    """Newline-separated full URLs grouped by domain, for the Excel cell.
+    Falls back to 'No sources available' when nothing is present."""
+    groups = _group_urls_by_domain(citation_list)
+    if not groups:
+        return "No sources available"
+    lines = []
+    for g in groups:
+        lines.append(g["domain"])
+        for u in g["urls"]:
+            lines.append(f"  - {u}")
+    return "\n".join(lines)
 
 
 def _display_platform(platform: str) -> str:
@@ -85,6 +127,33 @@ def _scale_sentiment(score) -> float:
         return round((float(score or 0) + 1.0) * 50.0, 1)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _apply_date_range(qs, request):
+    """Filter ``qs`` by optional ``start_date``/``end_date`` (YYYY-MM-DD)
+    query params on ``created_at``. Returns ``(qs, error_response_or_None)``."""
+    start_param = request.query_params.get("start_date")
+    end_param = request.query_params.get("end_date")
+    if not start_param and not end_param:
+        return qs, None
+    try:
+        start_date = datetime.strptime(start_param, "%Y-%m-%d").date() if start_param else None
+        end_date = datetime.strptime(end_param, "%Y-%m-%d").date() if end_param else None
+    except ValueError:
+        return qs, Response(
+            {"error": "start_date and end_date must be YYYY-MM-DD"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if start_date and end_date and start_date > end_date:
+        return qs, Response(
+            {"error": "start_date cannot be after end_date"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if start_date:
+        qs = qs.filter(created_at__date__gte=start_date)
+    if end_date:
+        qs = qs.filter(created_at__date__lte=end_date)
+    return qs, None
 
 
 def _format_created(dt) -> str:
@@ -149,12 +218,15 @@ def prompts_export(request):
         .select_related("prompt", "prompt__group")
         .order_by("-created_at")
     )
+    qs, range_err = _apply_date_range(qs, request)
+    if range_err is not None:
+        return range_err
 
     rows = []
     for a in qs.iterator():
         prompt_text = a.prompt.prompt if a.prompt else ""
         rows.append((
-            _format_source_urls(a.citation_list),
+            _format_source_urls_full(a.citation_list),
             prompt_text,
             _display_platform(a.platform),
             _scale_sentiment(a.sentiment_score),
@@ -206,12 +278,16 @@ def prompts_export_data(request):
         .select_related("prompt", "prompt__group")
         .order_by("-created_at")
     )
+    qs, range_err = _apply_date_range(qs, request)
+    if range_err is not None:
+        return range_err
 
     rows = []
     for a in qs.iterator():
         prompt_text = a.prompt.prompt if a.prompt else ""
         rows.append({
             "source_urls": _format_source_urls(a.citation_list),
+            "source_url_groups": _group_urls_by_domain(a.citation_list),
             "prompt_text": prompt_text,
             "model": _display_platform(a.platform),
             "avg_sentiment": _scale_sentiment(a.sentiment_score),
