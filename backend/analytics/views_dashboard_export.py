@@ -256,12 +256,22 @@ def _fetch_dataforseo_backlinks(host):
     if not login or not password or not host:
         return None
 
+    use_sandbox = bool(getattr(settings, "DATAFORSEO_USE_SANDBOX", False))
+    base_url = "https://sandbox.dataforseo.com" if use_sandbox else "https://api.dataforseo.com"
+    if use_sandbox:
+        # Sandbox returns the same fixture for every target — log once per call
+        # so the source of the numbers is obvious in dev logs.
+        logger.warning(
+            "DataForSEO sandbox mode active for %s — numbers are mock data, not real backlinks.",
+            host,
+        )
+
     try:
         token = base64.b64encode(f"{login}:{password}".encode("utf-8")).decode("utf-8")
         headers = {"Authorization": f"Basic {token}", "Content-Type": "application/json"}
 
         s_resp = requests.post(
-            "https://api.dataforseo.com/v3/backlinks/summary/live",
+            f"{base_url}/v3/backlinks/summary/live",
             headers=headers,
             json=[{
                 "target": host,
@@ -287,7 +297,7 @@ def _fetch_dataforseo_backlinks(host):
         cat_backlinks = {"A": 0, "B": 0, "C": 0}
 
         d_resp = requests.post(
-            "https://api.dataforseo.com/v3/backlinks/referring_domains/live",
+            f"{base_url}/v3/backlinks/referring_domains/live",
             headers=headers,
             json=[{
                 "target": host,
