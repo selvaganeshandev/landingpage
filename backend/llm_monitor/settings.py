@@ -269,6 +269,11 @@ MOZ_SECRET_KEY = config('MOZ_SECRET_KEY', default=None)
 # DataForSEO API Configuration (for Backlink Portfolio in dashboard export)
 DATAFORSEO_LOGIN = config('DATAFORSEO_LOGIN', default=None)
 DATAFORSEO_PASSWORD = config('DATAFORSEO_PASSWORD', default=None)
+# When True, hit sandbox.dataforseo.com instead of api.dataforseo.com. The
+# sandbox is free but returns fixed mock data (same numbers for every brand),
+# so it's useful before the paid Backlinks subscription is activated. Flip to
+# False once the live Backlinks plan is active — same code path.
+DATAFORSEO_USE_SANDBOX = config('DATAFORSEO_USE_SANDBOX', default=False, cast=bool)
 
 # Google OAuth Configuration
 GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='1080254283876-0o3ur4sr7ii1kh4ugaij4c7n1ptibn4j.apps.googleusercontent.com')
