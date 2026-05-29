@@ -384,29 +384,101 @@ def _fetch_moz_backlinks(host):
     }
 
 
-def _fetch_pages_indexed(host):
-    """Approximate Google's `About N results` count for `site:host`.
-    Uses the Scrapingdog key that's already configured for brand-mention scraping.
+def _fetch_pages_indexed_dataforseo(host):
+    """Google's `About N results` count for `site:host` via DataForSEO SERP API.
+    Returns se_results_count (~$0.01 per call from prepaid balance).
+
+    Note: SERP always uses the live api.dataforseo.com endpoint, even when
+    DATAFORSEO_USE_SANDBOX=True. SERP is pay-per-call from the prepaid balance,
+    so there's no reason to fall back to mock data — and sandbox returns a
+    fixed fixture per query, not useful real-world numbers. The sandbox toggle
+    only gates Backlinks (which require a separate paid subscription).
+    """
+    login = getattr(settings, "DATAFORSEO_LOGIN", None)
+    password = getattr(settings, "DATAFORSEO_PASSWORD", None)
+    if not login or not password or not host:
+        return None
+
+    try:
+        token = base64.b64encode(f"{login}:{password}".encode("utf-8")).decode("utf-8")
+        resp = requests.post(
+            "https://api.dataforseo.com/v3/serp/google/organic/live/advanced",
+            headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"},
+            json=[{
+                "keyword": f"site:{host}",
+                "location_code": 2840,
+                "language_code": "en",
+                "depth": 10,
+            }],
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "DataForSEO SERP returned %s for site:%s: %s",
+                resp.status_code, host, resp.text[:200],
+            )
+            return None
+        payload = resp.json() or {}
+        tasks = payload.get("tasks") or []
+        result = (tasks[0].get("result") if tasks else None) or []
+        if result:
+            count = result[0].get("se_results_count")
+            if count is not None:
+                return int(count)
+    except Exception as exc:
+        logger.warning("DataForSEO pages-indexed fetch failed for %s: %s", host, exc)
+    return None
+
+
+def _fetch_pages_indexed_scrapingdog(host):
+    """Fallback pages-indexed via Scrapingdog's dedicated /google API.
+    The legacy /scrape endpoint no longer handles Google searches (returns a
+    redirect-message JSON). The /google endpoint returns structured search
+    results at 5 credits per request.
     """
     api_key = getattr(settings, "SCRAPINGDOG_API_KEY", None)
     if not api_key or not host:
         return None
     try:
-        search_url = f"https://www.google.com/search?q=site:{host}"
         resp = requests.get(
-            "https://api.scrapingdog.com/scrape",
-            params={"api_key": api_key, "url": search_url, "dynamic": "false"},
-            timeout=15,
+            "https://api.scrapingdog.com/google",
+            params={"api_key": api_key, "query": f"site:{host}"},
+            timeout=20,
         )
         if resp.status_code != 200:
             return None
-        match = re.search(r"About\s+([\d,]+)\s+results", resp.text) \
-            or re.search(r"([\d,]+)\s+results", resp.text)
-        if match:
-            return int(match.group(1).replace(",", ""))
+        data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+        # Scrapingdog returns a `success: false` body with HTTP 200 when out
+        # of credits — treat that as a soft failure.
+        if isinstance(data, dict) and data.get("success") is False:
+            logger.warning(
+                "Scrapingdog soft failure for site:%s: %s",
+                host, (data.get("message") or "")[:200],
+            )
+            return None
+        # Try common fields where Scrapingdog reports the total-results count.
+        for key in ("total_results", "search_information", "search_metadata"):
+            val = data.get(key) if isinstance(data, dict) else None
+            if isinstance(val, dict):
+                for sub in ("total_results", "result_count", "approximate_results", "results_count"):
+                    if val.get(sub) is not None:
+                        return int(str(val[sub]).replace(",", ""))
+            elif val is not None:
+                return int(str(val).replace(",", ""))
     except Exception as exc:
-        logger.warning("Pages-indexed fetch failed for %s: %s", host, exc)
+        logger.warning("Scrapingdog pages-indexed fetch failed for %s: %s", host, exc)
     return None
+
+
+def _fetch_pages_indexed(host):
+    """Return Google's `site:<host>` indexed-pages count.
+    Tries DataForSEO SERP first (pay-per-call from prepaid balance), then
+    Scrapingdog. Returns None if both providers fail / are unconfigured.
+    """
+    return (
+        _fetch_pages_indexed_dataforseo(host)
+        or _fetch_pages_indexed_scrapingdog(host)
+    )
 
 
 def _fetch_brand_backlinks(brand):
