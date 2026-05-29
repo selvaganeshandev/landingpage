@@ -124,18 +124,28 @@ def _build_brand_columns(domain, sov_latest_rows):
     return brands
 
 
+def _hidden_platforms():
+    """LLMs whose rows are suppressed from the export.
+    Returns a set for fast membership checks. Empty set = show every platform.
+    """
+    return set(getattr(settings, "AI_VISIBILITY_HIDDEN_PLATFORMS", []) or [])
+
+
 def _platforms_for_report(sov_latest_rows):
-    """Always return the full canonical LLM list (matching the Insights LLM dropdown).
+    """Return the canonical LLM list minus any platforms hidden via settings.
     Any extra platforms found in the data that aren't in the canonical list are
-    appended at the end, alphabetically. Platforms with no data get 0 cells."""
-    ordered = list(LLM_PLATFORM_ORDER)
+    appended at the end, alphabetically (also filtered against the hide-list).
+    Platforms with no data still get 0 cells.
+    """
+    hidden = _hidden_platforms()
+    ordered = [p for p in LLM_PLATFORM_ORDER if p not in hidden]
     found = set(
         sov_latest_rows.exclude(platform__isnull=True)
         .exclude(platform="")
         .values_list("platform", flat=True)
         .distinct()
     )
-    extras = sorted(p for p in found if p not in LLM_PLATFORM_ORDER)
+    extras = sorted(p for p in found if p not in LLM_PLATFORM_ORDER and p not in hidden)
     return ordered + extras
 
 
@@ -152,9 +162,15 @@ def _mention_matrix(sov_period_rows, brands, platforms):
 def _brand_totals(sov_period_rows, brands):
     """Total mentions per brand across the period — summed from per-platform
     rows so we never under-count when the daily aggregate row is missing for
-    some days."""
+    some days. Hidden platforms (AI_VISIBILITY_HIDDEN_PLATFORMS) are skipped so
+    the Mentions total stays consistent with the visible per-LLM rows.
+    """
+    hidden = _hidden_platforms()
     totals = {b["competitor_id"]: 0 for b in brands}
-    for row in sov_period_rows.exclude(platform__isnull=True).exclude(platform=""):
+    qs = sov_period_rows.exclude(platform__isnull=True).exclude(platform="")
+    if hidden:
+        qs = qs.exclude(platform__in=hidden)
+    for row in qs:
         if row.competitor_id in totals:
             totals[row.competitor_id] = totals.get(row.competitor_id, 0) + (row.mention_count or 0)
     return totals
@@ -184,6 +200,12 @@ def _your_brand_llm_citations(domain_id, start_date, end_date):
         snapshot_date__gte=start_date,
         snapshot_date__lte=end_date,
     ).exclude(platform__isnull=True).exclude(platform="")
+
+    # Drop hidden LLMs so the Total Cited Pages row equals the sum of the
+    # visible per-LLM rows (otherwise the total appears inflated to the reader).
+    hidden = _hidden_platforms()
+    if hidden:
+        qs = qs.exclude(platform__in=hidden)
 
     totals = {}
     for snap in qs:
