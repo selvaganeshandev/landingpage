@@ -266,6 +266,18 @@ GOOGLE_PAGESPEED_API_KEY = config('GOOGLE_PAGESPEED_API_KEY', default=None)
 MOZ_ACCESS_ID = config('MOZ_ACCESS_ID', default=None)
 MOZ_SECRET_KEY = config('MOZ_SECRET_KEY', default=None)
 
+# LLM platforms to hide from the AI Visibility Excel export.
+# The engine still calls these LLMs and stores their data — only the export
+# display omits them (rows and Mentions/Citations totals exclude their share).
+# Comma-separated. Match values stored on snapshots: "ChatGPT", "Google Gemini",
+# "Perplexity", "Claude", "Grok", "DeepSeek".
+AI_VISIBILITY_HIDDEN_PLATFORMS = [
+    s.strip() for s in config(
+        'AI_VISIBILITY_HIDDEN_PLATFORMS',
+        default='Perplexity,Grok,DeepSeek',
+    ).split(',') if s.strip()
+]
+
 # DataForSEO API Configuration (for Backlink Portfolio in dashboard export)
 DATAFORSEO_LOGIN = config('DATAFORSEO_LOGIN', default=None)
 DATAFORSEO_PASSWORD = config('DATAFORSEO_PASSWORD', default=None)
