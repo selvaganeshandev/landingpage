@@ -464,6 +464,8 @@ class GAInsightsProcessor:
                         {'name': 'totalRevenue'},
                         {'name': 'bounceRate'},
                         {'name': 'averageSessionDuration'},
+                        {'name': 'totalUsers'},
+                        {'name': 'screenPageViews'},
                     ],
                     'dimensionFilter': {
                         'filter': {
@@ -491,14 +493,18 @@ class GAInsightsProcessor:
                         'conversions': 0,
                         'revenue': 0,
                         'bounceRate': 0,
-                        'avgDuration': 0
+                        'avgDuration': 0,
+                        'users': 0,
+                        'pageViews': 0
                     }
-                
+
                 platform_data[platform_name]['visits'] += int(metric_values[0].get('value', 0)) if len(metric_values) > 0 else 0
                 platform_data[platform_name]['conversions'] += int(metric_values[1].get('value', 0)) if len(metric_values) > 1 else 0
                 platform_data[platform_name]['revenue'] += float(metric_values[2].get('value', 0)) if len(metric_values) > 2 else 0
                 platform_data[platform_name]['bounceRate'] = float(metric_values[3].get('value', 0)) if len(metric_values) > 3 else 0
                 platform_data[platform_name]['avgDuration'] = float(metric_values[4].get('value', 0)) if len(metric_values) > 4 else 0
+                platform_data[platform_name]['users'] += int(metric_values[5].get('value', 0)) if len(metric_values) > 5 else 0
+                platform_data[platform_name]['pageViews'] += int(metric_values[6].get('value', 0)) if len(metric_values) > 6 else 0
                 
         except Exception as e:
             logger.error(f"Error fetching platform breakdown: {e}")

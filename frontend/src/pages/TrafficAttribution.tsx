@@ -198,11 +198,31 @@ export default function TrafficAttribution() {
   // Google Search Console Data
   const searchConsoleData = gscData?.top_queries || [];
 
-  // ROI Metrics
-  const totalTraffic = gaData?.total_sessions || 0;
-  const totalConversions = gaData?.total_conversions || 0;
+  // ===== AI-referral aggregates =====
+  // Every headline metric on this page describes traffic ATTRIBUTED TO AI platforms,
+  // so it is derived from platform_breakdown — the GA4 sessions whose sessionSource is
+  // a known AI platform (ChatGPT, Claude, Gemini, Perplexity, Grok, DeepSeek, …).
+  // We deliberately do NOT use gaData.total_sessions / total_conversions / total_revenue
+  // here: those are all-channel site totals (organic + direct + paid + AI) and using them
+  // made "Total AI Traffic" look hugely inflated versus GA4's actual AI-referral numbers.
+  const aiBreakdown: any[] = gaData?.platform_breakdown ? Object.values(gaData.platform_breakdown) : [];
+  const visitsOf = (p: any) => Number(p?.visits ?? p?.sessions ?? 0) || 0;
+  const sumBy = (key: string) => aiBreakdown.reduce((s, p: any) => s + (Number(p?.[key]) || 0), 0);
+  const weightedAvg = (key: string, total: number) =>
+    total > 0 ? aiBreakdown.reduce((s, p: any) => s + (Number(p?.[key]) || 0) * visitsOf(p), 0) / total : 0;
+
+  const totalTraffic = aiBreakdown.reduce((s, p) => s + visitsOf(p), 0);
+  const totalConversions = sumBy('conversions');
+  const totalRevenue = sumBy('revenue');
   const conversionRate = totalTraffic > 0 ? ((totalConversions / totalTraffic) * 100).toFixed(1) : "0";
-  const totalRevenue = gaData?.total_revenue || 0;
+
+  // Per-LLM users / page views are present only on insights synced with the newer
+  // breakdown query; fall back to "—" for older cached insights instead of showing
+  // all-channel totals that would re-introduce the inflation this fix removes.
+  const aiUsers = sumBy('users');
+  const aiPageViews = sumBy('pageViews');
+  const hasAiUsers = aiBreakdown.some((p: any) => p?.users != null);
+  const hasAiPageViews = aiBreakdown.some((p: any) => p?.pageViews != null);
 
   const roiMetrics = [
     { metric: "Total Traffic from AI", value: totalTraffic.toLocaleString(), unit: "visits" },
@@ -211,10 +231,12 @@ export default function TrafficAttribution() {
     { metric: "ROI", value: "N/A", unit: "%" },
   ];
 
-  // ===== Derived data for the new Overview tab =====
-  const totalPageViews = gaData?.total_page_views || 0;
-  const avgSessionDuration = gaData?.avg_session_duration || 0;
-  const bounceRate = gaData?.bounce_rate || 0;
+  // ===== Derived data for the Overview tab (all AI-referral scoped) =====
+  const totalPageViews = aiPageViews;
+  // Bounce rate and avg session duration are per-unit rates, so aggregate them as a
+  // visit-weighted average across AI sources rather than summing.
+  const avgSessionDuration = weightedAvg('avgDuration', totalTraffic);
+  const bounceRate = weightedAvg('bounceRate', totalTraffic);
   const engagedSessions = Math.max(0, Math.round(totalTraffic * (1 - bounceRate / 100)));
   const revenuePerSession = totalTraffic > 0 ? totalRevenue / totalTraffic : 0;
 
@@ -301,8 +323,8 @@ export default function TrafficAttribution() {
               { title: "Total AI Visits", value: totalTraffic.toLocaleString(), key: "sessions", icon: MousePointerClick },
               { title: "Engaged Sessions", value: engagedSessions.toLocaleString(), key: "sessions", icon: BarChart3 },
               { title: "Avg Duration", value: formatDurationSec(avgSessionDuration), key: "avgDuration", icon: TrendingUp },
-              { title: "Total Users", value: (gaData?.total_users || 0).toLocaleString(), key: "totalUsers", icon: Users },
-              { title: "Page Views", value: totalPageViews.toLocaleString(), key: "screenPageViews", icon: Eye },
+              { title: "Total Users", value: hasAiUsers ? aiUsers.toLocaleString() : "—", key: "totalUsers", icon: Users },
+              { title: "Page Views", value: hasAiPageViews ? totalPageViews.toLocaleString() : "—", key: "screenPageViews", icon: Eye },
             ].map((m, i) => {
               const Icon = m.icon;
               return (
