@@ -777,19 +777,33 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
 
         used_provider = 'gemini'
         try:
-            # Bounded timeout so a quota/429 error surfaces in ~15s instead of
+            # Bounded timeout so a quota/429 error surfaces in ~30s instead of
             # letting google.api_core silently exponential-back-off retry for
-            # ~60s before raising. Successful Gemini calls finish well under 15s.
+            # ~60s before raising. 30s (vs the old 15s) gives large keyword sets
+            # — e.g. 50 keywords × 9 fields — room to finish on Gemini before we
+            # fall back; combined with the 180s OpenAI cap it stays under the
+            # frontend's 5-min window.
             response = model.generate_content(
                 prompt,
-                request_options={'timeout': 15},
+                request_options={'timeout': 30},
             )
             result_text = response.text.strip()
         except Exception as gemini_err:
             err_str = str(gemini_err)
-            # Fall back to OpenAI ONLY for quota/429 errors. Other failures bubble up.
-            if '429' in err_str or 'quota' in err_str.lower() or 'spend cap' in err_str.lower():
-                logger.warning(f"Gemini quota/429 hit, falling back to OpenAI: {err_str}")
+            err_lower = err_str.lower()
+            # Fall back to OpenAI for quota/429 AND for transient errors (read
+            # timeout, deadline exceeded, 5xx, connection drops). Previously only
+            # 429/quota fell back, so a slow Gemini response (ReadTimeout on
+            # generativelanguage.googleapis.com) failed outright instead of
+            # retrying on OpenAI. Genuine bad-request/safety errors still bubble up.
+            is_quota = '429' in err_str or 'quota' in err_lower or 'spend cap' in err_lower
+            is_transient = any(s in err_lower for s in (
+                'timed out', 'timeout', 'deadline', 'connection', 'connectionpool',
+                'unavailable', '503', '500', '502', '504',
+            ))
+            if is_quota or is_transient:
+                reason = 'quota/429' if is_quota else 'timeout/transient error'
+                logger.warning(f"Gemini {reason}, falling back to OpenAI: {err_str}")
                 used_provider = 'openai'
                 openai_client = get_openai_client()
                 openai_response = openai_client.chat.completions.create(
