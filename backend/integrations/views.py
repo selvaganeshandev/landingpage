@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.conf import settings
 from django.utils import timezone
 from .models import Integration, GATrafficInsight, GSCTrafficInsight
 from .serializers import IntegrationSerializer, IntegrationPublicSerializer
@@ -185,7 +186,7 @@ def _extract_main_keyword(article_title):
     from domains.views import get_google_genai_client
 
     genai = get_google_genai_client()
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    model = genai.GenerativeModel(settings.GEMINI_MODEL)
 
     prompt = (
         f'Extract the single most important search keyword or short phrase '

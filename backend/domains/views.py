@@ -617,7 +617,7 @@ def fetch_brand_niches(request):
 
     try:
         genai = get_google_genai_client()
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel(settings.GEMINI_MODEL)
 
         prompt = f"""Analyze the brand "{brand_name}" (website: {domain_name}) and suggest relevant industry niches or categories.
 
@@ -716,7 +716,7 @@ def generate_semantic_keywords(request):
 
     try:
         genai = get_google_genai_client()
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel(settings.GEMINI_MODEL)
 
         # Build niche description
         niche_text = ", ".join(niches) if niches else "general business"
@@ -801,8 +801,22 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
                 'timed out', 'timeout', 'deadline', 'connection', 'connectionpool',
                 'unavailable', '503', '500', '502', '504',
             ))
-            if is_quota or is_transient:
-                reason = 'quota/429' if is_quota else 'timeout/transient error'
+            # A 404 / "model not found" means the configured Gemini model isn't
+            # available for this key (e.g. retired by Google). Fall back to OpenAI
+            # so the user still gets keywords; the permanent fix is setting
+            # GEMINI_MODEL to a supported model, but we never hard-fail on it.
+            is_model_unavailable = (
+                '404' in err_str
+                or 'not found' in err_lower
+                or 'is not supported' in err_lower
+                or 'not available' in err_lower
+            )
+            if is_quota or is_transient or is_model_unavailable:
+                reason = (
+                    'quota/429' if is_quota
+                    else 'model unavailable/404' if is_model_unavailable
+                    else 'timeout/transient error'
+                )
                 logger.warning(f"Gemini {reason}, falling back to OpenAI: {err_str}")
                 used_provider = 'openai'
                 openai_client = get_openai_client()
@@ -2405,7 +2419,7 @@ def automated_domain_onboard(request):
         if not niches or len(niches) == 0:
             try:
                 genai = get_google_genai_client()
-                model = genai.GenerativeModel('gemini-2.0-flash')
+                model = genai.GenerativeModel(settings.GEMINI_MODEL)
 
                 prompt = f"""Analyze the brand "{brand_name}" (website: {domain_name}) and suggest relevant industry niches or categories.
 
@@ -2437,7 +2451,7 @@ Provide the response as a valid JSON array only, no additional text."""
         generated_keywords = []
         try:
             genai = get_google_genai_client()
-            model = genai.GenerativeModel('gemini-2.0-flash')
+            model = genai.GenerativeModel(settings.GEMINI_MODEL)
 
             niche_text = ", ".join(niches) if niches else "general business"
             max_keywords = 50
