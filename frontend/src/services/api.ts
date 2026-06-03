@@ -1256,10 +1256,11 @@ export const apiClient = {
     return apiRequest(`/integrations/google/analytics-data/?${queryParams.toString()}`);
   },
 
-  getAIReferralData: (domainId: number, startDate?: string, endDate?: string) => {
+  getAIReferralData: (domainId: number, startDate?: string, endDate?: string, days?: number) => {
     const queryParams = new URLSearchParams({ domain_id: String(domainId) });
     if (startDate) queryParams.set('start_date', startDate);
     if (endDate) queryParams.set('end_date', endDate);
+    if (days) queryParams.set('days', String(days));
     return apiRequest(`/integrations/google/ai-referrals/?${queryParams.toString()}`);
   },
 

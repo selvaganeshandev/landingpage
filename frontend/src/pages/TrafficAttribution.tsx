@@ -60,6 +60,12 @@ export default function TrafficAttribution() {
   const [loading, setLoading] = useState(true);
   const [trafficData, setTrafficData] = useState<any>(null);
   const [dailySeries, setDailySeries] = useState<any[]>([]);
+  // AI-referral lookback window. null = the latest cached snapshot (default);
+  // 7/14/21/28 = a live GA4-matched window (ends yesterday, no proration) so
+  // the numbers reconcile with GA4's "Last N days" comparison views.
+  const [windowDays, setWindowDays] = useState<number | null>(null);
+  const [aiWindowData, setAiWindowData] = useState<any>(null);
+  const [aiWindowLoading, setAiWindowLoading] = useState(false);
 
   useEffect(() => {
     const ensureDomain = async () => {
@@ -77,6 +83,23 @@ export default function TrafficAttribution() {
       setLoading(false);
     }
   }, [selectedDomain?.id, domains.length]);
+
+  // Fetch a live GA4-matched window when the user picks 7/14/21/28 days.
+  // null resets to the cached snapshot. Other tabs (devices, geo, pages,
+  // search) keep using the snapshot — only the AI-platform numbers re-window.
+  useEffect(() => {
+    if (!selectedDomain?.id || !windowDays) {
+      setAiWindowData(null);
+      return;
+    }
+    let cancelled = false;
+    setAiWindowLoading(true);
+    apiClient.getAIReferralData(selectedDomain.id, undefined, undefined, windowDays)
+      .then((res: any) => { if (!cancelled) setAiWindowData(res || null); })
+      .catch(() => { if (!cancelled) setAiWindowData(null); })
+      .finally(() => { if (!cancelled) setAiWindowLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedDomain?.id, windowDays]);
 
   const loadTrafficData = async () => {
     if (!selectedDomain?.id) return;
@@ -129,6 +152,13 @@ export default function TrafficAttribution() {
   // Format data from API
   const gaData = trafficData?.ga;
   const gscData = trafficData?.gsc;
+
+  // AI-platform numbers come from the selected live window when one is chosen,
+  // otherwise from the cached snapshot. Both share the platform_breakdown shape.
+  const aiPlatformBreakdown = (windowDays && aiWindowData?.platform_breakdown)
+    ? aiWindowData.platform_breakdown
+    : gaData?.platform_breakdown;
+  const aiDateRange = windowDays ? aiWindowData?.date_range : null;
   
   // Show empty state if no data
   if (!gaData && !gscData) {
@@ -167,7 +197,7 @@ export default function TrafficAttribution() {
   };
 
   // Google Analytics Data
-  const platformSources = gaData?.platform_breakdown ? Object.entries(gaData.platform_breakdown).map(([platform, data]: [string, any]) => ({
+  const platformSources = aiPlatformBreakdown ? Object.entries(aiPlatformBreakdown).map(([platform, data]: [string, any]) => ({
     platform,
     visits: data.visits || data.sessions || 0,
     conversions: data.conversions || 0,
@@ -205,7 +235,7 @@ export default function TrafficAttribution() {
   // We deliberately do NOT use gaData.total_sessions / total_conversions / total_revenue
   // here: those are all-channel site totals (organic + direct + paid + AI) and using them
   // made "Total AI Traffic" look hugely inflated versus GA4's actual AI-referral numbers.
-  const aiBreakdown: any[] = gaData?.platform_breakdown ? Object.values(gaData.platform_breakdown) : [];
+  const aiBreakdown: any[] = aiPlatformBreakdown ? Object.values(aiPlatformBreakdown) : [];
   const visitsOf = (p: any) => Number(p?.visits ?? p?.sessions ?? 0) || 0;
   const sumBy = (key: string) => aiBreakdown.reduce((s, p: any) => s + (Number(p?.[key]) || 0), 0);
   const weightedAvg = (key: string, total: number) =>
@@ -284,6 +314,34 @@ export default function TrafficAttribution() {
         <p className="text-muted-foreground mt-2">
           Track and attribute traffic from AI platforms to measure ROI
         </p>
+      </div>
+
+      {/* AI-traffic lookback selector — matches GA4's "Last N days" comparison
+          windows (ends yesterday, raw sessions) so the numbers reconcile with GA4. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-muted-foreground mr-1">AI traffic window:</span>
+        {[
+          { label: "Latest", value: null as number | null },
+          { label: "Last 7 days", value: 7 },
+          { label: "Last 14 days", value: 14 },
+          { label: "Last 21 days", value: 21 },
+          { label: "Last 28 days", value: 28 },
+        ].map((opt) => (
+          <Button
+            key={opt.label}
+            size="sm"
+            variant={windowDays === opt.value ? "default" : "outline"}
+            onClick={() => setWindowDays(opt.value)}
+          >
+            {opt.label}
+          </Button>
+        ))}
+        {aiWindowLoading && <span className="text-sm text-muted-foreground">Loading…</span>}
+        {aiDateRange && !aiWindowLoading && (
+          <span className="text-sm text-muted-foreground">
+            {aiDateRange.start} → {aiDateRange.end} (GA4-matched)
+          </span>
+        )}
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">

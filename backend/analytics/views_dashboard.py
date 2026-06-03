@@ -15,6 +15,78 @@ from competitors.models import Competitor
 from .models import ShareOfVoiceAnalytics
 
 
+def _dashboard_datetime_window(start_date, end_date):
+    """Aware datetime window [start 00:00 .. end 23:59:59] for live
+    PromptAnalytics queries, matching the snapshot date range the dashboard
+    uses elsewhere."""
+    start_dt = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+    end_dt = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
+    return start_dt, end_dt
+
+
+def count_cited_urls(domain_id, start_date, end_date, platform_filter=None):
+    """Count every URL the AI cited (sum of citation_list lengths) for a domain
+    in the given window.
+
+    This matches the Citations page (misinformation citations dashboard), which
+    counts citation_list entries, so the Insights 'Total Citations' headline
+    agrees with the Citations page a client drills into.
+
+    NOTE: this is intentionally different from the PromptAnalytics
+    `total_citations` column (domain-specific citations) that feeds the
+    visibility score / exports / snapshots — those are left untouched.
+    """
+    start_dt, end_dt = _dashboard_datetime_window(start_date, end_date)
+    qs = PromptAnalytics.objects.filter(
+        prompt__group__domain_id=domain_id,
+        track_status='COMP',
+        created_at__gte=start_dt,
+        created_at__lte=end_dt,
+    )
+    if platform_filter:
+        qs = qs.filter(platform=platform_filter)
+    total = 0
+    for citation_list in qs.values_list('citation_list', flat=True):
+        if isinstance(citation_list, list):
+            total += len(citation_list)
+    return total
+
+
+def live_sentiment_breakdown(domain_id, start_date, end_date, platform_filter=None):
+    """Positive/neutral/negative percentages from each mention's actual
+    sentiment_category (live PromptAnalytics), matching the Sentiment page.
+
+    The previous Insights logic bucketed each platform's AVERAGE sentiment
+    score, which collapsed mixed responses into one category (e.g. one positive
+    + one neutral response -> '100% positive'). Counting categories per mention
+    reflects the real distribution. Only mention rows (is_mention=True) count,
+    since sentiment is about how the brand was mentioned.
+    """
+    start_dt, end_dt = _dashboard_datetime_window(start_date, end_date)
+    qs = PromptAnalytics.objects.filter(
+        prompt__group__domain_id=domain_id,
+        is_mention=True,
+        created_at__gte=start_dt,
+        created_at__lte=end_dt,
+    )
+    if platform_filter:
+        qs = qs.filter(platform=platform_filter)
+    counts = {'positive': 0, 'neutral': 0, 'negative': 0}
+    for category in qs.values_list('sentiment_category', flat=True):
+        key = (category or '').strip().lower()
+        if key not in counts:
+            key = 'neutral'
+        counts[key] += 1
+    total = counts['positive'] + counts['neutral'] + counts['negative']
+    if total == 0:
+        return 0, 0, 0
+    return (
+        round(counts['positive'] / total * 100, 2),
+        round(counts['neutral'] / total * 100, 2),
+        round(counts['negative'] / total * 100, 2),
+    )
+
+
 def calculate_relative_time(dt):
     """Calculate relative time string like '2 hours ago'"""
     now = timezone.now()
@@ -320,18 +392,17 @@ def dashboard_summary(request):
         total=Sum('mentions')
     )['total'] or 0
     
-    total_citations = snapshot_qs.aggregate(
-        total=Sum('citations')
-    )['total'] or 0
-    
+    # Total Citations = count of every URL the AI cited (live PromptAnalytics),
+    # matching the Citations page the client drills into. See count_cited_urls()
+    # for why this differs from the snapshot 'citations' aggregate.
+    total_citations = count_cited_urls(domain_id, start_date, end_date, platform_filter)
+
     # Previous period metrics for change calculation
     prev_total_mentions = prev_snapshot_qs.aggregate(
         total=Sum('mentions')
     )['total'] or 0
-    
-    prev_total_citations = prev_snapshot_qs.aggregate(
-        total=Sum('citations')
-    )['total'] or 0
+
+    prev_total_citations = count_cited_urls(domain_id, prev_start_date, prev_end_date, platform_filter)
     
     # Calculate weighted average position and visibility score
     # First check if we have snapshots with actual mentions
@@ -444,32 +515,13 @@ def dashboard_summary(request):
         'position_change': position_change,
     }
     
-    # 2. Brand performance - calculate sentiment from snapshots
-    # Aggregate sentiment scores weighted by mentions
-    total_positive_mentions = 0
-    total_neutral_mentions = 0
-    total_negative_mentions = 0
-    
-    for snapshot in snapshot_qs:
-        sentiment = float(snapshot.sentiment_score or 0)
-        mentions = snapshot.mentions
-
-        # More sensitive thresholds for better sentiment distribution
-        if sentiment > 0.05:
-            total_positive_mentions += mentions
-        elif sentiment >= -0.05:
-            total_neutral_mentions += mentions
-        else:
-            total_negative_mentions += mentions
-    
-    total_sentiment_mentions = total_positive_mentions + total_neutral_mentions + total_negative_mentions
-    
-    if total_sentiment_mentions > 0:
-        positive_pct = round((total_positive_mentions / total_sentiment_mentions) * 100, 2)
-        neutral_pct = round((total_neutral_mentions / total_sentiment_mentions) * 100, 2)
-        negative_pct = round((total_negative_mentions / total_sentiment_mentions) * 100, 2)
-    else:
-        positive_pct = neutral_pct = negative_pct = 0
+    # 2. Brand performance - sentiment from each mention's actual category
+    # (live PromptAnalytics), matching the Sentiment page. Previously this
+    # bucketed each platform's AVERAGE sentiment score, which hid mixed
+    # responses (e.g. one positive + one neutral -> "100% positive").
+    positive_pct, neutral_pct, negative_pct = live_sentiment_breakdown(
+        domain_id, start_date, end_date, platform_filter
+    )
     
     brand = {
         'visibility_score': round(visibility_score, 2),
@@ -514,13 +566,13 @@ def dashboard_summary(request):
             platform_aggregates[platform]['position_sum'] += float(snapshot.average_position) * snapshot.mentions
             platform_aggregates[platform]['position_weight'] += snapshot.mentions
     
-    # Build platforms list with weighted averages
+    # Build platforms list with weighted averages.
+    # Note: every platform with tracked snapshots is included so the Insights
+    # platform distribution matches the Mentions / Citations / Sentiment pages,
+    # which all read live PromptAnalytics. (Previously Claude was hard-skipped
+    # here, so its mentions were silently dropped from this card only.)
     platforms = []
     for platform, agg in platform_aggregates.items():
-        # Skip Claude platform
-        if platform == 'Claude':
-            continue
-
         avg_pos = (agg['position_sum'] / agg['position_weight']) if agg['position_weight'] > 0 else 0
         platforms.append({
             'platform': platform,
