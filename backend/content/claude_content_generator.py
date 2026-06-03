@@ -936,6 +936,82 @@ AFTER (converted to <ul>):
             logger.warning(f"Keyword-fix pass failed (non-fatal): {e}")
             return content_html, 0
 
+    @staticmethod
+    def _strip_empty_headings(content_html):
+        """Remove section headings that have no content beneath them.
+
+        Word-count trimming can keep a section heading while dropping every
+        body block under it — e.g. the greedy fill keeps
+        ``<h2>Long-Term Management</h2>`` because it fit the budget, then
+        drops the paragraph that followed because it didn't. That leaves a
+        bare heading sitting directly above the next heading / conclusion,
+        which renders as the visible "content cut off mid-section" bug
+        (heading shown, body missing).
+
+        A heading is treated as empty when the block that follows it is
+        another heading of the SAME or HIGHER level (smaller/equal h-number),
+        or it is the last block. A heading followed by a DEEPER subheading
+        (e.g. ``<h2>`` then ``<h3>``) is kept, because the subsection
+        supplies its content. Only the dropped heading spans are removed
+        from the original HTML, so surrounding markup/whitespace is left
+        untouched and no other flow is affected.
+        """
+        if not content_html:
+            return content_html
+
+        block_pattern = re.compile(
+            r'<(h[1-6]|p|ul|ol|blockquote|pre|table|div|figure)\b[^>]*>.*?</\1>',
+            re.IGNORECASE | re.DOTALL
+        )
+        matches = list(block_pattern.finditer(content_html))
+        if not matches:
+            return content_html
+
+        heading_level_re = re.compile(r'^\s*<h([1-6])\b', re.IGNORECASE)
+
+        def heading_level(block):
+            m = heading_level_re.match(block)
+            return int(m.group(1)) if m else None
+
+        blocks = [m.group(0) for m in matches]
+        keep = [True] * len(blocks)
+        for i, block in enumerate(blocks):
+            level = heading_level(block)
+            if level is None:
+                continue
+            has_content = False
+            for nxt in blocks[i + 1:]:
+                nxt_level = heading_level(nxt)
+                if nxt_level is None:
+                    has_content = True  # a body block belongs to this heading
+                    break
+                if nxt_level > level:
+                    has_content = True  # deeper subheading => has content
+                    break
+                # same-or-higher level heading => this section is empty
+                break
+            if not has_content:
+                keep[i] = False
+
+        if all(keep):
+            return content_html
+
+        # Rebuild by removing only the dropped heading spans, preserving
+        # everything else (including inter-block whitespace) verbatim.
+        result_parts = []
+        last_end = 0
+        for idx, m in enumerate(matches):
+            if keep[idx]:
+                continue
+            result_parts.append(content_html[last_end:m.start()])
+            last_end = m.end()
+        result_parts.append(content_html[last_end:])
+        dropped = keep.count(False)
+        logger.info(
+            f"Stripped {dropped} empty section heading(s) with no body content"
+        )
+        return ''.join(result_parts)
+
     @classmethod
     def _enforce_word_count_limit(cls, content_html, word_count, outline=None):
         """Cap content at the user-selected word count range's upper bound,
@@ -968,7 +1044,10 @@ AFTER (converted to <ul>):
         # real conclusion over hitting the word cap exactly.
         soft_cap = int(upper * 1.15)
         if current_words <= soft_cap:
-            return content_html
+            # Even when no trimming is needed, sweep any heading that ended
+            # up with no body under it so the article never shows a bare
+            # section title followed by the next heading / conclusion.
+            return cls._strip_empty_headings(content_html)
 
         # Outline-aware path: keep every planned section heading, trim
         # trailing body blocks within sections instead. Falls through to the
@@ -1045,7 +1124,10 @@ AFTER (converted to <ul>):
         kept_parts = kept_body + conclusion_blocks
         if not kept_parts:
             return content_html
-        truncated = '\n'.join(kept_parts)
+        # Drop any heading that became the last kept body block (its body
+        # paragraph was greedily trimmed away), which would otherwise render
+        # as an empty section title right before the conclusion.
+        truncated = cls._strip_empty_headings('\n'.join(kept_parts))
         final_words = kept_words + conclusion_words
         logger.info(
             f"Enforced word count limit: {current_words} -> {final_words} words "
@@ -1178,7 +1260,10 @@ AFTER (converted to <ul>):
             f"{total_words} words (target {word_count}, upper {upper}, "
             f"{sections_with_heading} section heading(s) preserved)"
         )
-        return '\n'.join(parts)
+        # If a section was trimmed down to its heading with no body blocks
+        # left, drop that bare heading so it doesn't render as an empty
+        # section above the next heading / conclusion.
+        return cls._strip_empty_headings('\n'.join(parts))
 
     def _continue_truncated_content(self, truncated_html):
         """

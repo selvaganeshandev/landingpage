@@ -11,6 +11,7 @@ from django.db.models import Q
 
 # Import from engine's integrations app
 from integrations.models import Integration, GATrafficInsight
+from integrations.ai_platforms import AI_SOURCE_REGEX, resolve_platform
 from shared_models.models import Domain
 from integrations.google_oauth_helper import get_credentials_from_integration
 from google.oauth2.credentials import Credentials
@@ -19,21 +20,8 @@ from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
 
-# AI platform domains to track
-AI_PLATFORMS = {
-    'chat.openai.com': 'ChatGPT',
-    'chatgpt.com': 'ChatGPT',
-    'claude.ai': 'Claude',
-    'gemini.google.com': 'Gemini',
-    'bard.google.com': 'Gemini',
-    'perplexity.ai': 'Perplexity',
-    'grok.x.ai': 'Grok',
-    'grok.com': 'Grok',
-    'chat.deepseek.com': 'DeepSeek',
-    'deepseek.com': 'DeepSeek',
-    'you.com': 'You.com',
-    'poe.com': 'Poe',
-}
+# AI-platform matching (regex + classification) lives in integrations.ai_platforms
+# so the engine and backend share one source of truth that mirrors the GA4 filter.
 
 
 class GAInsightsProcessor:
@@ -443,13 +431,20 @@ class GAInsightsProcessor:
             return {}
     
     def _fetch_platform_breakdown(self, service, property_id: str, start_date: date, end_date: date) -> Dict[str, Any]:
-        """Fetch AI platform breakdown"""
+        """Fetch AI platform breakdown.
+
+        Filters sessionSource with the same regex GA4's Explorations use (see
+        integrations.ai_platforms) so the stored breakdown matches GA4's numbers,
+        including sources the old exact-match list dropped (e.g. bare
+        "perplexity", Copilot, Meta AI, Mistral, subdomain variants).
+        """
         platform_data = {}
-        
+        # Bounce rate and avg session duration are per-session rates, so they
+        # must be combined as a sessions-weighted average — never summed or
+        # overwritten. We accumulate weighted sums here and divide at the end.
+        rate_weight = {}
+
         try:
-            # Filter for AI platform sources
-            ai_sources = list(AI_PLATFORMS.keys())
-            
             response = service.properties().runReport(
                 property=property_id,
                 body={
@@ -470,8 +465,10 @@ class GAInsightsProcessor:
                     'dimensionFilter': {
                         'filter': {
                             'fieldName': 'sessionSource',
-                            'inListFilter': {
-                                'values': ai_sources
+                            'stringFilter': {
+                                'matchType': 'PARTIAL_REGEXP',
+                                'value': AI_SOURCE_REGEX,
+                                'caseSensitive': False,
                             }
                         }
                     },
@@ -481,12 +478,20 @@ class GAInsightsProcessor:
                     }]
                 }
             ).execute()
-            
+
             for row in response.get('rows', []):
                 source = row.get('dimensionValues', [{}])[0].get('value', '')
-                platform_name = AI_PLATFORMS.get(source, 'Other AI')
-                metric_values = row.get('metricValues', [])
-                
+                platform_name = resolve_platform(source) or 'Other AI'
+                mv = row.get('metricValues', [])
+
+                sessions = int(float(mv[0].get('value', 0))) if len(mv) > 0 else 0
+                conversions = int(float(mv[1].get('value', 0))) if len(mv) > 1 else 0
+                revenue = float(mv[2].get('value', 0)) if len(mv) > 2 else 0.0
+                bounce_rate = float(mv[3].get('value', 0)) if len(mv) > 3 else 0.0
+                avg_duration = float(mv[4].get('value', 0)) if len(mv) > 4 else 0.0
+                users = int(float(mv[5].get('value', 0))) if len(mv) > 5 else 0
+                page_views = int(float(mv[6].get('value', 0))) if len(mv) > 6 else 0
+
                 if platform_name not in platform_data:
                     platform_data[platform_name] = {
                         'visits': 0,
@@ -497,18 +502,32 @@ class GAInsightsProcessor:
                         'users': 0,
                         'pageViews': 0
                     }
+                    rate_weight[platform_name] = 0
 
-                platform_data[platform_name]['visits'] += int(metric_values[0].get('value', 0)) if len(metric_values) > 0 else 0
-                platform_data[platform_name]['conversions'] += int(metric_values[1].get('value', 0)) if len(metric_values) > 1 else 0
-                platform_data[platform_name]['revenue'] += float(metric_values[2].get('value', 0)) if len(metric_values) > 2 else 0
-                platform_data[platform_name]['bounceRate'] = float(metric_values[3].get('value', 0)) if len(metric_values) > 3 else 0
-                platform_data[platform_name]['avgDuration'] = float(metric_values[4].get('value', 0)) if len(metric_values) > 4 else 0
-                platform_data[platform_name]['users'] += int(metric_values[5].get('value', 0)) if len(metric_values) > 5 else 0
-                platform_data[platform_name]['pageViews'] += int(metric_values[6].get('value', 0)) if len(metric_values) > 6 else 0
-                
+                pd = platform_data[platform_name]
+                pd['visits'] += sessions
+                pd['conversions'] += conversions
+                pd['revenue'] += revenue
+                pd['users'] += users
+                pd['pageViews'] += page_views
+                # Weighted-sum the rates; divided by total sessions below.
+                pd['bounceRate'] += bounce_rate * sessions
+                pd['avgDuration'] += avg_duration * sessions
+                rate_weight[platform_name] += sessions
+
+            # Finalize sessions-weighted averages for the rate metrics.
+            for name, pd in platform_data.items():
+                weight = rate_weight.get(name, 0)
+                if weight > 0:
+                    pd['bounceRate'] = pd['bounceRate'] / weight
+                    pd['avgDuration'] = pd['avgDuration'] / weight
+                else:
+                    pd['bounceRate'] = 0
+                    pd['avgDuration'] = 0
+
         except Exception as e:
             logger.error(f"Error fetching platform breakdown: {e}")
-        
+
         return platform_data
     
     def _fetch_device_breakdown(self, service, property_id: str, start_date: date, end_date: date) -> Dict[str, Any]:

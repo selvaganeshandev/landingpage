@@ -3,7 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, FolderOpen, TrendingUp, Eye, Edit, Sparkles, Loader2, Clock, CheckCircle, Download } from "lucide-react";
+import { Plus, FolderOpen, TrendingUp, Eye, Edit, Sparkles, Loader2, Clock, CheckCircle, Download, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
   Breadcrumb,
@@ -26,6 +36,9 @@ const Prompts = () => {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [groupToDelete, setGroupToDelete] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<any>(null);
   const [promptGroups, setPromptGroups] = useState<any[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -135,6 +148,36 @@ const Prompts = () => {
   const handleGenerateVariants = (group: typeof promptGroups[0]) => {
     setSelectedGroup(group);
     setGenerateDialogOpen(true);
+  };
+
+  const handleDeleteGroup = (group: typeof promptGroups[0]) => {
+    setGroupToDelete(group);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteGroup = async () => {
+    if (!groupToDelete) return;
+    try {
+      setIsDeleting(true);
+      await apiClient.deletePromptGroup(groupToDelete.id);
+      toast({
+        title: "Prompt Group Deleted",
+        description: `"${groupToDelete.group_id}" and its prompts have been deleted.`,
+      });
+      setDeleteDialogOpen(false);
+      setGroupToDelete(null);
+      // Reload the list from the start so counts/pagination stay correct
+      setOffset(0);
+      void loadPromptGroups(0, true);
+    } catch (error: any) {
+      toast({
+        title: "Failed to delete",
+        description: error?.message || String(error),
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const getStatusBadge = (trackStatus: string) => {
@@ -281,6 +324,15 @@ const Prompts = () => {
                   <Sparkles className="h-4 w-4 mr-1" />
                   Generate Variants
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDeleteGroup(group)}
+                  className="border border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive ml-auto"
+                >
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Delete
+                </Button>
               </div>
             </div>
           </Card>
@@ -360,6 +412,27 @@ const Prompts = () => {
           }
         }}
       />
+      <AlertDialog open={deleteDialogOpen} onOpenChange={(open) => { if (!isDeleting) setDeleteDialogOpen(open); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Prompt Group</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete{groupToDelete?.group_id ? ` "${groupToDelete.group_id}"` : " this prompt group"}?
+              This will permanently remove the group, all its prompt variants, and their tracked analytics. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); void confirmDeleteGroup(); }}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Deleting...</>) : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

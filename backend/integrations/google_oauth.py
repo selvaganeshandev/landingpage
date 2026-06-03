@@ -18,6 +18,8 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from .ai_platforms import AI_SOURCE_REGEX, resolve_platform
+
 from .models import Integration
 from domains.models import Domain, DomainAccess
 
@@ -658,11 +660,15 @@ def get_ga_data(request):
 def get_ai_referral_data(request):
     """
     Fetch traffic data specifically from AI platforms.
-    Tracks referrals from: ChatGPT, Claude, Gemini, Perplexity, Grok
+
+    Matches the same sessionSource regex GA4's Explorations use, so the numbers
+    reconcile with GA4. Accepts ?days=7|14|21|28 (default 28) for the lookback
+    windows the team compares, or explicit ?start_date=&end_date=.
     """
     domain_id = request.query_params.get('domain_id')
     start_date = request.query_params.get('start_date')
     end_date = request.query_params.get('end_date')
+    days_param = request.query_params.get('days')
 
     if not domain_id:
         return Response(
@@ -670,11 +676,20 @@ def get_ai_referral_data(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Default date range: last 30 days
-    if not end_date:
-        end_date = datetime.now().strftime('%Y-%m-%d')
-    if not start_date:
-        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    # Date range resolution. To match GA4's "Last N days" comparison views we
+    # use a window that ENDS YESTERDAY (GA4 treats today as an incomplete day
+    # and excludes it from those presets) and report RAW session counts — no
+    # proration — so the totals line up exactly with what the team sees in GA4.
+    days = None
+    if not (start_date and end_date):
+        try:
+            days = int(days_param) if days_param else 28
+        except (TypeError, ValueError):
+            days = 28
+        window_end = datetime.now().date() - timedelta(days=1)   # yesterday
+        window_start = window_end - timedelta(days=days - 1)
+        end_date = window_end.strftime('%Y-%m-%d')
+        start_date = window_start.strftime('%Y-%m-%d')
 
     try:
         integration = Integration.objects.get(
@@ -702,20 +717,9 @@ def get_ai_referral_data(request):
         if not property_id.startswith('properties/'):
             property_id = f'properties/{property_id}'
 
-        # AI platform domains to track
-        ai_platforms = [
-            'chat.openai.com',
-            'chatgpt.com',
-            'claude.ai',
-            'gemini.google.com',
-            'bard.google.com',
-            'perplexity.ai',
-            'grok.x.ai',
-            'you.com',
-            'poe.com',
-        ]
-
-        # Run report with session source dimension
+        # Run report with session source dimension. Filtering with the shared
+        # AI_SOURCE_REGEX (matchType PARTIAL_REGEXP == GA4's "matches regex")
+        # returns the exact same sessionSource rows the team's GA4 explore does.
         response = service.properties().runReport(
             property=property_id,
             body={
@@ -724,25 +728,22 @@ def get_ai_referral_data(request):
                     {'name': 'sessions'},
                     {'name': 'totalUsers'},
                     {'name': 'screenPageViews'},
+                    {'name': 'conversions'},
+                    {'name': 'totalRevenue'},
+                    {'name': 'bounceRate'},
+                    {'name': 'averageSessionDuration'},
                 ],
                 'dimensions': [
                     {'name': 'sessionSource'},
                 ],
                 'dimensionFilter': {
-                    'orGroup': {
-                        'expressions': [
-                            {
-                                'filter': {
-                                    'fieldName': 'sessionSource',
-                                    'stringFilter': {
-                                        'matchType': 'CONTAINS',
-                                        'value': platform,
-                                        'caseSensitive': False,
-                                    }
-                                }
-                            }
-                            for platform in ai_platforms
-                        ]
+                    'filter': {
+                        'fieldName': 'sessionSource',
+                        'stringFilter': {
+                            'matchType': 'PARTIAL_REGEXP',
+                            'value': AI_SOURCE_REGEX,
+                            'caseSensitive': False,
+                        }
                     }
                 },
                 'orderBys': [
@@ -752,12 +753,14 @@ def get_ai_referral_data(request):
         ).execute()
 
         # Parse and categorize by AI platform
-        ai_traffic = parse_ai_referral_response(response, ai_platforms)
+        ai_traffic = parse_ai_referral_response(response)
 
         return Response({
             'success': True,
             'ai_traffic': ai_traffic,
-            'date_range': {'start': start_date, 'end': end_date},
+            'platform_breakdown': ai_traffic['platform_breakdown'],
+            'totals': ai_traffic['totals'],
+            'date_range': {'start': start_date, 'end': end_date, 'days': days},
         })
 
     except Integration.DoesNotExist:
@@ -803,64 +806,89 @@ def parse_ga_response(response):
     return data
 
 
-def parse_ai_referral_response(response, ai_platforms):
-    """Parse AI referral response and categorize by platform."""
+def _f(values, idx, cast=float, default=0):
+    """Safely read metricValues[idx] from a GA4 row, casting GA4's string numbers."""
+    try:
+        return cast(float(values[idx]['value']))
+    except (IndexError, KeyError, TypeError, ValueError):
+        return default
+
+
+def parse_ai_referral_response(response):
+    """Parse an AI-referral GA4 response and aggregate by canonical platform.
+
+    Platform classification uses the shared integrations.ai_platforms matcher so
+    every variant GA4 counts (bare "perplexity", subdomains, Copilot, Meta AI,
+    Mistral, …) folds into the same label the dashboard already uses.
+
+    Returns both the legacy ``by_platform`` shape and a ``platform_breakdown``
+    shape identical to GATrafficInsight.platform_breakdown, so the frontend can
+    render a live window with the exact same code path as the cached snapshot.
+    """
     rows = response.get('rows', [])
 
-    # Platform name mapping
-    platform_names = {
-        'chat.openai.com': 'ChatGPT',
-        'chatgpt.com': 'ChatGPT',
-        'claude.ai': 'Claude',
-        'gemini.google.com': 'Google Gemini',
-        'bard.google.com': 'Google Gemini',
-        'perplexity.ai': 'Perplexity',
-        'grok.x.ai': 'Grok',
-        'you.com': 'You.com',
-        'poe.com': 'Poe',
-    }
+    by_platform = {}        # legacy shape: sessions/users/pageviews/sources
+    platform_breakdown = {}  # dashboard shape: visits/conversions/revenue/...
+    rate_weight = {}         # platform -> sessions, for weighted rate averages
 
-    # Aggregate by platform
-    platform_data = {}
-    total_sessions = 0
-    total_users = 0
-    total_pageviews = 0
+    totals = {'visits': 0, 'conversions': 0, 'revenue': 0.0, 'users': 0, 'pageViews': 0}
 
     for row in rows:
-        source = row['dimensionValues'][0]['value']
-        sessions = int(row['metricValues'][0]['value'])
-        users = int(row['metricValues'][1]['value'])
-        pageviews = int(row['metricValues'][2]['value'])
+        source = row.get('dimensionValues', [{}])[0].get('value', '')
+        mv = row.get('metricValues', [])
 
-        # Find which platform this source belongs to
-        platform_name = 'Other AI'
-        for domain, name in platform_names.items():
-            if domain in source.lower():
-                platform_name = name
-                break
+        sessions = int(_f(mv, 0, int))
+        users = int(_f(mv, 1, int))
+        pageviews = int(_f(mv, 2, int))
+        conversions = int(_f(mv, 3, int))
+        revenue = _f(mv, 4, float)
+        bounce_rate = _f(mv, 5, float)
+        avg_duration = _f(mv, 6, float)
 
-        if platform_name not in platform_data:
-            platform_data[platform_name] = {
-                'sessions': 0,
-                'users': 0,
-                'pageviews': 0,
-                'sources': []
+        platform_name = resolve_platform(source) or 'Other AI'
+
+        if platform_name not in by_platform:
+            by_platform[platform_name] = {'sessions': 0, 'users': 0, 'pageviews': 0, 'sources': []}
+            platform_breakdown[platform_name] = {
+                'visits': 0, 'conversions': 0, 'revenue': 0,
+                'bounceRate': 0, 'avgDuration': 0, 'users': 0, 'pageViews': 0,
             }
+            rate_weight[platform_name] = 0
 
-        platform_data[platform_name]['sessions'] += sessions
-        platform_data[platform_name]['users'] += users
-        platform_data[platform_name]['pageviews'] += pageviews
-        platform_data[platform_name]['sources'].append(source)
+        bp = by_platform[platform_name]
+        bp['sessions'] += sessions
+        bp['users'] += users
+        bp['pageviews'] += pageviews
+        bp['sources'].append(source)
 
-        total_sessions += sessions
-        total_users += users
-        total_pageviews += pageviews
+        pb = platform_breakdown[platform_name]
+        pb['visits'] += sessions
+        pb['conversions'] += conversions
+        pb['revenue'] += revenue
+        pb['users'] += users
+        pb['pageViews'] += pageviews
+        # Rates are weighted by sessions and divided out after the loop.
+        pb['bounceRate'] += bounce_rate * sessions
+        pb['avgDuration'] += avg_duration * sessions
+        rate_weight[platform_name] += sessions
+
+        totals['visits'] += sessions
+        totals['conversions'] += conversions
+        totals['revenue'] += revenue
+        totals['users'] += users
+        totals['pageViews'] += pageviews
+
+    for name, pb in platform_breakdown.items():
+        weight = rate_weight.get(name, 0)
+        if weight > 0:
+            pb['bounceRate'] = pb['bounceRate'] / weight
+            pb['avgDuration'] = pb['avgDuration'] / weight
+        else:
+            pb['bounceRate'] = 0
+            pb['avgDuration'] = 0
 
     return {
-        'by_platform': platform_data,
-        'totals': {
-            'sessions': total_sessions,
-            'users': total_users,
-            'pageviews': total_pageviews,
-        }
+        'by_platform': by_platform,
+        'platform_breakdown': platform_breakdown,
+        'totals': totals,
     }
