@@ -3,7 +3,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
+import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3, CalendarIcon } from "lucide-react";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/PageLoader";
@@ -60,10 +64,11 @@ export default function TrafficAttribution() {
   const [loading, setLoading] = useState(true);
   const [trafficData, setTrafficData] = useState<any>(null);
   const [dailySeries, setDailySeries] = useState<any[]>([]);
-  // AI-referral lookback window. null = the latest cached snapshot (default);
-  // 7/14/21/28 = a live GA4-matched window (ends yesterday, no proration) so
-  // the numbers reconcile with GA4's "Last N days" comparison views.
-  const [windowDays, setWindowDays] = useState<number | null>(null);
+  // AI-referral date range. Both unset = the latest cached snapshot (default);
+  // when a FULL range is picked we fetch a live GA4 window for those exact dates
+  // (same sessionSource regex as the client's GA "matches regex" view).
+  const [aiStartDate, setAiStartDate] = useState<Date | undefined>(undefined);
+  const [aiEndDate, setAiEndDate] = useState<Date | undefined>(undefined);
   const [aiWindowData, setAiWindowData] = useState<any>(null);
   const [aiWindowLoading, setAiWindowLoading] = useState(false);
 
@@ -84,22 +89,27 @@ export default function TrafficAttribution() {
     }
   }, [selectedDomain?.id, domains.length]);
 
-  // Fetch a live GA4-matched window when the user picks 7/14/21/28 days.
-  // null resets to the cached snapshot. Other tabs (devices, geo, pages,
-  // search) keep using the snapshot — only the AI-platform numbers re-window.
+  // Fetch a live GA4 window for the chosen date range. A partial/empty range
+  // resets to the cached snapshot. Other tabs (devices, geo, pages, search)
+  // keep using the snapshot — only the AI-platform numbers re-window.
   useEffect(() => {
-    if (!selectedDomain?.id || !windowDays) {
+    const hasRange = Boolean(aiStartDate && aiEndDate);
+    if (!selectedDomain?.id || !hasRange) {
       setAiWindowData(null);
       return;
     }
     let cancelled = false;
     setAiWindowLoading(true);
-    apiClient.getAIReferralData(selectedDomain.id, undefined, undefined, windowDays)
+    apiClient.getAIReferralData(
+      selectedDomain.id,
+      format(aiStartDate!, 'yyyy-MM-dd'),
+      format(aiEndDate!, 'yyyy-MM-dd'),
+    )
       .then((res: any) => { if (!cancelled) setAiWindowData(res || null); })
       .catch(() => { if (!cancelled) setAiWindowData(null); })
       .finally(() => { if (!cancelled) setAiWindowLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedDomain?.id, windowDays]);
+  }, [selectedDomain?.id, aiStartDate, aiEndDate]);
 
   const loadTrafficData = async () => {
     if (!selectedDomain?.id) return;
@@ -153,12 +163,13 @@ export default function TrafficAttribution() {
   const gaData = trafficData?.ga;
   const gscData = trafficData?.gsc;
 
-  // AI-platform numbers come from the selected live window when one is chosen,
+  // AI-platform numbers come from the live window when a date range is applied,
   // otherwise from the cached snapshot. Both share the platform_breakdown shape.
-  const aiPlatformBreakdown = (windowDays && aiWindowData?.platform_breakdown)
+  const hasAiRange = Boolean(aiStartDate && aiEndDate);
+  const aiPlatformBreakdown = (hasAiRange && aiWindowData?.platform_breakdown)
     ? aiWindowData.platform_breakdown
     : gaData?.platform_breakdown;
-  const aiDateRange = windowDays ? aiWindowData?.date_range : null;
+  const aiDateRange = hasAiRange ? aiWindowData?.date_range : null;
   
   // Show empty state if no data
   if (!gaData && !gscData) {
@@ -316,27 +327,67 @@ export default function TrafficAttribution() {
         </p>
       </div>
 
-      {/* AI-traffic lookback selector — matches GA4's "Last N days" comparison
-          windows (ends yesterday, raw sessions) so the numbers reconcile with GA4. */}
+      {/* AI-traffic date range — fetches a live GA4 window for the exact dates
+          (same sessionSource regex as the client's GA view). Leave blank for the
+          latest cached snapshot. */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-muted-foreground mr-1">AI traffic window:</span>
-        {[
-          { label: "Latest", value: null as number | null },
-          { label: "Last 7 days", value: 7 },
-          { label: "Last 14 days", value: 14 },
-          { label: "Last 21 days", value: 21 },
-          { label: "Last 28 days", value: 28 },
-        ].map((opt) => (
+        <span className="text-sm text-muted-foreground mr-1">AI traffic range:</span>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn("justify-start text-left font-normal", !aiStartDate && "text-muted-foreground")}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {aiStartDate ? format(aiStartDate, "MMM d, yyyy") : <span>Start date</span>}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={aiStartDate}
+              onSelect={setAiStartDate}
+              disabled={(date) => date > new Date()}
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn("justify-start text-left font-normal", !aiEndDate && "text-muted-foreground")}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {aiEndDate ? format(aiEndDate, "MMM d, yyyy") : <span>End date</span>}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={aiEndDate}
+              onSelect={setAiEndDate}
+              disabled={(date) => date > new Date() || (aiStartDate ? date < aiStartDate : false)}
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
+        {(aiStartDate || aiEndDate) && (
           <Button
-            key={opt.label}
+            variant="ghost"
             size="sm"
-            variant={windowDays === opt.value ? "default" : "outline"}
-            onClick={() => setWindowDays(opt.value)}
+            onClick={() => { setAiStartDate(undefined); setAiEndDate(undefined); }}
           >
-            {opt.label}
+            Clear
           </Button>
-        ))}
+        )}
         {aiWindowLoading && <span className="text-sm text-muted-foreground">Loading…</span>}
+        {/* Only one of the two dates picked — the range isn't applied yet. */}
+        {Boolean(aiStartDate) !== Boolean(aiEndDate) && !aiWindowLoading && (
+          <span className="text-sm text-muted-foreground">Pick both dates to apply the range.</span>
+        )}
         {aiDateRange && !aiWindowLoading && (
           <span className="text-sm text-muted-foreground">
             {aiDateRange.start} → {aiDateRange.end} (GA4-matched)

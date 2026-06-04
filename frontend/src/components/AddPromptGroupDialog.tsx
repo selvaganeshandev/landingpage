@@ -119,10 +119,21 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
       return;
     }
 
-    if (!groupId.trim() || !mainPrompt.trim()) {
+    if (!groupId.trim()) {
       toast({
         title: "Missing Information",
-        description: "Please provide a group name and main prompt.",
+        description: "Please provide a group name.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Main prompt is optional, but a group needs at least one prompt — the main
+    // prompt OR a variant — to be trackable (matches the backend's rule).
+    if (!mainPrompt.trim() && variants.length === 0) {
+      toast({
+        title: "Add a prompt",
+        description: "Enter a main prompt or add at least one variant.",
         variant: "destructive",
       });
       return;
@@ -133,7 +144,8 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
       const response = await apiClient.createPromptGroup({
         group_id: groupId.trim(),
         domain_id: activeDomainId,
-        primary_prompts: [mainPrompt.trim()],
+        // Omit the primary prompt entirely when left blank (don't send [""]).
+        primary_prompts: mainPrompt.trim() ? [mainPrompt.trim()] : [],
         secondary_prompts: variants,
       });
 
@@ -191,7 +203,7 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
 
           {/* Main Prompt */}
           <div className="space-y-2">
-            <Label htmlFor="mainPrompt">Main Prompt*</Label>
+            <Label htmlFor="mainPrompt">Main Prompt (Optional)</Label>
             <div className="flex gap-2">
               <Input
                 id="mainPrompt"
@@ -214,7 +226,7 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Enter your main prompt, then click the ✨ button to auto-generate group name and variants
+              Optional — add a main prompt and click the ✨ button to auto-generate the group name and variants. You can also skip it and just add variants below.
             </p>
           </div>
 
