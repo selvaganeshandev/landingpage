@@ -87,6 +87,94 @@ def live_sentiment_breakdown(domain_id, start_date, end_date, platform_filter=No
     )
 
 
+def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=None):
+    """Compute the Insights current-window headline metrics directly from live
+    PromptAnalytics (the source of truth), in a single pass.
+
+    Returns totals + a per-platform breakdown so the Insights cards always match
+    the Mentions/Citations/Sentiment detail pages and never drift from cached
+    DomainMetricSnapshots. Only the headline cards use this — trend charts,
+    share of voice, and the engine's alert generation keep reading snapshots
+    independently, so they are unaffected.
+
+    Keys returned:
+      total_mentions  - sum of total_mentions (matches snapshot 'mentions')
+      domain_citations- sum of total_citations (domain-specific; feeds visibility)
+      cited_urls      - count of all citation_list entries (matches Citations page)
+      avg_position    - mention-weighted average brand position
+      avg_sentiment   - average sentiment_score over mention rows (-1..1)
+      platforms       - [{platform, mention_count, avg_position, citations}], desc
+    """
+    start_dt, end_dt = _dashboard_datetime_window(start_date, end_date)
+    qs = PromptAnalytics.objects.filter(
+        prompt__group__domain_id=domain_id,
+        track_status='COMP',
+        created_at__gte=start_dt,
+        created_at__lte=end_dt,
+    )
+    if platform_filter:
+        qs = qs.filter(platform=platform_filter)
+
+    total_mentions = 0
+    domain_citations = 0
+    cited_urls = 0
+    pos_sum = 0.0
+    pos_wt = 0
+    sent_sum = 0.0
+    sent_n = 0
+    platforms = {}
+
+    for platform, is_m, tm, tc, pos, sscore, clist in qs.values_list(
+        'platform', 'is_mention', 'total_mentions', 'total_citations',
+        'position', 'sentiment_score', 'citation_list',
+    ):
+        tm = int(tm or 0)
+        tc = int(tc or 0)
+        n_urls = len(clist) if isinstance(clist, list) else 0
+        total_mentions += tm
+        domain_citations += tc
+        cited_urls += n_urls
+
+        p = platforms.setdefault(
+            platform, {'mention_count': 0, 'citations': 0, 'pos_sum': 0.0, 'pos_wt': 0}
+        )
+        p['mention_count'] += tm
+        p['citations'] += tc
+
+        if is_m:
+            sent_sum += float(sscore or 0)
+            sent_n += 1
+            if pos and float(pos) > 0:
+                weight = tm if tm > 0 else 1
+                pos_sum += float(pos) * weight
+                pos_wt += weight
+                p['pos_sum'] += float(pos) * weight
+                p['pos_wt'] += weight
+
+    avg_position = (pos_sum / pos_wt) if pos_wt > 0 else 0.0
+    avg_sentiment = (sent_sum / sent_n) if sent_n > 0 else 0.0
+
+    platform_list = []
+    for name, p in platforms.items():
+        ap = (p['pos_sum'] / p['pos_wt']) if p['pos_wt'] > 0 else 0
+        platform_list.append({
+            'platform': name,
+            'mention_count': p['mention_count'],
+            'avg_position': int(round(ap)),
+            'citations': p['citations'],
+        })
+    platform_list.sort(key=lambda x: x['mention_count'], reverse=True)
+
+    return {
+        'total_mentions': total_mentions,
+        'domain_citations': domain_citations,
+        'cited_urls': cited_urls,
+        'avg_position': avg_position,
+        'avg_sentiment': avg_sentiment,
+        'platforms': platform_list,
+    }
+
+
 def calculate_relative_time(dt):
     """Calculate relative time string like '2 hours ago'"""
     now = timezone.now()
@@ -387,85 +475,47 @@ def dashboard_summary(request):
     if platform_filter:
         prev_snapshot_qs = prev_snapshot_qs.filter(platform=platform_filter)
     
-    # Aggregate metrics from snapshots (will be recalculated from raw data if snapshots have no mentions)
-    total_mentions = snapshot_qs.aggregate(
-        total=Sum('mentions')
-    )['total'] or 0
-    
-    # Total Citations = count of every URL the AI cited (live PromptAnalytics),
-    # matching the Citations page the client drills into. See count_cited_urls()
-    # for why this differs from the snapshot 'citations' aggregate.
-    total_citations = count_cited_urls(domain_id, start_date, end_date, platform_filter)
+    # --- Current-window headline metrics from LIVE PromptAnalytics ---
+    # Mentions, citations, avg position, visibility and the platform breakdown
+    # are computed directly from live PromptAnalytics so the Insights cards
+    # always match the Mentions/Citations/Sentiment detail pages and never drift
+    # from cached DomainMetricSnapshots. The snapshot queryset (snapshot_qs) is
+    # still used below for the over-time TREND chart, and the engine's alert
+    # generation reads snapshots independently — both are unaffected.
+    live = live_domain_window_metrics(domain_id, start_date, end_date, platform_filter)
+    live_prev = live_domain_window_metrics(domain_id, prev_start_date, prev_end_date, platform_filter)
 
-    # Previous period metrics for change calculation
-    prev_total_mentions = prev_snapshot_qs.aggregate(
-        total=Sum('mentions')
-    )['total'] or 0
+    total_mentions = live['total_mentions']
+    prev_total_mentions = live_prev['total_mentions']
+    # Total Citations = count of every URL the AI cited (matches the Citations page)
+    total_citations = live['cited_urls']
+    prev_total_citations = live_prev['cited_urls']
+    avg_position = live['avg_position']
+    prev_avg_position = live_prev['avg_position']
+    # Visibility score: keep the engine-computed snapshot value (its 0-100
+    # normalization is calibrated per-snapshot and doesn't translate cleanly to
+    # live window-aggregates), but GATE it on live presence — a domain with zero
+    # live mentions in the window has no real visibility, so we never surface a
+    # stale snapshot score for it (this was the phantom "22.14 with 0 mentions").
+    def _snapshot_weighted_visibility(sqs):
+        snap_mentions = sum(s.mentions for s in sqs)
+        if snap_mentions <= 0:
+            return 0.0
+        return sum(
+            float(s.visibility_score or 0) * s.mentions for s in sqs if s.mentions > 0
+        ) / snap_mentions
+    visibility_score = _snapshot_weighted_visibility(snapshot_qs) if total_mentions > 0 else 0.0
+    prev_visibility_score = _snapshot_weighted_visibility(prev_snapshot_qs) if prev_total_mentions > 0 else 0.0
 
-    prev_total_citations = count_cited_urls(domain_id, prev_start_date, prev_end_date, platform_filter)
-    
-    # Calculate weighted average position and visibility score
-    # First check if we have snapshots with actual mentions
-    snapshot_count = snapshot_qs.count()
-    total_mentions_for_avg = sum(snapshot.mentions for snapshot in snapshot_qs)
-    
-    logger.info(f"Dashboard API: snapshot_count: {snapshot_count}, total_mentions_for_avg: {total_mentions_for_avg}")
-    
-    # Prepare datetime for raw analytics fallback
-    # Use start of day for start_date and end of day for end_date to include all data
+    # Datetime window reused by the "recent mentions" section further below.
     end_datetime = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
     start_datetime = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
-    
-    logger.info(f"Dashboard API: Using snapshots: {snapshot_count > 0 and total_mentions_for_avg > 0}")
-    
-    if snapshot_count > 0 and total_mentions_for_avg > 0:
-        # Use snapshots - they have data
-        # Weighted average: sum(avg_position * mentions) / sum(mentions)
-        # Aggregate across all platform-specific snapshots
-        weighted_position_sum = sum(
-            float(snapshot.average_position or 0) * snapshot.mentions 
-            for snapshot in snapshot_qs if snapshot.mentions > 0
-        )
-        
-        avg_position = weighted_position_sum / total_mentions_for_avg
-        # Average visibility score (weighted by mentions)
-        weighted_visibility_sum = sum(
-            float(snapshot.visibility_score or 0) * snapshot.mentions 
-            for snapshot in snapshot_qs if snapshot.mentions > 0
-        )
-        visibility_score = weighted_visibility_sum / total_mentions_for_avg
-    else:
-        # No snapshots OR snapshots exist but have no mentions
-        # For testing alert generation, we should return 0 values when no snapshots exist in the requested date range
-        # This allows alerts to trigger when comparing current period (0) vs previous period (with data)
-        logger.info(f"Dashboard API: No snapshots found or snapshots have no mentions in requested date range ({start_date} to {end_date}). Returning zero values.")
-        avg_position = 0.0
-        visibility_score = 0.0
-        total_mentions = 0
-        total_citations = 0
-    
-    # Calculate previous period metrics for change comparison
-    prev_snapshot_count = prev_snapshot_qs.count()
-    if prev_snapshot_count > 0:
-        prev_weighted_position_sum = sum(
-            float(snapshot.average_position or 0) * snapshot.mentions 
-            for snapshot in prev_snapshot_qs if snapshot.mentions > 0
-        )
-        prev_total_mentions_for_avg = sum(snapshot.mentions for snapshot in prev_snapshot_qs)
-        
-        if prev_total_mentions_for_avg > 0:
-            prev_avg_position = prev_weighted_position_sum / prev_total_mentions_for_avg
-            prev_weighted_visibility_sum = sum(
-                float(snapshot.visibility_score or 0) * snapshot.mentions 
-                for snapshot in prev_snapshot_qs if snapshot.mentions > 0
-            )
-            prev_visibility_score = prev_weighted_visibility_sum / prev_total_mentions_for_avg
-        else:
-            prev_avg_position = 0
-            prev_visibility_score = 0
-    else:
-        prev_avg_position = 0
-        prev_visibility_score = 0
+
+    logger.info(
+        f"Dashboard API (live): domain={domain_id} mentions={total_mentions} "
+        f"citations={total_citations} avg_position={avg_position:.2f} "
+        f"visibility={visibility_score}"
+    )
     
     # Calculate change percentages (only if previous period has data)
     def calculate_change(current, previous):
@@ -534,55 +584,12 @@ def dashboard_summary(request):
         }
     }
     
-    # 3. Platform distribution - use PromptGroupMetricSnapshot for platform breakdown
-    # Get platform-specific snapshots (with fallback to more granular period_types)
-    # Use the requested date range (do not adjust to use older snapshots)
-    platform_snapshots = PromptGroupMetricSnapshot.objects.filter(
-        prompt_group__domain_id=domain_id,
-        snapshot_date__gte=start_date,
-        snapshot_date__lte=end_date,
-        period_type__in=period_types
-    ).exclude(platform__isnull=True).exclude(platform='')
-    
-    # Apply platform filter if provided
-    if platform_filter:
-        platform_snapshots = platform_snapshots.filter(platform=platform_filter)
-    
-    # Aggregate by platform
-    platform_aggregates = {}
-    for snapshot in platform_snapshots:
-        platform = snapshot.platform
-        if platform not in platform_aggregates:
-            platform_aggregates[platform] = {
-                'mention_count': 0,
-                'citations': 0,
-                'position_sum': 0,
-                'position_weight': 0
-            }
-        
-        platform_aggregates[platform]['mention_count'] += snapshot.mentions
-        platform_aggregates[platform]['citations'] += snapshot.citations
-        if snapshot.average_position and snapshot.mentions > 0:
-            platform_aggregates[platform]['position_sum'] += float(snapshot.average_position) * snapshot.mentions
-            platform_aggregates[platform]['position_weight'] += snapshot.mentions
-    
-    # Build platforms list with weighted averages.
-    # Note: every platform with tracked snapshots is included so the Insights
-    # platform distribution matches the Mentions / Citations / Sentiment pages,
-    # which all read live PromptAnalytics. (Previously Claude was hard-skipped
-    # here, so its mentions were silently dropped from this card only.)
-    platforms = []
-    for platform, agg in platform_aggregates.items():
-        avg_pos = (agg['position_sum'] / agg['position_weight']) if agg['position_weight'] > 0 else 0
-        platforms.append({
-            'platform': platform,
-            'mention_count': agg['mention_count'],
-            'avg_position': int(round(avg_pos)),
-            'citations': agg['citations']
-        })
-
-    # Sort by mention count
-    platforms.sort(key=lambda x: x['mention_count'], reverse=True)
+    # 3. Platform distribution - from the SAME live PromptAnalytics window as the
+    # totals above, so per-platform mentions add up to Total Mentions and every
+    # tracked platform (incl. Claude) is shown. Previously this read
+    # PromptGroupMetricSnapshot, which could surface stale/phantom per-platform
+    # mentions that no longer existed in the live data.
+    platforms = live['platforms']
     
     # 4. Share of Voice (latest day in range)
     # Use the requested date range (do not adjust to use older data)
