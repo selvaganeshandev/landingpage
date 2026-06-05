@@ -28,14 +28,17 @@ def fetch_serp_data(keyword_text, region, isocode, language_code, uule='', platf
     """
     Fetch Google SERP data via DataBlue.
 
-    Signature kept stable so existing callers don't need changes; `region`,
-    `uule` and `platform` are accepted but not forwarded — DataBlue handles
-    geo via country+language and returns DATABLUE_NUM_RESULTS in one call.
+    On the v2 (google-search-v2) endpoint `region` (Google domain), `uule` and
+    `platform` (desktop|mobile) ARE forwarded so the SERP matches the configured
+    device/geo for the keyword.
     """
     return datablue_service.fetch_one(
         keyword_text=keyword_text,
         isocode=isocode,
         language_code=language_code,
+        platform=platform,
+        region=region,
+        uule=uule,
     )
 
 

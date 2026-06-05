@@ -26,11 +26,36 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-DATABLUE_API_URL = "https://api.datablue.dev/v1/data/google/search"
+# DataBlue v2 ("google-search-v2") SERP endpoint. Read via _cfg at call time so
+# the URL can be overridden in settings/.env without a code change. v2 adds the
+# country / platform / language / domain / location / uule / pages params that
+# _build_payload forwards below.
+DEFAULT_DATABLUE_API_URL = "https://api.datablue.dev/v1/data/google/google-search-v2"
 
 
 def _cfg(name: str, default):
     return getattr(settings, name, default)
+
+
+def _api_url():
+    return _cfg("DATABLUE_API_URL", DEFAULT_DATABLUE_API_URL)
+
+
+def _is_usable(raw) -> bool:
+    """True only if DataBlue returned a real SERP we can rank against.
+
+    v2 (google-search-v2) can intermittently return success=true with an EMPTY
+    organic_results list (the scrape produced nothing). A genuine Google query
+    always returns a full SERP, so an empty list means a failed scrape — NOT
+    "not ranked in top N" (that case still returns ~10 results, just without the
+    target domain). Treating empty as a failure makes the caller retry next
+    cycle instead of overwriting a good rank with 0.
+    """
+    if not isinstance(raw, dict):
+        return False
+    if not raw.get("success", True):
+        return False
+    return bool(raw.get("organic_results"))
 
 
 def _normalize_organic(organic):
@@ -53,11 +78,15 @@ def _normalize_organic(organic):
             item["link"] = item.get("url", "")
 
         if "displayed_link" not in item:
-            try:
-                p = urllib.parse.urlparse(item.get("link", ""))
-                item["displayed_link"] = (p.netloc + p.path).rstrip("/")
-            except Exception:
-                item["displayed_link"] = item.get("link", "")
+            # v2 returns "displayed_url" directly; prefer it, else derive from link.
+            if item.get("displayed_url"):
+                item["displayed_link"] = item.get("displayed_url", "")
+            else:
+                try:
+                    p = urllib.parse.urlparse(item.get("link", ""))
+                    item["displayed_link"] = (p.netloc + p.path).rstrip("/")
+                except Exception:
+                    item["displayed_link"] = item.get("link", "")
 
         if "snippet" not in item:
             item["snippet"] = ""
@@ -67,15 +96,60 @@ def _normalize_organic(organic):
     return organic
 
 
-def _build_payload(keyword_text: str, isocode: str, language_code: str) -> dict:
-    payload = {
-        "query": (keyword_text or "")[:256],
-        "num_results": _cfg("DATABLUE_NUM_RESULTS", 50),
-    }
+def _build_payload(
+    keyword_text: str,
+    isocode: str,
+    language_code: str,
+    platform: str = "",
+    region: str = "",
+    location: str = "",
+    uule: str = "",
+) -> dict:
+    """Build the DataBlue v2 (google-search-v2) request body.
+
+    v2 is page-based: ``pages`` (1-5, ~10 results each) replaces v1's
+    ``num_results``. We derive ``pages`` from DATABLUE_NUM_RESULTS so the existing
+    depth/cost config keeps working (10 -> 1 page), with DATABLUE_PAGES as an
+    explicit override. country / platform (desktop|mobile) / language / domain /
+    location / uule are each forwarded only when set, so every keyword is scraped
+    exactly as configured on its SeoKeywordRank without changing defaults.
+    """
+    payload = {"query": (keyword_text or "")[:2048]}
+
+    # num_results (~10/page) -> pages, capped to v2's 1-5; DATABLUE_PAGES overrides.
+    try:
+        num = int(_cfg("DATABLUE_NUM_RESULTS", 10) or 10)
+    except (TypeError, ValueError):
+        num = 10
+    derived_pages = max(1, min(5, (num + 9) // 10))
+    try:
+        cfg_pages = int(_cfg("DATABLUE_PAGES", 0) or 0)
+    except (TypeError, ValueError):
+        cfg_pages = 0
+    # DATABLUE_PAGES <= 0 means "derive from num_results"; otherwise cap to 1-5.
+    payload["pages"] = max(1, min(5, cfg_pages)) if cfg_pages > 0 else derived_pages
+
     if language_code:
         payload["language"] = language_code
     if isocode:
         payload["country"] = str(isocode).lower()
+
+    # Device. Defaults to DATABLUE_PLATFORM (desktop) when the caller omits it.
+    plat = (platform or _cfg("DATABLUE_PLATFORM", "desktop") or "").strip().lower()
+    if plat in ("desktop", "mobile"):
+        payload["platform"] = plat
+
+    # region holds a Google domain (model default "google.com"). Only forward an
+    # explicit non-default domain — otherwise let DataBlue auto-pick the
+    # country-correct domain (e.g. www.google.co.in for country=in), as v1 did.
+    dom = (region or _cfg("DATABLUE_GOOGLE_DOMAIN", "") or "").strip()
+    if dom and dom not in ("google.com", "www.google.com"):
+        payload["domain"] = dom if dom.startswith("www.") else f"www.{dom}"
+
+    if location:
+        payload["location"] = location
+    if uule:
+        payload["uule"] = uule
     return payload
 
 
@@ -88,12 +162,16 @@ async def _fetch_one_async(client, sem, item_id, item_data, api_key, timeout):
         item_data.get("keyword", ""),
         item_data.get("isocode", ""),
         item_data.get("language_code") or item_data.get("language", ""),
+        platform=item_data.get("platform", ""),
+        region=item_data.get("region", ""),
+        location=item_data.get("location", ""),
+        uule=item_data.get("uule", ""),
     )
 
     async with sem:
         try:
             resp = await client.post(
-                DATABLUE_API_URL,
+                _api_url(),
                 headers={"Authorization": f"Bearer {api_key}"},
                 json=payload,
                 timeout=timeout,
@@ -103,18 +181,21 @@ async def _fetch_one_async(client, sem, item_id, item_data, api_key, timeout):
                     raw = resp.json()
                     organic = raw.get("organic_results", []) or []
                     raw["organic_results"] = _normalize_organic(organic)
-                    # Trust DataBlue's own success flag. An empty organic list
-                    # with success=true is a legitimate "not in top N" — let
-                    # the parser record rank=0 instead of flagging the keyword
-                    # as failed (which would skip it until tomorrow's
-                    # scheduler retry). Fall back to True if the field is
-                    # absent so we don't regress on schema changes.
-                    api_success = bool(raw.get("success", True))
+                    # Usable only when success=true AND organic is non-empty.
+                    # An empty list (even with success=true) is a failed v2
+                    # scrape, so flag the item failed → it retries next cycle
+                    # rather than recording a spurious rank 0. See _is_usable.
+                    usable = _is_usable(raw)
+                    if not usable:
+                        logger.warning(
+                            f"[DataBlue] Empty/failed SERP for item {item_id} "
+                            f"(success={raw.get('success')}, organic={len(organic)}) — will retry"
+                        )
                     return {
                         "item_id": item_id,
                         "status": resp.status_code,
                         "data": raw,
-                        "success": api_success,
+                        "success": usable,
                     }
                 except Exception as je:
                     logger.warning(f"[DataBlue] JSON parse failed for item {item_id}: {je}")
@@ -217,8 +298,19 @@ def fetch_many(
         ).result()
 
 
-def fetch_one(keyword_text: str, isocode: str = "", language_code: str = "") -> Optional[dict]:
+def fetch_one(
+    keyword_text: str,
+    isocode: str = "",
+    language_code: str = "",
+    platform: str = "",
+    region: str = "",
+    location: str = "",
+    uule: str = "",
+) -> Optional[dict]:
     """Sync single-keyword DataBlue call.
+
+    ``platform`` (desktop|mobile), ``region`` (Google domain), ``location`` and
+    ``uule`` are optional v2 params; omitting them preserves the prior behavior.
 
     Returns the parsed JSON response (with normalized organic_results) or None
     on any failure (no key, non-200, timeout, JSON parse error, empty results).
@@ -228,12 +320,12 @@ def fetch_one(keyword_text: str, isocode: str = "", language_code: str = "") -> 
         logger.error("[DataBlue] DATABLUE_API_KEY not configured")
         return None
 
-    payload = _build_payload(keyword_text, isocode, language_code)
+    payload = _build_payload(keyword_text, isocode, language_code, platform, region, location, uule)
     timeout = _cfg("DATABLUE_TIMEOUT", 60)
 
     try:
         resp = httpx.post(
-            DATABLUE_API_URL,
+            _api_url(),
             headers={"Authorization": f"Bearer {api_key}"},
             json=payload,
             timeout=timeout,
@@ -263,10 +355,13 @@ def fetch_one(keyword_text: str, isocode: str = "", language_code: str = "") -> 
 
     organic = raw.get("organic_results", []) or []
     raw["organic_results"] = _normalize_organic(organic)
-    # Trust DataBlue's success flag. success=false → DataBlue couldn't fetch
-    # (should be retried). success=true with empty organic → legitimate "not
-    # ranked in top N" → return raw so the parser records rank=0 and the
-    # keyword is marked 'done' rather than 'fail'.
-    if not raw.get("success", True):
+    # Usable only when success=true AND organic is non-empty. success=false or an
+    # empty SERP (a failed v2 scrape) → return None so the caller retries instead
+    # of recording a spurious rank 0. See _is_usable.
+    if not _is_usable(raw):
+        logger.warning(
+            f"[DataBlue] Empty/failed SERP for '{keyword_text}' "
+            f"(success={raw.get('success')}, organic={len(organic)}) — returning None"
+        )
         return None
     return raw

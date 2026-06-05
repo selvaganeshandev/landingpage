@@ -1281,6 +1281,10 @@ def _run_competitor_analysis(domain_id: int):
                         keyword_text=kw_text,
                         isocode=kw.isocode or 'us',
                         language_code=kw.language_code or 'en',
+                        platform=kw.platform or '',
+                        region=kw.region or '',
+                        location=kw.geo_target or '',
+                        uule=kw.geo_target_uule or '',
                     )
                     fresh_calls += 1
 
