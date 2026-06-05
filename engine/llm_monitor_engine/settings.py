@@ -190,11 +190,19 @@ DEEPSEEK_MODEL = config('DEEPSEEK_MODEL', default='deepseek-chat')
 # ScrapingDog API Configuration (still used by misinformation crawler — /scrape endpoint)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
 
-# DataBlue API Configuration (SEO keyword ranking / SERP — /v1/data/google/search)
+# DataBlue API Configuration (SEO keyword ranking / SERP — v2 google-search-v2)
 DATABLUE_API_KEY = config('DATABLUE_API_KEY', default='')
 DATABLUE_NUM_RESULTS = config('DATABLUE_NUM_RESULTS', default=50, cast=int)
 DATABLUE_CONCURRENCY = config('DATABLUE_CONCURRENCY', default=100, cast=int)
 DATABLUE_TIMEOUT = config('DATABLUE_TIMEOUT', default=60, cast=int)
+# v2 endpoint + params. URL is overridable; PLATFORM is the default device when a
+# keyword doesn't specify one; PAGES (1-5) overrides the num_results→pages derive
+# (each page ~10 results and is billed separately); GOOGLE_DOMAIN forces a Google
+# domain (else DataBlue auto-picks by country).
+DATABLUE_API_URL = config('DATABLUE_API_URL', default='https://api.datablue.dev/v1/data/google/google-search-v2')
+DATABLUE_PLATFORM = config('DATABLUE_PLATFORM', default='desktop')
+DATABLUE_PAGES = config('DATABLUE_PAGES', default=0, cast=int)  # 0 = derive from NUM_RESULTS
+DATABLUE_GOOGLE_DOMAIN = config('DATABLUE_GOOGLE_DOMAIN', default='')
 
 # ==================== EMAIL CONFIGURATION (MAILGUN HTTP API) ====================
 # Mailgun HTTP API Configuration for report email delivery

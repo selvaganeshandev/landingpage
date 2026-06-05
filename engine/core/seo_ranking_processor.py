@@ -44,14 +44,17 @@ def fetch_serp_data(keyword_text, region, isocode, language_code, uule='', platf
     """
     Fetch Google SERP data via DataBlue.
 
-    Signature kept stable so existing callers don't break; `region`, `uule`,
-    and `platform` are accepted but not forwarded — DataBlue handles geo via
-    country+language and returns DATABLUE_NUM_RESULTS in one call.
+    On the v2 (google-search-v2) endpoint `region` (Google domain), `uule` and
+    `platform` (desktop|mobile) ARE forwarded so the SERP matches the configured
+    device/geo for the keyword.
     """
     return datablue_service.fetch_one(
         keyword_text=keyword_text,
         isocode=isocode,
         language_code=language_code,
+        platform=platform,
+        region=region,
+        uule=uule,
     )
 
 
@@ -246,6 +249,10 @@ class SeoRankingProcessor:
                 keyword_text=keyword_text,
                 isocode=seo_kw.isocode,
                 language_code=seo_kw.language_code,
+                platform=seo_kw.platform or '',
+                region=seo_kw.region or '',
+                location=seo_kw.geo_target or '',
+                uule=seo_kw.geo_target_uule or '',
             )
 
             if not json_data:
@@ -408,6 +415,11 @@ class SeoRankingProcessor:
                 'keyword': row.keyword.keyword,
                 'isocode': row.isocode or '',
                 'language_code': row.language_code or '',
+                # v2 params — scrape each keyword on its own device/geo.
+                'platform': row.platform or '',
+                'region': row.region or '',
+                'location': row.geo_target or '',
+                'uule': row.geo_target_uule or '',
             }
 
         # Mark all to-be-processed rows busy in one query (atomic batch flip)

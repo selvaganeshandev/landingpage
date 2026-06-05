@@ -858,6 +858,10 @@ def parse_ai_referral_response(response):
             platform_breakdown[platform_name] = {
                 'visits': 0, 'conversions': 0, 'revenue': 0,
                 'bounceRate': 0, 'avgDuration': 0, 'users': 0, 'pageViews': 0,
+                # Raw GA4 sessionSource rows that roll up into this LLM, so the
+                # dashboard can show clients exactly how each card reconciles
+                # with GA4 (e.g. Perplexity = "perplexity" + "perplexity.ai").
+                'sources': [],
             }
             rate_weight[platform_name] = 0
 
@@ -869,6 +873,7 @@ def parse_ai_referral_response(response):
 
         pb = platform_breakdown[platform_name]
         pb['visits'] += sessions
+        pb['sources'].append({'source': source, 'visits': sessions})
         pb['conversions'] += conversions
         pb['revenue'] += revenue
         pb['users'] += users
@@ -892,6 +897,8 @@ def parse_ai_referral_response(response):
         else:
             pb['bounceRate'] = 0
             pb['avgDuration'] = 0
+        # Largest contributing source first, for a readable reconciliation list.
+        pb['sources'].sort(key=lambda s: s['visits'], reverse=True)
 
     return {
         'by_platform': by_platform,
