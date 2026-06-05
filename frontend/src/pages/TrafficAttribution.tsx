@@ -241,6 +241,9 @@ export default function TrafficAttribution() {
     // GA4 returns bounceRate as a fraction (0.2621 = 26.21%); ×100 to match GA4's %.
     bounceRate: `${((data.bounceRate ?? 0) * 100).toFixed(1)}%`,
     avgDuration: formatDuration(data.avgDuration || 0),
+    // Raw GA4 sessionSource rows that roll up into this LLM (live window only),
+    // so the client can see exactly how the card reconciles with GA4.
+    sources: Array.isArray(data.sources) ? data.sources : [],
   })) : [];
 
   const deviceBreakdown = gaData?.device_breakdown ? Object.entries(gaData.device_breakdown).map(([device, data]: [string, any]) => ({
@@ -778,6 +781,30 @@ export default function TrafficAttribution() {
                           <div className="text-lg font-bold">{item.avgDuration}</div>
                         </div>
                       </div>
+                      {/* GA4 reconciliation: the raw sessionSource rows that roll
+                          up into this LLM. Helps clients match the card to GA4
+                          (e.g. Perplexity = "perplexity" + "perplexity.ai"). */}
+                      {item.sources && item.sources.length > 0 && (
+                        <details className="mt-3">
+                          <summary className="text-xs text-muted-foreground cursor-pointer select-none hover:text-foreground">
+                            {item.sources.length === 1
+                              ? `GA4 source: ${item.sources[0].source || "(not set)"}`
+                              : `${item.sources.length} GA4 sources — show how this matches GA4`}
+                          </summary>
+                          <div className="mt-2 space-y-1 border-t pt-2">
+                            {item.sources.map((s: any, i: number) => (
+                              <div key={i} className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground font-mono">{s.source || "(not set)"}</span>
+                                <span className="font-medium">{(s.visits || 0).toLocaleString()} visits</span>
+                              </div>
+                            ))}
+                            <div className="flex items-center justify-between text-xs border-t pt-1 mt-1 font-semibold">
+                              <span>Total — {item.platform}</span>
+                              <span>{item.visits.toLocaleString()} visits</span>
+                            </div>
+                          </div>
+                        </details>
+                      )}
                     </div>
                   ))}
                 </div>
