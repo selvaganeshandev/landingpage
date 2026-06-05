@@ -89,22 +89,29 @@ export default function TrafficAttribution() {
     }
   }, [selectedDomain?.id, domains.length]);
 
-  // Fetch a live GA4 window for the chosen date range. A partial/empty range
-  // resets to the cached snapshot. Other tabs (devices, geo, pages, search)
+  // Fetch the live GA4 AI-referral window. With an explicit range we fetch those
+  // exact dates; with NO range we default to the last 28 days ending YESTERDAY —
+  // the same window the team compares in GA4's "Last 28 days" explore — so the
+  // AI-platform numbers reconcile with GA4 out of the box instead of showing a
+  // stale, differently-dated cached snapshot. Both paths use the shared
+  // sessionSource regex on the backend. Other tabs (devices, geo, pages, search)
   // keep using the snapshot — only the AI-platform numbers re-window.
   useEffect(() => {
-    const hasRange = Boolean(aiStartDate && aiEndDate);
-    if (!selectedDomain?.id || !hasRange) {
+    if (!selectedDomain?.id) {
       setAiWindowData(null);
       return;
     }
+    const hasRange = Boolean(aiStartDate && aiEndDate);
     let cancelled = false;
     setAiWindowLoading(true);
-    apiClient.getAIReferralData(
-      selectedDomain.id,
-      format(aiStartDate!, 'yyyy-MM-dd'),
-      format(aiEndDate!, 'yyyy-MM-dd'),
-    )
+    const request = hasRange
+      ? apiClient.getAIReferralData(
+          selectedDomain.id,
+          format(aiStartDate!, 'yyyy-MM-dd'),
+          format(aiEndDate!, 'yyyy-MM-dd'),
+        )
+      : apiClient.getAIReferralData(selectedDomain.id, undefined, undefined, 28);
+    request
       .then((res: any) => { if (!cancelled) setAiWindowData(res || null); })
       .catch(() => { if (!cancelled) setAiWindowData(null); })
       .finally(() => { if (!cancelled) setAiWindowLoading(false); });
@@ -163,13 +170,13 @@ export default function TrafficAttribution() {
   const gaData = trafficData?.ga;
   const gscData = trafficData?.gsc;
 
-  // AI-platform numbers come from the live window when a date range is applied,
-  // otherwise from the cached snapshot. Both share the platform_breakdown shape.
-  const hasAiRange = Boolean(aiStartDate && aiEndDate);
-  const aiPlatformBreakdown = (hasAiRange && aiWindowData?.platform_breakdown)
-    ? aiWindowData.platform_breakdown
-    : gaData?.platform_breakdown;
-  const aiDateRange = hasAiRange ? aiWindowData?.date_range : null;
+  // AI-platform numbers come from the live GA4 window (default: last 28 days
+  // ending yesterday, or the picked range) so they reconcile with GA4. Fall back
+  // to the cached snapshot only if the live call fails, so the section is never
+  // empty. Both sources share the platform_breakdown shape.
+  const aiPlatformBreakdown = aiWindowData?.platform_breakdown
+    ?? gaData?.platform_breakdown;
+  const aiDateRange = aiWindowData?.date_range ?? null;
   
   // Show empty state if no data
   if (!gaData && !gscData) {
@@ -207,6 +214,23 @@ export default function TrafficAttribution() {
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Render revenue in the GA4 property's own currency (e.g. ₹ for INR) instead of
+  // a hardcoded "$". The live AI-referral window returns the property's ISO code;
+  // fall back to USD only when it's unavailable (e.g. snapshot-only render).
+  const currencyCode = aiWindowData?.currency_code || 'USD';
+  const formatCurrency = (value: number, decimals = 0): string => {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: currencyCode,
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      }).format(value || 0);
+    } catch {
+      return `${(value || 0).toLocaleString()}`;
+    }
+  };
+
   // Google Analytics Data
   const platformSources = aiPlatformBreakdown ? Object.entries(aiPlatformBreakdown).map(([platform, data]: [string, any]) => ({
     platform,
@@ -214,7 +238,8 @@ export default function TrafficAttribution() {
     conversions: data.conversions || 0,
     revenue: data.revenue || 0,
     trend: "+0%", // Calculate trend if needed
-    bounceRate: `${(data.bounceRate ?? 0).toFixed(1)}%`,
+    // GA4 returns bounceRate as a fraction (0.2621 = 26.21%); ×100 to match GA4's %.
+    bounceRate: `${((data.bounceRate ?? 0) * 100).toFixed(1)}%`,
     avgDuration: formatDuration(data.avgDuration || 0),
   })) : [];
 
@@ -268,7 +293,7 @@ export default function TrafficAttribution() {
   const roiMetrics = [
     { metric: "Total Traffic from AI", value: totalTraffic.toLocaleString(), unit: "visits" },
     { metric: "Conversion Rate", value: conversionRate, unit: "%" },
-    { metric: "Total Revenue", value: `$${totalRevenue.toLocaleString()}`, unit: "" },
+    { metric: "Total Revenue", value: formatCurrency(totalRevenue), unit: "" },
     { metric: "ROI", value: "N/A", unit: "%" },
   ];
 
@@ -277,8 +302,9 @@ export default function TrafficAttribution() {
   // Bounce rate and avg session duration are per-unit rates, so aggregate them as a
   // visit-weighted average across AI sources rather than summing.
   const avgSessionDuration = weightedAvg('avgDuration', totalTraffic);
+  // weightedAvg keeps GA4's fraction scale (0–1), so engaged = total × (1 − fraction).
   const bounceRate = weightedAvg('bounceRate', totalTraffic);
-  const engagedSessions = Math.max(0, Math.round(totalTraffic * (1 - bounceRate / 100)));
+  const engagedSessions = Math.max(0, Math.round(totalTraffic * (1 - bounceRate)));
   const revenuePerSession = totalTraffic > 0 ? totalRevenue / totalTraffic : 0;
 
   const sourceSummary = platformSources
@@ -647,7 +673,7 @@ export default function TrafficAttribution() {
                           <td className="py-2 pr-4 font-medium">{c.country}</td>
                           <td className="py-2 pr-4 text-right">{c.sessions.toLocaleString()}</td>
                           <td className="py-2 pr-4 text-right">{c.percentage.toFixed(1)}%</td>
-                          <td className="py-2 text-right">${c.revenue.toLocaleString()}</td>
+                          <td className="py-2 text-right">{formatCurrency(c.revenue)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -669,7 +695,7 @@ export default function TrafficAttribution() {
               <div className="grid gap-4 md:grid-cols-4">
                 <div className="p-4 border rounded-lg">
                   <div className="text-sm text-muted-foreground">Total Revenue</div>
-                  <div className="text-2xl font-bold mt-1">${totalRevenue.toLocaleString()}</div>
+                  <div className="text-2xl font-bold mt-1">{formatCurrency(totalRevenue)}</div>
                 </div>
                 <div className="p-4 border rounded-lg">
                   <div className="text-sm text-muted-foreground">Purchases</div>
@@ -681,7 +707,7 @@ export default function TrafficAttribution() {
                 </div>
                 <div className="p-4 border rounded-lg">
                   <div className="text-sm text-muted-foreground">Rev / Session</div>
-                  <div className="text-2xl font-bold mt-1">${revenuePerSession.toFixed(2)}</div>
+                  <div className="text-2xl font-bold mt-1">{formatCurrency(revenuePerSession, 2)}</div>
                 </div>
               </div>
 
@@ -699,7 +725,7 @@ export default function TrafficAttribution() {
                             <div className="bg-primary h-2 rounded-full" style={{ width: `${pct}%` }} />
                           </div>
                           <span className="text-sm font-bold min-w-[100px] text-right">
-                            ${r.revenue.toLocaleString()}
+                            {formatCurrency(r.revenue)}
                           </span>
                           <span className="text-xs text-muted-foreground min-w-[50px] text-right">{pct}%</span>
                         </div>
@@ -741,7 +767,7 @@ export default function TrafficAttribution() {
                         </div>
                         <div>
                           <div className="text-sm text-muted-foreground">Revenue</div>
-                          <div className="text-lg font-bold">${item.revenue.toLocaleString()}</div>
+                          <div className="text-lg font-bold">{formatCurrency(item.revenue)}</div>
                         </div>
                         <div>
                           <div className="text-sm text-muted-foreground">Bounce Rate</div>
@@ -831,7 +857,7 @@ export default function TrafficAttribution() {
                         </div>
                         <div className="grid grid-cols-2 gap-2 mt-2 text-sm text-muted-foreground">
                           <div>Conversions: {item.conversions}</div>
-                          <div>Revenue: ${item.revenue.toLocaleString()}</div>
+                          <div>Revenue: {formatCurrency(item.revenue)}</div>
                         </div>
                       </div>
                     ))}
@@ -868,7 +894,7 @@ export default function TrafficAttribution() {
                           </span>
                         </div>
                         <div className="text-sm text-muted-foreground mt-2">
-                          Revenue: ${item.revenue.toLocaleString()}
+                          Revenue: {formatCurrency(item.revenue)}
                         </div>
                       </div>
                     ))}
@@ -933,7 +959,7 @@ export default function TrafficAttribution() {
                   <div key={index} className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="font-medium">{item.model}</span>
-                      <span className="text-sm font-medium">${item.value.toLocaleString()}</span>
+                      <span className="text-sm font-medium">{formatCurrency(item.value)}</span>
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="flex-1 bg-secondary rounded-full h-2">

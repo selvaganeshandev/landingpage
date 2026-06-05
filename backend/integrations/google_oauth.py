@@ -755,11 +755,17 @@ def get_ai_referral_data(request):
         # Parse and categorize by AI platform
         ai_traffic = parse_ai_referral_response(response)
 
+        # GA4 reports revenue in the property's configured currency. Surface its
+        # ISO code (e.g. INR, USD) so the dashboard renders the right symbol
+        # instead of a hardcoded "$". GA4 returns it in the report metadata.
+        currency_code = response.get('metadata', {}).get('currencyCode') or 'USD'
+
         return Response({
             'success': True,
             'ai_traffic': ai_traffic,
             'platform_breakdown': ai_traffic['platform_breakdown'],
             'totals': ai_traffic['totals'],
+            'currency_code': currency_code,
             'date_range': {'start': start_date, 'end': end_date, 'days': days},
         })
 
