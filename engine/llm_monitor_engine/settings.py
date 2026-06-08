@@ -184,8 +184,27 @@ ANTHROPIC_MODEL = config('ANTHROPIC_MODEL', default='claude-sonnet-4-6')
 XAI_WEB_SEARCH = config('XAI_WEB_SEARCH', default=True, cast=bool)
 XAI_MODEL = config('XAI_MODEL', default='grok-2-latest')
 GEMINI_WEB_SEARCH = config('GEMINI_WEB_SEARCH', default=True, cast=bool)
-GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-2.0-flash')
+# gemini-2.0-flash is discontinued (returns HTTP 404). Default to a current model.
+GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-2.5-flash')
 DEEPSEEK_MODEL = config('DEEPSEEK_MODEL', default='deepseek-chat')
+
+# ==================== LLM QUOTA / CREDIT ALERTS ====================
+# Probes every configured paid key and emails recipients when a key is
+# depleted/erroring or recovers. Recipients are .env-configurable.
+QUOTA_ALERT_ENABLED = config('QUOTA_ALERT_ENABLED', default=True, cast=bool)
+QUOTA_ALERT_RECIPIENTS = config(
+    'QUOTA_ALERT_RECIPIENTS', default='',
+    cast=lambda v: [e.strip() for e in v.split(',') if e.strip()]
+)
+QUOTA_ALERT_REPEAT_HOURS = config('QUOTA_ALERT_REPEAT_HOURS', default=12, cast=int)
+# Also email a one-time "credits restored" note when a depleted provider recovers.
+QUOTA_ALERT_ON_RECOVERY = config('QUOTA_ALERT_ON_RECOVERY', default=True, cast=bool)
+# Cheap models used only for the health probe (not for analysis).
+QUOTA_PROBE_OPENAI_MODEL = config('QUOTA_PROBE_OPENAI_MODEL', default='gpt-4o-mini')
+QUOTA_PROBE_ANTHROPIC_MODEL = config('QUOTA_PROBE_ANTHROPIC_MODEL', default='claude-haiku-4-5-20251001')
+QUOTA_PROBE_PERPLEXITY_MODEL = config('QUOTA_PROBE_PERPLEXITY_MODEL', default='sonar')
+QUOTA_PROBE_XAI_MODEL = config('QUOTA_PROBE_XAI_MODEL', default='grok-2-latest')
+QUOTA_PROBE_DEEPSEEK_MODEL = config('QUOTA_PROBE_DEEPSEEK_MODEL', default='deepseek-chat')
 
 # ScrapingDog API Configuration (still used by misinformation crawler — /scrape endpoint)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
@@ -303,5 +322,12 @@ CELERY_BEAT_SCHEDULE = {
     'monthly-insights-daily-schedule': {
         'task': 'core.processing_tasks.schedule_all_monthly_insights_task',
         'schedule': crontab(hour=1, minute=0),
+    },
+    # LLM credit monitor — checks hourly so a depleted provider is caught within
+    # ~1h, and emails QUOTA_ALERT_RECIPIENTS ONLY when a key is out of credits
+    # (or recovers). Transient errors/rate-limits never trigger mail.
+    'llm-quota-alert': {
+        'task': 'core.processing_tasks.quota_alert_scheduler',
+        'schedule': config('CELERY_BEAT_SCHEDULE_QUOTA_ALERT', default=3600.0, cast=float),
     },
 }
