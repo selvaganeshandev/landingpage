@@ -158,6 +158,25 @@ def process_cmsmanager_scheduler(self):
         raise self.retry(exc=e, countdown=60)
 
 
+@shared_task(bind=True, ignore_result=True, max_retries=1)
+def quota_alert_scheduler(self):
+    """
+    Periodic LLM credit/quota monitor.
+
+    Probes every configured (paid) provider key and emails QUOTA_ALERT_RECIPIENTS
+    when a key is depleted/erroring or recovers (deduped via a state file). Never
+    raises into the beat loop — quota checks must not break processing.
+    """
+    try:
+        from .quota_monitor import run_quota_check_and_alert
+        result = run_quota_check_and_alert()
+        logger.info(f"Quota alert check completed: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error in quota alert scheduler: {str(e)}", exc_info=True)
+        return {'error': str(e)}
+
+
 @shared_task(bind=True, ignore_result=True, max_retries=3)
 def process_single_competitor_task(self, competitor_id: int):
     """
