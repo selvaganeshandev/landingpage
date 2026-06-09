@@ -591,6 +591,21 @@ class PromptAnalyticsProcessor:
         last_created: PromptAnalytics | None = None
         try:
             for platform_key, result in results.items():
+                # Provider was unavailable / out of credits for this platform: the
+                # result is a zero-filled fallback stub. Skip it so we DON'T
+                # overwrite the existing row's last good values with zeros — a
+                # provider outage must never blank the client's dashboard. The
+                # weekly scheduler re-runs the prompt next cycle, so it self-heals
+                # once credits/keys are restored. A working provider that genuinely
+                # finds no mention is NOT a fallback and still writes through.
+                if result.get('fallback'):
+                    logger.warning(
+                        f"Skipping analytics write for prompt {prompt.id} / {platform_key}: "
+                        f"provider unavailable (fallback) — preserving last good values, "
+                        f"will retry on next scheduled run"
+                    )
+                    continue
+
                 # Determine platform label stored in DB
                 if platform_key == 'chatgpt':
                     platform_label = 'ChatGPT'
@@ -1628,7 +1643,12 @@ class PromptAnalyticsProcessor:
             raise  # Re-raise to ensure the error is visible
     
     def _get_fallback_analytics(self, prompt_text: str, user_domain: str, platform: str) -> Dict[str, Any]:
-        """Generate fallback analytics when AI platforms are unavailable"""
+        """Generate fallback analytics when AI platforms are unavailable.
+
+        The 'fallback' flag marks this as a NON-result (provider down / out of
+        credits), so the persistence layer can skip it and keep the last good
+        values instead of overwriting them with zeros.
+        """
         return {
             'citations': [],
             'mention_count': 0,
@@ -1639,5 +1659,6 @@ class PromptAnalyticsProcessor:
             'has_citation': False,
             'all_urls': [],
             'competitor_mention_list': [],  # Include empty list for consistency
-            'is_mention': False
+            'is_mention': False,
+            'fallback': True,  # provider unavailable — do not persist over good data
         }
