@@ -2067,8 +2067,12 @@ def _fetch_gsc_report_data(integration, sheet):
     yoy_data = {}   # {dim_key: {metric: value}}
     if is_monthly and date_ranges:
         cur_s, cur_e, _ = date_ranges[-1]
-        yoy_s = _date(cur_s.year - 1, cur_s.month, cur_s.day)
-        yoy_e = _date(cur_e.year - 1, cur_e.month, cur_e.day)
+        yoy_s = _date(cur_s.year - 1, cur_s.month, 1)
+        # YOY base spans the FULL prior-year month so it matches the current
+        # month's full-month (prorated) projection; a partial window here would
+        # divide a projected value by a few days and inflate YOY %.
+        _, _yoy_last = _cal.monthrange(cur_e.year - 1, cur_e.month)
+        yoy_e = _date(cur_e.year - 1, cur_e.month, _yoy_last)
         body = {
             'startDate':  yoy_s.isoformat(),
             'endDate':    yoy_e.isoformat(),
@@ -2294,8 +2298,12 @@ def _fetch_ga_report_data(integration, sheet):
     yoy_leads_ch = {}   # {channel: count}
     if is_monthly and date_ranges:
         cur_s, cur_e, _ = date_ranges[-1]
-        yoy_s = _date(cur_s.year - 1, cur_s.month, cur_s.day)
-        yoy_e = _date(cur_e.year - 1, cur_e.month, cur_e.day)
+        yoy_s = _date(cur_s.year - 1, cur_s.month, 1)
+        # YOY base spans the FULL prior-year month so it matches the current
+        # month's full-month (prorated) projection; a partial window here would
+        # divide a projected value by a few days and inflate YOY %.
+        _, _yoy_last = _cal.monthrange(cur_e.year - 1, cur_e.month)
+        yoy_e = _date(cur_e.year - 1, cur_e.month, _yoy_last)
         try:
             body = {
                 'dateRanges': [{'startDate': yoy_s.isoformat(), 'endDate': yoy_e.isoformat()}],
@@ -2482,9 +2490,25 @@ def _resolve_brand_tokens(integration):
     domain_name = getattr(domain, 'name', '') if domain else ''
     if domain_name:
         for raw in _re.split(r'[\s/_\-,&]+', domain_name):
-            t = _re.sub(r'[^a-z0-9]+', '', raw.lower())
-            if len(t) >= 3 and t not in _BRAND_STOPWORDS and t not in tokens:
-                tokens.append(t)
+            # Also split CamelCase / acronym boundaries so a glued brand like
+            # "CanaraHSBCLife" yields ["Canara", "HSBC", "Life"] rather than one
+            # token nobody searches. Users type the brand with spaces, so the
+            # GSC query regex must match each word ("canara", "hsbc"), not the
+            # joined string — otherwise branded traffic is misclassified as
+            # non-branded. For all-lowercase names this is a no-op.
+            pieces = _re.findall(r'[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+', raw)
+            # Only trust the split when every fragment is itself usable (>=3
+            # chars) or a known stopword. A stray short fragment (e.g. "my" in
+            # "MyPulse") would strand a generic word, so keep the whole chunk
+            # instead — this protects single-brand names from over-broadening.
+            usable = [p for p in pieces
+                      if len(_re.sub(r'[^a-z0-9]+', '', p.lower())) >= 3
+                      or p.lower() in _BRAND_STOPWORDS]
+            parts = pieces if (pieces and len(usable) == len(pieces)) else [raw]
+            for piece in parts:
+                t = _re.sub(r'[^a-z0-9]+', '', piece.lower())
+                if len(t) >= 3 and t not in _BRAND_STOPWORDS and t not in tokens:
+                    tokens.append(t)
 
     if not tokens:
         site_url = getattr(integration, 'provider_id', '') or ''
@@ -2611,7 +2635,11 @@ def _fetch_gsc_overview_data(integration, sheet):
     if is_monthly:
         cur_s, cur_e, _ = date_ranges[-1]
         yoy_s = _date(cur_s.year - 1, cur_s.month, 1)
-        yoy_e = _date(cur_e.year - 1, cur_e.month, cur_e.day)
+        # YOY base spans the FULL prior-year month so it matches the current
+        # month's full-month (prorated) projection; a partial window here would
+        # divide a projected value by a few days and inflate YOY %.
+        _, _yoy_last = _cal.monthrange(cur_e.year - 1, cur_e.month)
+        yoy_e = _date(cur_e.year - 1, cur_e.month, _yoy_last)
         try:
             yoy_total = _query_totals(yoy_s, yoy_e, with_filter=False)
         except Exception as e:
@@ -2896,7 +2924,11 @@ def _fetch_ga_overview_data(integration, sheet):
     if is_monthly:
         cur_s, cur_e, _ = date_ranges[-1]
         yoy_s = _date(cur_s.year - 1, cur_s.month, 1)
-        yoy_e = _date(cur_e.year - 1, cur_e.month, cur_e.day)
+        # YOY base spans the FULL prior-year month so it matches the current
+        # month's full-month (prorated) projection; a partial window here would
+        # divide a projected value by a few days and inflate YOY %.
+        _, _yoy_last = _cal.monthrange(cur_e.year - 1, cur_e.month)
+        yoy_e = _date(cur_e.year - 1, cur_e.month, _yoy_last)
         try:
             resp = service.properties().runReport(
                 property=property_id,
@@ -3068,7 +3100,7 @@ def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
         }
     }
 
-    def _runReport(start_dt, end_dt, dim='pagePath', limit=10000):
+    def _runReport(start_dt, end_dt, dim='landingPage', limit=10000):
         body = {
             'dateRanges':      [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
             'dimensions':      [{'name': dim}],
@@ -3078,7 +3110,12 @@ def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
         }
         return service.properties().runReport(property=property_id, body=body).execute()
 
-    # ── Fetch per-period page paths ─────────────────────────────────────────
+    # ── Fetch per-period landing pages ──────────────────────────────────────
+    # Use the landingPage dimension (session entry page) so each organic
+    # session is counted exactly once. pagePath would count a session on every
+    # page it viewed, over-counting buckets (a homepage bucket could exceed the
+    # site's true session totals) and never reconciling to GA4's Landing-page
+    # report, which is what the audit compares against.
     range_paths = {}     # {label: [(path, sessions), ...]}
     api_errors  = []
     for s_dt, e_dt, label in date_ranges:
@@ -3099,8 +3136,12 @@ def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
     yoy_paths = []
     if is_monthly and date_ranges:
         cur_s, cur_e, _ = date_ranges[-1]
-        yoy_s = _date(cur_s.year - 1, cur_s.month, cur_s.day)
-        yoy_e = _date(cur_e.year - 1, cur_e.month, cur_e.day)
+        yoy_s = _date(cur_s.year - 1, cur_s.month, 1)
+        # YOY base spans the FULL prior-year month so it matches the current
+        # month's full-month (prorated) projection; a partial window here would
+        # divide a projected value by a few days and inflate YOY %.
+        _, _yoy_last = _cal.monthrange(cur_e.year - 1, cur_e.month)
+        yoy_e = _date(cur_e.year - 1, cur_e.month, _yoy_last)
         try:
             resp = _runReport(yoy_s, yoy_e)
             for r in resp.get('rows', []):
@@ -3503,7 +3544,11 @@ def _fetch_ga_country_events_data(integration, sheet):
     if is_monthly and date_ranges:
         cur_s, cur_e, _ = date_ranges[-1]
         yoy_s = _date(cur_s.year - 1, cur_s.month, 1)
-        yoy_e = _date(cur_e.year - 1, cur_e.month, cur_e.day)
+        # YOY base spans the FULL prior-year month so it matches the current
+        # month's full-month (prorated) projection; a partial window here would
+        # divide a projected value by a few days and inflate YOY %.
+        _, _yoy_last = _cal.monthrange(cur_e.year - 1, cur_e.month)
+        yoy_e = _date(cur_e.year - 1, cur_e.month, _yoy_last)
         try:
             resp = service.properties().runReport(
                 property=property_id,
