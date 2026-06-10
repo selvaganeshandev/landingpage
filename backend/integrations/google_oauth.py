@@ -729,7 +729,10 @@ def get_ai_referral_data(request):
                     {'name': 'totalUsers'},
                     {'name': 'screenPageViews'},
                     {'name': 'conversions'},
-                    {'name': 'totalRevenue'},
+                    # purchaseRevenue == GA4's "Purchase revenue" column, so this
+                    # filtered/live window reconciles with GA4 exactly like the
+                    # cached snapshot does (see ga_insights_processor).
+                    {'name': 'purchaseRevenue'},
                     {'name': 'bounceRate'},
                     {'name': 'averageSessionDuration'},
                 ],

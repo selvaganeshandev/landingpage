@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Avg, Count, Sum, Q, Min, Max
+from django.db.models.functions import Coalesce
 from datetime import timedelta, datetime, date
 from decimal import Decimal
 
@@ -37,11 +38,20 @@ def count_cited_urls(domain_id, start_date, end_date, platform_filter=None):
     visibility score / exports / snapshots — those are left untouched.
     """
     start_dt, end_dt = _dashboard_datetime_window(start_date, end_date)
-    qs = PromptAnalytics.objects.filter(
+    qs = PromptAnalytics.objects.annotate(
+        # Keep BOTH dates: use tracked_at (last run) and fall back to created_at
+        # (first creation) when a row has no tracked_at, so neither field is lost.
+        _window_dt=Coalesce('tracked_at', 'created_at'),
+    ).filter(
         prompt__group__domain_id=domain_id,
         track_status='COMP',
-        created_at__gte=start_dt,
-        created_at__lte=end_dt,
+        # Window on the last-run date (tracked_at, with created_at fallback —
+        # see _window_dt above). Analytics rows are updated in place on every
+        # weekly run, so created_at alone stays the original date (often months
+        # ago) and would drop freshly-refreshed prompts out of the rolling window —
+        # the cause of dashboards reading 0 while data is actually being refreshed.
+        _window_dt__gte=start_dt,
+        _window_dt__lte=end_dt,
     )
     if platform_filter:
         qs = qs.filter(platform=platform_filter)
@@ -63,11 +73,20 @@ def live_sentiment_breakdown(domain_id, start_date, end_date, platform_filter=No
     since sentiment is about how the brand was mentioned.
     """
     start_dt, end_dt = _dashboard_datetime_window(start_date, end_date)
-    qs = PromptAnalytics.objects.filter(
+    qs = PromptAnalytics.objects.annotate(
+        # Keep BOTH dates: use tracked_at (last run) and fall back to created_at
+        # (first creation) when a row has no tracked_at, so neither field is lost.
+        _window_dt=Coalesce('tracked_at', 'created_at'),
+    ).filter(
         prompt__group__domain_id=domain_id,
         is_mention=True,
-        created_at__gte=start_dt,
-        created_at__lte=end_dt,
+        # Window on the last-run date (tracked_at, with created_at fallback —
+        # see _window_dt above). Analytics rows are updated in place on every
+        # weekly run, so created_at alone stays the original date (often months
+        # ago) and would drop freshly-refreshed prompts out of the rolling window —
+        # the cause of dashboards reading 0 while data is actually being refreshed.
+        _window_dt__gte=start_dt,
+        _window_dt__lte=end_dt,
     )
     if platform_filter:
         qs = qs.filter(platform=platform_filter)
@@ -106,11 +125,20 @@ def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=
       platforms       - [{platform, mention_count, avg_position, citations}], desc
     """
     start_dt, end_dt = _dashboard_datetime_window(start_date, end_date)
-    qs = PromptAnalytics.objects.filter(
+    qs = PromptAnalytics.objects.annotate(
+        # Keep BOTH dates: use tracked_at (last run) and fall back to created_at
+        # (first creation) when a row has no tracked_at, so neither field is lost.
+        _window_dt=Coalesce('tracked_at', 'created_at'),
+    ).filter(
         prompt__group__domain_id=domain_id,
         track_status='COMP',
-        created_at__gte=start_dt,
-        created_at__lte=end_dt,
+        # Window on the last-run date (tracked_at, with created_at fallback —
+        # see _window_dt above). Analytics rows are updated in place on every
+        # weekly run, so created_at alone stays the original date (often months
+        # ago) and would drop freshly-refreshed prompts out of the rolling window —
+        # the cause of dashboards reading 0 while data is actually being refreshed.
+        _window_dt__gte=start_dt,
+        _window_dt__lte=end_dt,
     )
     if platform_filter:
         qs = qs.filter(platform=platform_filter)
@@ -722,18 +750,21 @@ def dashboard_summary(request):
     # end_datetime and start_datetime are already calculated above
     # Show all mentions regardless of position
     
-    recent_analytics = PromptAnalytics.objects.filter(
+    recent_analytics = PromptAnalytics.objects.annotate(
+        # Last-run date with created_at fallback — see headline metrics above.
+        _window_dt=Coalesce('tracked_at', 'created_at'),
+    ).filter(
         prompt__group__domain_id=domain_id,
         track_status='COMP',
-        created_at__gte=start_datetime,
-        created_at__lte=end_datetime
+        _window_dt__gte=start_datetime,
+        _window_dt__lte=end_datetime
     )
-    
+
     # Apply platform filter if provided
     if platform_filter:
         recent_analytics = recent_analytics.filter(platform=platform_filter)
-    
-    recent_analytics = recent_analytics.order_by('-created_at')[:10]
+
+    recent_analytics = recent_analytics.order_by('-_window_dt')[:10]
     
     recent_mentions = []
     for a in recent_analytics:
@@ -745,8 +776,8 @@ def dashboard_summary(request):
             'position': position,
             'sentiment': get_sentiment_category(a.sentiment_score),
             'sentiment_score': float(a.sentiment_score or 0),
-            'created_at': a.created_at.isoformat(),
-            'relative_time': calculate_relative_time(a.created_at),
+            'created_at': (a.tracked_at or a.created_at).isoformat(),
+            'relative_time': calculate_relative_time(a.tracked_at or a.created_at),
             'citations': int(a.total_citations or 0)
         })
     
