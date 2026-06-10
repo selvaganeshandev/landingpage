@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 # AI-platform matching (regex + classification) lives in integrations.ai_platforms
 # so the engine and backend share one source of truth that mirrors the GA4 filter.
 
+# GA4 keeps reprocessing the current day, so its data is only settled through
+# "yesterday". Every snapshot query is clamped to (today - GA_DATA_LAG_DAYS) so an
+# in-progress period never ingests GA4's partial current day — mirroring the live
+# get_ai_referral_data window and the read-time proration lag
+# (integrations.utils.prorate.DEFAULT_LAG_GA). Completed past periods are unaffected.
+GA_DATA_LAG_DAYS = 1
+
 
 class GAInsightsProcessor:
     """
@@ -346,24 +353,33 @@ class GAInsightsProcessor:
             property_id = integration.provider_id
             if not property_id.startswith('properties/'):
                 property_id = f'properties/{property_id}'
-            
+
+            # Clamp the GA query window to GA4's settled data (through yesterday)
+            # so an in-progress period doesn't undercount on today's partial data.
+            # The insight record keeps its original end_date, so read-time
+            # proration still projects to the full period. This is a no-op for
+            # already-complete past periods (query_end == end_date there).
+            query_end = min(end_date, date.today() - timedelta(days=GA_DATA_LAG_DAYS))
+            if query_end < start_date:
+                query_end = start_date
+
             # Fetch overall metrics
-            overall_data = self._fetch_overall_metrics(service, property_id, start_date, end_date)
-            
+            overall_data = self._fetch_overall_metrics(service, property_id, start_date, query_end)
+
             # Fetch AI platform breakdown
-            platform_data = self._fetch_platform_breakdown(service, property_id, start_date, end_date)
-            
+            platform_data = self._fetch_platform_breakdown(service, property_id, start_date, query_end)
+
             # Fetch device breakdown
-            device_data = self._fetch_device_breakdown(service, property_id, start_date, end_date)
-            
+            device_data = self._fetch_device_breakdown(service, property_id, start_date, query_end)
+
             # Fetch geographic breakdown
-            geo_data = self._fetch_geographic_breakdown(service, property_id, start_date, end_date)
-            
+            geo_data = self._fetch_geographic_breakdown(service, property_id, start_date, query_end)
+
             # Fetch landing pages
-            landing_pages = self._fetch_landing_pages(service, property_id, start_date, end_date)
-            
+            landing_pages = self._fetch_landing_pages(service, property_id, start_date, query_end)
+
             # Fetch conversion paths (if available)
-            conversion_paths = self._fetch_conversion_paths(service, property_id, start_date, end_date)
+            conversion_paths = self._fetch_conversion_paths(service, property_id, start_date, query_end)
             
             # Update insight with all data
             insight.total_sessions = overall_data.get('sessions', 0)
@@ -404,13 +420,16 @@ class GAInsightsProcessor:
                         {'name': 'totalUsers'},
                         {'name': 'screenPageViews'},
                         {'name': 'conversions'},
-                        {'name': 'totalRevenue'},
+                        # purchaseRevenue == GA4's "Purchase revenue" column, the
+                        # e-commerce KPI clients reconcile against. totalRevenue
+                        # also includes ad/other revenue and won't tie out to it.
+                        {'name': 'purchaseRevenue'},
                         {'name': 'bounceRate'},
                         {'name': 'averageSessionDuration'},
                     ],
                 }
             ).execute()
-            
+
             if not response.get('rows'):
                 return {}
             
@@ -456,7 +475,9 @@ class GAInsightsProcessor:
                     'metrics': [
                         {'name': 'sessions'},
                         {'name': 'conversions'},
-                        {'name': 'totalRevenue'},
+                        # purchaseRevenue to match GA4's "Purchase revenue" column
+                        # (the per-platform revenue clients compare against).
+                        {'name': 'purchaseRevenue'},
                         {'name': 'bounceRate'},
                         {'name': 'averageSessionDuration'},
                         {'name': 'totalUsers'},
@@ -500,12 +521,19 @@ class GAInsightsProcessor:
                         'bounceRate': 0,
                         'avgDuration': 0,
                         'users': 0,
-                        'pageViews': 0
+                        'pageViews': 0,
+                        # Raw GA4 sessionSource rows that roll up into this LLM, so
+                        # the dashboard can show clients exactly how each card
+                        # reconciles with GA4 (e.g. Perplexity = "perplexity" +
+                        # "perplexity.ai"). Mirrors the live get_ai_referral_data
+                        # path so snapshot and live windows reconcile identically.
+                        'sources': [],
                     }
                     rate_weight[platform_name] = 0
 
                 pd = platform_data[platform_name]
                 pd['visits'] += sessions
+                pd['sources'].append({'source': source, 'visits': sessions})
                 pd['conversions'] += conversions
                 pd['revenue'] += revenue
                 pd['users'] += users
@@ -524,6 +552,9 @@ class GAInsightsProcessor:
                 else:
                     pd['bounceRate'] = 0
                     pd['avgDuration'] = 0
+                # Largest contributing source first, for a readable
+                # reconciliation list (matches the live path's ordering).
+                pd['sources'].sort(key=lambda s: s['visits'], reverse=True)
 
         except Exception as e:
             logger.error(f"Error fetching platform breakdown: {e}")
@@ -546,7 +577,9 @@ class GAInsightsProcessor:
                     'metrics': [
                         {'name': 'sessions'},
                         {'name': 'conversions'},
-                        {'name': 'totalRevenue'},
+                        # purchaseRevenue keeps device revenue consistent with the
+                        # overall/platform totals (GA4 "Purchase revenue").
+                        {'name': 'purchaseRevenue'},
                     ],
                 }
             ).execute()
@@ -591,7 +624,9 @@ class GAInsightsProcessor:
                     'dimensions': [{'name': 'country'}],
                     'metrics': [
                         {'name': 'sessions'},
-                        {'name': 'totalRevenue'},
+                        # purchaseRevenue keeps geo revenue consistent with the
+                        # overall/platform totals (GA4 "Purchase revenue").
+                        {'name': 'purchaseRevenue'},
                     ],
                     'orderBys': [{
                         'metric': {'metricName': 'sessions'},
