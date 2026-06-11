@@ -3096,7 +3096,7 @@ def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
         }
     }
 
-    def _runReport(start_dt, end_dt, dim='landingPage', limit=10000):
+    def _runReport(start_dt, end_dt, dim='landingPagePlusQueryString', limit=10000):
         body = {
             'dateRanges':      [{'startDate': start_dt.isoformat(), 'endDate': end_dt.isoformat()}],
             'dimensions':      [{'name': dim}],
@@ -3107,11 +3107,13 @@ def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
         return service.properties().runReport(property=property_id, body=body).execute()
 
     # ── Fetch per-period landing pages ──────────────────────────────────────
-    # Use the landingPage dimension (session entry page) so each organic
-    # session is counted exactly once. pagePath would count a session on every
-    # page it viewed, over-counting buckets (a homepage bucket could exceed the
-    # site's true session totals) and never reconciling to GA4's Landing-page
-    # report, which is what the audit compares against.
+    # Use the landingPagePlusQueryString dimension (session entry page incl.
+    # query string) so each organic session is counted once AND the rows match
+    # GA4's "Landing page + query string" report the audit compares against —
+    # e.g. the Home Page bucket equals the literal "/" row (query-string
+    # variants like "/?utm=…" stay separate, exactly as GA shows them).
+    # pagePath would instead count a session on every page it viewed, hugely
+    # over-counting buckets.
     range_paths = {}     # {label: [(path, sessions), ...]}
     api_errors  = []
     for s_dt, e_dt, label in date_ranges:
@@ -3160,12 +3162,15 @@ def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
     from collections import defaultdict
     bucket_period_sessions = defaultdict(lambda: defaultdict(int))
     bucket_paths           = defaultdict(lambda: defaultdict(list))
+    bucket_raw_seg         = {}   # bucket display name -> raw first path segment
 
     for label, entries in range_paths.items():
         for path, sess in entries:
             bucket = _bucket_of_path(path)
             bucket_period_sessions[bucket][label] += sess
             bucket_paths[bucket][label].append((path, sess))
+            if bucket not in bucket_raw_seg:
+                bucket_raw_seg[bucket] = path.split('?')[0].strip('/').split('/')[0].lower()
 
     yoy_bucket = defaultdict(int)
     for path, sess in yoy_paths:
@@ -3209,12 +3214,89 @@ def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
             return f"{raw} ({proj})", proj
         return raw, raw
 
+    # ── Exact Page-Type totals via filtered (de-duplicated) GA queries ──────
+    # GA4 de-dupes sessions inside a filtered total, but summing landing-page
+    # rows double-counts a session that lands on >1 page in the same bucket
+    # (so a row-sum runs ~1-2% above the GA UI). To match exactly what the
+    # client reads in GA, re-query each top bucket's total with a landing-page
+    # filter that mirrors a GA UI search: Home = exact "/", "(not set)" = exact,
+    # every other bucket = CONTAINS "/<segment>" (same as typing "/blog" into
+    # the GA search box — so buckets can overlap, exactly as they do for the
+    # client). Falls back to the row-sum when no filter applies (e.g. "Other
+    # Pages") or a call fails, so the report always renders. Drill-down tables
+    # and "Other Pages" keep the row-level data unchanged.
+    label_dates = {lbl: (s, e) for s, e, lbl in date_ranges}
+    _ft_cache   = {}   # (value, match, start, end) -> sessions
+
+    def _bucket_landing_filter(bucket):
+        if bucket == 'Home Page':
+            return ('/', 'EXACT')
+        if bucket == '(Not Set)':
+            return ('(not set)', 'EXACT')
+        seg = bucket_raw_seg.get(bucket, '')
+        return (f'/{seg}', 'CONTAINS') if seg else None
+
+    def _ft_request(value, match, s_dt, e_dt):
+        return {
+            'dateRanges':      [{'startDate': s_dt.isoformat(), 'endDate': e_dt.isoformat()}],
+            'metrics':         [{'name': 'sessions'}],
+            'dimensionFilter': {'andGroup': {'expressions': [
+                {'filter': organic_filter['filter']},
+                {'filter': {'fieldName': 'landingPagePlusQueryString',
+                            'stringFilter': {'value': value, 'matchType': match}}},
+            ]}},
+        }
+
+    # Collect every (filter, period) total we need, then fetch in GA4
+    # batchRunReports calls (max 5 requests each) so a report makes a handful
+    # of round-trips instead of ~20-36 sequential ones (which timed out).
+    _ft_specs = []
+    for bucket in top_buckets:
+        spec = _bucket_landing_filter(bucket)
+        if not spec:
+            continue
+        v, m = spec
+        for lbl in range_labels:
+            s_dt, e_dt = label_dates[lbl]
+            _ft_specs.append((v, m, s_dt, e_dt))
+        if is_monthly:
+            _ft_specs.append((v, m, yoy_s, yoy_e))
+    _ft_specs = list(dict.fromkeys(_ft_specs))   # dedupe, preserve order
+
+    for _i in range(0, len(_ft_specs), 5):
+        chunk = _ft_specs[_i:_i + 5]
+        try:
+            resp = service.properties().batchRunReports(property=property_id, body={
+                'requests': [_ft_request(v, m, s, e) for (v, m, s, e) in chunk]
+            }).execute()
+            for key, rep in zip(chunk, resp.get('reports', [])):
+                rows = rep.get('rows', [])
+                _ft_cache[key] = int(rows[0]['metricValues'][0]['value']) if rows else 0
+        except Exception as e:
+            logger.error(f"GA Breakup batch filtered-total error for sheet {sheet.id}: {e}")
+            # leave this chunk uncached; callers fall back to the row-sum below
+
+    def _filtered_total(bucket, s_dt, e_dt):
+        spec = _bucket_landing_filter(bucket)
+        if spec is None:
+            return None
+        value, match = spec
+        return _ft_cache.get((value, match, s_dt, e_dt))   # None -> caller falls back
+
+    def _bucket_value(bucket, lbl_orig):
+        """Exact filtered total for a bucket/period, falling back to row-sum."""
+        s_dt, e_dt = label_dates[lbl_orig]
+        val = _filtered_total(bucket, s_dt, e_dt)
+        if val is None:
+            val = bucket_period_sessions.get(bucket, {}).get(lbl_orig, 0)
+        return val
+
     section1_rows = []
     for bucket in top_buckets:
         row = {'Page Type': bucket}
         change_series = []
         for lbl_orig, lbl_disp in zip(range_labels, range_labels_display):
-            raw = bucket_period_sessions.get(bucket, {}).get(lbl_orig, 0)
+            raw = _bucket_value(bucket, lbl_orig)
             display, numeric = _cell_for(raw, lbl_orig)
             row[lbl_disp] = display
             change_series.append(numeric)
@@ -3224,7 +3306,9 @@ def _fetch_ga_organic_traffic_breakup_data(integration, sheet):
         )
         if is_monthly:
             cur_v = change_series[-1] if change_series else 0
-            yoy_v = yoy_bucket.get(bucket)
+            yoy_v = _filtered_total(bucket, yoy_s, yoy_e)
+            if yoy_v is None:
+                yoy_v = yoy_bucket.get(bucket)
             row['YOY %'] = _pct(cur_v, yoy_v) if yoy_v is not None else 'N/A'
         section1_rows.append(row)
 
@@ -4801,6 +4885,16 @@ def seo_report_sheet_data(request):
         domain_id=domain_id, is_active=True
     ).order_by('-created_at')
 
+    # Optional: generate only a subset of sheets (progressive "load more" on the
+    # page fetches sheets a couple at a time). Absent → all sheets (unchanged).
+    sheet_ids_param = request.query_params.get('sheet_ids')
+    if sheet_ids_param:
+        try:
+            wanted = [int(x) for x in sheet_ids_param.split(',') if x.strip()]
+            sheets = sheets.filter(id__in=wanted)
+        except ValueError:
+            pass
+
     if not sheets.exists():
         return Response({'reports': [], 'count': 0})
 
@@ -4815,8 +4909,7 @@ def seo_report_sheet_data(request):
         domain_id=domain_id, type='google_analytics', status='active'
     ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
 
-    reports = []
-    for sheet in sheets:
+    def _gen_one(sheet):
         report_entry = {
             'sheet_id': sheet.id,
             'sheet_name': sheet.sheet_name,
@@ -4920,8 +5013,49 @@ def seo_report_sheet_data(request):
             logger.error(f"Error fetching data for sheet {sheet.id}: {e}")
             report_entry['error'] = str(e)
 
-        reports.append(report_entry)
+        return report_entry
 
+    # Generate sheets concurrently so the page waits on the slowest single sheet
+    # (~seconds) instead of the sum of all sheets. Sequentially the total can,
+    # with occasional GA/GSC 5xx retries, exceed the client's 120s timeout and
+    # leave every card spinning. Order is preserved; a sheet that blows past the
+    # per-request deadline returns an error row instead of hanging the page.
+    # Each fetch is read-only and builds its own Google credentials/service, so
+    # the workers don't share mutable state; close_old_connections() keeps each
+    # thread's DB connection clean.
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
+    from django.db import close_old_connections
+
+    def _gen_safe(sheet):
+        try:
+            return _gen_one(sheet)
+        finally:
+            close_old_connections()
+
+    def _error_entry(sheet, message):
+        return {
+            'sheet_id': sheet.id, 'sheet_name': sheet.sheet_name,
+            'sheet_type': sheet.sheet_type, 'category': sheet.category,
+            'schedule': sheet.schedule, 'duration': sheet.duration,
+            'order_by': sheet.order_by, 'metrics': sheet.metrics,
+            'change_units': sheet.change_units,
+            'columns': [], 'rows': [], 'total_rows': 0, 'error': message,
+        }
+
+    sheets_list = list(sheets)
+    reports = []
+    with ThreadPoolExecutor(max_workers=min(6, len(sheets_list))) as _ex:
+        _futures = [_ex.submit(_gen_safe, s) for s in sheets_list]
+        _deadline = _time.monotonic() + 90
+        for s, fut in zip(sheets_list, _futures):
+            try:
+                reports.append(fut.result(timeout=max(1, _deadline - _time.monotonic())))
+            except _FutTimeout:
+                reports.append(_error_entry(s, 'Report generation timed out. Please retry.'))
+            except Exception as e:
+                logger.error(f"Error fetching data for sheet {s.id}: {e}")
+                reports.append(_error_entry(s, str(e)))
     return Response({'reports': reports, 'count': len(reports)})
 
 

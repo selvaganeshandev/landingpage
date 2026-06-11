@@ -82,28 +82,57 @@ const SeoReports = () => {
 
   const sheets = sheetsData?.sheets || [];
 
-  // Fetch report data (live GSC/GA)
-  const {
-    data: reportData,
-    isLoading: dataLoading,
-    isError: dataError,
-  } = useQuery({
-    queryKey: ["seoReportData", domainId],
-    queryFn: async () => {
-      const res = await apiClient.getSeoReportSheetData(domainId!);
-      return res as { reports: any[]; count: number };
-    },
-    enabled: !!domainId && sheets.length > 0,
-    retry: 1,
-  });
+  // ── Progressive loading: render a couple of report cards at a time and fetch
+  //    each batch's live GSC/GA data on demand via a "Load More" button, so the
+  //    page paints fast instead of blocking on every sheet's API calls up front.
+  const BATCH_SIZE = 2;
+  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
+  const [reportBySheetId, setReportBySheetId] = useState<Record<number, any>>({});
+  const [loadingSheetIds, setLoadingSheetIds] = useState<Set<number>>(new Set());
+  const [batchError, setBatchError] = useState(false);
 
-  const reports = reportData?.reports || [];
+  const visibleSheets = sheets.slice(0, visibleCount);
+  const visibleIdsKey = visibleSheets.map((s: any) => s.id).join(",");
 
-  // Map report data by sheet_id for quick lookup
-  const reportBySheetId: Record<number, any> = {};
-  reports.forEach((r) => {
-    reportBySheetId[r.sheet_id] = r;
-  });
+  // Reset progressive state when the domain (and thus its sheet set) changes.
+  useEffect(() => {
+    setVisibleCount(BATCH_SIZE);
+    setReportBySheetId({});
+    setLoadingSheetIds(new Set());
+    setBatchError(false);
+  }, [domainId]);
+
+  // Fetch data for any currently-visible sheet that hasn't been loaded yet.
+  useEffect(() => {
+    if (!domainId || visibleSheets.length === 0) return;
+    const toFetch = visibleSheets
+      .map((s: any) => s.id)
+      .filter((id: number) => !(id in reportBySheetId) && !loadingSheetIds.has(id));
+    if (toFetch.length === 0) return;
+
+    setLoadingSheetIds((prev) => new Set([...prev, ...toFetch]));
+    setBatchError(false);
+    apiClient
+      .getSeoReportSheetData(domainId, toFetch)
+      .then((res: any) => {
+        setReportBySheetId((prev) => {
+          const next = { ...prev };
+          (res?.reports || []).forEach((r: any) => {
+            next[r.sheet_id] = r;
+          });
+          return next;
+        });
+      })
+      .catch(() => setBatchError(true))
+      .finally(() => {
+        setLoadingSheetIds((prev) => {
+          const n = new Set(prev);
+          toFetch.forEach((id: number) => n.delete(id));
+          return n;
+        });
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [domainId, visibleIdsKey]);
 
   // Delete mutation
   const deleteMutation = useMutation({
@@ -263,13 +292,13 @@ const SeoReports = () => {
       {/* Report Widgets */}
       {!isLoading && sheets.length > 0 && (
         <div className="space-y-8">
-          {sheets.map((sheet) => (
+          {visibleSheets.map((sheet: any) => (
             <ReportWidget
               key={sheet.id}
               sheet={sheet}
               reportData={reportBySheetId[sheet.id]}
-              dataLoading={dataLoading}
-              dataError={dataError}
+              dataLoading={loadingSheetIds.has(sheet.id)}
+              dataError={batchError && !reportBySheetId[sheet.id] && !loadingSheetIds.has(sheet.id)}
               onDelete={handleDelete}
               onRename={(id, name) => {
                 apiClient
@@ -286,6 +315,22 @@ const SeoReports = () => {
               }}
             />
           ))}
+
+          {visibleCount < sheets.length && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="outline"
+                disabled={loadingSheetIds.size > 0}
+                onClick={() =>
+                  setVisibleCount((c) => Math.min(c + BATCH_SIZE, sheets.length))
+                }
+              >
+                {loadingSheetIds.size > 0
+                  ? "Loading…"
+                  : `Load More (${sheets.length - visibleCount} left)`}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
