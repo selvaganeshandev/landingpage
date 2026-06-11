@@ -1974,8 +1974,11 @@ export const apiClient = {
       body: JSON.stringify(data),
     }),
 
-  getSeoReportSheetData: (domainId: number) =>
-    apiRequest(`/seo/report-sheets/data/?domain_id=${domainId}`),
+  getSeoReportSheetData: (domainId: number, sheetIds?: number[]) =>
+    apiRequest(
+      `/seo/report-sheets/data/?domain_id=${domainId}` +
+      (sheetIds && sheetIds.length ? `&sheet_ids=${sheetIds.join(',')}` : '')
+    ),
 
   exportSeoReportXlsx: async (domainId: number): Promise<Blob> => {
     const token = getAuthToken();
