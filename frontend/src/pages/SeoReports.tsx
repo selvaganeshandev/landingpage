@@ -489,6 +489,13 @@ function SubTable({
                     const isUrl =
                       typeof value === "string" &&
                       (value.startsWith("http://") || value.startsWith("https://"));
+                    const isLongDimPath =
+                      typeof value === "string" &&
+                      !isUrl &&
+                      (col === "Landing Pages" ||
+                        col === "Pages" ||
+                        col === "Queries" ||
+                        col === "Page URL");
                     return (
                       <td
                         key={col}
@@ -512,6 +519,13 @@ function SubTable({
                           >
                             {value}
                           </a>
+                        ) : isLongDimPath ? (
+                          <span
+                            className="truncate block max-w-[260px]"
+                            title={value}
+                          >
+                            {value}
+                          </span>
                         ) : (
                           <span>{value ?? "-"}</span>
                         )}
@@ -892,7 +906,8 @@ function ReportWidget({
                           !isUrl &&
                           (col === "Landing Pages" ||
                             col === "Pages" ||
-                            col === "Queries");
+                            col === "Queries" ||
+                            col === "Page URL");
                         const numVal =
                           typeof value === "number"
                             ? value
