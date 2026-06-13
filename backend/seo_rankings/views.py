@@ -745,9 +745,6 @@ def seo_trigger_ranking(request):
     Body: { domain_id } or { seo_keyword_rank_id } for single keyword.
     Dispatches to Celery via the engine API.
     """
-    if request.user.role not in ['admin', 'super_admin']:
-        return Response({'error': 'Only admins can trigger ranking'}, status=status.HTTP_403_FORBIDDEN)
-
     domain_id = request.data.get('domain_id')
     seo_kw_id = request.data.get('seo_keyword_rank_id')
 
@@ -1453,13 +1450,19 @@ def seo_competitor_status(request):
 @permission_classes([IsAuthenticated])
 def seo_competitor_add(request):
     """
-    Add a competitor domain to track.
+    Add a competitor domain to track. Used by both auto-discovery (Add from the
+    candidate list) and manual entry (user types a domain).
     Body: { domain_id: int, competitor_domain: str }
-    Max 6 competitors per domain.
+    Max 30 competitors per domain.
     """
     domain_id = request.data.get('domain_id')
     competitor_domain = request.data.get('competitor_domain', '').strip().lower()
-    competitor_domain = competitor_domain.replace('www.', '')
+    # Normalize manual input like "https://www.competitor.com/path" -> "competitor.com".
+    competitor_domain = (
+        competitor_domain
+        .replace('https://', '').replace('http://', '')
+        .replace('www.', '').split('/')[0].strip()
+    )
 
     if not domain_id or not competitor_domain:
         return Response({'error': 'domain_id and competitor_domain required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1469,8 +1472,8 @@ def seo_competitor_add(request):
         return Response({'error': 'Domain not found or access denied'}, status=status.HTTP_403_FORBIDDEN)
 
     existing_count = SeoCompetitorProject.objects.filter(domain_id=domain_id).count()
-    if existing_count >= 6:
-        return Response({'error': 'Maximum 6 competitors allowed'}, status=status.HTTP_400_BAD_REQUEST)
+    if existing_count >= 30:
+        return Response({'error': 'Maximum 30 competitors allowed'}, status=status.HTTP_400_BAD_REQUEST)
 
     project, created = SeoCompetitorProject.objects.get_or_create(
         domain_id=int(domain_id),
