@@ -2,6 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { ExternalLink, Plus, Trash2, ChevronLeft, Search, ChevronRight, RefreshCw, MoreVertical, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -89,6 +93,11 @@ const SeoCompetitors = () => {
   const [trackedCount, setTrackedCount] = useState(0);
   const [adding, setAdding] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
+
+  // Manual competitor add
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualDomain, setManualDomain] = useState("");
+  const [manualBusy, setManualBusy] = useState(false);
 
   // Direct competitors
   const [projects, setProjects] = useState<CompProject[]>([]);
@@ -207,7 +216,7 @@ const SeoCompetitors = () => {
   };
 
   const handleAddCompetitor = async (domain: string) => {
-    if (!domainId || trackedCount >= 6) return;
+    if (!domainId || trackedCount >= 30) return;
     setAdding(domain);
     try {
       await apiClient.addSeoCompetitor(domainId, domain);
@@ -264,6 +273,39 @@ const SeoCompetitors = () => {
     }
   };
 
+  const handleAddManual = async () => {
+    const raw = manualDomain.trim();
+    if (!domainId || !raw || manualBusy) return;
+    // Normalize "https://www.competitor.com/x" -> "competitor.com" (backend re-normalizes too).
+    const dom = raw.replace(/^https?:\/\//i, "").replace(/^www\./i, "").split("/")[0].trim().toLowerCase();
+    if (!dom || !dom.includes(".")) {
+      toast({ title: "Invalid domain", description: "Enter a valid domain like competitor.com", variant: "destructive" });
+      return;
+    }
+    if (trackedCount >= 30) {
+      toast({ title: "Limit reached", description: "You can add up to 30 competitors per project.", variant: "destructive" });
+      return;
+    }
+    if (projects.some(p => p.competitor_domain === dom)) {
+      toast({ title: "Already added", description: `${dom} is already a competitor.` });
+      return;
+    }
+    setManualBusy(true);
+    try {
+      await apiClient.addSeoCompetitor(domainId, dom);
+      await loadProjects();
+      setTrackedCount(prev => prev + 1);
+      setCandidates(prev => prev.map(c => c.domain === dom ? { ...c, tracked: true } : c));
+      toast({ title: "Competitor added", description: dom });
+      setManualDomain("");
+      setManualOpen(false);
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "Could not add competitor.", variant: "destructive" });
+    } finally {
+      setManualBusy(false);
+    }
+  };
+
   /* ── Filtered lists ─────────────────────────────────────────────────────── */
   const filteredCandidates = candidates.filter(c =>
     !compSearch || c.domain.toLowerCase().includes(compSearch.toLowerCase())
@@ -295,6 +337,40 @@ const SeoCompetitors = () => {
       </div>
       {extra && <div className="flex items-center gap-2.5 flex-wrap">{extra}</div>}
     </div>
+  );
+
+  /* ── Manual add dialog (shared across selecting + direct views) ──────────── */
+  const manualDialog = (
+    <Dialog open={manualOpen} onOpenChange={(o) => { if (!manualBusy) setManualOpen(o); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add competitor manually</DialogTitle>
+          <DialogDescription>
+            Enter a competitor's domain to track it alongside auto-discovered competitors.
+            Keyword comparison fills in on the next analysis / reanalysis.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-2">
+          <Label htmlFor="manual-comp-domain">Competitor domain</Label>
+          <Input
+            id="manual-comp-domain"
+            placeholder="competitor.com"
+            value={manualDomain}
+            onChange={(e) => setManualDomain(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleAddManual(); }}
+            autoFocus
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setManualOpen(false)} disabled={manualBusy}>
+            Cancel
+          </Button>
+          <Button className="gradient-primary" onClick={handleAddManual} disabled={manualBusy || !manualDomain.trim()}>
+            {manualBusy ? "Adding..." : "Add competitor"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 
   /* ═══════════════════════════════════════════════════════════════════════════
@@ -491,10 +567,17 @@ const SeoCompetitors = () => {
                 NOTE: The list displays top competitors from {candidates.length} results.
               </p>
             </div>
-            <div className="relative w-full sm:w-72 flex-shrink-0">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input placeholder={`Search among ${candidates.length} competitors`}
-                value={compSearch} onChange={e => setCompSearch(e.target.value)} className="pl-9 h-9 text-sm" />
+            <div className="flex items-center gap-2 w-full sm:w-auto flex-shrink-0">
+              <div className="relative w-full sm:w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input placeholder={`Search among ${candidates.length} competitors`}
+                  value={compSearch} onChange={e => setCompSearch(e.target.value)} className="pl-9 h-9 text-sm" />
+              </div>
+              <Button size="sm" variant="outline" className="gap-1.5 h-9 flex-shrink-0"
+                disabled={trackedCount >= 30}
+                onClick={() => setManualOpen(true)}>
+                <Plus className="w-4 h-4" /> Add manually
+              </Button>
             </div>
           </div>
 
@@ -538,7 +621,7 @@ const SeoCompetitors = () => {
                       </button>
                     ) : (
                       <Button size="sm" className="gradient-primary h-8 px-4 text-xs font-semibold"
-                        disabled={trackedCount >= 6 || adding === c.domain}
+                        disabled={trackedCount >= 30 || adding === c.domain}
                         onClick={() => handleAddCompetitor(c.domain)}>
                         {adding === c.domain ? "..." : "Add"}
                       </Button>
@@ -555,7 +638,7 @@ const SeoCompetitors = () => {
           className="fixed bottom-0 right-0 bg-background border-t border-border px-6 sm:px-8 py-4 flex items-center justify-between z-40 transition-all duration-150"
           style={{ left: sidebarOpen ? 256 : 64 }}>
           <span className="text-sm text-muted-foreground">
-            You can add not more than 6 competitors per project.
+            You can add not more than 30 competitors per project.
           </span>
           <div className="flex items-center gap-3 mr-16">
             {projects.length > 0 && (
@@ -568,10 +651,11 @@ const SeoCompetitors = () => {
               variant={trackedCount > 0 ? "default" : "outline"}
               onClick={handleFinish}
               disabled={finishing}>
-              <span className="mr-1.5">Finish</span>({trackedCount}/6)
+              <span className="mr-1.5">Finish</span>({trackedCount}/30)
             </Button>
           </div>
         </div>
+        {manualDialog}
       </div>
     );
   }
@@ -589,6 +673,11 @@ const SeoCompetitors = () => {
               <Button variant="outline" size="sm" className="gap-1.5 text-xs"
                 onClick={handleStartAnalysis}>
                 <RefreshCw className="w-3.5 h-3.5" /> Reanalysis
+              </Button>
+              <Button variant="outline" size="sm" className="gap-1.5"
+                disabled={projects.length >= 30}
+                onClick={() => setManualOpen(true)}>
+                <Plus className="w-4 h-4" /> Add manually
               </Button>
               <Button size="sm" className="gradient-primary gap-1.5"
                 onClick={() => { if (analysisStatus === "COMP") setView("selecting"); else handleStartAnalysis(); }}>
@@ -663,6 +752,7 @@ const SeoCompetitors = () => {
             ))}
           </div>
         )}
+        {manualDialog}
       </div>
     );
   }
