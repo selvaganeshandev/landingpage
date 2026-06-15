@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3, CalendarIcon } from "lucide-react";
+import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3, CalendarIcon, Sparkles } from "lucide-react";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/PageLoader";
@@ -813,6 +813,70 @@ export default function TrafficAttribution() {
               )}
             </CardContent>
           </Card>
+
+          {/* AI Assistance: a single combined section below the per-LLM cards that
+              rolls every AI platform (ChatGPT, Gemini, Claude, Other AI, …) into one
+              summary, then breaks the totals back down per LLM. Mirrors the aggregate
+              already shown elsewhere on the page so the numbers reconcile. */}
+          {platformSources.length > 0 && (
+            <Card className="border border-border">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  AI Assistance
+                </CardTitle>
+                <CardDescription>Combined traffic across all AI platforms, with a per-LLM breakdown</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {/* Combined totals across every AI platform */}
+                <div className="p-4 border rounded-lg bg-muted/30 mb-4">
+                  <div className="grid grid-cols-5 gap-4">
+                    <div>
+                      <div className="text-sm text-muted-foreground">Visits</div>
+                      <div className="text-lg font-bold">{totalTraffic.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-muted-foreground">Conversions</div>
+                      <div className="text-lg font-bold">{totalConversions.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-muted-foreground">Revenue</div>
+                      <div className="text-lg font-bold">{formatCurrency(totalRevenue)}</div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-muted-foreground">Bounce Rate</div>
+                      <div className="text-lg font-bold">{(bounceRate * 100).toFixed(1)}%</div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-muted-foreground">Avg Duration</div>
+                      <div className="text-lg font-bold">{formatDuration(avgSessionDuration)}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Per-LLM breakdown (sorted high → low by visits) */}
+                <div className="space-y-2">
+                  {sourceSummary.map((item, index) => {
+                    const share = totalTraffic > 0 ? ((item.visits / totalTraffic) * 100).toFixed(1) : "0";
+                    return (
+                      <div key={index} className="flex items-center justify-between gap-4 py-2 px-3 border rounded-md">
+                        <div className="flex items-center gap-2 min-w-[120px]">
+                          <ExternalLink className="h-4 w-4 text-primary" />
+                          <span className="font-medium">{item.platform}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-end gap-x-6 gap-y-1 text-sm">
+                          <span><span className="text-muted-foreground">Visits </span><span className="font-semibold">{item.visits.toLocaleString()}</span></span>
+                          <span><span className="text-muted-foreground">Conversions </span><span className="font-semibold">{item.conversions}</span></span>
+                          <span><span className="text-muted-foreground">Revenue </span><span className="font-semibold">{formatCurrency(item.revenue)}</span></span>
+                          <span className="text-muted-foreground min-w-[48px] text-right">{share}%</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="search" className="space-y-6">
