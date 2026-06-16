@@ -761,7 +761,14 @@ def get_ai_referral_data(request):
         # GA4 reports revenue in the property's configured currency. Surface its
         # ISO code (e.g. INR, USD) so the dashboard renders the right symbol
         # instead of a hardcoded "$". GA4 returns it in the report metadata.
-        currency_code = response.get('metadata', {}).get('currencyCode') or 'USD'
+        report_metadata = response.get('metadata', {})
+        currency_code = report_metadata.get('currencyCode') or 'USD'
+
+        # Tell the dashboard whether GA4 sampled this response. Our Data API
+        # numbers are normally UNSAMPLED (exact, and match GA4's Reports view);
+        # only GA4 Explorations sample. Surfacing this lets the UI reassure the
+        # client that a figure is exact vs. a GA4 estimate. See _extract_sampling.
+        sampling = _extract_sampling_metadata(report_metadata)
 
         return Response({
             'success': True,
@@ -769,6 +776,7 @@ def get_ai_referral_data(request):
             'platform_breakdown': ai_traffic['platform_breakdown'],
             'totals': ai_traffic['totals'],
             'currency_code': currency_code,
+            'sampling': sampling,
             'date_range': {'start': start_date, 'end': end_date, 'days': days},
         })
 
@@ -821,6 +829,35 @@ def _f(values, idx, cast=float, default=0):
         return cast(float(values[idx]['value']))
     except (IndexError, KeyError, TypeError, ValueError):
         return default
+
+
+def _extract_sampling_metadata(report_metadata):
+    """Read GA4's sampling state out of a runReport response's metadata.
+
+    GA4 returns one SamplingMetadata per requested date range; a range is
+    sampled when ``samplesReadCount < samplingSpaceSize`` (GA4 read only a
+    subset of sessions and extrapolated). When the list is absent or empty the
+    response is fully UNSAMPLED — i.e. exact, and reconciles with GA4's Reports
+    view. (Only GA4's Explorations UI samples, and that estimate can't be
+    reproduced through the Data API, so we report the unsampled truth and just
+    flag whether GA4 itself would have sampled.)
+
+    Returns ``{'is_sampled': bool, 'percent_sampled': float|None}`` where the
+    percent is the share of sessions GA4 actually read (None when unsampled).
+    """
+    samplings = report_metadata.get('samplingMetadatas') or []
+    is_sampled = False
+    percent = None
+    for s in samplings:
+        try:
+            read = int(s.get('samplesReadCount', 0))
+            space = int(s.get('samplingSpaceSize', 0))
+        except (TypeError, ValueError):
+            continue
+        if space > 0 and read < space:
+            is_sampled = True
+            percent = round((read / space) * 100, 1)
+    return {'is_sampled': is_sampled, 'percent_sampled': percent}
 
 
 def parse_ai_referral_response(response):

@@ -3,6 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
@@ -71,6 +73,11 @@ export default function TrafficAttribution() {
   const [aiEndDate, setAiEndDate] = useState<Date | undefined>(undefined);
   const [aiWindowData, setAiWindowData] = useState<any>(null);
   const [aiWindowLoading, setAiWindowLoading] = useState(false);
+  // "GA4 view" toggle for the Sources tab. OFF = internal/exact view (clean cards).
+  // ON = client-facing GA4 reconciliation view: reveals the sampling badge +
+  // "matches GA4" note on every LLM card. Numbers are identical either way —
+  // the switch only shows/hides the GA4-reconciliation context. Display-only.
+  const [gaClientView, setGaClientView] = useState(false);
 
   useEffect(() => {
     const ensureDomain = async () => {
@@ -218,6 +225,40 @@ export default function TrafficAttribution() {
   // a hardcoded "$". The live AI-referral window returns the property's ISO code;
   // fall back to USD only when it's unavailable (e.g. snapshot-only render).
   const currencyCode = aiWindowData?.currency_code || 'USD';
+
+  // GA4 sampling state for the live AI-referral window. Our Data API numbers are
+  // normally UNSAMPLED (exact, and match GA4's Reports view); only GA4 Explorations
+  // sample. We surface this so the AI Assistance card can reassure the client a
+  // figure is exact vs. a GA4 estimate. Absent on snapshot-only renders.
+  const sampling = aiWindowData?.sampling;
+  const isSampled = !!sampling?.is_sampled;
+  const percentSampled = sampling?.percent_sampled;
+
+  // GA4-reconciliation block shown on each card when the "GA4 view" switch is ON.
+  // Sampling is per-response (a single GA4 query), so the state is identical for
+  // every LLM — we render the same badge + note on each card for the client.
+  // Returns null on snapshot-only renders where we have no live sampling metadata.
+  const renderGaReconcile = () => {
+    if (!sampling) return null;
+    return (
+      <div className="mt-3 border-t pt-2 space-y-1">
+        {isSampled ? (
+          <Badge variant="outline" className="border-amber-500 text-amber-600">
+            ⚠ GA4-sampled{percentSampled != null ? ` (~${percentSampled}% of sessions)` : ''}
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="border-emerald-500 text-emerald-600">
+            ✓ Unsampled · matches GA4 Reports
+          </Badge>
+        )}
+        <p className="text-xs text-muted-foreground">
+          {isSampled
+            ? `GA4 sampled this window${percentSampled != null ? ` (~${percentSampled}% of sessions)` : ''} — its Explorations figure is an estimate. Compare in GA4 Reports → Traffic acquisition for an exact match.`
+            : `GA4 Data API returns exact, unsampled data — it matches your GA4 Reports → Traffic acquisition${aiDateRange?.start ? ` for ${aiDateRange.start} → ${aiDateRange.end}` : ''} exactly.`}
+        </p>
+      </div>
+    );
+  };
   const formatCurrency = (value: number, decimals = 0): string => {
     try {
       return new Intl.NumberFormat(undefined, {
@@ -744,8 +785,24 @@ export default function TrafficAttribution() {
         <TabsContent value="sources" className="space-y-6">
           <Card className="border border-border">
             <CardHeader>
-              <CardTitle>AI Platform Referral Analysis</CardTitle>
-              <CardDescription>Traffic, conversions, and revenue by AI platform</CardDescription>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle>AI Platform Referral Analysis</CardTitle>
+                  <CardDescription>Traffic, conversions, and revenue by AI platform — exact, unsampled GA4 figures</CardDescription>
+                </div>
+                {/* GA4 view switch: OFF = internal/exact (clean cards), ON = client
+                    GA4 reconciliation (reveals the sampling badge + "matches GA4"
+                    note on every LLM card). Numbers are identical in both modes;
+                    only the GA4 context is shown/hidden. */}
+                {sampling && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Label htmlFor="ga-view-switch" className="text-xs text-muted-foreground cursor-pointer">
+                      {gaClientView ? 'GA4 view (client)' : 'Internal (exact)'}
+                    </Label>
+                    <Switch id="ga-view-switch" checked={gaClientView} onCheckedChange={setGaClientView} />
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               {platformSources.length > 0 ? (
@@ -805,6 +862,9 @@ export default function TrafficAttribution() {
                           </div>
                         </details>
                       )}
+                      {/* Client GA4-reconciliation context, shown only when the
+                          "GA4 view" switch is ON. Display-only — same numbers. */}
+                      {gaClientView && renderGaReconcile()}
                     </div>
                   ))}
                 </div>
@@ -821,11 +881,30 @@ export default function TrafficAttribution() {
           {platformSources.length > 0 && (
             <Card className="border border-border">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-primary" />
-                  AI Assistance
-                </CardTitle>
-                <CardDescription>Combined traffic across all AI platforms, with a per-LLM breakdown</CardDescription>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Sparkles className="h-5 w-5 text-primary" />
+                      AI Assistance
+                    </CardTitle>
+                    <CardDescription>Combined traffic across all AI platforms, with a per-LLM breakdown</CardDescription>
+                  </div>
+                  {/* Sampling badge: tells the client whether these numbers are
+                      exact (unsampled — match GA4 Reports) or a GA4 estimate.
+                      Shown in the client "GA4 view" (switch ON) when we have
+                      live-window sampling metadata. */}
+                  {gaClientView && sampling && (
+                    isSampled ? (
+                      <Badge variant="outline" className="border-amber-500 text-amber-600 whitespace-nowrap">
+                        ⚠ GA4-sampled{percentSampled != null ? ` (~${percentSampled}% of sessions)` : ''}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="border-emerald-500 text-emerald-600 whitespace-nowrap">
+                        ✓ Unsampled · matches GA4 Reports
+                      </Badge>
+                    )
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 {/* Combined totals across every AI platform */}
@@ -854,6 +933,16 @@ export default function TrafficAttribution() {
                   </div>
                 </div>
 
+                {/* Plain-text sampling note for the combined total, shown in the
+                    client "GA4 view" (switch ON). */}
+                {gaClientView && sampling && (
+                  <p className="text-xs text-muted-foreground mb-4">
+                    {isSampled
+                      ? `GA4 sampled this window${percentSampled != null ? ` (~${percentSampled}% of sessions)` : ''} — its Explorations figure is an estimate. Compare in GA4 Reports for an exact match.`
+                      : `GA4 Data API returns exact, unsampled data — this total matches your GA4 Reports → Traffic acquisition${aiDateRange?.start ? ` for ${aiDateRange.start} → ${aiDateRange.end}` : ''} exactly.`}
+                  </p>
+                )}
+
                 {/* Per-LLM breakdown (sorted high → low by visits) */}
                 <div className="space-y-2">
                   {sourceSummary.map((item, index) => {
@@ -874,6 +963,24 @@ export default function TrafficAttribution() {
                     );
                   })}
                 </div>
+
+                {/* How to verify against GA4. The point clients miss: compare in
+                    GA4's REPORTS view (unsampled, matches us), not Explorations
+                    (which samples). GA4 sampling can't be reproduced via the API. */}
+                <details className="mt-4">
+                  <summary className="text-xs text-muted-foreground cursor-pointer select-none hover:text-foreground">
+                    How does this match GA4?
+                  </summary>
+                  <div className="mt-2 border-t pt-2 text-xs text-muted-foreground space-y-1">
+                    <p>These totals are pulled from the GA4 Data API and are {isSampled ? 'GA4-sampled (an estimate)' : 'unsampled (exact)'}. To reconcile in GA4:</p>
+                    <ol className="list-decimal pl-4 space-y-0.5">
+                      <li>Go to <span className="font-medium text-foreground">Reports → Acquisition → Traffic acquisition</span> (not Explorations — Explorations samples and will differ).</li>
+                      <li>Change the dimension to <span className="font-medium text-foreground">Session source / medium</span>.</li>
+                      <li>Search each AI source and sum the <span className="font-medium text-foreground">Sessions</span> (= Visits here). Expand any LLM card above to see its exact GA4 sources.</li>
+                      <li>Set the GA4 date range to <span className="font-medium text-foreground">{aiWindowData?.date_range?.start} → {aiWindowData?.date_range?.end}</span> (ends yesterday).</li>
+                    </ol>
+                  </div>
+                </details>
               </CardContent>
             </Card>
           )}
