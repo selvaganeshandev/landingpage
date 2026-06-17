@@ -3790,8 +3790,12 @@ def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
       - Clicks: GSC total clicks (site-wide)
       - Clicks to Sessions Ratio: Sessions ÷ Clicks (how much of GSC-reported traffic
         GA is capturing as Organic sessions; 1.0 means perfect match)
+      - New Users: GA Organic Search new users (site-wide)
+      - Bounce Rate: GA Organic Search bounce rate (shown as a percentage)
+      - Lead Count Events: GA Organic Search 'all_leads_event_action' key-event count
     Monthly schedule prorates the current incomplete month (raw shown alongside
-    projected value and the label suffixed with " (PR)").
+    projected value and the label suffixed with " (PR)"). Counts (Sessions,
+    New Users, Lead Count) are prorated; Bounce Rate (a rate) is not.
     """
     import calendar as _cal
     from datetime import date as _date
@@ -3852,28 +3856,71 @@ def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
         }
     }
 
-    range_data = {}   # {label: {'sessions': int, 'clicks': int}}
+    # GA4 key event counted as a "lead" (Organic-scoped here). This is the exact
+    # event name as it appears in GA4 — note GA sanitizes it to double/trailing
+    # underscores. Change this single constant if the lead event is renamed.
+    LEADS_EVENT_NAME = 'all_leads__event_action_'
+
+    range_data = {}   # {label: {sessions, new_users, bounce_rate, leads, clicks}}
     api_errors = []
 
     # ga_ranges and gsc_ranges share the same labels and start dates; only the
     # current period's end date differs (each uses its own provider lag).
     for (ga_start, ga_end, label), (_gsc_start, gsc_end, _gsc_label) in zip(ga_ranges, gsc_ranges):
-        # GA Organic Sessions (site-wide, no dimension)
+        # GA Organic metrics — Sessions, New Users, Bounce Rate (site-wide, no dimension)
         try:
             ga_resp = ga_service.properties().runReport(
                 property=property_id,
                 body={
                     'dateRanges':      [{'startDate': ga_start.isoformat(), 'endDate': ga_end.isoformat()}],
-                    'metrics':         [{'name': 'sessions'}],
+                    'metrics':         [{'name': 'sessions'}, {'name': 'newUsers'}, {'name': 'bounceRate'}],
                     'dimensionFilter': organic_filter,
                 }
             ).execute()
             ga_rows = ga_resp.get('rows', [])
-            sessions = int(ga_rows[0]['metricValues'][0]['value']) if ga_rows else 0
+            if ga_rows:
+                mv          = ga_rows[0]['metricValues']
+                sessions    = int(mv[0]['value'])
+                new_users   = int(mv[1]['value'])
+                bounce_rate = float(mv[2]['value'])
+            else:
+                sessions = new_users = 0
+                bounce_rate = 0.0
         except Exception as e:
             logger.error(f"Reconcile GA error ({label}) for sheet {sheet.id}: {e}")
-            sessions = 0
+            sessions = new_users = 0
+            bounce_rate = 0.0
             api_errors.append(f'GA: {e}')
+
+        # GA Organic Leads — count of the 'all_leads_event_action' key event in
+        # Organic Search sessions. keyEvents must be broken down with eventName
+        # as the DIMENSION and the organic channel as the FILTER, then the target
+        # event's row is picked. The inverse (eventName as a filter, with or
+        # without the channel as a dimension/andGroup) returns 0 here because
+        # GA4 mishandles crossing the event-scoped eventName with the
+        # session-scoped channel. Note: keyEvents only counts events currently
+        # marked as Key Events in GA4 admin — 'all_leads_event_action' must be
+        # configured there for this to be non-zero.
+        try:
+            leads_resp = ga_service.properties().runReport(
+                property=property_id,
+                body={
+                    'dateRanges':      [{'startDate': ga_start.isoformat(), 'endDate': ga_end.isoformat()}],
+                    'dimensions':      [{'name': 'eventName'}],
+                    'metrics':         [{'name': 'keyEvents'}],
+                    'dimensionFilter': organic_filter,
+                    'limit':           500,
+                }
+            ).execute()
+            leads = 0
+            for row in leads_resp.get('rows', []):
+                if row['dimensionValues'][0]['value'] == LEADS_EVENT_NAME:
+                    leads = int(row['metricValues'][0]['value'])
+                    break
+        except Exception as e:
+            logger.error(f"Reconcile GA leads error ({label}) for sheet {sheet.id}: {e}")
+            leads = 0
+            api_errors.append(f'GA leads: {e}')
 
         # GSC Clicks (site-wide totals, no dimensions)
         try:
@@ -3892,30 +3939,50 @@ def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
             clicks = 0
             api_errors.append(f'GSC: {e}')
 
-        range_data[label] = {'sessions': sessions, 'clicks': clicks}
+        range_data[label] = {
+            'sessions':    sessions,
+            'new_users':   new_users,
+            'bounce_rate': bounce_rate,
+            'leads':       leads,
+            'clicks':      clicks,
+        }
 
     # If EVERY period failed for both APIs, surface an error.
     if not range_data and api_errors:
         return {'columns': [], 'rows': [], 'total_rows': 0, 'error': api_errors[0]}
 
-    columns = ['Sr No', 'Month', 'Sessions', 'Clicks', 'Clicks to Sessions Ratio']
+    columns = ['Sr No', 'Month', 'Sessions', 'Clicks', 'Clicks to Sessions Ratio',
+               'New Users', 'Bounce Rate', 'Lead Count Events']
 
+    _empty = {'sessions': 0, 'clicks': 0, 'new_users': 0, 'bounce_rate': 0.0, 'leads': 0}
     rows = []
     for idx, (_s, _e, label) in enumerate(ga_ranges, 1):
-        data = range_data.get(label, {'sessions': 0, 'clicks': 0})
-        raw_s = data['sessions']
-        raw_c = data['clicks']
+        data = range_data.get(label, _empty)
+        raw_s  = data['sessions']
+        raw_c  = data['clicks']
+        raw_nu = data['new_users']
+        raw_br = data['bounce_rate']
+        raw_ld = data['leads']
+
+        # Bounce Rate is a rate (GA returns a 0–1 ratio) → percentage, never prorated.
+        bounce_cell = f"{round(raw_br * 100, 2)}%"
 
         if is_prorated and label == cur_label:
-            proj_s = round(raw_s * ga_factor)
-            proj_c = round(raw_c * gsc_factor)
-            sessions_cell = f"{raw_s} ({proj_s})"
-            clicks_cell   = f"{raw_c} ({proj_c})"
+            proj_s  = round(raw_s * ga_factor)
+            proj_c  = round(raw_c * gsc_factor)
+            proj_nu = round(raw_nu * ga_factor)
+            proj_ld = round(raw_ld * ga_factor)
+            sessions_cell  = f"{raw_s} ({proj_s})"
+            clicks_cell    = f"{raw_c} ({proj_c})"
+            new_users_cell = f"{raw_nu} ({proj_nu})"
+            leads_cell     = f"{raw_ld} ({proj_ld})"
             ratio_s, ratio_c = proj_s, proj_c
             month_label = f"{label} (PR)"
         else:
-            sessions_cell = raw_s
-            clicks_cell   = raw_c
+            sessions_cell  = raw_s
+            clicks_cell    = raw_c
+            new_users_cell = raw_nu
+            leads_cell     = raw_ld
             ratio_s, ratio_c = raw_s, raw_c
             month_label = label
 
@@ -3930,6 +3997,9 @@ def _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet):
             'Sessions':                  sessions_cell,
             'Clicks':                    clicks_cell,
             'Clicks to Sessions Ratio':  ratio_cell,
+            'New Users':                 new_users_cell,
+            'Bounce Rate':               bounce_cell,
+            'Lead Count Events':         leads_cell,
         })
 
     return {
