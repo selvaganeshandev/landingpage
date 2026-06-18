@@ -273,19 +273,30 @@ export default function TrafficAttribution() {
   };
 
   // Google Analytics Data
-  const platformSources = aiPlatformBreakdown ? Object.entries(aiPlatformBreakdown).map(([platform, data]: [string, any]) => ({
-    platform,
-    visits: data.visits || data.sessions || 0,
-    conversions: data.conversions || 0,
-    revenue: data.revenue || 0,
-    trend: "+0%", // Calculate trend if needed
-    // GA4 returns bounceRate as a fraction (0.2621 = 26.21%); ×100 to match GA4's %.
-    bounceRate: `${((data.bounceRate ?? 0) * 100).toFixed(1)}%`,
-    avgDuration: formatDuration(data.avgDuration || 0),
-    // Raw GA4 sessionSource rows that roll up into this LLM (live window only),
-    // so the client can see exactly how the card reconciles with GA4.
-    sources: Array.isArray(data.sources) ? data.sources : [],
-  })) : [];
+  const platformSources = aiPlatformBreakdown ? Object.entries(aiPlatformBreakdown).map(([platform, data]: [string, any]) => {
+    const visits = data.visits || data.sessions || 0;
+    const conversions = data.conversions || 0;
+    return {
+      platform,
+      visits,
+      conversions,
+      revenue: data.revenue || 0,
+      trend: "+0%", // Calculate trend if needed
+      // GA4 returns bounceRate as a fraction (0.2621 = 26.21%); ×100 to match GA4's %.
+      bounceRate: `${((data.bounceRate ?? 0) * 100).toFixed(1)}%`,
+      avgDuration: formatDuration(data.avgDuration || 0),
+      // Conversion rate = GA4's "Session key event rate (purchase)" (a fraction),
+      // session-weighted across the platform's sources on the backend so it matches
+      // GA4 exactly — 0% for lead-gen properties with no purchase key event, the
+      // real rate for e-commerce. Older cached snapshots predate the field → "—".
+      conversionRate: data.conversionRate != null
+        ? `${(data.conversionRate * 100).toFixed(2)}%`
+        : '—',
+      // Raw GA4 sessionSource rows that roll up into this LLM (live window only),
+      // so the client can see exactly how the card reconciles with GA4.
+      sources: Array.isArray(data.sources) ? data.sources : [],
+    };
+  }) : [];
 
   const deviceBreakdown = gaData?.device_breakdown ? Object.entries(gaData.device_breakdown).map(([device, data]: [string, any]) => ({
     device,
@@ -790,18 +801,10 @@ export default function TrafficAttribution() {
                   <CardTitle>AI Platform Referral Analysis</CardTitle>
                   <CardDescription>Traffic, conversions, and revenue by AI platform — exact, unsampled GA4 figures</CardDescription>
                 </div>
-                {/* GA4 view switch: OFF = internal/exact (clean cards), ON = client
-                    GA4 reconciliation (reveals the sampling badge + "matches GA4"
-                    note on every LLM card). Numbers are identical in both modes;
-                    only the GA4 context is shown/hidden. */}
-                {sampling && (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Label htmlFor="ga-view-switch" className="text-xs text-muted-foreground cursor-pointer">
-                      {gaClientView ? 'GA4 view (client)' : 'Internal (exact)'}
-                    </Label>
-                    <Switch id="ga-view-switch" checked={gaClientView} onCheckedChange={setGaClientView} />
-                  </div>
-                )}
+                {/* GA4 view switch hidden — the client has confirmed the figures
+                    reconcile with GA4, so the internal/GA4-reconciliation toggle is
+                    no longer surfaced. The logic is retained (gaClientView stays
+                    false) so nothing else on the page changes. */}
               </div>
             </CardHeader>
             <CardContent>
@@ -816,13 +819,13 @@ export default function TrafficAttribution() {
                         </div>
                         <Badge variant="default">{item.trend}</Badge>
                       </div>
-                      <div className="grid grid-cols-5 gap-4">
+                      <div className="grid grid-cols-6 gap-4">
                         <div>
                           <div className="text-sm text-muted-foreground">Visits</div>
                           <div className="text-lg font-bold">{item.visits.toLocaleString()}</div>
                         </div>
                         <div>
-                          <div className="text-sm text-muted-foreground">Conversions</div>
+                          <div className="text-sm text-muted-foreground">Orders</div>
                           <div className="text-lg font-bold">{item.conversions}</div>
                         </div>
                         <div>
@@ -836,6 +839,10 @@ export default function TrafficAttribution() {
                         <div>
                           <div className="text-sm text-muted-foreground">Avg Duration</div>
                           <div className="text-lg font-bold">{item.avgDuration}</div>
+                        </div>
+                        <div>
+                          <div className="text-sm text-muted-foreground">Conversion Rate</div>
+                          <div className="text-lg font-bold">{item.conversionRate}</div>
                         </div>
                       </div>
                       {/* GA4 reconciliation: the raw sessionSource rows that roll
@@ -915,7 +922,7 @@ export default function TrafficAttribution() {
                       <div className="text-lg font-bold">{totalTraffic.toLocaleString()}</div>
                     </div>
                     <div>
-                      <div className="text-sm text-muted-foreground">Conversions</div>
+                      <div className="text-sm text-muted-foreground">Orders</div>
                       <div className="text-lg font-bold">{totalConversions.toLocaleString()}</div>
                     </div>
                     <div>
@@ -955,7 +962,7 @@ export default function TrafficAttribution() {
                         </div>
                         <div className="flex flex-wrap items-center justify-end gap-x-6 gap-y-1 text-sm">
                           <span><span className="text-muted-foreground">Visits </span><span className="font-semibold">{item.visits.toLocaleString()}</span></span>
-                          <span><span className="text-muted-foreground">Conversions </span><span className="font-semibold">{item.conversions}</span></span>
+                          <span><span className="text-muted-foreground">Orders </span><span className="font-semibold">{item.conversions}</span></span>
                           <span><span className="text-muted-foreground">Revenue </span><span className="font-semibold">{formatCurrency(item.revenue)}</span></span>
                           <span className="text-muted-foreground min-w-[48px] text-right">{share}%</span>
                         </div>
