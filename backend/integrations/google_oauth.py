@@ -735,6 +735,12 @@ def get_ai_referral_data(request):
                     {'name': 'purchaseRevenue'},
                     {'name': 'bounceRate'},
                     {'name': 'averageSessionDuration'},
+                    # GA4's "Session key event rate (purchase)" column — sessions
+                    # that completed a purchase ÷ sessions. Event-scoped, so it's a
+                    # clean 0 for lead-gen properties with no `purchase` key event
+                    # and the real rate for e-commerce; reconciles with GA4 exactly.
+                    # Returned as a fraction (0.013 = 1.3%).
+                    {'name': 'sessionKeyEventRate:purchase'},
                 ],
                 'dimensions': [
                     {'name': 'sessionSource'},
@@ -890,6 +896,8 @@ def parse_ai_referral_response(response):
         revenue = _f(mv, 4, float)
         bounce_rate = _f(mv, 5, float)
         avg_duration = _f(mv, 6, float)
+        # GA4 sessionKeyEventRate:purchase — a per-session rate (fraction).
+        conv_rate = _f(mv, 7, float)
 
         platform_name = resolve_platform(source) or 'Other AI'
 
@@ -897,7 +905,8 @@ def parse_ai_referral_response(response):
             by_platform[platform_name] = {'sessions': 0, 'users': 0, 'pageviews': 0, 'sources': []}
             platform_breakdown[platform_name] = {
                 'visits': 0, 'conversions': 0, 'revenue': 0,
-                'bounceRate': 0, 'avgDuration': 0, 'users': 0, 'pageViews': 0,
+                'bounceRate': 0, 'avgDuration': 0, 'conversionRate': 0,
+                'users': 0, 'pageViews': 0,
                 # Raw GA4 sessionSource rows that roll up into this LLM, so the
                 # dashboard can show clients exactly how each card reconciles
                 # with GA4 (e.g. Perplexity = "perplexity" + "perplexity.ai").
@@ -918,9 +927,13 @@ def parse_ai_referral_response(response):
         pb['revenue'] += revenue
         pb['users'] += users
         pb['pageViews'] += pageviews
-        # Rates are weighted by sessions and divided out after the loop.
+        # Rates are weighted by sessions and divided out after the loop. For
+        # sessionKeyEventRate:purchase this weighted average is mathematically
+        # exact (rate_i × sessions_i = purchasing sessions_i), so a multi-source
+        # platform reconciles with GA4's combined rate.
         pb['bounceRate'] += bounce_rate * sessions
         pb['avgDuration'] += avg_duration * sessions
+        pb['conversionRate'] += conv_rate * sessions
         rate_weight[platform_name] += sessions
 
         totals['visits'] += sessions
@@ -934,9 +947,11 @@ def parse_ai_referral_response(response):
         if weight > 0:
             pb['bounceRate'] = pb['bounceRate'] / weight
             pb['avgDuration'] = pb['avgDuration'] / weight
+            pb['conversionRate'] = pb['conversionRate'] / weight
         else:
             pb['bounceRate'] = 0
             pb['avgDuration'] = 0
+            pb['conversionRate'] = 0
         # Largest contributing source first, for a readable reconciliation list.
         pb['sources'].sort(key=lambda s: s['visits'], reverse=True)
 

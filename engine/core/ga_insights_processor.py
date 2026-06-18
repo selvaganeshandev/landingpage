@@ -482,6 +482,11 @@ class GAInsightsProcessor:
                         {'name': 'averageSessionDuration'},
                         {'name': 'totalUsers'},
                         {'name': 'screenPageViews'},
+                        # GA4's "Session key event rate (purchase)" column — sessions
+                        # that purchased ÷ sessions. Event-scoped: 0 for lead-gen
+                        # properties with no `purchase` key event, the real rate for
+                        # e-commerce. Returned as a fraction (0.013 = 1.3%).
+                        {'name': 'sessionKeyEventRate:purchase'},
                     ],
                     'dimensionFilter': {
                         'filter': {
@@ -512,6 +517,8 @@ class GAInsightsProcessor:
                 avg_duration = float(mv[4].get('value', 0)) if len(mv) > 4 else 0.0
                 users = int(float(mv[5].get('value', 0))) if len(mv) > 5 else 0
                 page_views = int(float(mv[6].get('value', 0))) if len(mv) > 6 else 0
+                # sessionKeyEventRate:purchase — per-session rate (fraction).
+                conv_rate = float(mv[7].get('value', 0)) if len(mv) > 7 else 0.0
 
                 if platform_name not in platform_data:
                     platform_data[platform_name] = {
@@ -520,6 +527,7 @@ class GAInsightsProcessor:
                         'revenue': 0,
                         'bounceRate': 0,
                         'avgDuration': 0,
+                        'conversionRate': 0,
                         'users': 0,
                         'pageViews': 0,
                         # Raw GA4 sessionSource rows that roll up into this LLM, so
@@ -538,9 +546,12 @@ class GAInsightsProcessor:
                 pd['revenue'] += revenue
                 pd['users'] += users
                 pd['pageViews'] += page_views
-                # Weighted-sum the rates; divided by total sessions below.
+                # Weighted-sum the rates; divided by total sessions below. The
+                # session-weighted average is exact for sessionKeyEventRate:purchase
+                # (rate_i × sessions_i = purchasing sessions_i).
                 pd['bounceRate'] += bounce_rate * sessions
                 pd['avgDuration'] += avg_duration * sessions
+                pd['conversionRate'] += conv_rate * sessions
                 rate_weight[platform_name] += sessions
 
             # Finalize sessions-weighted averages for the rate metrics.
@@ -549,9 +560,11 @@ class GAInsightsProcessor:
                 if weight > 0:
                     pd['bounceRate'] = pd['bounceRate'] / weight
                     pd['avgDuration'] = pd['avgDuration'] / weight
+                    pd['conversionRate'] = pd['conversionRate'] / weight
                 else:
                     pd['bounceRate'] = 0
                     pd['avgDuration'] = 0
+                    pd['conversionRate'] = 0
                 # Largest contributing source first, for a readable
                 # reconciliation list (matches the live path's ordering).
                 pd['sources'].sort(key=lambda s: s['visits'], reverse=True)
