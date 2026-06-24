@@ -14,11 +14,11 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-# DataBlue v2 ("google-search-v2") SERP endpoint. Read via _cfg at call time so
-# the URL can be overridden in settings/.env without a code change. v2 adds the
-# country / platform / language / domain / location / uule / pages params that
-# _build_payload forwards below.
-DEFAULT_DATABLUE_API_URL = "https://api.datablue.dev/v1/data/google/google-search-v2"
+# DataBlue SERP endpoint (/v1/data/google/serp — GET + query params). Read via
+# _cfg at call time so the URL can be overridden in settings/.env without a code
+# change. Supports the country / mobile / language / domain / location / uule /
+# pages / advanced params that _build_params forwards below.
+DEFAULT_DATABLUE_API_URL = "https://api.datablue.dev/v1/data/google/serp"
 
 
 def _cfg(name: str, default):
@@ -32,7 +32,7 @@ def _api_url():
 def _is_usable(raw) -> bool:
     """True only if DataBlue returned a real SERP we can rank against.
 
-    v2 (google-search-v2) can intermittently return success=true with an EMPTY
+    DataBlue can intermittently return success=true with an EMPTY
     organic_results list (the scrape produced nothing). A genuine Google query
     always returns a full SERP, so an empty list means a failed scrape — NOT
     "not ranked in top N" (that case still returns ~10 results, just without the
@@ -66,7 +66,7 @@ def _normalize_organic(organic):
             item["link"] = item.get("url", "")
 
         if "displayed_link" not in item:
-            # v2 returns "displayed_url" directly; prefer it, else derive from link.
+            # DataBlue returns "displayed_url" directly; prefer it, else derive from link.
             if item.get("displayed_url"):
                 item["displayed_link"] = item.get("displayed_url", "")
             else:
@@ -84,7 +84,7 @@ def _normalize_organic(organic):
     return organic
 
 
-def _build_payload(
+def _build_params(
     keyword_text: str,
     isocode: str,
     language_code: str,
@@ -93,18 +93,19 @@ def _build_payload(
     location: str = "",
     uule: str = "",
 ) -> dict:
-    """Build the DataBlue v2 (google-search-v2) request body.
+    """Build the DataBlue /v1/data/google/serp request query params (GET).
 
-    v2 is page-based: ``pages`` (1-5, ~10 results each) replaces v1's
-    ``num_results``. We derive ``pages`` from DATABLUE_NUM_RESULTS so the existing
-    depth/cost config keeps working (10 -> 1 page), with DATABLUE_PAGES as an
-    explicit override. country / platform (desktop|mobile) / language / domain /
-    location / uule are each forwarded only when set, so every keyword is scraped
-    exactly as configured on its SeoKeywordRank without changing defaults.
+    The endpoint is page-based: ``pages`` (1-5, ~10 results each). We derive
+    ``pages`` from DATABLUE_NUM_RESULTS so the existing depth/cost config keeps
+    working (10 -> 1 page), with DATABLUE_PAGES as an explicit override. country /
+    mobile (desktop|mobile) / language / domain / location / uule are each
+    forwarded only when set, so every keyword is scraped exactly as configured on
+    its SeoKeywordRank without changing defaults. ``advanced`` (DATABLUE_ADVANCED,
+    default false) selects the cheaper organic-focused SERP mode.
     """
-    payload = {"query": (keyword_text or "")[:2048]}
+    params = {"query": (keyword_text or "")[:2048]}
 
-    # num_results (~10/page) -> pages, capped to v2's 1-5; DATABLUE_PAGES overrides.
+    # num_results (~10/page) -> pages, capped to 1-5; DATABLUE_PAGES overrides.
     try:
         num = int(_cfg("DATABLUE_NUM_RESULTS", 10) or 10)
     except (TypeError, ValueError):
@@ -115,30 +116,36 @@ def _build_payload(
     except (TypeError, ValueError):
         cfg_pages = 0
     # DATABLUE_PAGES <= 0 means "derive from num_results"; otherwise cap to 1-5.
-    payload["pages"] = max(1, min(5, cfg_pages)) if cfg_pages > 0 else derived_pages
+    params["pages"] = max(1, min(5, cfg_pages)) if cfg_pages > 0 else derived_pages
+
+    # advanced=false → cheaper organic-focused SERP (1 credit/page vs 2).
+    params["advanced"] = "true" if _cfg("DATABLUE_ADVANCED", False) else "false"
 
     if language_code:
-        payload["language"] = language_code
+        params["language"] = language_code
     if isocode:
-        payload["country"] = str(isocode).lower()
+        params["country"] = str(isocode).lower()
 
     # Device. Defaults to DATABLUE_PLATFORM (desktop) when the caller omits it.
+    # The serp endpoint takes a ``mobile`` boolean instead of v2's platform string.
     plat = (platform or _cfg("DATABLUE_PLATFORM", "desktop") or "").strip().lower()
-    if plat in ("desktop", "mobile"):
-        payload["platform"] = plat
+    if plat == "mobile":
+        params["mobile"] = "true"
+    elif plat == "desktop":
+        params["mobile"] = "false"
 
     # region holds a Google domain (model default "google.com"). Only forward an
     # explicit non-default domain — otherwise let DataBlue auto-pick the
-    # country-correct domain (e.g. www.google.co.in for country=in), as v1 did.
+    # country-correct domain (e.g. www.google.co.in for country=in).
     dom = (region or _cfg("DATABLUE_GOOGLE_DOMAIN", "") or "").strip()
     if dom and dom not in ("google.com", "www.google.com"):
-        payload["domain"] = dom if dom.startswith("www.") else f"www.{dom}"
+        params["domain"] = dom if dom.startswith("www.") else f"www.{dom}"
 
     if location:
-        payload["location"] = location
+        params["location"] = location
     if uule:
-        payload["uule"] = uule
-    return payload
+        params["uule"] = uule
+    return params
 
 
 def fetch_one(
@@ -153,7 +160,7 @@ def fetch_one(
     """Sync single-keyword DataBlue call.
 
     ``platform`` (desktop|mobile), ``region`` (Google domain), ``location`` and
-    ``uule`` are optional v2 params; omitting them preserves the prior behavior.
+    ``uule`` are optional params; omitting them preserves the prior behavior.
 
     Returns the parsed JSON response (with normalized organic_results) or None
     on any failure (no key, non-200, timeout, JSON parse error, empty results).
@@ -163,14 +170,14 @@ def fetch_one(
         logger.error("[DataBlue] DATABLUE_API_KEY not configured")
         return None
 
-    payload = _build_payload(keyword_text, isocode, language_code, platform, region, location, uule)
+    params = _build_params(keyword_text, isocode, language_code, platform, region, location, uule)
     timeout = _cfg("DATABLUE_TIMEOUT", 60)
 
     try:
-        resp = requests.post(
+        resp = requests.get(
             _api_url(),
             headers={"Authorization": f"Bearer {api_key}"},
-            json=payload,
+            params=params,
             timeout=timeout,
         )
     except requests.Timeout:

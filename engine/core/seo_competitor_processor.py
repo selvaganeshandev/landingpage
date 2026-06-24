@@ -43,7 +43,7 @@ def _fetch_top10_competitors(kw_text: str, region: str, isocode: str,
     Fetch SERP via DataBlue and return a competitors dict keyed by rank,
     same shape as parse_json_serp_response produces.
 
-    On the v2 (google-search-v2) endpoint `region` (Google domain), `uule` and
+    On the /v1/data/google/serp endpoint `region` (Google domain), `uule` and
     `platform` (desktop|mobile) ARE forwarded so competitor SERPs match the
     keyword's device/geo. `api_key` is read from Django settings.
     """

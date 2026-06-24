@@ -28,7 +28,7 @@ def fetch_serp_data(keyword_text, region, isocode, language_code, uule='', platf
     """
     Fetch Google SERP data via DataBlue.
 
-    On the v2 (google-search-v2) endpoint `region` (Google domain), `uule` and
+    On the /v1/data/google/serp endpoint `region` (Google domain), `uule` and
     `platform` (desktop|mobile) ARE forwarded so the SERP matches the configured
     device/geo for the keyword.
     """
