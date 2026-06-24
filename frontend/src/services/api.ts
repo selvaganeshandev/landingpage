@@ -1922,6 +1922,7 @@ export const apiClient = {
     schedule?: string;
     duration?: number;
     order_by?: string;
+    secondary_domain_id?: number | null;
   }) =>
     apiRequest('/seo/report-sheets/add/', {
       method: 'POST',

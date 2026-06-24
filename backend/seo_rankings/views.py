@@ -1670,6 +1670,64 @@ def seo_competitor_keywords(request, pk):
 # SEO Report Sheets CRUD
 # ---------------------------------------------------------------------------
 
+def _clean_secondary_domain_id(raw, primary_domain_id, allowed_ids):
+    """Validate a requested secondary (combine) domain id.
+
+    Returns a usable int id, or None to mean "single-domain report". Guards
+    against blanks, the primary itself, and domains the user cannot access.
+    """
+    if raw in (None, '', 'null', 'none'):
+        return None
+    try:
+        sid = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if sid == int(primary_domain_id) or sid not in allowed_ids:
+        return None
+    return sid
+
+
+# Sheet types that read from each Google source (shared by primary validation
+# and the secondary-domain connection check below).
+_GSC_SHEET_TYPES = ('gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries',
+                    'gsc_queries', 'gsc_overview')
+_GA_SHEET_TYPES = ('ga_landing_pages', 'ga_other_sources', 'ga_overview',
+                   'ga_organic_traffic_breakup', 'ga_country_events')
+
+
+def _domain_has_integration(domain_id, itype):
+    """True if the domain has an active, fully-configured integration of itype."""
+    from integrations.models import Integration
+    return Integration.objects.filter(
+        domain_id=domain_id, type=itype, status='active'
+    ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(
+        provider_id__isnull=True).exists()
+
+
+def _secondary_connection_error(secondary_domain_id, sheet_type):
+    """Return an alert string if the chosen secondary domain is missing the
+    Google connection this report type needs (GA for GA reports, GSC for GSC
+    reports, both for GA-vs-GSC). Returns None when OK or not applicable —
+    keyword/domain-metrics reports don't need GA/GSC, so they're never blocked.
+    """
+    if not secondary_domain_id:
+        return None
+    from domains.models import Domain
+    name = (Domain.objects.filter(id=secondary_domain_id)
+            .values_list('name', flat=True).first()) or 'secondary domain'
+    needs_ga = sheet_type in _GA_SHEET_TYPES or sheet_type == 'ga_gsc_reconcile'
+    needs_gsc = sheet_type in _GSC_SHEET_TYPES or sheet_type == 'ga_gsc_reconcile'
+    if needs_ga and not _domain_has_integration(secondary_domain_id, 'google_analytics'):
+        return (f'The selected secondary domain "{name}" does not have Google '
+                f'Analytics connected. Connect GA for it, or choose a different '
+                f'secondary domain.')
+    if needs_gsc and not _domain_has_integration(secondary_domain_id, 'search_console'):
+        return (f'The selected secondary domain "{name}" does not have Google '
+                f'Search Console connected. Connect GSC for it, or choose a '
+                f'different secondary domain.')
+    return None
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def seo_report_sheet_list(request):
@@ -1684,7 +1742,7 @@ def seo_report_sheet_list(request):
 
     sheets = SeoReportSheet.objects.filter(
         domain_id=domain_id, is_active=True
-    ).order_by('-created_at')
+    ).select_related('secondary_domain').order_by('-created_at')
 
     data = []
     for s in sheets:
@@ -1698,6 +1756,8 @@ def seo_report_sheet_list(request):
             'schedule': s.schedule,
             'duration': s.duration,
             'order_by': s.order_by,
+            'secondary_domain_id': s.secondary_domain_id,
+            'secondary_domain_name': s.secondary_domain.name if s.secondary_domain_id else None,
             'created_at': s.created_at.isoformat(),
         })
 
@@ -1724,6 +1784,12 @@ def seo_report_sheet_add(request):
     schedule = request.data.get('schedule', 'weekly')
     duration = request.data.get('duration', 2)
     order_by = request.data.get('order_by', 'Ascending')
+
+    # Optional secondary domain to combine into this report (must be another
+    # domain the user can access). Absent/blank → single-domain report.
+    secondary_domain_id = _clean_secondary_domain_id(
+        request.data.get('secondary_domain_id'), domain_id, allowed_ids
+    )
 
     if not sheet_name:
         return Response({'error': 'sheet_name is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1764,6 +1830,12 @@ def seo_report_sheet_add(request):
         if ga_check:
             return Response({'error': ga_check}, status=status.HTTP_400_BAD_REQUEST)
 
+    # If a secondary (combine) domain is chosen, it must have the same Google
+    # source connected that this report type reads from.
+    sec_err = _secondary_connection_error(secondary_domain_id, sheet_type)
+    if sec_err:
+        return Response({'error': sec_err}, status=status.HTTP_400_BAD_REQUEST)
+
     sheet = SeoReportSheet.objects.create(
         domain_id=domain_id,
         created_by=request.user,
@@ -1775,6 +1847,7 @@ def seo_report_sheet_add(request):
         schedule=schedule,
         duration=duration,
         order_by=order_by,
+        secondary_domain_id=secondary_domain_id,
     )
 
     return Response({
@@ -1820,6 +1893,19 @@ def seo_report_sheet_update(request, pk):
         if field in request.data:
             setattr(sheet, field, request.data[field])
             update_fields.append(field)
+
+    # Optional secondary domain (combine target). Send null/'' to clear it.
+    if 'secondary_domain_id' in request.data:
+        sheet.secondary_domain_id = _clean_secondary_domain_id(
+            request.data.get('secondary_domain_id'), sheet.domain_id, allowed_ids
+        )
+        update_fields.append('secondary_domain')
+
+    # Validate the secondary's GA/GSC connection against the (possibly updated)
+    # report type before persisting.
+    sec_err = _secondary_connection_error(sheet.secondary_domain_id, sheet.sheet_type)
+    if sec_err:
+        return Response({'error': sec_err}, status=status.HTTP_400_BAD_REQUEST)
 
     sheet.save(update_fields=update_fields)
 
@@ -4947,6 +5033,78 @@ def _fetch_competitor_ranking_summary(domain_id, sheet, include_urls=False):
     }
 
 
+# ── Combined (primary + secondary domain) report helpers ────────────────────
+# These are PURELY ADDITIVE: they only run when a request supplies a valid
+# secondary_domain_id. The single-domain path is never touched.
+
+def _resolve_report_integrations(domain_id):
+    """Return (ga_integration, gsc_integration) for a domain — same filters the
+    single-domain report path uses."""
+    from integrations.models import Integration
+    gsc = Integration.objects.filter(
+        domain_id=domain_id, type='search_console', status='active'
+    ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+    ga = Integration.objects.filter(
+        domain_id=domain_id, type='google_analytics', status='active'
+    ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+    return ga, gsc
+
+
+def _dispatch_sheet_fetch(sheet, domain_id, ga_integration, gsc_integration, include_urls=False):
+    """Fetch one sheet's data dict for a given domain + its integrations.
+
+    Mirrors the dispatch in seo_report_sheet_data / seo_report_export_xlsx but
+    parameterised by domain. Used ONLY for the SECONDARY domain in combined
+    reports — the primary domain keeps its existing inline dispatch untouched.
+    Returns the fetcher's data dict, or {'error': ...} when an integration is
+    missing or the type is unsupported.
+    """
+    st = sheet.sheet_type
+    if sheet.category == 'gsc' and st in (
+        'gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries', 'gsc_queries'
+    ):
+        if not gsc_integration:
+            return {'error': 'Google Search Console not connected'}
+        return _fetch_gsc_report_data(gsc_integration, sheet)
+    if sheet.category == 'ga' and st in ('ga_landing_pages', 'ga_other_sources'):
+        if not ga_integration:
+            return {'error': 'Google Analytics not connected'}
+        return _fetch_ga_report_data(ga_integration, sheet)
+    if st == 'ga_gsc_reconcile':
+        if not ga_integration or not gsc_integration:
+            return {'error': 'GA/GSC not connected'}
+        return _fetch_ga_gsc_reconciliation_data(ga_integration, gsc_integration, sheet)
+    if st == 'keyword_ranking':
+        return (_fetch_keyword_ranking_monthly(domain_id, sheet)
+                if sheet.schedule == 'monthly'
+                else _fetch_keyword_ranking_weekly(domain_id, sheet))
+    if st == 'domain_metrics':
+        return _fetch_domain_metrics_data(domain_id, sheet)
+    if st == 'gsc_overview':
+        if not gsc_integration:
+            return {'error': 'Google Search Console not connected'}
+        return _fetch_gsc_overview_data(gsc_integration, sheet)
+    if st == 'ga_overview':
+        if not ga_integration:
+            return {'error': 'Google Analytics not connected'}
+        return _fetch_ga_overview_data(ga_integration, sheet)
+    if st == 'ga_organic_traffic_breakup':
+        if not ga_integration:
+            return {'error': 'Google Analytics not connected'}
+        return _fetch_ga_organic_traffic_breakup_data(ga_integration, sheet)
+    if st == 'ga_country_events':
+        if not ga_integration:
+            return {'error': 'Google Analytics not connected'}
+        return _fetch_ga_country_events_data(ga_integration, sheet)
+    if st == 'keyword_ranking_overview':
+        return _fetch_keyword_ranking_overview(domain_id, sheet)
+    if st == 'keyword_ranking_summary':
+        return _fetch_keyword_ranking_summary(domain_id, sheet)
+    if st == 'competitor_ranking_summary':
+        return _fetch_competitor_ranking_summary(domain_id, sheet, include_urls=include_urls)
+    return {'error': f'Unsupported report type: {st}'}
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def seo_report_sheet_data(request):
@@ -4965,7 +5123,7 @@ def seo_report_sheet_data(request):
 
     sheets = SeoReportSheet.objects.filter(
         domain_id=domain_id, is_active=True
-    ).order_by('-created_at')
+    ).select_related('secondary_domain').order_by('-created_at')
 
     # Optional: generate only a subset of sheets (progressive "load more" on the
     # page fetches sheets a couple at a time). Absent → all sheets (unchanged).
@@ -4990,6 +5148,16 @@ def seo_report_sheet_data(request):
     ga_integration = Integration.objects.filter(
         domain_id=domain_id, type='google_analytics', status='active'
     ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+
+    # ── Combined report (optional): each sheet may carry a secondary domain
+    #    whose GA/GSC (and other) data is pooled in. Pre-resolve each distinct
+    #    secondary domain's integrations once (read-only map → thread-safe).
+    #    Reports with no secondary_domain run the unchanged single-domain path.
+    sec_integrations = {}  # {secondary_domain_id: (ga_integration, gsc_integration)}
+    for _sid in {s.secondary_domain_id for s in sheets
+                 if s.secondary_domain_id and s.secondary_domain_id in allowed_ids
+                 and s.secondary_domain_id != int(domain_id)}:
+        sec_integrations[_sid] = _resolve_report_integrations(_sid)
 
     def _gen_one(sheet):
         report_entry = {
@@ -5095,6 +5263,18 @@ def seo_report_sheet_data(request):
             logger.error(f"Error fetching data for sheet {sheet.id}: {e}")
             report_entry['error'] = str(e)
 
+        # ── Combined report: merge this sheet's secondary domain (if any) ──
+        sec_pair = sec_integrations.get(sheet.secondary_domain_id)
+        if sec_pair and not report_entry.get('error'):
+            try:
+                from seo_rankings.combined_report import merge_sheet
+                sec_ga, sec_gsc = sec_pair
+                sec_data = _dispatch_sheet_fetch(sheet, sheet.secondary_domain_id, sec_ga, sec_gsc)
+                if sec_data and not sec_data.get('error'):
+                    report_entry.update(merge_sheet(sheet, report_entry, sec_data))
+            except Exception as e:
+                logger.warning(f"Combined merge skipped for sheet {sheet.id}: {e}")
+
         return report_entry
 
     # Generate sheets concurrently so the page waits on the slowest single sheet
@@ -5169,7 +5349,7 @@ def seo_report_export_xlsx(request):
 
     sheets = SeoReportSheet.objects.filter(
         domain_id=domain_id, is_active=True
-    ).order_by('-created_at')
+    ).select_related('secondary_domain').order_by('-created_at')
 
     if not sheets.exists():
         return Response({'error': 'No report sheets configured'}, status=status.HTTP_404_NOT_FOUND)
@@ -5181,6 +5361,14 @@ def seo_report_export_xlsx(request):
     ga_integration = Integration.objects.filter(
         domain_id=domain_id, type='google_analytics', status='active'
     ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+
+    # ── Combined export (optional): each sheet's saved secondary domain is
+    #    pooled in. Pre-resolve each distinct secondary's integrations once.
+    sec_integrations = {}  # {secondary_domain_id: (ga_integration, gsc_integration)}
+    for _sid in {s.secondary_domain_id for s in sheets
+                 if s.secondary_domain_id and s.secondary_domain_id in allowed_ids
+                 and s.secondary_domain_id != int(domain_id)}:
+        sec_integrations[_sid] = _resolve_report_integrations(_sid)
 
     # ── Styles ────────────────────────────────────────────────────────────
     metric_header_fill = PatternFill(start_color="00B050", fill_type="solid")
@@ -5249,6 +5437,18 @@ def seo_report_export_xlsx(request):
         except Exception as e:
             logger.error(f"Export: error fetching sheet {sheet.id}: {e}")
             data['error'] = str(e)
+
+        # ── Combined export: merge this sheet's secondary domain (if any) ──
+        sec_pair = sec_integrations.get(sheet.secondary_domain_id)
+        if sec_pair and not data.get('error'):
+            try:
+                from seo_rankings.combined_report import merge_sheet
+                sec_ga, sec_gsc = sec_pair
+                sec_data = _dispatch_sheet_fetch(sheet, sheet.secondary_domain_id, sec_ga, sec_gsc, include_urls=True)
+                if sec_data and not sec_data.get('error'):
+                    data = merge_sheet(sheet, data, sec_data)
+            except Exception as e:
+                logger.warning(f"Combined export merge skipped for sheet {sheet.id}: {e}")
 
         columns = data.get('columns', [])
         rows    = data.get('rows', [])

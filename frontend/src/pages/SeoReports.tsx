@@ -10,6 +10,13 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   FileText,
   Plus,
   Loader2,
@@ -90,6 +97,9 @@ const SeoReports = () => {
   const [reportBySheetId, setReportBySheetId] = useState<Record<number, any>>({});
   const [loadingSheetIds, setLoadingSheetIds] = useState<Set<number>>(new Set());
   const [batchError, setBatchError] = useState(false);
+  // Bumped to force a re-fetch of visible sheets (e.g. after a secondary
+  // domain change) without changing the domain or visible-sheet set.
+  const [refetchNonce, setRefetchNonce] = useState(0);
 
   const visibleSheets = sheets.slice(0, visibleCount);
   const visibleIdsKey = visibleSheets.map((s: any) => s.id).join(",");
@@ -132,7 +142,7 @@ const SeoReports = () => {
         });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [domainId, visibleIdsKey]);
+  }, [domainId, visibleIdsKey, refetchNonce]);
 
   // Delete mutation
   const deleteMutation = useMutation({
@@ -312,6 +322,33 @@ const SeoReports = () => {
                     });
                     toast({ title: "Renamed", description: "Report renamed." });
                   });
+              }}
+              onUpdateSecondary={(id, secId) => {
+                apiClient
+                  .updateSeoReportSheet(id, { secondary_domain_id: secId })
+                  .then(() => {
+                    queryClient.invalidateQueries({ queryKey: ["seoReportSheets"] });
+                    // Drop this sheet's cached data so it refetches (combined).
+                    setReportBySheetId((prev) => {
+                      const next = { ...prev };
+                      delete next[id];
+                      return next;
+                    });
+                    setRefetchNonce((n) => n + 1);
+                    toast({
+                      title: secId ? "Combined report updated" : "Secondary domain removed",
+                      description: secId
+                        ? "This report now pools both domains."
+                        : "This report is now single-domain.",
+                    });
+                  })
+                  .catch((err: any) =>
+                    toast({
+                      title: "Couldn't combine",
+                      description: err?.message || "Update failed.",
+                      variant: "destructive",
+                    }),
+                  );
               }}
             />
           ))}
@@ -549,6 +586,7 @@ function ReportWidget({
   dataError,
   onDelete,
   onRename,
+  onUpdateSecondary,
 }: {
   sheet: any;
   reportData: any | undefined;
@@ -556,9 +594,14 @@ function ReportWidget({
   dataError: boolean;
   onDelete: (id: number) => void;
   onRename: (id: number, name: string) => void;
+  onUpdateSecondary: (id: number, secondaryDomainId: number | null) => void;
 }) {
+  const { domains, selectedDomain } = useDomainStore();
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(sheet.sheet_name);
+  const [editSecondary, setEditSecondary] = useState<string>(
+    sheet.secondary_domain_id ? String(sheet.secondary_domain_id) : "",
+  );
   const [menuOpen, setMenuOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
@@ -647,9 +690,14 @@ function ReportWidget({
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
 
-  const handleSaveRename = () => {
+  const handleSaveEdit = () => {
     if (editName.trim() && editName.trim() !== sheet.sheet_name) {
       onRename(sheet.id, editName.trim());
+    }
+    const newSec = editSecondary ? Number(editSecondary) : null;
+    const curSec = sheet.secondary_domain_id ?? null;
+    if (newSec !== curSec) {
+      onUpdateSecondary(sheet.id, newSec);
     }
     setEditing(false);
   };
@@ -660,38 +708,70 @@ function ReportWidget({
       <div className="flex items-center justify-between px-5 py-4 border-b bg-muted/20">
         <div className="flex items-center gap-3 min-w-0">
           {editing ? (
-            <div className="flex items-center gap-2">
-              <Input
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                className="h-8 w-64 text-base font-semibold"
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSaveRename();
-                  if (e.key === "Escape") setEditing(false);
-                }}
-              />
-              <button
-                onClick={handleSaveRename}
-                className="p-1 hover:bg-muted rounded"
-              >
-                <Check className="h-4 w-4 text-green-600" />
-              </button>
-              <button
-                onClick={() => setEditing(false)}
-                className="p-1 hover:bg-muted rounded"
-              >
-                <X className="h-4 w-4 text-red-500" />
-              </button>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="h-8 w-64 text-base font-semibold"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveEdit();
+                    if (e.key === "Escape") setEditing(false);
+                  }}
+                />
+                <button
+                  onClick={handleSaveEdit}
+                  className="p-1 hover:bg-muted rounded"
+                >
+                  <Check className="h-4 w-4 text-green-600" />
+                </button>
+                <button
+                  onClick={() => setEditing(false)}
+                  className="p-1 hover:bg-muted rounded"
+                >
+                  <X className="h-4 w-4 text-red-500" />
+                </button>
+              </div>
+              {/* Secondary (combine) domain — pooled into GA/GSC figures */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Combine with:</span>
+                <Select
+                  value={editSecondary || "none"}
+                  onValueChange={(v) => setEditSecondary(v === "none" ? "" : v)}
+                >
+                  <SelectTrigger className="h-8 w-64 text-xs">
+                    <SelectValue placeholder="None (single domain)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None (single domain)</SelectItem>
+                    {domains
+                      .filter((d) => d.id !== selectedDomain?.id)
+                      .map((d) => (
+                        <SelectItem key={d.id} value={String(d.id)}>
+                          {d.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           ) : (
             <>
               <h3 className="text-base font-semibold truncate">
                 {sheet.sheet_name}
               </h3>
+              {sheet.secondary_domain_name && (
+                <Badge variant="secondary" className="text-xs flex-shrink-0">
+                  + {sheet.secondary_domain_name}
+                </Badge>
+              )}
               <button
                 onClick={() => {
                   setEditName(sheet.sheet_name);
+                  setEditSecondary(
+                    sheet.secondary_domain_id ? String(sheet.secondary_domain_id) : "",
+                  );
                   setEditing(true);
                 }}
                 className="p-1 hover:bg-muted rounded opacity-60 hover:opacity-100 flex-shrink-0"
