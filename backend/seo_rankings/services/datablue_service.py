@@ -135,13 +135,12 @@ def _build_params(
         params["mobile"] = "false"
 
     # region holds the Google domain configured per keyword in the DB (model
-    # default "google.com", e.g. "google.co.in"). Forward it for EVERY keyword so
-    # the SERP is scraped on the exact domain configured, normalizing to the www.
-    # host the serp endpoint expects (e.g. google.co.in -> www.google.co.in).
-    # Falls back to DATABLUE_GOOGLE_DOMAIN when the caller passes no region.
+    # default "google.com", e.g. "google.co.in"). Forward it for EVERY keyword
+    # exactly as stored — no www. prefixing — so the SERP is scraped on the exact
+    # domain configured. Falls back to DATABLUE_GOOGLE_DOMAIN when no region.
     dom = (region or _cfg("DATABLUE_GOOGLE_DOMAIN", "") or "").strip()
     if dom:
-        params["domain"] = dom if dom.startswith("www.") else f"www.{dom}"
+        params["domain"] = dom
 
     if location:
         params["location"] = location
