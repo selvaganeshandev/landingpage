@@ -41,13 +41,18 @@ const ORDER_BY_VALS = ["Ascending", "Descending"];
 const ConfigureSeoReport = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { selectedDomain } = useDomainStore();
+  const { selectedDomain, domains } = useDomainStore();
   const [activeTab, setActiveTab] = useState<TabKey>("gsc");
   const [loading, setLoading] = useState(false);
 
   // GSC/GA connection status
   const [isGscConnected, setIsGscConnected] = useState(false);
   const [isGaConnected, setIsGaConnected] = useState(false);
+
+  // Connection status of the chosen secondary (combine) domain
+  const [secGaConnected, setSecGaConnected] = useState(false);
+  const [secGscConnected, setSecGscConnected] = useState(false);
+  const [secChecked, setSecChecked] = useState(false);
 
   // Fetch integration status on mount
   useEffect(() => {
@@ -94,9 +99,69 @@ const ConfigureSeoReport = () => {
     monthInterval: "Past 3 months",
     orderBy: "Ascending",
     changeUnits: [] as string[],
+    // Optional: combine a second connected domain (e.g. the blog) into this
+    // report. "" = single-domain report (unchanged behaviour).
+    secondaryDomainId: "" as string,
   });
 
   const isMonthly = formState.schedule === "Monthly Schedule";
+
+  // Check the chosen secondary domain's GA/GSC connection (live, on select).
+  useEffect(() => {
+    const sid = formState.secondaryDomainId;
+    if (!sid) {
+      setSecChecked(false);
+      setSecGaConnected(false);
+      setSecGscConnected(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = (await apiClient.getIntegrationsByDomain(Number(sid))) as any;
+        const list = Array.isArray(res) ? res : (Array.isArray(res?.results) ? res.results : []);
+        const isConnected = (i: any) =>
+          i.status === "active" && !!i.provider_id &&
+          i.provider_id !== "" && i.provider_id !== "pending_selection";
+        if (cancelled) return;
+        setSecGscConnected(list.some((i: any) => i.type === "search_console" && isConnected(i)));
+        setSecGaConnected(list.some((i: any) => i.type === "google_analytics" && isConnected(i)));
+        setSecChecked(true);
+      } catch {
+        if (cancelled) return;
+        setSecGaConnected(false);
+        setSecGscConnected(false);
+        setSecChecked(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [formState.secondaryDomainId]);
+
+  // Which Google source(s) this report type reads from — drives the secondary
+  // domain connection warning (mirrors the backend validation).
+  const secNeeds = (() => {
+    if (activeTab === "gsc") return { ga: false, gsc: true };
+    if (activeTab === "ga")
+      return formState.gaType === "GA vs GSC"
+        ? { ga: true, gsc: true }
+        : { ga: true, gsc: false };
+    if (activeTab === "overview") {
+      const m = formState.summaryMetric;
+      if (m === "google_search_console") return { ga: false, gsc: true };
+      if (m === "google_analytics" || m === "ga_organic_traffic_breakup" || m === "ga_country_events")
+        return { ga: true, gsc: false };
+    }
+    return { ga: false, gsc: false }; // keyword ranking / domain metrics / summaries
+  })();
+
+  const secWarning =
+    formState.secondaryDomainId && secChecked
+      ? secNeeds.ga && !secGaConnected
+        ? "Google Analytics"
+        : secNeeds.gsc && !secGscConnected
+          ? "Google Search Console"
+          : ""
+      : "";
 
   const toggleArrayItem = (
     field: "gscTypes" | "gscMetrics" | "rankMetrics" | "changeUnits",
@@ -177,6 +242,9 @@ const ConfigureSeoReport = () => {
               schedule,
               duration,
               order_by: formState.orderBy,
+              secondary_domain_id: formState.secondaryDomainId
+                ? Number(formState.secondaryDomainId)
+                : null,
             });
           }
           toast({ title: "Success", description: `Report "${formState.sheetName}" added successfully.` });
@@ -269,6 +337,9 @@ const ConfigureSeoReport = () => {
         schedule,
         duration,
         order_by: formState.orderBy,
+        secondary_domain_id: formState.secondaryDomainId
+          ? Number(formState.secondaryDomainId)
+          : null,
       });
 
       toast({ title: "Success", description: `Report "${formState.sheetName}" added successfully.` });
@@ -352,6 +423,47 @@ const ConfigureSeoReport = () => {
               value={formState.sheetName}
               onChange={(e) => setFormState((p) => ({ ...p, sheetName: e.target.value }))}
             />
+          </div>
+
+          {/* Secondary Domain (optional) — combine a second connected domain
+              (e.g. the blog) into this report. GA/GSC and other figures are
+              pooled with the primary. Leave as "None" for a single-domain report. */}
+          <div className="bg-white rounded-lg p-5">
+            <Label className="text-sm font-semibold">
+              Secondary Domain <span className="text-xs font-normal text-muted-foreground">(optional — combine into this report)</span>
+            </Label>
+            <div className="mt-2">
+              <Select
+                value={formState.secondaryDomainId || "none"}
+                onValueChange={(v) =>
+                  setFormState((p: any) => ({ ...p, secondaryDomainId: v === "none" ? "" : v }))
+                }
+              >
+                <SelectTrigger className="w-[320px]">
+                  <SelectValue placeholder="None (single domain)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None (single domain)</SelectItem>
+                  {domains
+                    .filter((d) => d.id !== selectedDomain?.id)
+                    .map((d) => (
+                      <SelectItem key={d.id} value={String(d.id)}>
+                        {d.name} {d.url ? `— ${d.url.replace(/^https?:\/\//, "")}` : ""}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              The selected domain must have its own GA4 / Search Console connected.
+              Its data is pooled into the GA &amp; GSC figures of this report.
+            </p>
+            {secWarning && (
+              <p className="mt-2 text-xs font-medium text-destructive">
+                ⚠ This domain doesn't have {secWarning} connected, which this report
+                type needs. Connect {secWarning} for it, or choose a different domain.
+              </p>
+            )}
           </div>
 
           {/* Tab-specific content (non-overview tabs show metrics first) */}

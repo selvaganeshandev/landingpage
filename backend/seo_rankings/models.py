@@ -417,6 +417,14 @@ class SeoReportSheet(models.Model):
         related_name='seo_report_sheets',
         help_text="Domain this report belongs to"
     )
+    secondary_domain = models.ForeignKey(
+        'domains.Domain',
+        on_delete=models.SET_NULL,
+        related_name='seo_report_sheets_as_secondary',
+        null=True, blank=True,
+        help_text=("Optional second domain whose GA/GSC (and other) data is "
+                   "pooled into this report. NULL = single-domain report."),
+    )
     created_by = models.ForeignKey(
         'authentication.Account',
         on_delete=models.CASCADE,
