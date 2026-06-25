@@ -68,7 +68,7 @@ def process_single_keyword(seo_kw_rank_id):
             region=seo_kw.region,
             isocode=seo_kw.isocode,
             language_code=seo_kw.language_code,
-            uule='',
+            uule=seo_kw.geo_target_uule or '',
             platform=seo_kw.platform,
         )
 
