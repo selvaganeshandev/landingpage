@@ -31,7 +31,7 @@ class Integration(models.Model):
     class Meta:
         app_label = 'integrations'
         db_table = 'integrations'
-        managed = False  # Table is managed by backend
+        managed = True  # Table is managed by backend
         unique_together = [['domain', 'type', 'provider_id']]
         indexes = [
             models.Index(fields=['domain', 'type']),
@@ -93,8 +93,10 @@ class GATrafficInsight(models.Model):
     
     class Meta:
         app_label = 'integrations'
+
+
         db_table = 'ga_traffic_insights'
-        managed = False  # Table is managed by backend
+        managed = True  # Table is managed by backend
         indexes = [
             models.Index(fields=['domain', 'track_status']),
             models.Index(fields=['integration', 'start_date', 'end_date']),
@@ -148,7 +150,7 @@ class GSCTrafficInsight(models.Model):
     class Meta:
         app_label = 'integrations'
         db_table = 'gsc_traffic_insights'
-        managed = False  # Table is managed by backend
+        managed = True  # Table is managed by backend
         indexes = [
             models.Index(fields=['domain', 'track_status']),
             models.Index(fields=['integration', 'start_date', 'end_date']),

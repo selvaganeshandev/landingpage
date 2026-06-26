@@ -98,16 +98,18 @@ If there are no issues ABOUT {brand_name}, respond with:
 
 Be thorough but fair. Only flag genuine issues ABOUT {brand_name}, not minor wording differences or issues about other companies."""
 
-    def __init__(self, model: str = None):
+    def __init__(self, model: str = None, org_id: int = None):
         """
         Initialize the comparator.
 
         Args:
             model: OpenAI model to use (default: gpt-4o-mini for cost efficiency)
+            org_id: Organisation ID for per-org BYOK key resolution (.env fallback)
         """
         self.model = model or getattr(
             settings, 'MISINFO_COMPARISON_MODEL', 'gpt-4o-mini'
         )
+        self.org_id = org_id
         self._client = None
 
     @property
@@ -117,9 +119,26 @@ Be thorough but fair. Only flag genuine issues ABOUT {brand_name}, not minor wor
             self._client = self._get_openai_client()
         return self._client
 
+    def _resolve_api_key(self):
+        """Resolve the OpenAI key via the org's BYOK key (with .env fallback)."""
+        if self.org_id is not None:
+            try:
+                from core.services.api_key_service import (
+                    get_org_settings, get_api_key, is_enabled,
+                )
+                org = get_org_settings(self.org_id)
+                if not is_enabled(org, 'openai'):
+                    raise Exception(f"OpenAI disabled for org {self.org_id}")
+                key = get_api_key(org, 'openai')
+                if key:
+                    return key
+            except Exception as e:
+                logger.warning(f"BYOK key resolution failed for org {self.org_id}: {e}")
+        return getattr(settings, "OPENAI_API_KEY", None)
+
     def _get_openai_client(self):
         """Get OpenAI client."""
-        api_key = getattr(settings, "OPENAI_API_KEY", None)
+        api_key = self._resolve_api_key()
         if not api_key:
             raise Exception("OpenAI API key not configured")
         try:

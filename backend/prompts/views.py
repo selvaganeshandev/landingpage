@@ -23,14 +23,12 @@ logger = logging.getLogger(__name__)
 
 # Import OpenAI client helper
 def get_openai_client():
-    """Return OpenAI client if configured in Django settings; else raise."""
-    from django.conf import settings
-    api_key = getattr(settings, "OPENAI_API_KEY", None)
-    if not api_key:
-        raise Exception("OpenAI API key not configured")
+    """Return OpenAI client for the current organization or settings fallback; else raise."""
+    from llm_monitor.middleware import get_current_org_id
+    from engine.core.services.client_factory import get_client
+    org_id = get_current_org_id()
     try:
-        from openai import OpenAI  # lazy import
-        return OpenAI(api_key=api_key, timeout=60)
+        return get_client('openai', org_id)
     except Exception as e:
         raise Exception(f"Failed to initialize OpenAI client: {e}")
 

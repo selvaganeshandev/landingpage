@@ -119,12 +119,11 @@ Be thorough but fair. Only flag genuine issues ABOUT {brand_name}, not minor wor
 
     def _get_openai_client(self):
         """Get OpenAI client."""
-        api_key = getattr(settings, "OPENAI_API_KEY", None)
-        if not api_key:
-            raise Exception("OpenAI API key not configured")
+        from llm_monitor.middleware import get_current_org_id
+        from engine.core.services.client_factory import get_client
+        org_id = get_current_org_id()
         try:
-            from openai import OpenAI
-            return OpenAI(api_key=api_key, timeout=60)
+            return get_client('openai', org_id)
         except Exception as e:
             raise Exception(f"Failed to initialize OpenAI client: {e}")
 

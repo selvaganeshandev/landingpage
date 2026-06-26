@@ -152,8 +152,101 @@ def _probe_openai_compatible(label, key, api_key, base_url, model):
         return _result(label, key, True, st, m)
 
 
+# Provider slug → (display label, probe callable). Used for both the system
+# (.env) probes and the per-organisation BYOK probes.
+_PROVIDER_LABELS = {
+    "openai": "OpenAI / ChatGPT",
+    "anthropic": "Anthropic / Claude",
+    "gemini": "Google Gemini",
+    "perplexity": "Perplexity",
+    "xai": "xAI / Grok",
+    "deepseek": "DeepSeek",
+}
+
+
+def _probe_provider(provider, api_key):
+    """Dispatch to the right provider probe with the configured probe model."""
+    if provider == "openai":
+        return _probe_openai(api_key, _cfg("QUOTA_PROBE_OPENAI_MODEL", "gpt-4o-mini"))
+    if provider == "anthropic":
+        return _probe_anthropic(api_key, _cfg("QUOTA_PROBE_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"))
+    if provider == "gemini":
+        return _probe_gemini(api_key, _cfg("GEMINI_MODEL", "gemini-2.5-flash"))
+    if provider == "perplexity":
+        return _probe_openai_compatible("Perplexity", "perplexity", api_key,
+                                        "https://api.perplexity.ai", _cfg("QUOTA_PROBE_PERPLEXITY_MODEL", "sonar"))
+    if provider == "xai":
+        return _probe_openai_compatible("xAI / Grok", "xai", api_key,
+                                        "https://api.x.ai/v1", _cfg("QUOTA_PROBE_XAI_MODEL", "grok-2-latest"))
+    if provider == "deepseek":
+        return _probe_openai_compatible("DeepSeek", "deepseek", api_key,
+                                        "https://api.deepseek.com/v1", _cfg("QUOTA_PROBE_DEEPSEEK_MODEL", "deepseek-chat"))
+    return _result(provider, provider, True, "ERROR", f"unknown provider {provider}")
+
+
+def probe_key_state(provider, api_key):
+    """Public helper: live-probe a single (provider, api_key) and return just the
+    state string (OK | INVALID_KEY | OUT_OF_CREDITS | RATE_LIMIT |
+    MODEL_UNAVAILABLE | ERROR | NOT_CONFIGURED) plus a short detail.
+
+    Used by the backend to validate a key the moment a user saves it.
+    Returns a (state, detail) tuple; never raises.
+    """
+    try:
+        r = _probe_provider(provider, api_key)
+        return r.get("state", "ERROR"), (r.get("detail", "") or "")
+    except Exception as e:
+        return "ERROR", str(e)
+
+
+def check_org_quotas():
+    """Probe each organisation's configured BYOK keys.
+
+    Each result gets an org-scoped label ("OpenAI / ChatGPT — Acme") and a unique
+    key ("openai@org42") so it dedupes and renders independently of the system
+    (.env) probes. Disable via QUOTA_ALERT_INCLUDE_ORG_KEYS=False. Never raises.
+    """
+    if not _cfg("QUOTA_ALERT_INCLUDE_ORG_KEYS", True):
+        return []
+    try:
+        from shared_models.models import Organisation
+        from shared_models.crypto import decrypt_value
+    except Exception as e:
+        logger.warning(f"[QuotaMonitor] org probing unavailable: {e}")
+        return []
+
+    results = []
+    try:
+        orgs = list(Organisation.objects.all())
+    except Exception as e:
+        logger.warning(f"[QuotaMonitor] could not load organisations: {e}")
+        return []
+
+    for org in orgs:
+        for provider, label in _PROVIDER_LABELS.items():
+            if not getattr(org, f"{provider}_enabled", True):
+                continue
+            encrypted = getattr(org, f"{provider}_api_key", None)
+            if not encrypted:
+                continue  # provider falls back to the system .env probe
+            api_key = decrypt_value(encrypted)
+            if not api_key:
+                continue
+            try:
+                r = _probe_provider(provider, api_key)
+            except Exception as e:
+                r = _result(label, provider, True, "ERROR", str(e))
+            r["label"] = f"{label} — {org.name}"
+            r["key"] = f"{provider}@org{org.id}"
+            results.append(r)
+    return results
+
+
 def check_all_quotas():
-    """Probe every provider whose key is configured. Returns a list of result dicts."""
+    """Probe every provider whose key is configured. Returns a list of result dicts.
+
+    Includes the system (.env) keys plus every organisation's BYOK keys.
+    """
     results = [
         _probe_openai(_cfg("OPENAI_API_KEY", ""), _cfg("QUOTA_PROBE_OPENAI_MODEL", "gpt-4o-mini")),
         _probe_anthropic(_cfg("ANTHROPIC_API_KEY", ""), _cfg("QUOTA_PROBE_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")),
@@ -165,6 +258,10 @@ def check_all_quotas():
         _probe_openai_compatible("DeepSeek", "deepseek", _cfg("DEEPSEEK_API_KEY", ""),
                                  "https://api.deepseek.com/v1", _cfg("QUOTA_PROBE_DEEPSEEK_MODEL", "deepseek-chat")),
     ]
+    try:
+        results.extend(check_org_quotas())
+    except Exception as e:
+        logger.warning(f"[QuotaMonitor] org quota probing failed: {e}")
     return results
 
 

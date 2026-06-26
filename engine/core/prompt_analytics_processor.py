@@ -459,10 +459,12 @@ class PromptAnalyticsProcessor:
     def process_single_prompt(self, prompt_id: int) -> Dict[str, Any]:
         """
         Process analytics for a single prompt across all platforms.
+        Clients are resolved per-prompt via ClientFactory, enabling per-organisation
+        API keys (BYOK) with Redis-cached org settings and in-memory client reuse.
         """
         try:
             prompt = (
-                Prompt.objects.select_related('group__domain')
+                Prompt.objects.select_related('group__domain__organisation')
                 .get(id=prompt_id)
             )
             logger.info(f"Processing analytics for prompt {prompt_id}: {prompt.prompt[:50]}...")
@@ -476,7 +478,29 @@ class PromptAnalyticsProcessor:
             user_domain = prompt.group.domain.name
             group = prompt.group
 
-            # Process with each platform - get enabled platforms from settings (lowercase keys)
+            # Resolve org_id for per-organisation key lookup
+            try:
+                org_id = prompt.group.domain.organisation_id
+            except Exception:
+                org_id = None
+
+            # Lazy import ClientFactory
+            try:
+                from .services.client_factory import get_client as _get_client
+            except ImportError:
+                _get_client = None
+
+            def _resolve_client(provider: str):
+                """Get a cached client via ClientFactory, or return None on failure."""
+                if _get_client is None:
+                    return None
+                try:
+                    return _get_client(provider, org_id=org_id)
+                except Exception as ce:
+                    logger.warning(f"Client unavailable for {provider} (org {org_id}): {ce}")
+                    return None
+
+            # Process with each platform
             platforms = getattr(settings, 'ENABLED_PLATFORMS', ['chatgpt'])
             results = {}
             
@@ -484,32 +508,55 @@ class PromptAnalyticsProcessor:
                 try:
                     logger.info(f"Processing {platform} for prompt {prompt_id}")
                     
-                    if platform == 'chatgpt' and self.openai_client is not None:
-                        result = self._process_prompt_with_chatgpt(
-                            prompt.prompt, user_domain, self.openai_client, group
-                        )
-                    elif platform == 'gemini' and self.gemini_client is not None:
-                        result = self._process_prompt_with_gemini(
-                            prompt.prompt, user_domain, self.gemini_client, group
-                        )
-                    elif platform == 'perplexity' and self.perplexity_client is not None:
-                        result = self._process_prompt_with_perplexity(
-                            prompt.prompt, user_domain, self.perplexity_client, group
-                        )
-                    elif platform == 'claude' and self.anthropic_client is not None:
-                        result = self._process_prompt_with_claude(
-                            prompt.prompt, user_domain, self.anthropic_client, group
-                        )
-                    elif platform == 'grok' and self.xai_client is not None:
-                        result = self._process_prompt_with_grok(
-                            prompt.prompt, user_domain, self.xai_client, group
-                        )
-                    elif platform == 'deepseek' and self.deepseek_client is not None:
-                        result = self._process_prompt_with_deepseek(
-                            prompt.prompt, user_domain, self.deepseek_client, group
-                        )
+                    if platform == 'chatgpt':
+                        client = _resolve_client('openai')
+                        if client is not None:
+                            result = self._process_prompt_with_chatgpt(
+                                prompt.prompt, user_domain, client, group
+                            )
+                        else:
+                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
+                    elif platform == 'gemini':
+                        client = _resolve_client('gemini')
+                        if client is not None:
+                            result = self._process_prompt_with_gemini(
+                                prompt.prompt, user_domain, client, group
+                            )
+                        else:
+                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
+                    elif platform == 'perplexity':
+                        client = _resolve_client('perplexity')
+                        if client is not None:
+                            result = self._process_prompt_with_perplexity(
+                                prompt.prompt, user_domain, client, group
+                            )
+                        else:
+                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
+                    elif platform == 'claude':
+                        client = _resolve_client('anthropic')
+                        if client is not None:
+                            result = self._process_prompt_with_claude(
+                                prompt.prompt, user_domain, client, group
+                            )
+                        else:
+                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
+                    elif platform == 'grok':
+                        client = _resolve_client('xai')
+                        if client is not None:
+                            result = self._process_prompt_with_grok(
+                                prompt.prompt, user_domain, client, group
+                            )
+                        else:
+                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
+                    elif platform == 'deepseek':
+                        client = _resolve_client('deepseek')
+                        if client is not None:
+                            result = self._process_prompt_with_deepseek(
+                                prompt.prompt, user_domain, client, group
+                            )
+                        else:
+                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
                     else:
-                        # Fallback processing
                         result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
                     
                     results[platform] = result

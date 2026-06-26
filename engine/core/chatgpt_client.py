@@ -13,13 +13,41 @@ class ChatGPTClient:
     Client for OpenAI ChatGPT API integration
     """
     
-    def __init__(self, api_key: str = None):
-        self.api_key = api_key or getattr(settings, 'OPENAI_API_KEY', None)
+    def __init__(self, api_key: str = None, org_id: int = None):
+        self.org_id = org_id
+        # Key resolution order: explicit arg > per-org BYOK (resolved lazily in
+        # _ensure_client) > .env. When an org_id is supplied we defer to
+        # _ensure_client so the per-org key wins; otherwise keep the legacy
+        # .env behaviour so existing callers are unaffected.
+        if api_key:
+            self.api_key = api_key
+        elif org_id is not None:
+            self.api_key = None  # resolved lazily via BYOK below
+        else:
+            self.api_key = getattr(settings, 'OPENAI_API_KEY', None)
         self.client = None  # lazy init
+
+    def _resolve_byok_key(self):
+        """Resolve the OpenAI key for self.org_id via the BYOK service (DB key,
+        falling back to .env). Returns None if the provider is disabled for the
+        org or no key is configured anywhere."""
+        try:
+            from .services.api_key_service import get_org_settings, get_api_key, is_enabled
+            org = get_org_settings(self.org_id)
+            if not is_enabled(org, 'openai'):
+                logger.info(f"OpenAI disabled for org {self.org_id}; skipping client init")
+                return None
+            return get_api_key(org, 'openai')
+        except Exception as e:
+            logger.warning(f"BYOK key resolution failed for org {self.org_id}: {e}")
+            # Fall back to .env on any resolution error
+            return getattr(settings, 'OPENAI_API_KEY', None)
 
     def _ensure_client(self):
         if self.client is not None:
             return
+        if not self.api_key and self.org_id is not None:
+            self.api_key = self._resolve_byok_key()
         if not self.api_key:
             logger.debug("OPENAI_API_KEY not set, client will not be initialized")
             return

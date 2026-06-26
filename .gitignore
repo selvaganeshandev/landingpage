@@ -38,7 +38,9 @@ wheels/
 venv/
 env/
 ENV/
-.venv
+.venv/
+backend/.venv/
+engine/.venv/
 
 # Django
 *.log

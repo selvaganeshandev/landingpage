@@ -23,67 +23,65 @@ def process_prompt_with_perplexity(prompt_text: str, user_domain: str, client: A
     """Direct Perplexity processor; currently delegates to wrapper implementation."""
     return process_prompt_with_perplexity_wrapper(prompt_text, user_domain, client, group)
 
-def get_openai_client():
+def get_openai_client(org_id: Optional[int] = None):
 	"""
-	Initialize and return OpenAI client using settings from database or .env.
-	Uses the same method as ChatGPTClient for consistency - reads from settings.OPENAI_API_KEY
-	which comes from engine/.env via python-decouple.
+	Return an OpenAI client. Delegates to ClientFactory which applies:
+	  1. Organisation DB key (BYOK)
+	  2. .env OPENAI_API_KEY fallback
+	Accepts optional org_id for per-organisation key resolution.
 	"""
-	# First try database Settings model (if available)
 	try:
-		from serp.models import Settings
-		settings_obj = Settings.objects.first()
-		if settings_obj and settings_obj.chatgpt_enabled and settings_obj.chatgpt_api_key:
-			from openai import OpenAI
-			return OpenAI(api_key=settings_obj.chatgpt_api_key, timeout=60)
-	except (ImportError, Exception):
-		pass  # Fall through to .env method
-	
-	# Fallback to .env file (same as ChatGPTClient)
-	api_key = getattr(settings, "OPENAI_API_KEY", None)
-	if not api_key:
-		raise Exception("OpenAI API key not configured. Set OPENAI_API_KEY in engine/.env file")
-	
-	try:
-		from openai import OpenAI  # lazy import
-		return OpenAI(api_key=api_key, timeout=60)
+		from .services.client_factory import get_client
+		return get_client('openai', org_id=org_id)
 	except Exception as e:
-		raise Exception(f"Failed to initialize OpenAI client: {e}")
+		raise Exception(f"OpenAI client unavailable: {e}")
 
 
-def get_gemini_client() -> Dict[str, Any]:
-	api_key = getattr(settings, "GEMINI_API_KEY", None)
-	if not api_key:
-		raise Exception("Gemini API key not configured")
-	return {"api_key": api_key, "timeout": 60}
+def get_gemini_client(org_id: Optional[int] = None) -> Dict[str, Any]:
+	"""Return a Gemini config dict via ClientFactory."""
+	try:
+		from .services.client_factory import get_client
+		return get_client('gemini', org_id=org_id)
+	except Exception as e:
+		raise Exception(f"Gemini client unavailable: {e}")
 
 
-def get_perplexity_client() -> Dict[str, Any]:
-	api_key = getattr(settings, "PERPLEXITY_API_KEY", None)
-	if not api_key:
-		raise Exception("Perplexity API key not configured")
-	return {"api_key": api_key, "timeout": 60}
+def get_perplexity_client(org_id: Optional[int] = None) -> Dict[str, Any]:
+	"""Return a Perplexity client via ClientFactory."""
+	try:
+		from .services.client_factory import get_client
+		return get_client('perplexity', org_id=org_id)
+	except Exception as e:
+		raise Exception(f"Perplexity client unavailable: {e}")
 
 
-def get_anthropic_client() -> Dict[str, Any]:
-	api_key = getattr(settings, "ANTHROPIC_API_KEY", None)
-	if not api_key:
-		raise Exception("Anthropic API key not configured")
-	return {"api_key": api_key, "timeout": 60}
+def get_anthropic_client(org_id: Optional[int] = None) -> Dict[str, Any]:
+	"""Return an Anthropic client via ClientFactory."""
+	try:
+		from .services.client_factory import get_client
+		return get_client('anthropic', org_id=org_id)
+	except Exception as e:
+		raise Exception(f"Anthropic client unavailable: {e}")
 
 
-def get_xai_client() -> Dict[str, Any]:
-	api_key = getattr(settings, "XAI_API_KEY", None)
-	if not api_key:
-		raise Exception("xAI (Grok) API key not configured")
-	return {"api_key": api_key, "base_url": "https://api.x.ai/v1", "timeout": 60}
+def get_xai_client(org_id: Optional[int] = None) -> Dict[str, Any]:
+	"""Return an xAI (Grok) client via ClientFactory."""
+	try:
+		from .services.client_factory import get_client
+		return get_client('xai', org_id=org_id)
+	except Exception as e:
+		raise Exception(f"xAI client unavailable: {e}")
 
 
-def get_deepseek_client() -> Dict[str, Any]:
-	api_key = getattr(settings, "DEEPSEEK_API_KEY", None)
-	if not api_key:
-		raise Exception("DeepSeek API key not configured")
-	return {"api_key": api_key, "base_url": "https://api.deepseek.com/v1", "timeout": 60}
+def get_deepseek_client(org_id: Optional[int] = None) -> Dict[str, Any]:
+	"""Return a DeepSeek client via ClientFactory."""
+	try:
+		from .services.client_factory import get_client
+		return get_client('deepseek', org_id=org_id)
+	except Exception as e:
+		raise Exception(f"DeepSeek client unavailable: {e}")
+
+
 
 
 def _get_domain_from_url(value: str) -> str:

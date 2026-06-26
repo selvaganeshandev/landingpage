@@ -964,7 +964,9 @@ class CompetitorProcessor:
             if not context.get('players'):
                 return
 
-            insights, model_name = self._generate_ai_insights(context)
+            insights, model_name = self._generate_ai_insights(
+                context, org_id=getattr(domain, 'organisation_id', None)
+            )
             if not insights:
                 return
 
@@ -1040,13 +1042,14 @@ class CompetitorProcessor:
             'share_of_voice_history': sov_summary,
         }
 
-    def _generate_ai_insights(self, context: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
+    def _generate_ai_insights(self, context: Dict[str, Any], org_id: int = None) -> Tuple[List[Dict[str, Any]], str]:
         """
         Call OpenAI to generate insights from the compiled context.
+        Uses the organisation's BYOK key (with .env fallback) when org_id is given.
         """
         try:
             if self._openai_client is None:
-                self._openai_client = get_openai_client()
+                self._openai_client = get_openai_client(org_id)
         except Exception as client_error:
             logger.error("OpenAI client not available for insights: %s", client_error)
             return [], ''

@@ -24,6 +24,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-j-ftjg4gs$tc&hneu1h4pr^qsn1g@$+ttp3s$*^)h*o^2j9sv^')
 
+# Secret used to encrypt/decrypt per-organisation BYOK API keys at rest.
+# MUST match the backend's API_KEY_ENCRYPTION_SECRET, otherwise the engine cannot
+# decrypt the keys the backend stored. The default mirrors the backend default
+# (which equals the backend SECRET_KEY default) so a default-config deployment
+# resolves keys correctly; override via env in production (same value in both).
+API_KEY_ENCRYPTION_SECRET = config(
+    'API_KEY_ENCRYPTION_SECRET',
+    default='django-insecure-1^ql#^w)r=70(!w2s-m9(y)y8ux!0yp3wniaeylu^z5u#pgy8q',
+)
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
