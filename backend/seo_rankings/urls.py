@@ -44,6 +44,7 @@ urlpatterns = [
     path('competitors/<int:pk>/keywords/', views.seo_competitor_keywords, name='seo-competitor-keywords'),
 
     # SEO Report Sheets
+    path('report-sheets/secondary-domain/resolve/', views.seo_secondary_domain_resolve, name='seo-secondary-domain-resolve'),
     path('report-sheets/', views.seo_report_sheet_list, name='seo-report-sheet-list'),
     path('report-sheets/add/', views.seo_report_sheet_add, name='seo-report-sheet-add'),
     path('report-sheets/<int:pk>/delete/', views.seo_report_sheet_delete, name='seo-report-sheet-delete'),

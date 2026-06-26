@@ -103,12 +103,17 @@ def google_auth_url(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    # Create state parameter with domain_id, integration_type, and user_id
+    # Create state parameter with domain_id, integration_type, and user_id.
+    # `popup=1` marks an OAuth started from a popup window (e.g. the Configure
+    # Report page's secondary-subdomain connect): the callback then closes the
+    # popup and notifies the opener instead of doing a full-page redirect.
     state_data = {
         'domain_id': domain_id,
         'integration_type': integration_type,
         'user_id': request.user.id,
     }
+    if str(request.query_params.get('popup', '')).lower() in ('1', 'true', 'yes'):
+        state_data['popup'] = True
     state = json.dumps(state_data)
 
     try:
@@ -132,6 +137,33 @@ def google_auth_url(request):
         )
 
 
+def _state_is_popup(state):
+    """Best-effort: was this OAuth started from a popup window?"""
+    try:
+        return bool(json.loads(state).get('popup'))
+    except Exception:
+        return False
+
+
+def _popup_close_response(message):
+    """HTML page that posts the OAuth result back to the opener window and
+    closes itself. Used instead of a redirect when the flow ran in a popup.
+    """
+    from django.http import HttpResponse
+    target = FRONTEND_URL if FRONTEND_URL else '*'
+    msg_json = json.dumps({'source': 'google-oauth', **message})
+    html = (
+        "<!doctype html><html><body>"
+        "<script>"
+        "try{if(window.opener){window.opener.postMessage("
+        + msg_json + "," + json.dumps(target) + ");}}catch(e){}"
+        "window.close();"
+        "document.write('Connection complete \\u2014 you can close this window.');"
+        "</script></body></html>"
+    )
+    return HttpResponse(html)
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])  # OAuth callback doesn't have auth header
 def google_callback(request):
@@ -142,13 +174,20 @@ def google_callback(request):
     code = request.query_params.get('code')
     state = request.query_params.get('state')
     error = request.query_params.get('error')
+    is_popup = _state_is_popup(state) if state else False
+
+    def _fail(error_code):
+        """Return to the opener (popup) or the settings page (redirect)."""
+        if is_popup:
+            return _popup_close_response({'success': False, 'error': error_code})
+        return redirect(f'{FRONTEND_URL}/organization-settings?error={error_code}')
 
     if error:
         logger.error(f"Google OAuth error: {error}")
-        return redirect(f'{FRONTEND_URL}/organization-settings?error=google_auth_denied')
+        return _fail('google_auth_denied')
 
     if not code or not state:
-        return redirect(f'{FRONTEND_URL}/organization-settings?error=missing_params')
+        return _fail('missing_params')
 
     try:
         # Parse state to get domain_id and integration_type
@@ -158,7 +197,7 @@ def google_callback(request):
         user_id = state_data.get('user_id')
 
         if not domain_id or not user_id:
-            return redirect(f'{FRONTEND_URL}/organization-settings?error=invalid_state')
+            return _fail('invalid_state')
 
         # Exchange code for tokens
         flow = create_oauth_flow()
@@ -169,14 +208,14 @@ def google_callback(request):
         try:
             domain = Domain.objects.get(pk=domain_id)
         except Domain.DoesNotExist:
-            return redirect(f'{FRONTEND_URL}/organization-settings?error=domain_not_found')
+            return _fail('domain_not_found')
 
         # Get the user
         from authentication.models import Account
         try:
             user = Account.objects.get(pk=user_id)
         except Account.DoesNotExist:
-            return redirect(f'{FRONTEND_URL}/organization-settings?error=user_not_found')
+            return _fail('user_not_found')
 
         # Store credentials
         credentials_data = {
@@ -244,15 +283,28 @@ def google_callback(request):
             }
         )
 
+        # Popup flow (e.g. secondary-subdomain connect on the report page):
+        # close the popup and notify the opener — no full-page redirect, so the
+        # half-filled report form in the opener window is preserved. The opener
+        # then loads the property/site list and shows the selection dialog.
+        if is_popup:
+            return _popup_close_response({
+                'success': True,
+                'integration_type': integration_type,
+                'domain_id': domain_id,
+                'integration_id': integration.id,
+                'status': integration_status,
+            })
+
         # Redirect back to frontend with success and actual status
         redirect_url = f'{FRONTEND_URL}/organization-settings/domains/{domain_id}?tab=integrations&success=google_connected&type={integration_type}&status={integration_status}'
         return redirect(redirect_url)
 
     except json.JSONDecodeError:
-        return redirect(f'{FRONTEND_URL}/organization-settings?error=invalid_state')
+        return _fail('invalid_state')
     except Exception as e:
         logger.error(f"Error in Google OAuth callback: {str(e)}")
-        return redirect(f'{FRONTEND_URL}/organization-settings?error=oauth_failed')
+        return _fail('oauth_failed')
 
 
 def get_credentials_from_integration(integration):

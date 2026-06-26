@@ -1160,8 +1160,11 @@ export const apiClient = {
   }),
 
   // Google OAuth
-  getGoogleAuthUrl: (domainId: number, integrationType: string = 'google_analytics') =>
-    apiRequest(`/integrations/google/auth-url/?domain_id=${domainId}&integration_type=${integrationType}`),
+  // `popup` marks an OAuth started from a popup window (e.g. connecting a
+  // secondary subdomain on the Configure Report page) — the callback then
+  // closes the popup and notifies the opener instead of doing a redirect.
+  getGoogleAuthUrl: (domainId: number, integrationType: string = 'google_analytics', popup: boolean = false) =>
+    apiRequest(`/integrations/google/auth-url/?domain_id=${domainId}&integration_type=${integrationType}${popup ? '&popup=1' : ''}`),
 
   getGAProperties: (params: { integrationId?: number; domainId?: number }) => {
     const queryParams = new URLSearchParams();
@@ -1911,6 +1914,17 @@ export const apiClient = {
   // SEO Report Sheets
   getSeoReportSheets: (domainId: number) =>
     apiRequest(`/seo/report-sheets/?domain_id=${domainId}`),
+
+  // Create-or-get a lightweight Domain for a typed secondary subdomain, so its
+  // own GA4/GSC connection can be pooled into the report. Returns { domain_id }.
+  resolveSecondarySubdomain: (primaryDomainId: number, subdomain: string) =>
+    apiRequest<{ domain_id: number; name: string; url: string; created: boolean }>(
+      '/seo/report-sheets/secondary-domain/resolve/',
+      {
+        method: 'POST',
+        body: JSON.stringify({ primary_domain_id: primaryDomainId, subdomain }),
+      },
+    ),
 
   addSeoReportSheet: (data: {
     domain_id: number;

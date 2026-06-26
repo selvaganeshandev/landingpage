@@ -1670,6 +1670,99 @@ def seo_competitor_keywords(request, pk):
 # SEO Report Sheets CRUD
 # ---------------------------------------------------------------------------
 
+def _normalize_subdomain(raw):
+    """Normalize a typed subdomain/host into (display_name, url).
+
+    Accepts inputs like 'blog.example.com', 'https://blog.example.com/',
+    'www.blog.example.com'. Returns (host, 'https://host') or (None, None) if
+    nothing usable is left after cleaning.
+    """
+    if not raw:
+        return None, None
+    host = str(raw).strip().lower()
+    # Strip scheme and any path/query/fragment.
+    if '://' in host:
+        host = host.split('://', 1)[1]
+    host = host.split('/', 1)[0].split('?', 1)[0].split('#', 1)[0]
+    host = host.strip().strip('.')
+    if not host or '.' not in host:
+        return None, None
+    return host, f'https://{host}'
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def seo_secondary_domain_resolve(request):
+    """Create-or-get a lightweight Domain for a typed secondary subdomain.
+
+    Body: { primary_domain_id, subdomain }
+
+    The returned domain is created under the SAME organisation as the primary
+    and is granted to all org members (so it passes the report's access checks).
+    It is intentionally created WITHOUT keywords and is NOT scheduled for AI
+    processing — it exists only to hold this subdomain's own GA4/GSC connection
+    so its data can be pooled into the report (see combined_report.merge_sheet).
+    """
+    primary_domain_id = request.data.get('primary_domain_id')
+    subdomain = request.data.get('subdomain')
+
+    if not primary_domain_id:
+        return Response({'error': 'primary_domain_id is required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = list(_get_user_domain_ids(request.user))
+    try:
+        primary_domain_id = int(primary_domain_id)
+    except (TypeError, ValueError):
+        return Response({'error': 'Invalid primary_domain_id'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if primary_domain_id not in allowed_ids:
+        return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    name, url = _normalize_subdomain(subdomain)
+    if not url:
+        return Response({'error': 'Enter a valid subdomain, e.g. blog.example.com'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    from domains.models import DomainAccess
+    from authentication.models import Account
+
+    primary = Domain.objects.filter(id=primary_domain_id).first()
+    if not primary:
+        return Response({'error': 'Primary domain not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    org = primary.organisation
+
+    # Don't let the subdomain be the primary itself.
+    if (primary.url or '').strip().lower().rstrip('/') == url:
+        return Response({'error': 'The secondary subdomain matches the primary domain.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        with transaction.atomic():
+            domain, created = Domain.objects.get_or_create(
+                url=url, organisation=org,
+                defaults={'name': name},
+            )
+            # Grant access to all org members so it appears in allowed domains.
+            for member in Account.objects.filter(organisation=org, is_active=True):
+                DomainAccess.objects.get_or_create(
+                    user=member, domain=domain,
+                    defaults={'granted_by': request.user},
+                )
+    except Exception as e:
+        logger.error(f"Failed to resolve secondary subdomain '{url}': {e}")
+        return Response({'error': f'Could not create subdomain entry: {e}'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({
+        'domain_id': domain.id,
+        'name': domain.name,
+        'url': domain.url,
+        'created': created,
+    })
+
+
 def _clean_secondary_domain_id(raw, primary_domain_id, allowed_ids):
     """Validate a requested secondary (combine) domain id.
 
