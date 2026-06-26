@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
@@ -41,7 +49,7 @@ const ORDER_BY_VALS = ["Ascending", "Descending"];
 const ConfigureSeoReport = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { selectedDomain, domains } = useDomainStore();
+  const { selectedDomain } = useDomainStore();
   const [activeTab, setActiveTab] = useState<TabKey>("gsc");
   const [loading, setLoading] = useState(false);
 
@@ -53,6 +61,27 @@ const ConfigureSeoReport = () => {
   const [secGaConnected, setSecGaConnected] = useState(false);
   const [secGscConnected, setSecGscConnected] = useState(false);
   const [secChecked, setSecChecked] = useState(false);
+
+  // Secondary subdomain (typed) + its connect flow. The client types a
+  // subdomain (e.g. blog.example.com); we create-or-get a Domain for it and
+  // connect a fresh GA/GSC for it via an OAuth popup, then pool its data.
+  const [secSubdomain, setSecSubdomain] = useState("");
+  const [secConnecting, setSecConnecting] = useState(false); // overall connect flow busy
+  const [secRecheckNonce, setSecRecheckNonce] = useState(0); // re-fetch connection status
+
+  // Property/site selection dialog (shown after the OAuth popup completes)
+  const [secSelectOpen, setSecSelectOpen] = useState(false);
+  const [secSelectType, setSecSelectType] =
+    useState<"google_analytics" | "search_console">("google_analytics");
+  const [secSelectIntegrationId, setSecSelectIntegrationId] = useState<number | null>(null);
+  const [secOptions, setSecOptions] = useState<any[]>([]); // GA4 properties or GSC sites
+  const [secSelectedOptionId, setSecSelectedOptionId] = useState("");
+  const [secLoadingOptions, setSecLoadingOptions] = useState(false);
+  const [secSelecting, setSecSelecting] = useState(false);
+
+  // Coordination across the async popup → message → select queue.
+  const secDomainIdRef = useRef<number | null>(null);
+  const secPendingTypesRef = useRef<string[]>([]);
 
   // Fetch integration status on mount
   useEffect(() => {
@@ -135,7 +164,7 @@ const ConfigureSeoReport = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [formState.secondaryDomainId]);
+  }, [formState.secondaryDomainId, secRecheckNonce]);
 
   // Which Google source(s) this report type reads from — drives the secondary
   // domain connection warning (mirrors the backend validation).
@@ -162,6 +191,209 @@ const ConfigureSeoReport = () => {
           ? "Google Search Console"
           : ""
       : "";
+
+  // The secondary subdomain is fully ready when its Domain exists and every
+  // Google source this report needs is connected (or none is needed).
+  const secConnected =
+    !!formState.secondaryDomainId && secChecked &&
+    (!secNeeds.ga || secGaConnected) &&
+    (!secNeeds.gsc || secGscConnected);
+
+  // The Google source(s) this report needs the secondary subdomain to connect.
+  const neededSecTypes = (): string[] => {
+    const t: string[] = [];
+    if (secNeeds.gsc) t.push("search_console");
+    if (secNeeds.ga) t.push("google_analytics");
+    return t;
+  };
+
+  const secTypeLabel = (t: string) =>
+    t === "google_analytics" ? "Google Analytics" : "Google Search Console";
+
+  // Label for the connect button + helper copy, based on the report's needs.
+  const secConnectLabel = (() => {
+    const t = neededSecTypes();
+    if (t.length === 0) return "Add subdomain";
+    if (t.length === 2) return "Connect GA & GSC";
+    return `Connect ${secTypeLabel(t[0])}`;
+  })();
+  const secSourcesText =
+    secNeeds.ga && secNeeds.gsc
+      ? "Google Analytics & Search Console"
+      : secNeeds.ga
+        ? "Google Analytics"
+        : secNeeds.gsc
+          ? "Google Search Console"
+          : "ranking";
+
+  // Open the Google OAuth consent for one source in a popup. The popup's
+  // callback posts a message back to this window (see google_callback).
+  const startConnectType = async (type: string) => {
+    const domainId = secDomainIdRef.current;
+    if (!domainId) return;
+    try {
+      const res: any = await apiClient.getGoogleAuthUrl(domainId, type, true);
+      if (res?.authorization_url) {
+        const popup = window.open(
+          res.authorization_url,
+          "google_oauth_secondary",
+          "width=600,height=720,menubar=no,toolbar=no,location=no",
+        );
+        if (!popup) {
+          toast({
+            title: "Popup blocked",
+            description: "Allow popups for this site, then try connecting again.",
+            variant: "destructive",
+          });
+          setSecConnecting(false);
+          secPendingTypesRef.current = [];
+        }
+      } else {
+        setSecConnecting(false);
+      }
+    } catch (e: any) {
+      toast({
+        title: "Couldn't start connection",
+        description: e?.message || "Failed to start the Google connection.",
+        variant: "destructive",
+      });
+      setSecConnecting(false);
+      secPendingTypesRef.current = [];
+    }
+  };
+
+  // Resolve the typed subdomain to a Domain, then connect the needed source(s).
+  const handleConnectSecondary = async () => {
+    const sub = secSubdomain.trim();
+    if (!selectedDomain?.id) {
+      toast({ title: "Select a domain first", variant: "destructive" });
+      return;
+    }
+    if (!sub) {
+      toast({ title: "Enter a subdomain", description: "e.g. blog.example.com", variant: "destructive" });
+      return;
+    }
+    setSecConnecting(true);
+    try {
+      const res = await apiClient.resolveSecondarySubdomain(selectedDomain.id, sub);
+      secDomainIdRef.current = res.domain_id;
+      setFormState((p: any) => ({ ...p, secondaryDomainId: String(res.domain_id) }));
+
+      const types = neededSecTypes();
+      if (types.length === 0) {
+        // Report type doesn't pool GA/GSC (e.g. keyword ranking / domain
+        // metrics) — just link the subdomain; no OAuth needed.
+        setSecConnecting(false);
+        setSecRecheckNonce((n) => n + 1);
+        toast({ title: "Subdomain added", description: `${res.name} will be pooled into this report.` });
+        return;
+      }
+      secPendingTypesRef.current = [...types];
+      await startConnectType(types[0]);
+    } catch (e: any) {
+      toast({
+        title: "Couldn't add subdomain",
+        description: e?.message || "Please check the subdomain and try again.",
+        variant: "destructive",
+      });
+      setSecConnecting(false);
+    }
+  };
+
+  // Clear the secondary subdomain entirely (back to single-domain report).
+  const handleClearSecondary = () => {
+    secDomainIdRef.current = null;
+    secPendingTypesRef.current = [];
+    setSecSubdomain("");
+    setSecConnecting(false);
+    setFormState((p: any) => ({ ...p, secondaryDomainId: "" }));
+  };
+
+  // Listen for the OAuth popup result, then load properties/sites to select.
+  useEffect(() => {
+    const onMessage = async (event: MessageEvent) => {
+      const data: any = event.data;
+      if (!data || data.source !== "google-oauth") return;
+
+      if (!data.success) {
+        toast({
+          title: "Connection failed",
+          description: `Google connection ${data.error ? `(${data.error})` : ""} did not complete.`,
+          variant: "destructive",
+        });
+        setSecConnecting(false);
+        secPendingTypesRef.current = [];
+        return;
+      }
+
+      const type: "google_analytics" | "search_console" = data.integration_type;
+      const integrationId: number | null = data.integration_id ?? null;
+      setSecSelectType(type);
+      setSecSelectIntegrationId(integrationId);
+      setSecSelectedOptionId("");
+      setSecOptions([]);
+      setSecLoadingOptions(true);
+      setSecSelectOpen(true);
+      try {
+        const domainId = secDomainIdRef.current ?? undefined;
+        if (type === "google_analytics") {
+          const r: any = await apiClient.getGAProperties({ integrationId: integrationId ?? undefined, domainId });
+          setSecOptions(Array.isArray(r?.properties) ? r.properties : []);
+        } else {
+          const r: any = await apiClient.getGSCSites({ integrationId: integrationId ?? undefined, domainId });
+          setSecOptions(Array.isArray(r?.sites) ? r.sites : []);
+        }
+      } catch (e: any) {
+        toast({
+          title: "Couldn't load options",
+          description: e?.message || "Failed to load the available properties/sites.",
+          variant: "destructive",
+        });
+      } finally {
+        setSecLoadingOptions(false);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+    // Setters, apiClient and toast are stable; refs hold the live values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Save the chosen GA4 property / GSC site, then advance to the next source
+  // (for "GA vs GSC" we connect both) or finish.
+  const handleSecSelectConfirm = async () => {
+    if (!secSelectIntegrationId || !secSelectedOptionId) {
+      toast({ title: "Select one to continue", variant: "destructive" });
+      return;
+    }
+    const opt = secOptions.find((o: any) => o.id === secSelectedOptionId);
+    if (!opt) return;
+    setSecSelecting(true);
+    try {
+      if (secSelectType === "google_analytics") {
+        await apiClient.selectGAProperty(secSelectIntegrationId, opt.id, opt.display_name || opt.id);
+      } else {
+        await apiClient.selectGSCSite(secSelectIntegrationId, opt.id, opt.display_name || opt.id);
+      }
+      setSecSelectOpen(false);
+      secPendingTypesRef.current = secPendingTypesRef.current.filter((t) => t !== secSelectType);
+      if (secPendingTypesRef.current.length > 0) {
+        await startConnectType(secPendingTypesRef.current[0]);
+      } else {
+        setSecConnecting(false);
+        setSecRecheckNonce((n) => n + 1);
+        toast({ title: "Connected", description: "Secondary subdomain connected and ready to pool." });
+      }
+    } catch (e: any) {
+      toast({
+        title: "Selection failed",
+        description: e?.message || "Could not save your selection.",
+        variant: "destructive",
+      });
+    } finally {
+      setSecSelecting(false);
+    }
+  };
 
   const toggleArrayItem = (
     field: "gscTypes" | "gscMetrics" | "rankMetrics" | "changeUnits",
@@ -425,43 +657,63 @@ const ConfigureSeoReport = () => {
             />
           </div>
 
-          {/* Secondary Domain (optional) — combine a second connected domain
-              (e.g. the blog) into this report. GA/GSC and other figures are
-              pooled with the primary. Leave as "None" for a single-domain report. */}
+          {/* Secondary Subdomain (optional) — the client types a subdomain
+              (e.g. the blog) and connects its own GA/GSC right here via an
+              OAuth popup. Its data is then pooled into this report. Leave blank
+              for a single-domain report (unchanged behaviour). */}
           <div className="bg-white rounded-lg p-5">
             <Label className="text-sm font-semibold">
-              Secondary Domain <span className="text-xs font-normal text-muted-foreground">(optional — combine into this report)</span>
+              Secondary Subdomain <span className="text-xs font-normal text-muted-foreground">(optional — combine into this report)</span>
             </Label>
-            <div className="mt-2">
-              <Select
-                value={formState.secondaryDomainId || "none"}
-                onValueChange={(v) =>
-                  setFormState((p: any) => ({ ...p, secondaryDomainId: v === "none" ? "" : v }))
-                }
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Input
+                className="max-w-sm"
+                placeholder="e.g. blog.example.com"
+                value={secSubdomain}
+                onChange={(e) => setSecSubdomain(e.target.value)}
+                disabled={secConnecting}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleConnectSecondary}
+                disabled={secConnecting || !secSubdomain.trim()}
               >
-                <SelectTrigger className="w-[320px]">
-                  <SelectValue placeholder="None (single domain)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None (single domain)</SelectItem>
-                  {domains
-                    .filter((d) => d.id !== selectedDomain?.id)
-                    .map((d) => (
-                      <SelectItem key={d.id} value={String(d.id)}>
-                        {d.name} {d.url ? `— ${d.url.replace(/^https?:\/\//, "")}` : ""}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+                {secConnecting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Connecting…
+                  </>
+                ) : (
+                  secConnectLabel
+                )}
+              </Button>
+              {formState.secondaryDomainId && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={handleClearSecondary}
+                  disabled={secConnecting}
+                >
+                  Remove
+                </Button>
+              )}
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              The selected domain must have its own GA4 / Search Console connected.
-              Its data is pooled into the GA &amp; GSC figures of this report.
-            </p>
-            {secWarning && (
+
+            {secConnected ? (
+              <p className="mt-2 text-xs font-medium text-green-600">
+                ✓ Connected — this subdomain's data will be pooled into the report.
+              </p>
+            ) : (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Type a subdomain and connect its own {secSourcesText}. A Google sign-in
+                opens in a popup; its data is pooled into the {secSourcesText} figures of this report.
+              </p>
+            )}
+
+            {secWarning && !secConnected && !secConnecting && (
               <p className="mt-2 text-xs font-medium text-destructive">
-                ⚠ This domain doesn't have {secWarning} connected, which this report
-                type needs. Connect {secWarning} for it, or choose a different domain.
+                ⚠ This subdomain doesn't have {secWarning} connected yet, which this
+                report type needs. Click “{secConnectLabel}” to finish connecting it.
               </p>
             )}
           </div>
@@ -512,6 +764,74 @@ const ConfigureSeoReport = () => {
           </div>
         </div>
       </div>
+
+      {/* Secondary subdomain — GA4 property / GSC site selection (after the
+          OAuth popup completes). Mirrors the Domain Settings selection step. */}
+      <Dialog
+        open={secSelectOpen}
+        onOpenChange={(o) => {
+          if (secSelecting) return;
+          setSecSelectOpen(o);
+          // Closing without finishing cancels the in-progress connect flow.
+          if (!o) {
+            secPendingTypesRef.current = [];
+            setSecConnecting(false);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Select {secSelectType === "google_analytics" ? "GA4 property" : "Search Console site"}
+            </DialogTitle>
+            <DialogDescription>
+              Choose which {secSelectType === "google_analytics" ? "Google Analytics property" : "Search Console site"} to
+              connect for the secondary subdomain. Its data is pooled into this report.
+            </DialogDescription>
+          </DialogHeader>
+
+          {secLoadingOptions ? (
+            <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading…
+            </div>
+          ) : secOptions.length === 0 ? (
+            <p className="py-6 text-sm text-muted-foreground">
+              No {secSelectType === "google_analytics" ? "properties" : "sites"} were found for this Google account.
+            </p>
+          ) : (
+            <Select value={secSelectedOptionId} onValueChange={setSecSelectedOptionId}>
+              <SelectTrigger>
+                <SelectValue placeholder={`Select a ${secSelectType === "google_analytics" ? "property" : "site"}`} />
+              </SelectTrigger>
+              <SelectContent>
+                {secOptions.map((o: any) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.display_name || o.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSecSelectOpen(false);
+                secPendingTypesRef.current = [];
+                setSecConnecting(false);
+              }}
+              disabled={secSelecting}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSecSelectConfirm} disabled={secSelecting || !secSelectedOptionId}>
+              {secSelecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Connect
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
