@@ -147,7 +147,7 @@ const ConfigureSeoReport = () => {
     let cancelled = false;
     (async () => {
       try {
-        const res = (await apiClient.getIntegrationsByDomain(Number(sid))) as any;
+        const res = (await apiClient.getSecondaryIntegrations(Number(sid))) as any;
         const list = Array.isArray(res) ? res : (Array.isArray(res?.results) ? res.results : []);
         const isConnected = (i: any) =>
           i.status === "active" && !!i.provider_id &&
@@ -192,7 +192,7 @@ const ConfigureSeoReport = () => {
           : ""
       : "";
 
-  // The secondary subdomain is fully ready when its Domain exists and every
+  // The secondary subdomain is fully ready when it's resolved and every
   // Google source this report needs is connected (or none is needed).
   const secConnected =
     !!formState.secondaryDomainId && secChecked &&
@@ -229,10 +229,10 @@ const ConfigureSeoReport = () => {
   // Open the Google OAuth consent for one source in a popup. The popup's
   // callback posts a message back to this window (see google_callback).
   const startConnectType = async (type: string) => {
-    const domainId = secDomainIdRef.current;
-    if (!domainId) return;
+    const secondaryId = secDomainIdRef.current;
+    if (!secondaryId) return;
     try {
-      const res: any = await apiClient.getGoogleAuthUrl(domainId, type, true);
+      const res: any = await apiClient.getGoogleAuthUrlSecondary(secondaryId, type);
       if (res?.authorization_url) {
         const popup = window.open(
           res.authorization_url,
@@ -262,7 +262,7 @@ const ConfigureSeoReport = () => {
     }
   };
 
-  // Resolve the typed subdomain to a Domain, then connect the needed source(s).
+  // Resolve the typed subdomain to a report-only record, then connect source(s).
   const handleConnectSecondary = async () => {
     const sub = secSubdomain.trim();
     if (!selectedDomain?.id) {
@@ -276,8 +276,8 @@ const ConfigureSeoReport = () => {
     setSecConnecting(true);
     try {
       const res = await apiClient.resolveSecondarySubdomain(selectedDomain.id, sub);
-      secDomainIdRef.current = res.domain_id;
-      setFormState((p: any) => ({ ...p, secondaryDomainId: String(res.domain_id) }));
+      secDomainIdRef.current = res.secondary_id;
+      setFormState((p: any) => ({ ...p, secondaryDomainId: String(res.secondary_id) }));
 
       const types = neededSecTypes();
       if (types.length === 0) {
@@ -335,12 +335,13 @@ const ConfigureSeoReport = () => {
       setSecLoadingOptions(true);
       setSecSelectOpen(true);
       try {
-        const domainId = secDomainIdRef.current ?? undefined;
+        // The popup flow always returns an integration_id; the property/site
+        // lookups key on it (a secondary subdomain has no Domain to fall back to).
         if (type === "google_analytics") {
-          const r: any = await apiClient.getGAProperties({ integrationId: integrationId ?? undefined, domainId });
+          const r: any = await apiClient.getGAProperties({ integrationId: integrationId ?? undefined });
           setSecOptions(Array.isArray(r?.properties) ? r.properties : []);
         } else {
-          const r: any = await apiClient.getGSCSites({ integrationId: integrationId ?? undefined, domainId });
+          const r: any = await apiClient.getGSCSites({ integrationId: integrationId ?? undefined });
           setSecOptions(Array.isArray(r?.sites) ? r.sites : []);
         }
       } catch (e: any) {

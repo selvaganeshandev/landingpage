@@ -16,7 +16,7 @@ from domains.models import Domain
 from .models import (
     SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory, SeoDomainDailyMetrics,
     SeoCompetitorAnalysis, SeoCompetitorProject, SeoCompetitorKeyword,
-    SeoReportSheet, SeoKeywordNote, SeoKeywordVolume,
+    SeoReportSheet, SeoKeywordNote, SeoKeywordVolume, SeoSecondaryDomain,
 )
 from .serializers import (
     SeoKeywordRankSerializer,
@@ -1693,15 +1693,14 @@ def _normalize_subdomain(raw):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def seo_secondary_domain_resolve(request):
-    """Create-or-get a lightweight Domain for a typed secondary subdomain.
+    """Create-or-get a report-only secondary subdomain record.
 
     Body: { primary_domain_id, subdomain }
 
-    The returned domain is created under the SAME organisation as the primary
-    and is granted to all org members (so it passes the report's access checks).
-    It is intentionally created WITHOUT keywords and is NOT scheduled for AI
-    processing — it exists only to hold this subdomain's own GA4/GSC connection
-    so its data can be pooled into the report (see combined_report.merge_sheet).
+    This creates a SeoSecondaryDomain (NOT a domains.Domain): it never appears in
+    the "Your Domains" list, is never processed for keywords/AI, and never pollutes
+    primary-domain queries. It exists only to anchor this subdomain's own GA4/GSC
+    connection so its data can be pooled into the report (see combined_report).
     """
     primary_domain_id = request.data.get('primary_domain_id')
     subdomain = request.data.get('subdomain')
@@ -1724,9 +1723,6 @@ def seo_secondary_domain_resolve(request):
         return Response({'error': 'Enter a valid subdomain, e.g. blog.example.com'},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    from domains.models import DomainAccess
-    from authentication.models import Account
-
     primary = Domain.objects.filter(id=primary_domain_id).first()
     if not primary:
         return Response({'error': 'Primary domain not found'},
@@ -1739,35 +1735,28 @@ def seo_secondary_domain_resolve(request):
                         status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        with transaction.atomic():
-            domain, created = Domain.objects.get_or_create(
-                url=url, organisation=org,
-                defaults={'name': name},
-            )
-            # Grant access to all org members so it appears in allowed domains.
-            for member in Account.objects.filter(organisation=org, is_active=True):
-                DomainAccess.objects.get_or_create(
-                    user=member, domain=domain,
-                    defaults={'granted_by': request.user},
-                )
+        secondary, created = SeoSecondaryDomain.objects.get_or_create(
+            primary_domain=primary, url=url,
+            defaults={'name': name, 'organisation': org, 'created_by': request.user},
+        )
     except Exception as e:
         logger.error(f"Failed to resolve secondary subdomain '{url}': {e}")
         return Response({'error': f'Could not create subdomain entry: {e}'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     return Response({
-        'domain_id': domain.id,
-        'name': domain.name,
-        'url': domain.url,
+        'secondary_id': secondary.id,
+        'name': secondary.name,
+        'url': secondary.url,
         'created': created,
     })
 
 
-def _clean_secondary_domain_id(raw, primary_domain_id, allowed_ids):
-    """Validate a requested secondary (combine) domain id.
+def _clean_secondary_domain_id(raw, primary_domain_id):
+    """Validate a requested secondary subdomain id (a SeoSecondaryDomain).
 
     Returns a usable int id, or None to mean "single-domain report". Guards
-    against blanks, the primary itself, and domains the user cannot access.
+    against blanks and ids that don't belong to this primary domain.
     """
     if raw in (None, '', 'null', 'none'):
         return None
@@ -1775,7 +1764,9 @@ def _clean_secondary_domain_id(raw, primary_domain_id, allowed_ids):
         sid = int(raw)
     except (TypeError, ValueError):
         return None
-    if sid == int(primary_domain_id) or sid not in allowed_ids:
+    if not SeoSecondaryDomain.objects.filter(
+        id=sid, primary_domain_id=primary_domain_id
+    ).exists():
         return None
     return sid
 
@@ -1787,37 +1778,42 @@ _GSC_SHEET_TYPES = ('gsc_pages', 'gsc_branded_queries', 'gsc_non_branded_queries
 _GA_SHEET_TYPES = ('ga_landing_pages', 'ga_other_sources', 'ga_overview',
                    'ga_organic_traffic_breakup', 'ga_country_events')
 
+# Sheet types whose data can be pooled from a report-only secondary subdomain
+# (it has GA/GSC but no Domain → no keyword/domain-metrics to pool).
+_SECONDARY_MERGEABLE_TYPES = frozenset(
+    _GSC_SHEET_TYPES + _GA_SHEET_TYPES + ('ga_gsc_reconcile',))
 
-def _domain_has_integration(domain_id, itype):
-    """True if the domain has an active, fully-configured integration of itype."""
+
+def _secondary_has_integration(secondary_domain_id, itype):
+    """True if the secondary subdomain has an active, fully-configured
+    integration of itype (keyed on secondary_domain, not Domain)."""
     from integrations.models import Integration
     return Integration.objects.filter(
-        domain_id=domain_id, type=itype, status='active'
+        secondary_domain_id=secondary_domain_id, type=itype, status='active'
     ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(
         provider_id__isnull=True).exists()
 
 
 def _secondary_connection_error(secondary_domain_id, sheet_type):
-    """Return an alert string if the chosen secondary domain is missing the
+    """Return an alert string if the chosen secondary subdomain is missing the
     Google connection this report type needs (GA for GA reports, GSC for GSC
     reports, both for GA-vs-GSC). Returns None when OK or not applicable —
     keyword/domain-metrics reports don't need GA/GSC, so they're never blocked.
     """
     if not secondary_domain_id:
         return None
-    from domains.models import Domain
-    name = (Domain.objects.filter(id=secondary_domain_id)
-            .values_list('name', flat=True).first()) or 'secondary domain'
+    name = (SeoSecondaryDomain.objects.filter(id=secondary_domain_id)
+            .values_list('name', flat=True).first()) or 'secondary subdomain'
     needs_ga = sheet_type in _GA_SHEET_TYPES or sheet_type == 'ga_gsc_reconcile'
     needs_gsc = sheet_type in _GSC_SHEET_TYPES or sheet_type == 'ga_gsc_reconcile'
-    if needs_ga and not _domain_has_integration(secondary_domain_id, 'google_analytics'):
-        return (f'The selected secondary domain "{name}" does not have Google '
+    if needs_ga and not _secondary_has_integration(secondary_domain_id, 'google_analytics'):
+        return (f'The selected secondary subdomain "{name}" does not have Google '
                 f'Analytics connected. Connect GA for it, or choose a different '
-                f'secondary domain.')
-    if needs_gsc and not _domain_has_integration(secondary_domain_id, 'search_console'):
-        return (f'The selected secondary domain "{name}" does not have Google '
+                f'secondary subdomain.')
+    if needs_gsc and not _secondary_has_integration(secondary_domain_id, 'search_console'):
+        return (f'The selected secondary subdomain "{name}" does not have Google '
                 f'Search Console connected. Connect GSC for it, or choose a '
-                f'different secondary domain.')
+                f'different secondary subdomain.')
     return None
 
 
@@ -1878,10 +1874,10 @@ def seo_report_sheet_add(request):
     duration = request.data.get('duration', 2)
     order_by = request.data.get('order_by', 'Ascending')
 
-    # Optional secondary domain to combine into this report (must be another
-    # domain the user can access). Absent/blank → single-domain report.
+    # Optional secondary subdomain to combine into this report (a
+    # SeoSecondaryDomain belonging to this primary). Absent/blank → single-domain.
     secondary_domain_id = _clean_secondary_domain_id(
-        request.data.get('secondary_domain_id'), domain_id, allowed_ids
+        request.data.get('secondary_domain_id'), domain_id
     )
 
     if not sheet_name:
@@ -1987,10 +1983,10 @@ def seo_report_sheet_update(request, pk):
             setattr(sheet, field, request.data[field])
             update_fields.append(field)
 
-    # Optional secondary domain (combine target). Send null/'' to clear it.
+    # Optional secondary subdomain (combine target). Send null/'' to clear it.
     if 'secondary_domain_id' in request.data:
         sheet.secondary_domain_id = _clean_secondary_domain_id(
-            request.data.get('secondary_domain_id'), sheet.domain_id, allowed_ids
+            request.data.get('secondary_domain_id'), sheet.domain_id
         )
         update_fields.append('secondary_domain')
 
@@ -5143,6 +5139,19 @@ def _resolve_report_integrations(domain_id):
     return ga, gsc
 
 
+def _resolve_secondary_integrations(secondary_id):
+    """Return (ga_integration, gsc_integration) for a report-only secondary
+    subdomain — same filters as the primary, but keyed on secondary_domain."""
+    from integrations.models import Integration
+    gsc = Integration.objects.filter(
+        secondary_domain_id=secondary_id, type='search_console', status='active'
+    ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+    ga = Integration.objects.filter(
+        secondary_domain_id=secondary_id, type='google_analytics', status='active'
+    ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
+    return ga, gsc
+
+
 def _dispatch_sheet_fetch(sheet, domain_id, ga_integration, gsc_integration, include_urls=False):
     """Fetch one sheet's data dict for a given domain + its integrations.
 
@@ -5242,15 +5251,17 @@ def seo_report_sheet_data(request):
         domain_id=domain_id, type='google_analytics', status='active'
     ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
 
-    # ── Combined report (optional): each sheet may carry a secondary domain
-    #    whose GA/GSC (and other) data is pooled in. Pre-resolve each distinct
-    #    secondary domain's integrations once (read-only map → thread-safe).
-    #    Reports with no secondary_domain run the unchanged single-domain path.
+    # ── Combined report (optional): each sheet may carry a secondary subdomain
+    #    whose GA/GSC data is pooled in. Pre-resolve each distinct secondary
+    #    subdomain's integrations once (read-only map → thread-safe). Reports with
+    #    no secondary_domain run the unchanged single-domain path.
+    sec_ids = {s.secondary_domain_id for s in sheets if s.secondary_domain_id}
+    valid_sec_ids = set(SeoSecondaryDomain.objects.filter(
+        id__in=sec_ids, primary_domain_id=domain_id
+    ).values_list('id', flat=True)) if sec_ids else set()
     sec_integrations = {}  # {secondary_domain_id: (ga_integration, gsc_integration)}
-    for _sid in {s.secondary_domain_id for s in sheets
-                 if s.secondary_domain_id and s.secondary_domain_id in allowed_ids
-                 and s.secondary_domain_id != int(domain_id)}:
-        sec_integrations[_sid] = _resolve_report_integrations(_sid)
+    for _sid in valid_sec_ids:
+        sec_integrations[_sid] = _resolve_secondary_integrations(_sid)
 
     def _gen_one(sheet):
         report_entry = {
@@ -5356,9 +5367,12 @@ def seo_report_sheet_data(request):
             logger.error(f"Error fetching data for sheet {sheet.id}: {e}")
             report_entry['error'] = str(e)
 
-        # ── Combined report: merge this sheet's secondary domain (if any) ──
+        # ── Combined report: merge this sheet's secondary subdomain (if any) ──
+        # Only GA/GSC-backed sheets pool: a report-only secondary subdomain has
+        # no Domain, so keyword-ranking / domain-metrics have nothing to pool.
         sec_pair = sec_integrations.get(sheet.secondary_domain_id)
-        if sec_pair and not report_entry.get('error'):
+        if (sec_pair and not report_entry.get('error')
+                and sheet.sheet_type in _SECONDARY_MERGEABLE_TYPES):
             try:
                 from seo_rankings.combined_report import merge_sheet
                 sec_ga, sec_gsc = sec_pair
@@ -5455,13 +5469,15 @@ def seo_report_export_xlsx(request):
         domain_id=domain_id, type='google_analytics', status='active'
     ).exclude(provider_id='').exclude(provider_id='pending_selection').exclude(provider_id__isnull=True).first()
 
-    # ── Combined export (optional): each sheet's saved secondary domain is
+    # ── Combined export (optional): each sheet's saved secondary subdomain is
     #    pooled in. Pre-resolve each distinct secondary's integrations once.
+    sec_ids = {s.secondary_domain_id for s in sheets if s.secondary_domain_id}
+    valid_sec_ids = set(SeoSecondaryDomain.objects.filter(
+        id__in=sec_ids, primary_domain_id=domain_id
+    ).values_list('id', flat=True)) if sec_ids else set()
     sec_integrations = {}  # {secondary_domain_id: (ga_integration, gsc_integration)}
-    for _sid in {s.secondary_domain_id for s in sheets
-                 if s.secondary_domain_id and s.secondary_domain_id in allowed_ids
-                 and s.secondary_domain_id != int(domain_id)}:
-        sec_integrations[_sid] = _resolve_report_integrations(_sid)
+    for _sid in valid_sec_ids:
+        sec_integrations[_sid] = _resolve_secondary_integrations(_sid)
 
     # ── Styles ────────────────────────────────────────────────────────────
     metric_header_fill = PatternFill(start_color="00B050", fill_type="solid")
@@ -5531,9 +5547,10 @@ def seo_report_export_xlsx(request):
             logger.error(f"Export: error fetching sheet {sheet.id}: {e}")
             data['error'] = str(e)
 
-        # ── Combined export: merge this sheet's secondary domain (if any) ──
+        # ── Combined export: merge this sheet's secondary subdomain (if any) ──
         sec_pair = sec_integrations.get(sheet.secondary_domain_id)
-        if sec_pair and not data.get('error'):
+        if (sec_pair and not data.get('error')
+                and sheet.sheet_type in _SECONDARY_MERGEABLE_TYPES):
             try:
                 from seo_rankings.combined_report import merge_sheet
                 sec_ga, sec_gsc = sec_pair

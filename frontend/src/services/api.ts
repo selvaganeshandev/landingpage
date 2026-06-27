@@ -1166,6 +1166,15 @@ export const apiClient = {
   getGoogleAuthUrl: (domainId: number, integrationType: string = 'google_analytics', popup: boolean = false) =>
     apiRequest(`/integrations/google/auth-url/?domain_id=${domainId}&integration_type=${integrationType}${popup ? '&popup=1' : ''}`),
 
+  // OAuth for a report-only secondary subdomain — anchored on secondary_id, not
+  // a Domain. Always a popup (preserves the half-filled report form in the opener).
+  getGoogleAuthUrlSecondary: (secondaryId: number, integrationType: string = 'google_analytics') =>
+    apiRequest(`/integrations/google/auth-url/?secondary_id=${secondaryId}&integration_type=${integrationType}&popup=1`),
+
+  // Integrations belonging to a report-only secondary subdomain (domain IS NULL).
+  getSecondaryIntegrations: (secondaryId: number) =>
+    apiRequest(`/integrations/integrations/by_secondary/?secondary_id=${secondaryId}`),
+
   getGAProperties: (params: { integrationId?: number; domainId?: number }) => {
     const queryParams = new URLSearchParams();
     if (params.integrationId) queryParams.set('integration_id', String(params.integrationId));
@@ -1915,10 +1924,10 @@ export const apiClient = {
   getSeoReportSheets: (domainId: number) =>
     apiRequest(`/seo/report-sheets/?domain_id=${domainId}`),
 
-  // Create-or-get a lightweight Domain for a typed secondary subdomain, so its
-  // own GA4/GSC connection can be pooled into the report. Returns { domain_id }.
+  // Create-or-get a report-only secondary subdomain (NOT a Domain), so its own
+  // GA4/GSC connection can be pooled into the report. Returns { secondary_id }.
   resolveSecondarySubdomain: (primaryDomainId: number, subdomain: string) =>
-    apiRequest<{ domain_id: number; name: string; url: string; created: boolean }>(
+    apiRequest<{ secondary_id: number; name: string; url: string; created: boolean }>(
       '/seo/report-sheets/secondary-domain/resolve/',
       {
         method: 'POST',

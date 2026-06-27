@@ -78,40 +78,64 @@ def google_auth_url(request):
         - integration_type: 'google_analytics' or 'search_console'
     """
     domain_id = request.query_params.get('domain_id')
+    secondary_id = request.query_params.get('secondary_id')
     integration_type = request.query_params.get('integration_type', 'google_analytics')
 
-    if not domain_id:
-        return Response(
-            {'error': 'domain_id is required'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    # Verify user has access to the domain
-    try:
-        if request.user.role == 'super_admin':
-            domain = Domain.objects.get(pk=domain_id, organisation=request.user.organisation)
-        else:
-            domain_access = DomainAccess.objects.get(
-                user=request.user,
-                domain_id=domain_id,
-                domain__organisation=request.user.organisation
-            )
-            domain = domain_access.domain
-    except (Domain.DoesNotExist, DomainAccess.DoesNotExist):
-        return Response(
-            {'error': 'Domain not found or access denied'},
-            status=status.HTTP_404_NOT_FOUND
-        )
-
-    # Create state parameter with domain_id, integration_type, and user_id.
-    # `popup=1` marks an OAuth started from a popup window (e.g. the Configure
-    # Report page's secondary-subdomain connect): the callback then closes the
-    # popup and notifies the opener instead of doing a full-page redirect.
+    # Create state parameter with integration_type and user_id, plus EITHER a
+    # domain_id (normal connect) OR a secondary_id (report-only subdomain connect).
     state_data = {
-        'domain_id': domain_id,
         'integration_type': integration_type,
         'user_id': request.user.id,
     }
+
+    if secondary_id:
+        # Report-only secondary subdomain: verify access via its primary domain.
+        from seo_rankings.models import SeoSecondaryDomain
+        secondary = SeoSecondaryDomain.objects.filter(pk=secondary_id).first()
+        if not secondary:
+            return Response({'error': 'Secondary subdomain not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        primary_id = secondary.primary_domain_id
+        try:
+            if request.user.role == 'super_admin':
+                Domain.objects.get(pk=primary_id, organisation=request.user.organisation)
+            else:
+                DomainAccess.objects.get(
+                    user=request.user, domain_id=primary_id,
+                    domain__organisation=request.user.organisation,
+                )
+        except (Domain.DoesNotExist, DomainAccess.DoesNotExist):
+            return Response({'error': 'Domain not found or access denied'},
+                            status=status.HTTP_404_NOT_FOUND)
+        state_data['secondary_id'] = secondary_id
+    else:
+        if not domain_id:
+            return Response(
+                {'error': 'domain_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verify user has access to the domain
+        try:
+            if request.user.role == 'super_admin':
+                domain = Domain.objects.get(pk=domain_id, organisation=request.user.organisation)
+            else:
+                domain_access = DomainAccess.objects.get(
+                    user=request.user,
+                    domain_id=domain_id,
+                    domain__organisation=request.user.organisation
+                )
+                domain = domain_access.domain
+        except (Domain.DoesNotExist, DomainAccess.DoesNotExist):
+            return Response(
+                {'error': 'Domain not found or access denied'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        state_data['domain_id'] = domain_id
+
+    # `popup=1` marks an OAuth started from a popup window (e.g. the Configure
+    # Report page's secondary-subdomain connect): the callback then closes the
+    # popup and notifies the opener instead of doing a full-page redirect.
     if str(request.query_params.get('popup', '')).lower() in ('1', 'true', 'yes'):
         state_data['popup'] = True
     state = json.dumps(state_data)
@@ -190,13 +214,14 @@ def google_callback(request):
         return _fail('missing_params')
 
     try:
-        # Parse state to get domain_id and integration_type
+        # Parse state to get the anchor (domain_id OR secondary_id) + type
         state_data = json.loads(state)
         domain_id = state_data.get('domain_id')
+        secondary_id = state_data.get('secondary_id')
         integration_type = state_data.get('integration_type', 'google_analytics')
         user_id = state_data.get('user_id')
 
-        if not domain_id or not user_id:
+        if not user_id or (not domain_id and not secondary_id):
             return _fail('invalid_state')
 
         # Exchange code for tokens
@@ -204,11 +229,19 @@ def google_callback(request):
         flow.fetch_token(code=code)
         credentials = flow.credentials
 
-        # Get the domain
-        try:
-            domain = Domain.objects.get(pk=domain_id)
-        except Domain.DoesNotExist:
-            return _fail('domain_not_found')
+        # Resolve the anchor: a real Domain, or a report-only secondary subdomain.
+        domain = None
+        secondary = None
+        if secondary_id:
+            from seo_rankings.models import SeoSecondaryDomain
+            secondary = SeoSecondaryDomain.objects.filter(pk=secondary_id).first()
+            if not secondary:
+                return _fail('domain_not_found')
+        else:
+            try:
+                domain = Domain.objects.get(pk=domain_id)
+            except Domain.DoesNotExist:
+                return _fail('domain_not_found')
 
         # Get the user
         from authentication.models import Account
@@ -269,10 +302,13 @@ def google_callback(request):
                 credentials_data['error_message'] = f'Failed to fetch sites: {str(e)}'
                 logger.error(f"Error fetching GSC sites: {e}")
 
-        # Create or update integration
+        # Create or update integration. For a report-only secondary subdomain the
+        # integration is anchored on `secondary_domain` (domain stays NULL) so it
+        # never appears in primary-domain queries, lists, or processing.
+        lookup = {'secondary_domain': secondary} if secondary else {'domain': domain}
         integration, created = Integration.objects.update_or_create(
-            domain=domain,
             type=integration_type,
+            **lookup,
             defaults={
                 'provider_id': provider_id,
                 'credentials': credentials_data,
@@ -292,6 +328,7 @@ def google_callback(request):
                 'success': True,
                 'integration_type': integration_type,
                 'domain_id': domain_id,
+                'secondary_id': secondary_id,
                 'integration_id': integration.id,
                 'status': integration_status,
             })
@@ -454,21 +491,24 @@ def select_ga_property(request):
         integration.credentials['selected_property_name'] = property_name
         integration.save()
 
-        # Create INIT record for processing
-        from datetime import date, timedelta
-        from .models import GATrafficInsight
-        
-        end_date = date.today()
-        start_date = end_date - timedelta(days=30)
-        GATrafficInsight.objects.get_or_create(
-            integration=integration,
-            domain=integration.domain,
-            start_date=start_date,
-            end_date=end_date,
-            defaults={
-                'track_status': 'INIT',
-            }
-        )
+        # Create INIT record for processing — ONLY for real domains. A report-only
+        # secondary subdomain (domain IS NULL) must not enter the GA processing
+        # scheduler; its data is fetched live at report time instead.
+        if integration.domain_id:
+            from datetime import date, timedelta
+            from .models import GATrafficInsight
+
+            end_date = date.today()
+            start_date = end_date - timedelta(days=30)
+            GATrafficInsight.objects.get_or_create(
+                integration=integration,
+                domain=integration.domain,
+                start_date=start_date,
+                end_date=end_date,
+                defaults={
+                    'track_status': 'INIT',
+                }
+            )
 
         return Response({
             'success': True,
@@ -566,21 +606,24 @@ def select_gsc_site(request):
         integration.credentials['selected_site_name'] = site_name
         integration.save()
 
-        # Create INIT record for processing
-        from datetime import date, timedelta
-        from .models import GSCTrafficInsight
-        
-        end_date = date.today()
-        start_date = end_date - timedelta(days=30)
-        GSCTrafficInsight.objects.get_or_create(
-            integration=integration,
-            domain=integration.domain,
-            start_date=start_date,
-            end_date=end_date,
-            defaults={
-                'track_status': 'INIT',
-            }
-        )
+        # Create INIT record for processing — ONLY for real domains. A report-only
+        # secondary subdomain (domain IS NULL) must not enter the GSC processing
+        # scheduler; its data is fetched live at report time instead.
+        if integration.domain_id:
+            from datetime import date, timedelta
+            from .models import GSCTrafficInsight
+
+            end_date = date.today()
+            start_date = end_date - timedelta(days=30)
+            GSCTrafficInsight.objects.get_or_create(
+                integration=integration,
+                domain=integration.domain,
+                start_date=start_date,
+                end_date=end_date,
+                defaults={
+                    'track_status': 'INIT',
+                }
+            )
 
         return Response({
             'success': True,
