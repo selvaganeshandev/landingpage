@@ -16,13 +16,22 @@ from decouple import config
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
+import sys
+if str(BASE_DIR.parent) not in sys.path:
+    sys.path.append(str(BASE_DIR.parent))
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-1^ql#^w)r=70(!w2s-m9(y)y8ux!0yp3wniaeylu^z5u#pgy8q')
+
+# Secret used to encrypt/decrypt per-organisation BYOK API keys at rest.
+# Defaults to SECRET_KEY so backend encryption/decryption is UNCHANGED from before
+# this feature (any keys already stored keep decrypting). MUST be identical in the
+# engine for the engine to decrypt; if you run a custom SECRET_KEY in production,
+# set API_KEY_ENCRYPTION_SECRET to that same value in BOTH backend and engine env.
+API_KEY_ENCRYPTION_SECRET = config('API_KEY_ENCRYPTION_SECRET', default=SECRET_KEY)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
@@ -80,6 +89,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'llm_monitor.middleware.ThreadLocalRequestMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -106,28 +116,26 @@ WSGI_APPLICATION = 'llm_monitor.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': config('DB_NAME', default='llm_monitor'),
-        'USER': config('DB_USER', default='root'),
-        'PASSWORD': config('DB_PASSWORD', default='Monit@2025$'),
-        'HOST': config('DB_HOST', default='64.227.190.42'),
+        'USER': config('DB_USER', default='postgres'),
+        'PASSWORD': config('DB_PASSWORD', default='9486'),   # or your actual local postgres password
+        'HOST': config('DB_HOST', default='localhost'),
         'PORT': config('DB_PORT', default='5432'),
         'OPTIONS': {
-            'gssencmode': 'disable',  # Disable GSSAPI to prevent macOS fork crashes
+            'gssencmode': 'disable',
             'connect_timeout': 10,
-            'keepalives': 1,  # Enable TCP keepalives
-            'keepalives_idle': 30,  # Seconds before sending keepalive probes
-            'keepalives_interval': 10,  # Seconds between keepalive probes
-            'keepalives_count': 5,  # Number of keepalives before giving up
+            'keepalives': 1,
+            'keepalives_idle': 30,
+            'keepalives_interval': 10,
+            'keepalives_count': 5,
         },
-        'CONN_MAX_AGE': 300,  # Reduced to 5 minutes to prevent stale connections
-        'CONN_HEALTH_CHECKS': True,  # Django 4.1+ health checks before using connection
+        'CONN_MAX_AGE': 300,
+        'CONN_HEALTH_CHECKS': True,
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators

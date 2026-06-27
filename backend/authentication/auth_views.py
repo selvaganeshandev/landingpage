@@ -8,7 +8,8 @@ from django.shortcuts import get_object_or_404
 from llm_monitor.email_utils import send_mail
 from django.utils import timezone
 from django.conf import settings
-from .models import Account, Organisation, TeamInvitation, UserPermission, PasswordResetToken
+from django.core.cache import cache
+from .models import Account, Organisation, TeamInvitation, UserPermission, PasswordResetToken, decrypt_value
 from domains.models import Domain, DomainAccess
 from .serializers import (
     AccountSerializer, AccountUpdateSerializer,
@@ -16,6 +17,105 @@ from .serializers import (
     UserPermissionSerializer, UserPermissionCreateSerializer,
     PasswordResetTokenSerializer, ForgotPasswordSerializer, ResetPasswordSerializer
 )
+
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+LLM_PROVIDERS = ['openai', 'gemini', 'perplexity', 'anthropic', 'xai', 'deepseek']
+
+# Map the engine quota-probe states → status strings the frontend renders.
+_PROBE_STATE_TO_UI = {
+    'OK': 'CONNECTED',
+    'INVALID_KEY': 'INVALID_KEY',
+    'RATE_LIMIT': 'RATE_LIMITED',
+    'OUT_OF_CREDITS': 'OUT_OF_CREDITS',
+    'MODEL_UNAVAILABLE': 'MODEL_UNAVAILABLE',
+    'ERROR': 'ERROR',
+}
+
+
+def _key_status_cache_key(org_id, provider):
+    return f'org_{org_id}_{provider}_keystatus'
+
+
+def _validate_api_key(provider, raw_key):
+    """Live-probe a freshly saved key and return a UI status string.
+
+    Falls back to 'CONNECTED' (stored-but-unverified) if the probe genuinely
+    can't run — e.g. the provider SDK isn't installed — so we never mislabel a
+    real key as broken because of an environment issue.
+    """
+    try:
+        from engine.core.quota_monitor import probe_key_state
+        state, detail = probe_key_state(provider, raw_key)
+        if state == 'ERROR' and 'no module named' in (detail or '').lower():
+            return 'CONNECTED'
+        return _PROBE_STATE_TO_UI.get(state, 'CONNECTED')
+    except Exception as e:
+        logger.warning(f"Key validation probe failed for {provider}: {e}")
+        return 'CONNECTED'
+
+
+def _get_provider_status(org, provider):
+    """Return the status string for a given provider.
+
+    Prefers the last *live-validated* status (cached when the key was saved);
+    otherwise falls back to a presence-based check.
+    """
+    enabled = getattr(org, f'{provider}_enabled', False)
+    if not enabled:
+        return 'DISABLED'
+    encrypted_key = getattr(org, f'{provider}_api_key', None)
+    if not encrypted_key:
+        # Check .env fallback
+        env_map = {
+            'openai': 'OPENAI_API_KEY',
+            'gemini': 'GEMINI_API_KEY',
+            'perplexity': 'PERPLEXITY_API_KEY',
+            'anthropic': 'ANTHROPIC_API_KEY',
+            'xai': 'XAI_API_KEY',
+            'deepseek': 'DEEPSEEK_API_KEY',
+        }
+        env_key = getattr(settings, env_map.get(provider, ''), None)
+        if env_key:
+            return 'CONNECTED'
+        return 'NOT_CONFIGURED'
+    # Org key present — use the validated status from when it was saved, if known.
+    validated = cache.get(_key_status_cache_key(org.id, provider))
+    if validated:
+        return validated
+    return 'CONNECTED'
+
+
+def _mask_key(raw_key):
+    """Return a safe masked preview of the API key."""
+    if not raw_key or len(raw_key) < 8:
+        return None
+    return raw_key[:6] + '••••'
+
+
+def _build_api_keys_payload(org):
+    """Build the API keys section of the organization GET response.
+
+    Returns a per-provider nested object so the frontend can read
+    api_keys[provider].{configured,preview,enabled,status} directly:
+        {"openai": {"configured": true, "preview": "sk-abc••••",
+                     "enabled": true, "status": "CONNECTED"}, ...}
+    """
+    payload = {}
+    for provider in LLM_PROVIDERS:
+        encrypted = getattr(org, f'{provider}_api_key', None)
+        raw = decrypt_value(encrypted) if encrypted else ''
+        enabled = getattr(org, f'{provider}_enabled', True)
+        payload[provider] = {
+            'configured': bool(raw),
+            'preview': _mask_key(raw) if raw else None,
+            'enabled': enabled,
+            'status': _get_provider_status(org, provider),
+        }
+    return payload
 
 
 def _has_team_management(user):
@@ -522,7 +622,7 @@ def organization_management(request):
     user = request.user
 
     if request.method == 'GET':
-        return Response({
+        response_data = {
             'id': organization.id,
             'name': organization.name,
             'industry': organization.industry,
@@ -531,10 +631,13 @@ def organization_management(request):
             'using_ai_monitoring': organization.using_ai_monitoring,
             'team_count': organization.team_count,
             'created_at': organization.created_at,
-            'modified_at': organization.modified_at
-        })
+            'modified_at': organization.modified_at,
+            'api_keys': _build_api_keys_payload(organization),
+        }
+        return Response(response_data)
 
-    # Update organization fields
+    # ----- PUT -----
+    # Update general organization fields
     if 'name' in request.data:
         organization.name = request.data.get('name')
     if 'industry' in request.data:
@@ -546,7 +649,39 @@ def organization_management(request):
     if 'using_ai_monitoring' in request.data:
         organization.using_ai_monitoring = request.data.get('using_ai_monitoring')
 
+    # Update API keys and enabled toggles per provider
+    from .models import encrypt_value
+    for provider in LLM_PROVIDERS:
+        key_field = f'{provider}_api_key'
+        enabled_field = f'{provider}_enabled'
+
+        # Toggle update
+        if enabled_field in request.data:
+            setattr(organization, enabled_field, bool(request.data.get(enabled_field)))
+
+        # Key update — only if field is present in request
+        if key_field in request.data:
+            new_key = request.data.get(key_field)
+            if new_key == '' or new_key is None:
+                # Empty string or null → delete the key
+                setattr(organization, key_field, None)
+                cache.delete(_key_status_cache_key(organization.id, provider))
+            else:
+                # Encrypt and store the new key, then live-validate it so the UI
+                # reflects whether the key actually works (not just that it exists).
+                new_key = new_key.strip()
+                setattr(organization, key_field, encrypt_value(new_key))
+                validated_status = _validate_api_key(provider, new_key)
+                cache.set(
+                    _key_status_cache_key(organization.id, provider),
+                    validated_status,
+                    86400,  # 24h; re-validated whenever the key is re-saved
+                )
+
     organization.save()
+
+    # Invalidate the Redis cache for this organisation's settings
+    cache.delete(f'org_{organization.id}_settings')
 
     # Update user's job role if provided
     if 'user_role' in request.data:
@@ -564,9 +699,53 @@ def organization_management(request):
             'using_ai_monitoring': organization.using_ai_monitoring,
             'team_count': organization.team_count,
             'created_at': organization.created_at,
-            'modified_at': organization.modified_at
+            'modified_at': organization.modified_at,
+            'api_keys': _build_api_keys_payload(organization),
         }
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def reveal_api_key(request, provider):
+    """Return the decrypted plaintext API key for a single provider, on demand.
+
+    The default organization settings response only exposes a masked preview
+    (see _build_api_keys_payload). This endpoint lets an authorised admin
+    reveal or copy the real key without it ever being preloaded into the page.
+
+    Security:
+      - Admin / super_admin only (same gate as organization_management).
+      - Provider name is validated against the known LLM_PROVIDERS allow-list.
+      - The decrypted key is never logged.
+      - Response is marked no-store so it is never cached by browsers/proxies.
+    """
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response(
+            {'error': 'Only organisation administrators can reveal API keys'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if provider not in LLM_PROVIDERS:
+        return Response(
+            {'error': 'Unknown provider'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    organization = request.user.organisation
+    encrypted = getattr(organization, f'{provider}_api_key', None)
+    raw = decrypt_value(encrypted) if encrypted else ''
+    if not raw:
+        return Response(
+            {'error': 'No API key configured for this provider'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    response = Response({'provider': provider, 'api_key': raw})
+    # Never let the plaintext key linger in any cache layer.
+    response['Cache-Control'] = 'no-store'
+    response['Pragma'] = 'no-cache'
+    return response
 
 
 @api_view(['DELETE'])

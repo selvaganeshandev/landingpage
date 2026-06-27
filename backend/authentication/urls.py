@@ -10,7 +10,7 @@ from .auth_views import (
     list_permissions, list_user_permissions, update_permission,
     delete_permission, get_available_modules, bulk_assign_permissions,
     revoke_all_permissions, grant_all_permissions, get_permission_summary,
-    organization_management, team_members, team_member_management,
+    organization_management, reveal_api_key, team_members, team_member_management,
     forgot_password, reset_password, verify_reset_token
 )
 
@@ -50,6 +50,7 @@ urlpatterns = [
     
     # Organization Management APIs
     path('organization/', organization_management, name='organization_management'),
+    path('organization/api-keys/<str:provider>/reveal/', reveal_api_key, name='reveal_api_key'),
     path('team-members/', team_members, name='team_members'),
     path('team-members/<int:member_id>/', team_member_management, name='team_member_management'),
     

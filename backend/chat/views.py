@@ -11,6 +11,7 @@ from django.shortcuts import get_object_or_404
 from django.conf import settings
 from openai import OpenAI
 import json
+from engine.core.services.client_factory import get_client
 import logging
 
 from .models import ChatConversation, ChatMessage
@@ -36,12 +37,7 @@ class ChatViewSet(viewsets.ViewSet):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        api_key = getattr(settings, 'OPENAI_API_KEY', None)
-        if api_key:
-            self.openai_client = OpenAI(api_key=api_key, timeout=60)
-        else:
-            self.openai_client = None
-            logger.warning("OpenAI API key not configured")
+        self.openai_client = None
 
     def _validate_domain_access(self, user, domain_id):
         """
@@ -368,9 +364,16 @@ Remember: You're helping users improve their visibility in AI-generated response
         """
         Send a message to the chatbot and get AI response with function calling
         """
-        if not self.openai_client:
+        org_id = request.user.organisation_id if hasattr(request.user, 'organisation_id') else None
+        if not org_id and hasattr(request.user, 'organisation') and request.user.organisation:
+            org_id = request.user.organisation.id
+
+        try:
+            openai_client = get_client('openai', org_id)
+        except Exception as e:
+            logger.warning(f"Could not load OpenAI client for org {org_id}: {e}")
             return Response(
-                {'error': 'ChatBot is not configured. Please contact administrator.'},
+                {'error': f'OpenAI client not configured for this organization: {str(e)}.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
 
@@ -429,7 +432,7 @@ Remember: You're helping users improve their visibility in AI-generated response
 
         try:
             # Call ChatGPT with function calling
-            response = self.openai_client.chat.completions.create(
+            response = openai_client.chat.completions.create(
                 model="gpt-4o-mini",  # Cost-effective model
                 messages=messages,
                 tools=CHAT_TOOLS,
@@ -483,7 +486,7 @@ Remember: You're helping users improve their visibility in AI-generated response
                     })
 
                 # Get final response from ChatGPT
-                final_response = self.openai_client.chat.completions.create(
+                final_response = openai_client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=messages,
                     temperature=0.7

@@ -338,6 +338,14 @@ export const apiClient = {
     body: JSON.stringify(data),
   }),
 
+  // Reveal the decrypted plaintext key for a single provider, on demand.
+  // The settings payload only carries a masked preview; this fetches the real
+  // key only when the user explicitly reveals, copies, or edits it.
+  revealApiKey: (provider: string) =>
+    apiRequest<{ provider: string; api_key: string }>(
+      `/auth/organization/api-keys/${provider}/reveal/`
+    ),
+
   // ===== Team Management =====
   getTeamMembers: () => apiRequest('/auth/team-members/'),
 

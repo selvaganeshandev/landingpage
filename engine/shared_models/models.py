@@ -11,11 +11,30 @@ class Organisation(models.Model):
     team_count = models.PositiveIntegerField(default=1, help_text="Number of team members")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the organisation was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the organisation was last modified")
-    
+
+    # Per-organisation BYOK API keys (encrypted at rest by the backend).
+    # These columns are created/owned by the backend migration
+    # authentication.0005_*; declared here (read-only mirror) so the engine ORM
+    # can actually read them when resolving keys via APIKeyService.
+    openai_api_key = models.TextField(blank=True, null=True, help_text="Encrypted OpenAI API Key")
+    gemini_api_key = models.TextField(blank=True, null=True, help_text="Encrypted Gemini API Key")
+    perplexity_api_key = models.TextField(blank=True, null=True, help_text="Encrypted Perplexity API Key")
+    anthropic_api_key = models.TextField(blank=True, null=True, help_text="Encrypted Anthropic API Key")
+    xai_api_key = models.TextField(blank=True, null=True, help_text="Encrypted xAI (Grok) API Key")
+    deepseek_api_key = models.TextField(blank=True, null=True, help_text="Encrypted DeepSeek API Key")
+
+    # Per-provider enable/disable toggles.
+    openai_enabled = models.BooleanField(default=True, help_text="Whether OpenAI is enabled")
+    gemini_enabled = models.BooleanField(default=True, help_text="Whether Gemini is enabled")
+    perplexity_enabled = models.BooleanField(default=True, help_text="Whether Perplexity is enabled")
+    anthropic_enabled = models.BooleanField(default=True, help_text="Whether Anthropic is enabled")
+    xai_enabled = models.BooleanField(default=True, help_text="Whether xAI (Grok) is enabled")
+    deepseek_enabled = models.BooleanField(default=True, help_text="Whether DeepSeek is enabled")
+
     class Meta:
         app_label = 'shared_models'
         db_table = 'organisations'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Organisation'
         verbose_name_plural = 'Organisations'
         ordering = ['name']
@@ -83,7 +102,7 @@ class Account(AbstractUser):
     class Meta:
         app_label = 'shared_models'
         db_table = 'accounts'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Account'
         verbose_name_plural = 'Accounts'
         ordering = ['email']
@@ -189,7 +208,7 @@ class Domain(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'domains'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Domain'
         verbose_name_plural = 'Domains'
         ordering = ['name']
@@ -231,7 +250,7 @@ class GeneratedContent(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'generated_contents'
-        managed = False
+        managed = True
         ordering = ['-modified_at']
 
     def __str__(self):
@@ -266,7 +285,7 @@ class CMSProvider(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'cms_providers'
-        managed = False
+        managed = True
         ordering = ['name']
 
     def __str__(self):
@@ -307,7 +326,7 @@ class ScheduledPublication(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'scheduled_publications'
-        managed = False
+        managed = True
         ordering = ['scheduled_at']
         unique_together = ['content', 'cms_provider', 'scheduled_at']
 
@@ -350,7 +369,7 @@ class Keyword(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'keywords'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Keyword'
         verbose_name_plural = 'Keywords'
         ordering = ['keyword']
@@ -425,7 +444,7 @@ class PromptGroup(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'prompt_groups'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Prompt Group'
         verbose_name_plural = 'Prompt Groups'
         ordering = ['group_id']
@@ -487,7 +506,7 @@ class Prompt(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'prompts'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Prompt'
         verbose_name_plural = 'Prompts'
         ordering = ['prompt']
@@ -597,7 +616,7 @@ class PromptAnalytics(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'prompt_analytics'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Prompt Analytics'
         verbose_name_plural = 'Prompt Analytics'
         ordering = ['-created_at']
@@ -677,7 +696,7 @@ class Competitor(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'competitors'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         unique_together = [['name', 'domain']]
         ordering = ['-total_mentions']
     
@@ -715,7 +734,7 @@ class CompetitorAnalytics(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'competitor_analytics'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         ordering = ['-timestamp']
     
     def __str__(self):
@@ -791,7 +810,7 @@ class SentimentAnalytics(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'sentiment_analytics'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         unique_together = ['domain', 'theme', 'platform', 'snapshot_date', 'period_type']
         ordering = ['-snapshot_date']
     
@@ -857,7 +876,7 @@ class ShareOfVoiceAnalytics(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'share_of_voice_analytics'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         unique_together = [['domain', 'competitor', 'platform', 'timestamp']]
         ordering = ['-timestamp', 'market_position']
     
@@ -960,7 +979,7 @@ class CompetitorPromptAnalytics(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'competitor_prompt_analytics'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         unique_together = [['competitor', 'prompt']]
         ordering = ['competitor', 'position']
     
@@ -1093,7 +1112,7 @@ class PromptMetricSnapshot(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'prompt_metric_snapshots'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         unique_together = ['prompt', 'platform', 'snapshot_date', 'period_type']
         indexes = [
             models.Index(fields=['prompt', 'snapshot_date']),
@@ -1170,7 +1189,7 @@ class PromptGroupMetricSnapshot(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'prompt_group_metric_snapshots'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         unique_together = ['prompt_group', 'platform', 'snapshot_date', 'period_type']
         indexes = [
             models.Index(fields=['prompt_group', 'snapshot_date']),
@@ -1247,7 +1266,7 @@ class DomainMetricSnapshot(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'domain_metric_snapshots'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         unique_together = ['domain', 'platform', 'snapshot_date', 'period_type']
         indexes = [
             models.Index(fields=['domain', 'snapshot_date']),
@@ -1341,7 +1360,7 @@ class Topic(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'topics'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Topic'
         verbose_name_plural = 'Topics'
         ordering = ['-total_mentions']
@@ -1397,7 +1416,7 @@ class TopicKeyword(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'topic_keywords'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Topic Keyword'
         verbose_name_plural = 'Topic Keywords'
         unique_together = ['topic', 'keyword']
@@ -1440,7 +1459,7 @@ class PromptKeyword(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'prompt_keywords'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Prompt Keyword'
         verbose_name_plural = 'Prompt Keywords'
         unique_together = ['prompt', 'keyword']
@@ -1524,7 +1543,7 @@ class KeywordAnalytics(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'keyword_analytics'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Keyword Analytics'
         verbose_name_plural = 'Keyword Analytics'
         unique_together = ['keyword', 'platform', 'timestamp']
@@ -1573,7 +1592,7 @@ class TopicAnalytics(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'topic_analytics'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Topic Analytics'
         verbose_name_plural = 'Topic Analytics'
         unique_together = ['topic', 'platform', 'timestamp']
@@ -1646,7 +1665,7 @@ class MisinformationScan(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'misinformation_scans'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Misinformation Scan'
         verbose_name_plural = 'Misinformation Scans'
         ordering = ['-created_at']
@@ -1720,7 +1739,7 @@ class CitationURL(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'citation_urls'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Citation URL'
         verbose_name_plural = 'Citation URLs'
         ordering = ['-created_at']
@@ -1786,7 +1805,7 @@ class CitationContent(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'citation_content'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Citation Content'
         verbose_name_plural = 'Citation Contents'
 
@@ -1838,7 +1857,7 @@ class CitationMention(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'citation_mentions'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Citation Mention'
         verbose_name_plural = 'Citation Mentions'
         ordering = ['-mentioned_at']
@@ -1959,7 +1978,7 @@ class MisinformationAlert(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'misinformation_alerts'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Misinformation Alert'
         verbose_name_plural = 'Misinformation Alerts'
         ordering = ['-created_at']
@@ -2013,7 +2032,7 @@ class MisinformationAnalytics(models.Model):
     class Meta:
         app_label = 'shared_models'
         db_table = 'misinformation_analytics'
-        managed = False  # Let backend manage this table
+        managed = True  # Let backend manage this table
         verbose_name = 'Misinformation Analytics'
         verbose_name_plural = 'Misinformation Analytics'
         ordering = ['-date']
@@ -2045,7 +2064,7 @@ class Alert(models.Model):
 
     class Meta:
         app_label = 'shared_models'
-        managed = False
+        managed = True
         db_table = 'alerts'
 
     def __str__(self):
@@ -2068,7 +2087,7 @@ class AlertRule(models.Model):
 
     class Meta:
         app_label = 'shared_models'
-        managed = False
+        managed = True
         db_table = 'alert_rules'
 
     def __str__(self):
@@ -2087,7 +2106,7 @@ class ReportTemplate(models.Model):
 
     class Meta:
         app_label = 'shared_models'
-        managed = False
+        managed = True
         db_table = 'report_templates'
 
     def __str__(self):
@@ -2116,7 +2135,7 @@ class ScheduledReport(models.Model):
 
     class Meta:
         app_label = 'shared_models'
-        managed = False
+        managed = True
         db_table = 'scheduled_reports'
 
     def __str__(self):
@@ -2153,7 +2172,7 @@ class GeneratedReport(models.Model):
 
     class Meta:
         app_label = 'shared_models'
-        managed = False
+        managed = True
         db_table = 'generated_reports'
 
     def __str__(self):

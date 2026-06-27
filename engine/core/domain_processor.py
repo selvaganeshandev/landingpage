@@ -33,9 +33,31 @@ class DomainProcessor:
     
     def __init__(self):
         self.max_concurrent_domains = getattr(settings, 'MAX_CONCURRENT_DOMAINS', 10)
+        # Default (.env) client kept for any path without org context.
         self.chatgpt_client = ChatGPTClient()
+        # Per-org ChatGPT clients (BYOK), cached by org_id. Domains are processed
+        # in concurrent threads sharing this instance, so the "current" org for a
+        # thread is held in thread-local storage and the cache is lock-guarded.
+        self._chatgpt_by_org = {}
+        self._tls = threading.local()
         self.active_threads = {}
         self.lock = threading.Lock()
+
+    def _get_chatgpt_client(self) -> ChatGPTClient:
+        """Return a ChatGPT client scoped to the org currently being processed by
+        this thread (set in _process_single_domain). Falls back to the default
+        .env client when no org context is present."""
+        org_id = getattr(self._tls, 'org_id', None)
+        if org_id is None:
+            return self.chatgpt_client
+        client = self._chatgpt_by_org.get(org_id)
+        if client is None:
+            with self.lock:
+                client = self._chatgpt_by_org.get(org_id)
+                if client is None:
+                    client = ChatGPTClient(org_id=org_id)
+                    self._chatgpt_by_org[org_id] = client
+        return client
     
     def start_processing_loop(self):
         """
@@ -104,6 +126,10 @@ class DomainProcessor:
                 domain.tracked_at = timezone.now()
                 domain.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
                 print(f"🔵 LOG: Domain {domain.id} ({domain.name}) - Status set to PROC, starting processing...")
+
+            # Bind this thread to the domain's organisation so all ChatGPT calls
+            # in this run resolve the org's BYOK key (with .env fallback).
+            self._tls.org_id = getattr(domain, 'organisation_id', None)
             
             # Step 1: Get only unused keywords (where last_used_for_generation is NULL)
             # Keywords are now MANDATORY and must be provided during domain creation
@@ -153,7 +179,7 @@ class DomainProcessor:
 
             # Get country from domain, default to "United States" if not available
             country = getattr(domain, 'country', 'United States') or 'United States'
-            prompts = self.chatgpt_client.generate_prompts_from_keywords(keywords, domain.name, country)
+            prompts = self._get_chatgpt_client().generate_prompts_from_keywords(keywords, domain.name, country)
 
             # Ensure distinct prompts and ensure we have PROMPT_MIN_COUNT prompts per keyword
             prompts = self._deduplicate_prompts(prompts)
@@ -1373,7 +1399,7 @@ class DomainProcessor:
             return ''
         try:
             print(f"Generating ChatGPT title using {len(prompts_texts)} prompts (all prompts in group)")
-            title = self.chatgpt_client.generate_group_title(prompts_texts)
+            title = self._get_chatgpt_client().generate_group_title(prompts_texts)
             if title:
                 print(f"ChatGPT group title generated: {title} (from {len(prompts_texts)} prompts)")
                 return title
@@ -1607,7 +1633,7 @@ class DomainProcessor:
 
         # Use GPT-4o-mini to extract key terms intelligently
         try:
-            title = self.chatgpt_client._extract_title_from_prompt(prompt)
+            title = self._get_chatgpt_client()._extract_title_from_prompt(prompt)
             if title and title != "General":
                 return title
         except Exception as e:

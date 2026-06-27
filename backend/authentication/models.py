@@ -4,6 +4,44 @@ from django.utils import timezone
 from django.core.exceptions import ValidationError
 from datetime import timedelta
 import uuid
+import base64
+from django.conf import settings
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+def get_fernet():
+    # Derive a 32-byte Fernet key via PBKDF2 from the shared BYOK encryption
+    # secret. This MUST match the engine's derivation (same secret + salt +
+    # iterations) so the engine can decrypt keys the backend stored.
+    secret = getattr(settings, 'API_KEY_ENCRYPTION_SECRET', None) or settings.SECRET_KEY
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b'llm-monitor-salt-123',
+        iterations=100000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(secret.encode()))
+    return Fernet(key)
+
+def encrypt_value(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        f = get_fernet()
+        return f.encrypt(value.encode()).decode()
+    except Exception:
+        return ""
+
+def decrypt_value(encrypted_value: str) -> str:
+    if not encrypted_value:
+        return ""
+    try:
+        f = get_fernet()
+        return f.decrypt(encrypted_value.encode()).decode()
+    except Exception:
+        return encrypted_value
+
 
 
 def default_expires_in_7_days():
@@ -68,6 +106,72 @@ class Organisation(models.Model):
     seo_keyword_limit = models.PositiveIntegerField(default=3000, help_text="Maximum number of SEO keywords allowed for this organisation")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the organisation was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the organisation was last modified")
+    
+    # Encrypted API keys
+    openai_api_key = models.TextField(blank=True, null=True, help_text="Encrypted OpenAI API Key")
+    gemini_api_key = models.TextField(blank=True, null=True, help_text="Encrypted Gemini API Key")
+    perplexity_api_key = models.TextField(blank=True, null=True, help_text="Encrypted Perplexity API Key")
+    anthropic_api_key = models.TextField(blank=True, null=True, help_text="Encrypted Anthropic API Key")
+    xai_api_key = models.TextField(blank=True, null=True, help_text="Encrypted xAI (Grok) API Key")
+    deepseek_api_key = models.TextField(blank=True, null=True, help_text="Encrypted DeepSeek API Key")
+
+    # Enabled toggles
+    openai_enabled = models.BooleanField(default=True, help_text="Whether OpenAI is enabled")
+    gemini_enabled = models.BooleanField(default=True, help_text="Whether Gemini is enabled")
+    perplexity_enabled = models.BooleanField(default=True, help_text="Whether Perplexity is enabled")
+    anthropic_enabled = models.BooleanField(default=True, help_text="Whether Anthropic is enabled")
+    xai_enabled = models.BooleanField(default=True, help_text="Whether xAI (Grok) is enabled")
+    deepseek_enabled = models.BooleanField(default=True, help_text="Whether DeepSeek is enabled")
+
+    # Cryptographic properties for transparent access
+    @property
+    def openai_key(self):
+        return decrypt_value(self.openai_api_key)
+
+    @openai_key.setter
+    def openai_key(self, value):
+        self.openai_api_key = encrypt_value(value) if value is not None else None
+
+    @property
+    def gemini_key(self):
+        return decrypt_value(self.gemini_api_key)
+
+    @gemini_key.setter
+    def gemini_key(self, value):
+        self.gemini_api_key = encrypt_value(value) if value is not None else None
+
+    @property
+    def perplexity_key(self):
+        return decrypt_value(self.perplexity_api_key)
+
+    @perplexity_key.setter
+    def perplexity_key(self, value):
+        self.perplexity_api_key = encrypt_value(value) if value is not None else None
+
+    @property
+    def anthropic_key(self):
+        return decrypt_value(self.anthropic_api_key)
+
+    @anthropic_key.setter
+    def anthropic_key(self, value):
+        self.anthropic_api_key = encrypt_value(value) if value is not None else None
+
+    @property
+    def xai_key(self):
+        return decrypt_value(self.xai_api_key)
+
+    @xai_key.setter
+    def xai_key(self, value):
+        self.xai_api_key = encrypt_value(value) if value is not None else None
+
+    @property
+    def deepseek_key(self):
+        return decrypt_value(self.deepseek_api_key)
+
+    @deepseek_key.setter
+    def deepseek_key(self, value):
+        self.deepseek_api_key = encrypt_value(value) if value is not None else None
+
     
     class Meta:
         db_table = 'organisations'

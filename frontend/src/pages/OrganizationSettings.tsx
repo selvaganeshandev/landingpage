@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { MODULES } from "@/types/auth";
 import { apiClient } from "@/services/api";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search, Activity } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search, Activity, Key, Eye, EyeOff, Pencil, Copy } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -238,6 +238,92 @@ export default function OrganizationSettings() {
   const [selectedDomainForIntegration, setSelectedDomainForIntegration] = useState("");
   const [integrationType, setIntegrationType] = useState<"google_analytics" | "search_console">("google_analytics");
 
+  // API Keys state
+  const PROVIDERS = [
+    { id: 'openai',     label: 'OpenAI (ChatGPT)',   color: '#10a37f', docsUrl: 'https://platform.openai.com/api-keys' },
+    { id: 'gemini',     label: 'Google Gemini',       color: '#4285F4', docsUrl: 'https://aistudio.google.com/app/apikey' },
+    { id: 'perplexity', label: 'Perplexity',          color: '#20808D', docsUrl: 'https://www.perplexity.ai/settings/api' },
+    { id: 'anthropic',  label: 'Anthropic (Claude)',  color: '#D4A04A', docsUrl: 'https://console.anthropic.com/settings/keys' },
+    { id: 'xai',        label: 'xAI (Grok)',          color: '#1DA1F2', docsUrl: 'https://console.x.ai/' },
+    { id: 'deepseek',   label: 'DeepSeek',            color: '#7C4DFF', docsUrl: 'https://platform.deepseek.com/api_keys' },
+  ] as const;
+
+  type ProviderId = typeof PROVIDERS[number]['id'];
+
+  const [apiKeys, setApiKeys] = useState<Record<ProviderId, {
+    configured: boolean;
+    preview: string | null;
+    enabled: boolean;
+    status: string;
+  }>>({} as any);
+
+  const [keyInputs, setKeyInputs] = useState<Record<ProviderId, string>>(
+    Object.fromEntries(PROVIDERS.map(p => [p.id, ''])) as any
+  );
+  const [showKey, setShowKey] = useState<Record<ProviderId, boolean>>(
+    Object.fromEntries(PROVIDERS.map(p => [p.id, false])) as any
+  );
+  const [savingKey, setSavingKey] = useState<ProviderId | null>(null);
+  const [editingKey, setEditingKey] = useState<Record<ProviderId, boolean>>(
+    Object.fromEntries(PROVIDERS.map(p => [p.id, false])) as any
+  );
+  const [copiedProvider, setCopiedProvider] = useState<ProviderId | null>(null);
+  // Transient plaintext keys fetched on demand from the reveal endpoint.
+  // Never preloaded; cleared automatically after REVEAL_TIMEOUT_MS.
+  const [revealedKeys, setRevealedKeys] = useState<Record<ProviderId, string | null>>(
+    Object.fromEntries(PROVIDERS.map(p => [p.id, null])) as any
+  );
+  const [revealingKey, setRevealingKey] = useState<ProviderId | null>(null);
+  const REVEAL_TIMEOUT_MS = 30000; // auto-hide a revealed key after 30s
+
+  // Fetch the decrypted key for a provider on demand. Returns null on failure.
+  const fetchPlaintextKey = async (provider: ProviderId): Promise<string | null> => {
+    try {
+      const data = await apiClient.revealApiKey(provider);
+      return data?.api_key ?? null;
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to retrieve API key. Please try again.', variant: 'destructive' });
+      return null;
+    }
+  };
+
+  const handleRevealApiKey = async (provider: ProviderId) => {
+    setRevealingKey(provider);
+    const key = await fetchPlaintextKey(provider);
+    setRevealingKey(null);
+    if (!key) return;
+    setRevealedKeys(prev => ({ ...prev, [provider]: key }));
+    // Auto-clear so the plaintext doesn't linger in memory/UI indefinitely.
+    window.setTimeout(() => {
+      setRevealedKeys(prev => ({ ...prev, [provider]: null }));
+    }, REVEAL_TIMEOUT_MS);
+  };
+
+  const handleHideApiKey = (provider: ProviderId) => {
+    setRevealedKeys(prev => ({ ...prev, [provider]: null }));
+  };
+
+  const handleCopyApiKey = async (provider: ProviderId) => {
+    setRevealingKey(provider);
+    const key = await fetchPlaintextKey(provider);
+    setRevealingKey(null);
+    if (!key) return;
+    await navigator.clipboard.writeText(key);
+    setCopiedProvider(provider);
+    // Plaintext is only held by the clipboard now — nothing retained in state.
+    setTimeout(() => setCopiedProvider(null), 2000);
+  };
+
+  const handleEditApiKey = async (provider: ProviderId) => {
+    setEditingKey(prev => ({ ...prev, [provider]: true }));
+    setRevealedKeys(prev => ({ ...prev, [provider]: null }));
+    setRevealingKey(provider);
+    const key = await fetchPlaintextKey(provider);
+    setRevealingKey(null);
+    setKeyInputs(prev => ({ ...prev, [provider]: key ?? '' }));
+  };
+
+
   // Load only organization + default tab (domains) on mount
   useEffect(() => {
     const loadInitialData = async () => {
@@ -269,6 +355,8 @@ export default function OrganizationSettings() {
     try {
       if (tab === "team") {
         await loadTeamMembers();
+      } else if (tab === "api-keys") {
+        await loadApiKeys();
       } else if (tab === "profile") {
         // Profile uses organization (already loaded) + user (from auth context)
       }
@@ -341,10 +429,40 @@ export default function OrganizationSettings() {
     try {
       const data = await apiClient.getOrganization();
       setOrganization(data);
+      // Populate API keys state if present in response
+      if (data.api_keys) {
+        setApiKeys(data.api_keys);
+      }
     } catch (error) {
       console.error("Error loading organization:", error);
     }
   };
+
+  const loadApiKeys = async () => {
+    try {
+      const data = await apiClient.getOrganization();
+      if (data.api_keys) setApiKeys(data.api_keys);
+    } catch (error) {
+      console.error("Error loading API keys:", error);
+    }
+  };
+
+  const handleSaveApiKey = async (provider: ProviderId) => {
+    const newKey = keyInputs[provider].trim();
+    if (!newKey) return;
+    setSavingKey(provider);
+    try {
+      await apiClient.updateOrganization({ [`${provider}_api_key`]: newKey });
+      setKeyInputs(prev => ({ ...prev, [provider]: '' }));
+      await loadApiKeys();
+      toast({ title: 'API key saved', description: `${PROVIDERS.find(p => p.id === provider)?.label} key updated successfully.` });
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to save API key. Please try again.', variant: 'destructive' });
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
 
   const loadDomains = async (page: number = 1, append: boolean = false, search: string = "") => {
     try {
@@ -1613,6 +1731,11 @@ export default function OrganizationSettings() {
             {(!isTeamMember || hasTeamManagement) && (
               <TabsTrigger value="team" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Team Members</TabsTrigger>
             )}
+            {!isTeamMember && (
+              <TabsTrigger value="api-keys" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+                <Key className="h-3.5 w-3.5 mr-1.5" />API Keys
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <div className="flex gap-2">
@@ -1987,7 +2110,188 @@ export default function OrganizationSettings() {
           )}
         </TabsContent>
 
+        {/* ─────────── API KEYS TAB ─────────── */}
+        {!isTeamMember && (
+          <TabsContent value="api-keys" className="space-y-6">
+            <Card className="border border-border">
+              <CardHeader>
+                <CardTitle>LLM Provider API Keys</CardTitle>
+                <CardDescription>
+                  Add your own API keys for each AI provider. Keys are encrypted at rest.
+                  Leave a field empty to use the system-level key (if configured).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {PROVIDERS.map((provider) => {
+                    const info = apiKeys[provider.id as ProviderId];
+                    const status = info?.status ?? 'NOT_CONFIGURED';
+                    const configured = info?.configured ?? false;
+                    const preview = info?.preview ?? null;
+                    const inputVal = keyInputs[provider.id as ProviderId] ?? '';
+                    const visible = showKey[provider.id as ProviderId] ?? false;
+                    const isSaving = savingKey === provider.id;
+                    const isEditing = editingKey[provider.id as ProviderId] ?? false;
+                    const revealed = revealedKeys[provider.id as ProviderId] ?? null;
+                    const isRevealing = revealingKey === provider.id;
+
+                    const statusConfig: Record<string, { label: string; className: string }> = {
+                      CONNECTED:        { label: 'Connected',         className: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' },
+                      NOT_CONFIGURED:   { label: 'Not Configured',     className: 'bg-muted text-muted-foreground border-border' },
+                      DISABLED:         { label: 'Disabled',           className: 'bg-orange-500/15 text-orange-400 border-orange-500/30' },
+                      INVALID_KEY:      { label: 'Invalid Key',        className: 'bg-red-500/15 text-red-400 border-red-500/30' },
+                      RATE_LIMITED:     { label: 'Rate Limited',       className: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' },
+                      OUT_OF_CREDITS:   { label: 'Out of Credits',     className: 'bg-red-500/15 text-red-400 border-red-500/30' },
+                      MODEL_UNAVAILABLE:{ label: 'Model Unavailable',  className: 'bg-red-500/15 text-red-400 border-red-500/30' },
+                      ERROR:            { label: 'Error',              className: 'bg-red-500/15 text-red-400 border-red-500/30' },
+                    };
+                    const sc = statusConfig[status] ?? statusConfig['NOT_CONFIGURED'];
+
+                    return (
+                      <Card key={provider.id} className="border border-border relative overflow-hidden bg-muted/10">
+                        {/* Colour accent bar */}
+                        <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: provider.color }} />
+
+                        <CardHeader className="pb-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${provider.color}20` }}>
+                                <Key className="h-4 w-4" style={{ color: provider.color }} />
+                              </div>
+                              <div>
+                                <CardTitle className="text-base">{provider.label}</CardTitle>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className={`gap-1.5 px-2.5 py-0.5 font-medium ${sc.className}`}>
+                                {sc.label}
+                              </Badge>
+                            </div>
+                          </div>
+                        </CardHeader>
+
+                        <CardContent className="space-y-3">
+
+                          {/* ── Key preview row (shown when configured and NOT editing) ── */}
+                          {configured && !isEditing && (
+                            <div className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Key className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                <span className="font-mono text-sm text-foreground truncate">
+                                  {revealed ?? preview ?? '••••••••••••••••'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0 ml-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 px-2.5 gap-1.5 text-muted-foreground hover:text-foreground"
+                                  disabled={isRevealing}
+                                  onClick={() => revealed ? handleHideApiKey(provider.id as ProviderId) : handleRevealApiKey(provider.id as ProviderId)}
+                                >
+                                  {isRevealing ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : revealed ? (
+                                    <EyeOff className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <Eye className="h-3.5 w-3.5" />
+                                  )}
+                                  <span className="text-xs font-medium">{revealed ? 'Hide' : 'Reveal'}</span>
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 px-2.5 gap-1.5 text-muted-foreground hover:text-foreground"
+                                  disabled={isRevealing}
+                                  onClick={() => handleCopyApiKey(provider.id as ProviderId)}
+                                >
+                                  {copiedProvider === provider.id ? (
+                                    <>
+                                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                                      <span className="text-xs text-emerald-500 font-medium">Copied</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="h-3.5 w-3.5" />
+                                      <span className="text-xs font-medium">Copy</span>
+                                    </>
+                                  )}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 px-2.5 gap-1.5 text-muted-foreground hover:text-foreground"
+                                  disabled={isRevealing}
+                                  onClick={() => handleEditApiKey(provider.id as ProviderId)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                  <span className="text-xs font-medium">Edit</span>
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* ── Input row (shown when NOT configured OR when editing) ── */}
+                          {(!configured || isEditing) && (
+                            <div className="flex gap-2">
+                              <div className="relative flex-1">
+                                <Input
+                                  type={visible ? 'text' : 'password'}
+                                  placeholder={configured ? 'Enter new key to replace…' : 'Paste your API key…'}
+                                  value={inputVal}
+                                  autoFocus={isEditing}
+                                  onChange={e => setKeyInputs(prev => ({ ...prev, [provider.id]: e.target.value }))}
+                                  className="pr-10 font-mono text-sm"
+                                  onKeyDown={e => { if (e.key === 'Enter') handleSaveApiKey(provider.id as ProviderId); }}
+                                />
+                                <button
+                                  type="button"
+                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                  onClick={() => setShowKey(prev => ({ ...prev, [provider.id]: !visible }))}
+                                >
+                                  {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                              </div>
+                              <Button
+                                size="sm"
+                                disabled={!inputVal.trim() || isSaving}
+                                onClick={async () => {
+                                  await handleSaveApiKey(provider.id as ProviderId);
+                                  setEditingKey(prev => ({ ...prev, [provider.id]: false }));
+                                }}
+                                className="gap-1.5"
+                              >
+                                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                Save
+                              </Button>
+                              {isEditing && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    setEditingKey(prev => ({ ...prev, [provider.id]: false }));
+                                    setKeyInputs(prev => ({ ...prev, [provider.id]: '' }));
+                                    setShowKey(prev => ({ ...prev, [provider.id]: false }));
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
+                              )}
+                            </div>
+                          )}
+
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
+
       </Tabs>
+
 
       <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
         <DialogContent>

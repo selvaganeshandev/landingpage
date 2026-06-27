@@ -60,6 +60,10 @@ class MisinformationProcessor:
 
         domain = Domain.objects.get(id=domain_id)
 
+        # Bind the comparator to this domain's organisation so it uses the org's
+        # BYOK OpenAI key (with .env fallback).
+        self.comparator = ContentComparator(org_id=getattr(domain, 'organisation_id', None))
+
         # Create scan record
         scan = MisinformationScan.objects.create(
             domain=domain,

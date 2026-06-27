@@ -28,23 +28,26 @@ logger = logging.getLogger(__name__)
 
 
 def get_openai_client():
-    """Return OpenAI client if configured in Django settings; else raise."""
-    api_key = getattr(settings, "OPENAI_API_KEY", None)
-    if not api_key:
-        raise Exception("OpenAI API key not configured")
+    """Return OpenAI client for the current organization or settings fallback; else raise."""
+    from llm_monitor.middleware import get_current_org_id
+    from engine.core.services.client_factory import get_client
+    org_id = get_current_org_id()
     try:
-        from openai import OpenAI
-        return OpenAI(api_key=api_key, timeout=60)
+        return get_client('openai', org_id)
     except Exception as e:
         raise Exception(f"Failed to initialize OpenAI client: {e}")
 
 
 def get_google_genai_client():
-    """Return Google GenerativeAI client if configured in Django settings; else raise."""
-    api_key = getattr(settings, "GOOGLE_GEMINI_API_KEY", None)
-    if not api_key:
-        raise Exception("Google GenAI API key not configured")
+    """Return Google GenerativeAI client configured with organization key or settings; else raise."""
+    from llm_monitor.middleware import get_current_org_id
+    from engine.core.services.api_key_service import get_org_settings, get_api_key
+    org_id = get_current_org_id()
     try:
+        org = get_org_settings(org_id) if org_id else None
+        api_key = get_api_key(org, 'gemini')
+        if not api_key:
+            raise Exception("Google GenAI API key not configured")
         import google.generativeai as genai
         genai.configure(api_key=api_key, transport="rest")
         return genai

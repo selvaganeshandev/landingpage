@@ -34,7 +34,11 @@ class TopicProcessor:
         """
         try:
             logger.info(f"Starting topic processing for domain {domain.id} ({domain.name})")
-            
+
+            # Use the domain's organisation BYOK key (with .env fallback) for all
+            # ChatGPT calls in this run.
+            self.chatgpt_client = ChatGPTClient(org_id=getattr(domain, 'organisation_id', None))
+
             # Fetch only unused keywords for this domain (keywords not yet used for topic generation)
             keywords = Keyword.objects.filter(
                 domain=domain,
