@@ -705,6 +705,49 @@ def organization_management(request):
     })
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def reveal_api_key(request, provider):
+    """Return the decrypted plaintext API key for a single provider, on demand.
+
+    The default organization settings response only exposes a masked preview
+    (see _build_api_keys_payload). This endpoint lets an authorised admin
+    reveal or copy the real key without it ever being preloaded into the page.
+
+    Security:
+      - Admin / super_admin only (same gate as organization_management).
+      - Provider name is validated against the known LLM_PROVIDERS allow-list.
+      - The decrypted key is never logged.
+      - Response is marked no-store so it is never cached by browsers/proxies.
+    """
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response(
+            {'error': 'Only organisation administrators can reveal API keys'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if provider not in LLM_PROVIDERS:
+        return Response(
+            {'error': 'Unknown provider'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    organization = request.user.organisation
+    encrypted = getattr(organization, f'{provider}_api_key', None)
+    raw = decrypt_value(encrypted) if encrypted else ''
+    if not raw:
+        return Response(
+            {'error': 'No API key configured for this provider'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    response = Response({'provider': provider, 'api_key': raw})
+    # Never let the plaintext key linger in any cache layer.
+    response['Cache-Control'] = 'no-store'
+    response['Pragma'] = 'no-cache'
+    return response
+
+
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_invitation(request, invitation_id):
