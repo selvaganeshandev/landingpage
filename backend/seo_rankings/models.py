@@ -376,6 +376,49 @@ class SeoCompetitorKeyword(models.Model):
         return f"{self.keyword_text}: us={self.our_rank} vs {self.competitor.competitor_domain}={self.their_rank}"
 
 
+class SeoSecondaryDomain(models.Model):
+    """A report-only secondary subdomain (e.g. blog.example.com).
+
+    This is intentionally NOT a domains.Domain: it must never appear in the
+    "Your Domains" list, never be processed for keywords/AI, and never pollute
+    primary-domain queries or counts. It exists only to anchor this subdomain's
+    own GA4/GSC connection (see integrations.Integration.secondary_domain) so its
+    data can be pooled into a single report (see combined_report.merge_sheet).
+    """
+    primary_domain = models.ForeignKey(
+        'domains.Domain',
+        on_delete=models.CASCADE,
+        related_name='secondary_subdomains',
+        help_text="The primary domain whose report this subdomain is combined into.",
+    )
+    organisation = models.ForeignKey(
+        'authentication.Organisation',
+        on_delete=models.CASCADE,
+        related_name='seo_secondary_subdomains',
+        help_text="Denormalised from the primary domain for scoping.",
+    )
+    name = models.CharField(max_length=255, help_text="Display host, e.g. blog.example.com")
+    url = models.CharField(max_length=255, help_text="Normalised URL, e.g. https://blog.example.com")
+    created_by = models.ForeignKey(
+        'authentication.Account',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='seo_secondary_subdomains_created',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'seo_secondary_domains'
+        verbose_name = 'SEO Secondary Subdomain'
+        verbose_name_plural = 'SEO Secondary Subdomains'
+        unique_together = [['primary_domain', 'url']]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.name} (secondary of {self.primary_domain_id})"
+
+
 class SeoReportSheet(models.Model):
     """
     SEO Report sheet configuration. Ported from RankMax ReportSheets model.
@@ -418,11 +461,11 @@ class SeoReportSheet(models.Model):
         help_text="Domain this report belongs to"
     )
     secondary_domain = models.ForeignKey(
-        'domains.Domain',
+        'seo_rankings.SeoSecondaryDomain',
         on_delete=models.SET_NULL,
         related_name='seo_report_sheets_as_secondary',
         null=True, blank=True,
-        help_text=("Optional second domain whose GA/GSC (and other) data is "
+        help_text=("Optional report-only secondary subdomain whose GA/GSC data is "
                    "pooled into this report. NULL = single-domain report."),
     )
     created_by = models.ForeignKey(

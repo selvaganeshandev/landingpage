@@ -18,7 +18,18 @@ class Integration(models.Model):
         ('disconnected', 'Disconnected'),
     ]
     
-    domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='integrations')
+    # domain is nullable: a report-only secondary subdomain connects its GA/GSC
+    # here via `secondary_domain` instead (domain stays NULL). All existing
+    # `filter(domain_id=...)` queries remain correct — secondary integrations
+    # (domain IS NULL) never match a primary-domain query.
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name='integrations', null=True, blank=True)
+    secondary_domain = models.ForeignKey(
+        'seo_rankings.SeoSecondaryDomain',
+        on_delete=models.CASCADE,
+        related_name='integrations',
+        null=True, blank=True,
+        help_text="Set when this integration belongs to a report-only secondary subdomain instead of a Domain.",
+    )
     type = models.CharField(max_length=50, choices=INTEGRATION_TYPES)
     provider_id = models.CharField(max_length=255)  # GA property ID, GSC URL, etc.
     credentials = models.JSONField(default=dict)  # Encrypted OAuth tokens
@@ -43,7 +54,9 @@ class Integration(models.Model):
         ordering = ['-created_at']
     
     def __str__(self):
-        return f"{self.domain.name} - {self.get_type_display()}"
+        anchor = self.domain.name if self.domain_id else (
+            self.secondary_domain.name if self.secondary_domain_id else 'unattached')
+        return f"{anchor} - {self.get_type_display()}"
 
 
 class GATrafficInsight(models.Model):

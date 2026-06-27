@@ -87,6 +87,27 @@ class IntegrationViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
     
     @action(detail=False, methods=['get'])
+    def by_secondary(self, request):
+        """Get all integrations for a report-only secondary subdomain.
+
+        Secondary integrations have domain IS NULL, so they're scoped by the
+        subdomain's organisation rather than by domain (the default queryset).
+        """
+        secondary_id = request.query_params.get('secondary_id')
+        if not secondary_id:
+            return Response(
+                {'error': 'secondary_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user = request.user
+        queryset = Integration.objects.filter(secondary_domain_id=secondary_id)
+        if user.role != 'super_admin':
+            queryset = queryset.filter(secondary_domain__organisation=user.organisation)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
     def status_summary(self, request):
         """Get integration status summary."""
         domain_id = request.query_params.get('domain_id')
