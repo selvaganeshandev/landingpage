@@ -177,6 +177,25 @@ def quota_alert_scheduler(self):
         return {'error': str(e)}
 
 
+@shared_task(bind=True, ignore_result=True, max_retries=1)
+def send_daily_usage_digests(self):
+    """
+    Nightly Content Generation usage digest.
+
+    Emails every active super-admin of each organisation with a configured
+    Content Generation key a consolidated today + month-to-date token report.
+    Always sends (even on zero usage). Never raises into the beat loop.
+    """
+    try:
+        from .usage_digest import run_daily_usage_digests
+        result = run_daily_usage_digests()
+        logger.info(f"Daily usage digest completed: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error in daily usage digest task: {str(e)}", exc_info=True)
+        return {'error': str(e)}
+
+
 @shared_task(bind=True, ignore_result=True, max_retries=3)
 def process_single_competitor_task(self, competitor_id: int):
     """
