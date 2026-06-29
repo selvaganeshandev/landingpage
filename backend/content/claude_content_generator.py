@@ -19,12 +19,59 @@ class ClaudeContentGenerator:
     Claude content generator for creating SEO-optimized articles
     """
 
-    def __init__(self):
-        api_key = config('CLAUDE_API_KEY', default=None)
+    def __init__(self, org_id=None):
+        """
+        Build a Claude client for content generation.
+
+        When ``org_id`` is provided and that organisation has configured a
+        dedicated Content Generation key (BYOK, Strategy pipeline only), that
+        key is used. Otherwise we fall back to the system-level CLAUDE_API_KEY
+        from the environment. The dedicated key is NEVER used by the background
+        scanning engines.
+        """
+        self.org_id = org_id
+        api_key = self._resolve_org_content_key(org_id) if org_id else None
+        if not api_key:
+            api_key = config('CLAUDE_API_KEY', default=None)
         if not api_key:
             raise ValueError("CLAUDE_API_KEY not found in environment variables")
         self.client = Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-5-20250929"
+        # Running token tally across every call made on this instance. Lets
+        # callers whose helper methods return only text (e.g. humanisation)
+        # still report token usage for the soft usage tracker.
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+
+    def _accumulate_usage(self, response):
+        """Add a Claude response's token usage to this instance's tally."""
+        try:
+            usage = getattr(response, 'usage', None)
+            if usage is not None:
+                self.total_input_tokens += int(getattr(usage, 'input_tokens', 0) or 0)
+                self.total_output_tokens += int(getattr(usage, 'output_tokens', 0) or 0)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _resolve_org_content_key(org_id):
+        """Return the org's decrypted Content Generation key, or None.
+
+        Failures (missing org, decryption error, import issues) are swallowed so
+        generation transparently falls back to the system key.
+        """
+        try:
+            from authentication.models import Organisation
+            org = Organisation.objects.filter(id=org_id).only(
+                'content_generation_api_key'
+            ).first()
+            if not org:
+                return None
+            key = org.content_generation_key  # transparently decrypts
+            return key or None
+        except Exception as e:
+            logger.warning(f"Could not resolve org content generation key: {e}")
+            return None
 
     # Maps the word_count value stored by the UI dropdown to the (lower, upper)
     # word-count range the generated content must fall within. Each tuple is
@@ -3381,6 +3428,7 @@ Return ONLY the transformed HTML content. Do not add any explanations, comments,
                 )
 
                 humanised_content = response.content[0].text.strip()
+                self._accumulate_usage(response)
 
                 # Strip any accidental markdown code block wrapping
                 if humanised_content.startswith('```'):
@@ -3517,6 +3565,7 @@ Return ONLY the fixed HTML. No explanations, no markdown code blocks."""
                 )
 
                 refined_content = response.content[0].text.strip()
+                self._accumulate_usage(response)
 
                 # Strip any accidental markdown code block wrapping
                 if refined_content.startswith('```'):

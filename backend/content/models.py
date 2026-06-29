@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from domains.models import Domain
+from authentication.models import Organisation
 
 
 class GeneratedContent(models.Model):
@@ -269,6 +270,75 @@ class GeneratedContent(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.status})"
+
+
+class ContentGenerationUsage(models.Model):
+    """
+    Logs every AI content-generation token event for the Strategy pipeline.
+
+    Used to power the Super-Admin "Token Usage" dashboard. This is a soft,
+    informational tracker only — generation requests are NEVER blocked based
+    on these counts, even if a configured monthly limit is exceeded.
+    """
+    STATUS_CHOICES = [
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+    ]
+
+    organisation = models.ForeignKey(
+        Organisation,
+        on_delete=models.CASCADE,
+        related_name='content_generation_usages',
+        help_text="Organisation this usage event belongs to"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='content_generation_usages',
+        help_text="User who triggered the generation (null for background jobs)"
+    )
+    feature = models.CharField(
+        max_length=50,
+        help_text="Feature that produced the usage (e.g. 'outline', 'generate', 'humanise', 'refurbish')"
+    )
+    model_name = models.CharField(
+        max_length=50,
+        default='claude-sonnet-4-5',
+        help_text="Claude model used for generation"
+    )
+    input_tokens = models.IntegerField(default=0, help_text="Prompt/input tokens consumed")
+    output_tokens = models.IntegerField(default=0, help_text="Completion/output tokens produced")
+    total_tokens = models.IntegerField(
+        default=0,
+        help_text="input_tokens + output_tokens (stored to avoid sum recalculations)"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='success',
+        help_text="Whether the generation succeeded or failed"
+    )
+    error_message = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Error message if the generation failed"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'content_generation_usages'
+        verbose_name = 'Content Generation Usage'
+        verbose_name_plural = 'Content Generation Usages'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['organisation', '-created_at']),
+            models.Index(fields=['organisation', 'status', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.organisation_id} - {self.feature} - {self.total_tokens} tokens ({self.status})"
 
 
 class CMSProvider(models.Model):

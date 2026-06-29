@@ -762,6 +762,205 @@ def reveal_api_key(request, provider):
     return response
 
 
+# ---------------------------------------------------------------------------
+# Dedicated Content Generation key (Claude) — Super Admin only.
+# Used exclusively by the Strategy content-generation pipeline.
+# ---------------------------------------------------------------------------
+
+def _content_key_status_cache_key(org_id):
+    return f'org_{org_id}_content_key_status'
+
+
+def _parse_token_limit(raw):
+    """Coerce a raw token-limit input into a positive int, or None (unlimited)."""
+    if raw is None or raw == '':
+        return None
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return val if val > 0 else None
+
+
+def _validate_content_key(raw_key):
+    """Live-probe a Content Generation (Claude) key before it is committed.
+
+    Returns (is_valid, detail). Only an explicit INVALID_KEY verdict rejects the
+    key — transient/probe-environment failures fall back to accepting it as
+    stored-but-unverified so we never block a real key on an environment issue.
+    """
+    try:
+        from engine.core.quota_monitor import probe_key_state
+        state, detail = probe_key_state('anthropic', raw_key)
+        if state == 'INVALID_KEY':
+            return False, detail or 'The key was rejected by Anthropic.'
+        return True, state
+    except Exception as e:
+        logger.warning(f"Content key validation probe failed: {e}")
+        return True, 'CONNECTED'
+
+
+def _build_content_key_payload(org):
+    """Build the content-generation-key section of the response."""
+    encrypted = org.content_generation_api_key
+    raw = decrypt_value(encrypted) if encrypted else ''
+    configured = bool(raw)
+    status_str = 'NOT_CONFIGURED'
+    if configured:
+        status_str = cache.get(_content_key_status_cache_key(org.id)) or 'CONNECTED'
+    return {
+        'configured': configured,
+        'preview': _mask_key(raw) if raw else None,
+        'status': status_str,
+        'token_limit': org.content_generation_token_limit,
+    }
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def content_generation_key(request):
+    """Manage the dedicated Content Generation (Claude) key and token limit.
+
+    Super-admin only. The key is validated against Anthropic before it is
+    encrypted and stored. The monthly token limit is a soft/informational
+    setting — it never blocks content generation.
+    """
+    if request.user.role != 'super_admin':
+        return Response(
+            {'error': 'Only super administrators can manage the content generation key'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    organization = request.user.organisation
+
+    if request.method == 'GET':
+        return Response(_build_content_key_payload(organization))
+
+    if request.method == 'DELETE':
+        organization.content_generation_api_key = None
+        organization.save(update_fields=['content_generation_api_key', 'modified_at'])
+        cache.delete(_content_key_status_cache_key(organization.id))
+        cache.delete(f'org_{organization.id}_settings')
+        payload = _build_content_key_payload(organization)
+        payload['message'] = 'Content generation key removed'
+        return Response(payload)
+
+    # ----- PUT -----
+    from .models import encrypt_value
+    data = request.data
+    updated_fields = []
+
+    # Optional monthly token limit (accepts `token_limit` or full field name).
+    if 'token_limit' in data or 'content_generation_token_limit' in data:
+        raw_limit = data.get('token_limit', data.get('content_generation_token_limit'))
+        organization.content_generation_token_limit = _parse_token_limit(raw_limit)
+        updated_fields.append('content_generation_token_limit')
+
+    # Optional key update — validated before commit. An empty value here is a
+    # no-op (use DELETE to clear the key) so the limit can be edited alone.
+    if 'api_key' in data or 'content_generation_api_key' in data:
+        new_key = data.get('api_key', data.get('content_generation_api_key'))
+        if new_key is not None and str(new_key).strip() != '':
+            new_key = str(new_key).strip()
+            is_valid, detail = _validate_content_key(new_key)
+            if not is_valid:
+                return Response(
+                    {'error': f'Invalid Claude API key: {detail}', 'status': 'INVALID_KEY'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            organization.content_generation_api_key = encrypt_value(new_key)
+            updated_fields.append('content_generation_api_key')
+            cache.set(_content_key_status_cache_key(organization.id), 'CONNECTED', 86400)
+
+    if updated_fields:
+        updated_fields.append('modified_at')
+        organization.save(update_fields=updated_fields)
+        cache.delete(f'org_{organization.id}_settings')
+
+    payload = _build_content_key_payload(organization)
+    payload['message'] = 'Content generation key updated'
+    return Response(payload)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def reveal_content_key(request):
+    """Return the decrypted Content Generation key on demand. Super-admin only."""
+    if request.user.role != 'super_admin':
+        return Response(
+            {'error': 'Only super administrators can reveal the content generation key'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    organization = request.user.organisation
+    encrypted = organization.content_generation_api_key
+    raw = decrypt_value(encrypted) if encrypted else ''
+    if not raw:
+        return Response(
+            {'error': 'No content generation key configured'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    response = Response({'api_key': raw})
+    response['Cache-Control'] = 'no-store'
+    response['Pragma'] = 'no-cache'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def content_generation_usage(request):
+    """Token-usage stats for the content-generation pipeline. Super-admin only.
+
+    Returns today + current-month aggregates plus the configured monthly limit
+    and how many tokens remain (negative if exceeded; null/Unlimited if no
+    limit is set). Usage is informational only — never a request blocker.
+    """
+    if request.user.role != 'super_admin':
+        return Response(
+            {'error': 'Only super administrators can view content generation usage'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    organization = request.user.organisation
+
+    from content.models import ContentGenerationUsage
+    from django.db.models import Sum, Count
+
+    now = timezone.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    base = ContentGenerationUsage.objects.filter(organisation=organization)
+
+    def _agg(qs):
+        a = qs.aggregate(
+            requests=Count('id'),
+            input_tokens=Sum('input_tokens'),
+            output_tokens=Sum('output_tokens'),
+            total_tokens=Sum('total_tokens'),
+        )
+        return {
+            'requests': a['requests'] or 0,
+            'input_tokens': a['input_tokens'] or 0,
+            'output_tokens': a['output_tokens'] or 0,
+            'total_tokens': a['total_tokens'] or 0,
+        }
+
+    today_stats = _agg(base.filter(created_at__gte=today_start))
+    month_stats = _agg(base.filter(created_at__gte=month_start))
+
+    limit = organization.content_generation_token_limit
+    month_stats['token_limit'] = limit
+    # tokens_left is None => Unlimited; can go negative if the limit is exceeded.
+    month_stats['tokens_left'] = (limit - month_stats['total_tokens']) if limit is not None else None
+
+    last_event = base.order_by('-created_at').first()
+
+    return Response({
+        'today': today_stats,
+        'month': month_stats,
+        'last_used': last_event.created_at if last_event else None,
+        'last_updated': organization.modified_at,
+    })
+
+
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_invitation(request, invitation_id):
