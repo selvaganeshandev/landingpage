@@ -1731,7 +1731,7 @@ export default function OrganizationSettings() {
             {(!isTeamMember || hasTeamManagement) && (
               <TabsTrigger value="team" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Team Members</TabsTrigger>
             )}
-            {!isTeamMember && (
+            {user?.role === 'super_admin' && (
               <TabsTrigger value="api-keys" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
                 <Key className="h-3.5 w-3.5 mr-1.5" />API Keys
               </TabsTrigger>
@@ -2111,7 +2111,7 @@ export default function OrganizationSettings() {
         </TabsContent>
 
         {/* ─────────── API KEYS TAB ─────────── */}
-        {!isTeamMember && (
+        {user?.role === 'super_admin' && (
           <TabsContent value="api-keys" className="space-y-6">
             <Card className="border border-border">
               <CardHeader>

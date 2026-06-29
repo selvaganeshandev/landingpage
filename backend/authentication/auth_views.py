@@ -632,8 +632,9 @@ def organization_management(request):
             'team_count': organization.team_count,
             'created_at': organization.created_at,
             'modified_at': organization.modified_at,
-            'api_keys': _build_api_keys_payload(organization),
         }
+        if request.user.role == 'super_admin':
+            response_data['api_keys'] = _build_api_keys_payload(organization)
         return Response(response_data)
 
     # ----- PUT -----
@@ -646,6 +647,16 @@ def organization_management(request):
         organization.company_size = request.data.get('company_size')
     if 'goals' in request.data:
         organization.goals = request.data.get('goals', [])
+    # Update API keys and enabled toggles per provider
+    is_key_update = False
+    for provider in LLM_PROVIDERS:
+        if f'{provider}_api_key' in request.data or f'{provider}_enabled' in request.data:
+            is_key_update = True
+            break
+
+    if is_key_update and request.user.role != 'super_admin':
+        return Response({'error': 'Only super administrators can manage API keys'}, status=status.HTTP_403_FORBIDDEN)
+
     if 'using_ai_monitoring' in request.data:
         organization.using_ai_monitoring = request.data.get('using_ai_monitoring')
 
@@ -688,7 +699,7 @@ def organization_management(request):
         user.job_role = request.data.get('user_role')
         user.save(update_fields=['job_role', 'modified_at'])
 
-    return Response({
+    response_payload = {
         'message': 'Organization updated successfully',
         'organization': {
             'id': organization.id,
@@ -700,9 +711,12 @@ def organization_management(request):
             'team_count': organization.team_count,
             'created_at': organization.created_at,
             'modified_at': organization.modified_at,
-            'api_keys': _build_api_keys_payload(organization),
         }
-    })
+    }
+    if request.user.role == 'super_admin':
+        response_payload['organization']['api_keys'] = _build_api_keys_payload(organization)
+
+    return Response(response_payload)
 
 
 @api_view(['GET'])
@@ -720,9 +734,9 @@ def reveal_api_key(request, provider):
       - The decrypted key is never logged.
       - Response is marked no-store so it is never cached by browsers/proxies.
     """
-    if request.user.role not in ['admin', 'super_admin']:
+    if request.user.role != 'super_admin':
         return Response(
-            {'error': 'Only organisation administrators can reveal API keys'},
+            {'error': 'Only super administrators can reveal API keys'},
             status=status.HTTP_403_FORBIDDEN,
         )
 
