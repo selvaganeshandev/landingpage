@@ -276,6 +276,24 @@ export default function OrganizationSettings() {
   const [revealingKey, setRevealingKey] = useState<ProviderId | null>(null);
   const REVEAL_TIMEOUT_MS = 30000; // auto-hide a revealed key after 30s
 
+  // ===== Content Generation key (Claude, Strategy pipeline only) =====
+  const [contentKey, setContentKey] = useState<{
+    configured: boolean;
+    preview: string | null;
+    status: string;
+    token_limit: number | null;
+  }>({ configured: false, preview: null, status: 'NOT_CONFIGURED', token_limit: null });
+  const [contentKeyInput, setContentKeyInput] = useState('');
+  const [contentLimitInput, setContentLimitInput] = useState('');
+  const [showContentKey, setShowContentKey] = useState(false);
+  const [editingContentKey, setEditingContentKey] = useState(false);
+  const [savingContentKey, setSavingContentKey] = useState(false);
+  const [revealedContentKey, setRevealedContentKey] = useState<string | null>(null);
+  const [revealingContentKey, setRevealingContentKey] = useState(false);
+  const [contentKeyCopied, setContentKeyCopied] = useState(false);
+  const [contentUsage, setContentUsage] = useState<any>(null);
+  const [loadingContentUsage, setLoadingContentUsage] = useState(false);
+
   // Fetch the decrypted key for a provider on demand. Returns null on failure.
   const fetchPlaintextKey = async (provider: ProviderId): Promise<string | null> => {
     try {
@@ -314,14 +332,131 @@ export default function OrganizationSettings() {
     setTimeout(() => setCopiedProvider(null), 2000);
   };
 
-  const handleEditApiKey = async (provider: ProviderId) => {
+  const handleEditApiKey = (provider: ProviderId) => {
     setEditingKey(prev => ({ ...prev, [provider]: true }));
     setRevealedKeys(prev => ({ ...prev, [provider]: null }));
-    setRevealingKey(provider);
-    const key = await fetchPlaintextKey(provider);
-    setRevealingKey(null);
-    setKeyInputs(prev => ({ ...prev, [provider]: key ?? '' }));
+    setKeyInputs(prev => ({ ...prev, [provider]: '' }));
   };
+
+  // ----- Content Generation key handlers -----
+  const loadContentKey = async () => {
+    try {
+      const data: any = await apiClient.getContentKey();
+      setContentKey(data);
+      setContentLimitInput(data.token_limit != null ? String(data.token_limit) : '');
+    } catch (error) {
+      console.error('Error loading content generation key:', error);
+    }
+  };
+
+  const loadContentKeyUsage = async () => {
+    try {
+      setLoadingContentUsage(true);
+      const data: any = await apiClient.getContentKeyUsage();
+      setContentUsage(data);
+    } catch (error) {
+      console.error('Error loading content generation usage:', error);
+    } finally {
+      setLoadingContentUsage(false);
+    }
+  };
+
+  const handleSaveContentKey = async () => {
+    const key = contentKeyInput.trim();
+    const limitRaw = contentLimitInput.trim();
+    if (!key && !contentKey.configured) {
+      toast({ title: 'API key required', description: 'Enter a Claude API key to configure content generation.', variant: 'destructive' });
+      return;
+    }
+    const payload: { api_key?: string; token_limit: number | null } = {
+      token_limit: limitRaw === '' ? null : Number(limitRaw),
+    };
+    if (key) payload.api_key = key;
+    setSavingContentKey(true);
+    try {
+      const res: any = await apiClient.updateContentKey(payload);
+      setContentKey({ configured: res.configured, preview: res.preview, status: res.status, token_limit: res.token_limit });
+      setContentKeyInput('');
+      setEditingContentKey(false);
+      setShowContentKey(false);
+      await loadContentKeyUsage();
+      toast({ title: 'Content generation key saved', description: 'Your Claude content key has been validated and stored.' });
+    } catch (error: any) {
+      toast({ title: 'Error', description: error?.message || 'Failed to save the content generation key.', variant: 'destructive' });
+    } finally {
+      setSavingContentKey(false);
+    }
+  };
+
+  const handleDeleteContentKey = async () => {
+    setSavingContentKey(true);
+    try {
+      const res: any = await apiClient.deleteContentKey();
+      setContentKey({ configured: false, preview: null, status: 'NOT_CONFIGURED', token_limit: res?.token_limit ?? null });
+      setContentKeyInput('');
+      setEditingContentKey(false);
+      setRevealedContentKey(null);
+      toast({ title: 'Content generation key removed' });
+    } catch (error: any) {
+      toast({ title: 'Error', description: 'Failed to remove the content generation key.', variant: 'destructive' });
+    } finally {
+      setSavingContentKey(false);
+    }
+  };
+
+  const fetchContentPlaintextKey = async (): Promise<string | null> => {
+    try {
+      const data = await apiClient.revealContentKey();
+      return data?.api_key ?? null;
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to retrieve the content generation key.', variant: 'destructive' });
+      return null;
+    }
+  };
+
+  const handleRevealContentKey = async () => {
+    setRevealingContentKey(true);
+    const key = await fetchContentPlaintextKey();
+    setRevealingContentKey(false);
+    if (!key) return;
+    setRevealedContentKey(key);
+    window.setTimeout(() => setRevealedContentKey(null), REVEAL_TIMEOUT_MS);
+  };
+
+  const handleCopyContentKey = async () => {
+    setRevealingContentKey(true);
+    const key = await fetchContentPlaintextKey();
+    setRevealingContentKey(false);
+    if (!key) return;
+    await navigator.clipboard.writeText(key);
+    setContentKeyCopied(true);
+    setTimeout(() => setContentKeyCopied(false), 2000);
+  };
+
+  const handleEditContentKey = () => {
+    setEditingContentKey(true);
+    setRevealedContentKey(null);
+    setContentKeyInput('');
+    setContentLimitInput(contentKey.token_limit != null ? String(contentKey.token_limit) : '');
+  };
+
+  // Format an ISO timestamp as a short "x minutes ago" relative string.
+  const formatRelativeTime = (iso: string | null | undefined): string => {
+    if (!iso) return 'Never';
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) return 'Never';
+    const diffSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+    if (diffSec < 60) return 'Just now';
+    const mins = Math.floor(diffSec / 60);
+    if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
+  };
+
+  const formatTokens = (n: number | null | undefined): string =>
+    (n ?? 0).toLocaleString();
 
 
   // Load only organization + default tab (domains) on mount
@@ -357,6 +492,8 @@ export default function OrganizationSettings() {
         await loadTeamMembers();
       } else if (tab === "api-keys") {
         await loadApiKeys();
+      } else if (tab === "content-key") {
+        await Promise.all([loadContentKey(), loadContentKeyUsage()]);
       } else if (tab === "profile") {
         // Profile uses organization (already loaded) + user (from auth context)
       }
@@ -1731,9 +1868,14 @@ export default function OrganizationSettings() {
             {(!isTeamMember || hasTeamManagement) && (
               <TabsTrigger value="team" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Team Members</TabsTrigger>
             )}
-            {!isTeamMember && (
+            {user?.role === 'super_admin' && (
               <TabsTrigger value="api-keys" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
                 <Key className="h-3.5 w-3.5 mr-1.5" />API Keys
+              </TabsTrigger>
+            )}
+            {user?.role === 'super_admin' && (
+              <TabsTrigger value="content-key" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+                <Sparkles className="h-3.5 w-3.5 mr-1.5" />Content Generation api key
               </TabsTrigger>
             )}
           </TabsList>
@@ -2111,7 +2253,7 @@ export default function OrganizationSettings() {
         </TabsContent>
 
         {/* ─────────── API KEYS TAB ─────────── */}
-        {!isTeamMember && (
+        {user?.role === 'super_admin' && (
           <TabsContent value="api-keys" className="space-y-6">
             <Card className="border border-border">
               <CardHeader>
@@ -2287,6 +2429,233 @@ export default function OrganizationSettings() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+        )}
+
+        {user?.role === 'super_admin' && (
+          <TabsContent value="content-key" className="space-y-6">
+            {(() => {
+              const status = contentKey.status ?? 'NOT_CONFIGURED';
+              const statusConfig: Record<string, { label: string; className: string }> = {
+                CONNECTED:      { label: 'Connected',      className: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' },
+                NOT_CONFIGURED: { label: 'Not Configured', className: 'bg-muted text-muted-foreground border-border' },
+                INVALID_KEY:    { label: 'Invalid Key',    className: 'bg-red-500/15 text-red-400 border-red-500/30' },
+                RATE_LIMITED:   { label: 'Rate Limited',   className: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' },
+                OUT_OF_CREDITS: { label: 'Out of Credits', className: 'bg-red-500/15 text-red-400 border-red-500/30' },
+                ERROR:          { label: 'Error',          className: 'bg-red-500/15 text-red-400 border-red-500/30' },
+              };
+              const sc = statusConfig[status] ?? statusConfig['NOT_CONFIGURED'];
+              const today = contentUsage?.today ?? { requests: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+              const month = contentUsage?.month ?? { requests: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, token_limit: null, tokens_left: null };
+              const tokensLeftUnlimited = month.token_limit == null;
+
+              return (
+                <>
+                  {/* ── API key card ── */}
+                  <Card className="border border-border relative overflow-hidden bg-muted/10">
+                    <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: '#D4A04A' }} />
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: '#D4A04A20' }}>
+                            <Sparkles className="h-4 w-4" style={{ color: '#D4A04A' }} />
+                          </div>
+                          <div>
+                            <CardTitle className="text-base">Content Generation Key (Claude)</CardTitle>
+                            <CardDescription className="text-xs">
+                              Used only by the Strategy content pipeline. Never used by background scanning.
+                            </CardDescription>
+                          </div>
+                        </div>
+                        <Badge variant="outline" className={`gap-1.5 px-2.5 py-0.5 font-medium ${sc.className}`}>
+                          {sc.label}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+
+                    <CardContent className="space-y-3">
+                      {/* Key preview row (configured & not editing) */}
+                      {contentKey.configured && !editingContentKey && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Key className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                              <span className="font-mono text-sm text-foreground truncate">
+                                {revealedContentKey ?? contentKey.preview ?? '••••••••••••••••'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0 ml-2">
+                              <Button
+                                size="sm" variant="ghost"
+                                className="h-8 px-2.5 gap-1.5 text-muted-foreground hover:text-foreground"
+                                disabled={revealingContentKey}
+                                onClick={() => revealedContentKey ? setRevealedContentKey(null) : handleRevealContentKey()}
+                              >
+                                {revealingContentKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : revealedContentKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                <span className="text-xs font-medium">{revealedContentKey ? 'Hide' : 'Reveal'}</span>
+                              </Button>
+                              <Button
+                                size="sm" variant="ghost"
+                                className="h-8 px-2.5 gap-1.5 text-muted-foreground hover:text-foreground"
+                                disabled={revealingContentKey}
+                                onClick={handleCopyContentKey}
+                              >
+                                {contentKeyCopied ? (
+                                  <><Check className="h-3.5 w-3.5 text-emerald-500" /><span className="text-xs text-emerald-500 font-medium">Copied</span></>
+                                ) : (
+                                  <><Copy className="h-3.5 w-3.5" /><span className="text-xs font-medium">Copy</span></>
+                                )}
+                              </Button>
+                              <Button
+                                size="sm" variant="ghost"
+                                className="h-8 px-2.5 gap-1.5 text-muted-foreground hover:text-foreground"
+                                disabled={revealingContentKey}
+                                onClick={handleEditContentKey}
+                              >
+                                <Pencil className="h-3.5 w-3.5" /><span className="text-xs font-medium">Edit</span>
+                              </Button>
+                              <Button
+                                size="sm" variant="ghost"
+                                className="h-8 px-2.5 gap-1.5 text-red-400 hover:text-red-300"
+                                disabled={savingContentKey}
+                                onClick={handleDeleteContentKey}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" /><span className="text-xs font-medium">Delete</span>
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between text-xs text-muted-foreground px-3 py-1">
+                            <span>Monthly Token Limit:</span>
+                            <span className="font-semibold text-foreground">
+                              {contentKey.token_limit != null ? contentKey.token_limit.toLocaleString() : 'Unlimited'}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Edit / create form */}
+                      {(!contentKey.configured || editingContentKey) && (
+                        <div className="space-y-3">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Claude API Key</Label>
+                            <div className="relative">
+                              <Input
+                                type={showContentKey ? 'text' : 'password'}
+                                placeholder={contentKey.configured ? 'Enter new key to replace…' : 'sk-ant-…'}
+                                value={contentKeyInput}
+                                autoFocus={editingContentKey}
+                                onChange={e => setContentKeyInput(e.target.value)}
+                                className="pr-10 font-mono text-sm"
+                              />
+                              <button
+                                type="button"
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                onClick={() => setShowContentKey(v => !v)}
+                              >
+                                {showContentKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Monthly Token Limit (optional)</Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              placeholder="Leave empty for unlimited"
+                              value={contentLimitInput}
+                              onChange={e => setContentLimitInput(e.target.value)}
+                              className="text-sm"
+                            />
+                            <p className="text-[11px] text-muted-foreground">
+                              Soft limit — usage is tracked but generation is never blocked.
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button size="sm" disabled={savingContentKey} onClick={handleSaveContentKey} className="gap-1.5">
+                              {savingContentKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                              Save
+                            </Button>
+                            {editingContentKey && (
+                              <Button
+                                size="sm" variant="ghost"
+                                onClick={() => {
+                                  setEditingContentKey(false);
+                                  setContentKeyInput('');
+                                  setShowContentKey(false);
+                                  setContentLimitInput(contentKey.token_limit != null ? String(contentKey.token_limit) : '');
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* ── Usage dashboard ── */}
+                  <Card className="border border-border">
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="flex items-center gap-2"><Activity className="h-4 w-4" />Token Usage</CardTitle>
+                          <CardDescription>Content generation token consumption for this organization.</CardDescription>
+                        </div>
+                        {loadingContentUsage && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Today's Usage */}
+                        <div className="rounded-lg border border-border bg-muted/10 p-4">
+                          <h4 className="text-sm font-semibold mb-3">Today's Usage</h4>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between"><span className="text-muted-foreground">Requests</span><span className="font-medium">{formatTokens(today.requests)}</span></div>
+                            <div className="flex justify-between"><span className="text-muted-foreground">Input Tokens</span><span className="font-medium">{formatTokens(today.input_tokens)}</span></div>
+                            <div className="flex justify-between"><span className="text-muted-foreground">Output Tokens</span><span className="font-medium">{formatTokens(today.output_tokens)}</span></div>
+                            <Separator className="my-1" />
+                            <div className="flex justify-between"><span className="text-muted-foreground">Total Tokens</span><span className="font-semibold">{formatTokens(today.total_tokens)}</span></div>
+                          </div>
+                        </div>
+
+                        {/* This Month */}
+                        <div className="rounded-lg border border-border bg-muted/10 p-4">
+                          <h4 className="text-sm font-semibold mb-3">This Month</h4>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between"><span className="text-muted-foreground">Requests</span><span className="font-medium">{formatTokens(month.requests)}</span></div>
+                            <div className="flex justify-between"><span className="text-muted-foreground">Input Tokens</span><span className="font-medium">{formatTokens(month.input_tokens)}</span></div>
+                            <div className="flex justify-between"><span className="text-muted-foreground">Output Tokens</span><span className="font-medium">{formatTokens(month.output_tokens)}</span></div>
+                            <div className="flex justify-between"><span className="text-muted-foreground">Total Tokens</span><span className="font-medium">{formatTokens(month.total_tokens)}</span></div>
+                            <Separator className="my-1" />
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground">Tokens Left</span>
+                              {tokensLeftUnlimited ? (
+                                <span className="font-semibold text-emerald-500">Unlimited</span>
+                              ) : (
+                                <span className={`font-semibold ${month.tokens_left < 0 ? 'text-red-400' : 'text-foreground'}`}>
+                                  {formatTokens(month.tokens_left)}
+                                </span>
+                              )}
+                            </div>
+                            {!tokensLeftUnlimited && (
+                              <div className="flex justify-between text-[11px] text-muted-foreground">
+                                <span>Monthly Limit</span><span>{formatTokens(month.token_limit)}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-muted-foreground pt-1">
+                        <span>Last Used: {formatRelativeTime(contentUsage?.last_used)}</span>
+                        <span>Last Updated: {formatRelativeTime(contentUsage?.last_updated)}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              );
+            })()}
           </TabsContent>
         )}
 

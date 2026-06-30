@@ -123,6 +123,16 @@ class Organisation(models.Model):
     xai_enabled = models.BooleanField(default=True, help_text="Whether xAI (Grok) is enabled")
     deepseek_enabled = models.BooleanField(default=True, help_text="Whether DeepSeek is enabled")
 
+    # Dedicated Content Generation key (Claude) — used ONLY by the Strategy
+    # content-generation pipeline, never by the background scanning engines.
+    content_generation_api_key = models.TextField(
+        blank=True, null=True, help_text="Encrypted API Key for Content Generation"
+    )
+    content_generation_token_limit = models.BigIntegerField(
+        blank=True, null=True,
+        help_text="Optional monthly token limit for content generation (soft/informational only)"
+    )
+
     # Cryptographic properties for transparent access
     @property
     def openai_key(self):
@@ -172,7 +182,15 @@ class Organisation(models.Model):
     def deepseek_key(self, value):
         self.deepseek_api_key = encrypt_value(value) if value is not None else None
 
-    
+    @property
+    def content_generation_key(self):
+        return decrypt_value(self.content_generation_api_key)
+
+    @content_generation_key.setter
+    def content_generation_key(self, value):
+        self.content_generation_api_key = encrypt_value(value) if value is not None else None
+
+
     class Meta:
         db_table = 'organisations'
         verbose_name = 'Organisation'

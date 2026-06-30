@@ -342,4 +342,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'core.processing_tasks.quota_alert_scheduler',
         'schedule': config('CELERY_BEAT_SCHEDULE_QUOTA_ALERT', default=3600.0, cast=float),
     },
+    # Daily Content Generation usage digest — emailed to each org's active
+    # super-admins every night at 11:59 PM.
+    'llm-daily-usage-digest': {
+        'task': 'core.processing_tasks.send_daily_usage_digests',
+        'schedule': crontab(hour=23, minute=59),
+    },
 }

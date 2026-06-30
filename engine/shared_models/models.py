@@ -31,6 +31,13 @@ class Organisation(models.Model):
     xai_enabled = models.BooleanField(default=True, help_text="Whether xAI (Grok) is enabled")
     deepseek_enabled = models.BooleanField(default=True, help_text="Whether DeepSeek is enabled")
 
+    # Dedicated Content Generation key (read-only mirror). Owned by the backend
+    # migration authentication.0006_*. The engine never uses this key — it is
+    # exclusively for the Strategy content-generation pipeline — but the columns
+    # are declared here so the shared ORM schema stays in sync.
+    content_generation_api_key = models.TextField(blank=True, null=True, help_text="Encrypted API Key for Content Generation")
+    content_generation_token_limit = models.BigIntegerField(blank=True, null=True, help_text="Optional monthly token limit for content generation")
+
     class Meta:
         app_label = 'shared_models'
         db_table = 'organisations'
@@ -255,6 +262,43 @@ class GeneratedContent(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.status})"
+
+
+class ContentGenerationUsage(models.Model):
+    """
+    Read-only mirror of the backend ContentGenerationUsage token-tracking table.
+    Owned by the backend migration content.0008_*. Declared here so the shared
+    ORM schema stays in sync; the engine does not write to it.
+    """
+    organisation = models.ForeignKey(
+        Organisation,
+        on_delete=models.CASCADE,
+        related_name='content_generation_usages'
+    )
+    user = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='content_generation_usages'
+    )
+    feature = models.CharField(max_length=50)
+    model_name = models.CharField(max_length=50, default='claude-sonnet-4-5')
+    input_tokens = models.IntegerField(default=0)
+    output_tokens = models.IntegerField(default=0)
+    total_tokens = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, default='success')
+    error_message = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        db_table = 'content_generation_usages'
+        managed = True
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.organisation_id} - {self.feature} - {self.total_tokens} tokens"
 
 
 class CMSProvider(models.Model):

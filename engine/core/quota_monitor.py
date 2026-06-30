@@ -239,6 +239,24 @@ def check_org_quotas():
             r["label"] = f"{label} — {org.name}"
             r["key"] = f"{provider}@org{org.id}"
             results.append(r)
+
+        # Dedicated Content Generation key (Claude) — Strategy pipeline only.
+        # Probed with the same anthropic probe so a REAL provider outage
+        # (OUT_OF_CREDITS / INVALID_KEY) is surfaced and, for OUT_OF_CREDITS,
+        # triggers the existing Mailgun alert. The internal soft monthly token
+        # budget is NOT consulted here — exceeding it is a dashboard-only warning
+        # and never overrides the live provider status.
+        cg_encrypted = getattr(org, "content_generation_api_key", None)
+        if cg_encrypted:
+            cg_api_key = decrypt_value(cg_encrypted)
+            if cg_api_key:
+                try:
+                    r = _probe_provider("anthropic", cg_api_key)
+                except Exception as e:
+                    r = _result("Anthropic / Claude", "anthropic", True, "ERROR", str(e))
+                r["label"] = f"Anthropic (Claude) Content Generation — {org.name}"
+                r["key"] = f"content_generation_claude@org{org.id}"
+                results.append(r)
     return results
 
 

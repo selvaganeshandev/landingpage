@@ -14,7 +14,7 @@ import threading
 
 from .models import (
     GeneratedContent, CMSProvider, ScheduledPublication, ContentComment,
-    BulkUploadBatch, BulkUploadItem
+    BulkUploadBatch, BulkUploadItem, ContentGenerationUsage
 )
 from .serializers import (
     GeneratedContentSerializer, ContentGenerationRequestSerializer,
@@ -31,6 +31,39 @@ from django.utils import timezone as django_timezone
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Model logged against content-generation usage events. Mirrors the model the
+# ClaudeContentGenerator actually calls.
+CONTENT_GENERATION_MODEL = 'claude-sonnet-4-5-20250929'
+
+
+def _log_content_usage(org_id, user, feature, *, input_tokens=0, output_tokens=0,
+                       model_name=CONTENT_GENERATION_MODEL,
+                       status_value='success', error_message=None):
+    """Record a content-generation token event (best-effort, never raises).
+
+    This is a soft/informational tracker only — content generation is NEVER
+    blocked based on these counts, even if a monthly token limit is exceeded.
+    Background jobs pass ``user=None``.
+    """
+    if not org_id:
+        return
+    try:
+        in_tok = int(input_tokens or 0)
+        out_tok = int(output_tokens or 0)
+        ContentGenerationUsage.objects.create(
+            organisation_id=org_id,
+            user=user if (user is not None and getattr(user, 'is_authenticated', False)) else None,
+            feature=feature,
+            model_name=model_name or CONTENT_GENERATION_MODEL,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            total_tokens=in_tok + out_tok,
+            status=status_value,
+            error_message=(str(error_message)[:2000] if error_message else None),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to log content generation usage: {e}")
 
 
 @api_view(['POST'])
@@ -83,8 +116,8 @@ def generate_content(request):
                 'message': 'Domain not found or you do not have access to this domain'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Import and initialize Claude content generator
-        generator = ClaudeContentGenerator()
+        # Import and initialize Claude content generator (org BYOK content key)
+        generator = ClaudeContentGenerator(org_id=request.user.organisation_id)
 
         # Check reference repository for relevant content
         reference_repository_context = ''
@@ -173,6 +206,14 @@ def generate_content(request):
             completion_tokens=generation_result['completion_tokens']
         )
 
+        # Log token usage (soft/informational — never blocks generation)
+        _log_content_usage(
+            request.user.organisation_id, request.user, 'generate',
+            input_tokens=generation_result.get('prompt_tokens', 0),
+            output_tokens=generation_result.get('completion_tokens', 0),
+            model_name=generation_result.get('model_used'),
+        )
+
         # Return response with generated content
         response_serializer = GeneratedContentSerializer(generated_content)
         logger.info(f"Successfully generated content ID {generated_content.id}")
@@ -185,6 +226,10 @@ def generate_content(request):
 
     except Exception as e:
         logger.error(f"Error generating content: {str(e)}", exc_info=True)
+        _log_content_usage(
+            request.user.organisation_id, request.user, 'generate',
+            status_value='failed', error_message=str(e),
+        )
         return Response({
             'status': 'error',
             'message': f'Error generating content: {str(e)}'
@@ -228,8 +273,8 @@ def generate_outline(request):
                 'message': 'Domain not found or you do not have access to this domain'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Initialize Claude content generator
-        generator = ClaudeContentGenerator()
+        # Initialize Claude content generator (org BYOK content key)
+        generator = ClaudeContentGenerator(org_id=request.user.organisation_id)
 
         # Check reference repository for relevant content
         reference_repository_context = ''
@@ -275,6 +320,14 @@ def generate_outline(request):
         logger.info(f"Generating outline for domain {domain.id}: {validated_data['title']}")
         outline_result = generator.generate_outline(generation_params)
 
+        # Log token usage (soft/informational — never blocks generation)
+        _log_content_usage(
+            request.user.organisation_id, request.user, 'outline',
+            input_tokens=outline_result.get('prompt_tokens', 0),
+            output_tokens=outline_result.get('completion_tokens', 0),
+            model_name=outline_result.get('model_used'),
+        )
+
         logger.info(f"Successfully generated outline with {len(outline_result['outline'])} sections")
 
         return Response({
@@ -285,6 +338,10 @@ def generate_outline(request):
 
     except Exception as e:
         logger.error(f"Error generating outline: {str(e)}", exc_info=True)
+        _log_content_usage(
+            request.user.organisation_id, request.user, 'outline',
+            status_value='failed', error_message=str(e),
+        )
         return Response({
             'status': 'error',
             'message': f'Error generating outline: {str(e)}'
@@ -334,8 +391,8 @@ def generate_content_from_outline(request):
                 'message': 'Domain not found or you do not have access to this domain'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Initialize Claude content generator
-        generator = ClaudeContentGenerator()
+        # Initialize Claude content generator (org BYOK content key)
+        generator = ClaudeContentGenerator(org_id=request.user.organisation_id)
 
         # Check reference repository for relevant content
         reference_repository_context = ''
@@ -415,6 +472,14 @@ def generate_content_from_outline(request):
             completion_tokens=generation_result['completion_tokens']
         )
 
+        # Log token usage (soft/informational — never blocks generation)
+        _log_content_usage(
+            request.user.organisation_id, request.user, 'generate',
+            input_tokens=generation_result.get('prompt_tokens', 0),
+            output_tokens=generation_result.get('completion_tokens', 0),
+            model_name=generation_result.get('model_used'),
+        )
+
         # Return response with generated content
         response_serializer = GeneratedContentSerializer(generated_content)
         logger.info(f"Successfully generated content ID {generated_content.id} from outline")
@@ -427,6 +492,10 @@ def generate_content_from_outline(request):
 
     except Exception as e:
         logger.error(f"Error generating content from outline: {str(e)}", exc_info=True)
+        _log_content_usage(
+            request.user.organisation_id, request.user, 'generate',
+            status_value='failed', error_message=str(e),
+        )
         return Response({
             'status': 'error',
             'message': f'Error generating content from outline: {str(e)}'
@@ -463,8 +532,8 @@ def rewrite_content(request):
                 'message': 'Rewrite prompt is required'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Initialize Claude content generator
-        generator = ClaudeContentGenerator()
+        # Initialize Claude content generator (org BYOK content key)
+        generator = ClaudeContentGenerator(org_id=request.user.organisation_id)
 
         # Generate rewritten content
         logger.info(f"Rewriting content with prompt: {prompt[:50]}...")
@@ -498,9 +567,11 @@ def _run_humanise_in_background(content_id):
     Django DB connections are per-thread. We must close the connection
     when the thread finishes to prevent connection leaks.
     """
+    org_id = None
     try:
         content_obj = GeneratedContent.objects.get(id=content_id)
-        generator = ClaudeContentGenerator()
+        org_id = content_obj.domain.organisation_id
+        generator = ClaudeContentGenerator(org_id=org_id)
 
         # Pass 1: Full humanisation (all 19 rules)
         logger.info(f"Humanisation Pass 1 started for content {content_id}")
@@ -526,10 +597,19 @@ def _run_humanise_in_background(content_id):
             'humanise_completed_at', 'humanise_error', 'modified_at'
         ])
 
+        # Log token usage across both Claude passes (soft/informational only)
+        _log_content_usage(
+            org_id, None, 'humanise',
+            input_tokens=generator.total_input_tokens,
+            output_tokens=generator.total_output_tokens,
+            model_name=generator.model,
+        )
+
         logger.info(f"Humanisation (all 3 passes) completed for content {content_id}")
 
     except Exception as e:
         logger.error(f"Humanisation failed for content {content_id}: {str(e)}", exc_info=True)
+        _log_content_usage(org_id, None, 'humanise', status_value='failed', error_message=str(e))
         try:
             content_obj = GeneratedContent.objects.get(id=content_id)
             content_obj.humanise_status = 'failed'
@@ -2075,7 +2155,7 @@ def _run_bulk_generation_queue(batch_id):
             status='processed'
         ).order_by('row_number')
 
-        generator = ClaudeContentGenerator()
+        generator = ClaudeContentGenerator(org_id=batch.domain.organisation_id)
         # Per-batch URL cache so identical reference URLs across rows are
         # fetched once rather than once per row.
         url_fetch_cache = {}
@@ -2220,6 +2300,14 @@ def _run_bulk_generation_queue(batch_id):
                     completion_tokens=generation_result['completion_tokens'],
                 )
 
+                # Log token usage (soft/informational — never blocks generation)
+                _log_content_usage(
+                    batch.domain.organisation_id, None, 'generate',
+                    input_tokens=generation_result.get('prompt_tokens', 0),
+                    output_tokens=generation_result.get('completion_tokens', 0),
+                    model_name=generation_result.get('model_used'),
+                )
+
                 # Update item
                 item.status = 'generated'
                 item.generated_content = generated_content
@@ -2252,6 +2340,11 @@ def _run_bulk_generation_queue(batch_id):
                 item.save(update_fields=[
                     'status', 'error_message', 'generation_completed_at', 'modified_at'
                 ])
+
+                _log_content_usage(
+                    batch.domain.organisation_id, None, 'generate',
+                    status_value='failed', error_message=str(e),
+                )
 
                 batch.refresh_from_db()
                 batch.processed_items += 1
@@ -2341,8 +2434,16 @@ def _run_single_item_generation(item_id):
         if generation_params.get('references'):
             generation_params['references'] = _enrich_references_with_content(generation_params['references'])
 
-        generator = ClaudeContentGenerator()
+        generator = ClaudeContentGenerator(org_id=batch.domain.organisation_id)
         generation_result = generator.generate_content(generation_params)
+
+        # Log token usage (soft/informational — never blocks generation)
+        _log_content_usage(
+            batch.domain.organisation_id, None, 'generate',
+            input_tokens=generation_result.get('prompt_tokens', 0),
+            output_tokens=generation_result.get('completion_tokens', 0),
+            model_name=generation_result.get('model_used'),
+        )
 
         # Generate SEO meta tags
         meta_result = generator.generate_meta_tags(
@@ -3582,7 +3683,7 @@ def suggest_keywords(request):
         domain_url = request.data.get('domain_url', '')
         existing_keywords = request.data.get('existing_keywords', '')
 
-        generator = ClaudeContentGenerator()
+        generator = ClaudeContentGenerator(org_id=request.user.organisation_id)
 
         system_prompt = """You are an expert SEO keyword researcher. Suggest highly relevant keywords for content optimization.
 Return a JSON array of keyword objects. Each object must have:
@@ -3618,6 +3719,14 @@ Return ONLY a JSON array."""
                 temperature=0.7,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}]
+            )
+
+            # Log token usage (soft/informational — never blocks generation)
+            _log_content_usage(
+                request.user.organisation_id, request.user, 'keywords',
+                input_tokens=getattr(response.usage, 'input_tokens', 0),
+                output_tokens=getattr(response.usage, 'output_tokens', 0),
+                model_name=generator.model,
             )
 
             import json
@@ -3823,7 +3932,7 @@ def refurbish_content(request):
                 'message': 'Original content is too short to refurbish'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        generator = ClaudeContentGenerator()
+        generator = ClaudeContentGenerator(org_id=request.user.organisation_id)
 
         refurbish_instructions = {
             'refresh_stats': """Refresh this content by:
@@ -3896,6 +4005,14 @@ Return ONLY the refurbished HTML content."""
 
         generation_time = time.time() - start_time
         refurbished_html = response.content[0].text.strip()
+
+        # Log token usage (soft/informational — never blocks generation)
+        _log_content_usage(
+            request.user.organisation_id, request.user, 'refurbish',
+            input_tokens=getattr(response.usage, 'input_tokens', 0),
+            output_tokens=getattr(response.usage, 'output_tokens', 0),
+            model_name=generator.model,
+        )
 
         # Clean up markdown artifacts
         refurbished_html = generator.post_process_content(refurbished_html)
