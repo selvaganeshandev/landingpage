@@ -581,87 +581,59 @@ def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, clien
 
 
 def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
+    """Process a prompt with Perplexity using the OpenAI-compatible API.
+
+    The ``client`` parameter is an OpenAI client instance created by
+    ``client_factory.py`` with ``base_url='https://api.perplexity.ai'``.
+    We call the chat completions endpoint with the ``sonar`` model which
+    has built-in web search and returns citations inline in the response.
+    """
     try:
-        # Get country from domain, default to "United States" if not available
-        country_text = "United States"
-        if group and hasattr(group, 'domain') and group.domain and hasattr(group.domain, 'country'):
-            country_text = group.domain.country or "United States"
-        
+        country_text = _resolve_country_text(group)
+        model_name = getattr(settings, 'PERPLEXITY_MODEL', 'sonar')
+        user_message = _build_analytics_user_prompt(prompt_text, country_text)
+
+        text = ""
         try:
-            from perplexity import Perplexity
-            from datetime import date as _date
-            perplexity_client = Perplexity(api_key=(client or {}).get('api_key'))
-            # Include country context in the prompt. Perplexity has live web
-            # search built in, so a short "[As of YYYY-MM-DD]" prefix is enough
-            # to nudge it toward current sources without blowing the 250-char
-            # query cap. Keep the date prefix first so truncation preserves it.
-            today_iso = _date.today().isoformat()
-            user_message = (
-                f"[As of {today_iso}] {prompt_text} "
-                f"(Context: Provide answers in the context of {country_text} unless the user specifies another country.)"
+            # client is an OpenAI-compatible client from client_factory
+            # (base_url already set to https://api.perplexity.ai)
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": (
+                        f"{_today_context_line()} "
+                        "You are a helpful assistant with access to the web. "
+                        "Provide comprehensive, well-cited answers with URLs. "
+                        f"Always provide answers in the context of {country_text} "
+                        "unless the user specifies another country."
+                    )},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.7,
+                max_tokens=3000,
+                timeout=90,
             )
-            if len(user_message) > 250:
-                user_message = user_message[:250].rsplit(' ', 1)[0] + "..."
-            
-            search_response = perplexity_client.search.create(query=user_message)
-            
-            # Extract text from response - check multiple possible response structures
-            text = None
-            
-            # First, check if response has results array with snippets (search results)
-            if hasattr(search_response, 'results') and search_response.results:
-                text_parts = []
-                for result in search_response.results:
-                    snippet = getattr(result, 'snippet', '') or getattr(result, 'text', '') or getattr(result, 'content', '')
-                    if snippet and snippet.strip():
-                        text_parts.append(snippet.strip())
-                if text_parts:
-                    text = "\n".join(text_parts)
-            
-            # If no results, check the response object itself for answer/text/content
-            if not text:
-                # Check for direct answer field (most common for chat completions)
-                if hasattr(search_response, 'answer') and search_response.answer:
-                    text = str(search_response.answer).strip()
-                # Check for choices array (chat completions format)
-                elif hasattr(search_response, 'choices') and search_response.choices:
-                    choice = search_response.choices[0] if search_response.choices else None
-                    if choice:
-                        if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
-                            text = str(choice.message.content).strip()
-                        elif hasattr(choice, 'text'):
-                            text = str(choice.text).strip()
-                        elif hasattr(choice, 'content'):
-                            text = str(choice.content).strip()
-                # Check for other common response fields
-                elif hasattr(search_response, 'text') and search_response.text:
-                    text = str(search_response.text).strip()
-                elif hasattr(search_response, 'content') and search_response.content:
-                    text = str(search_response.content).strip()
-                elif hasattr(search_response, 'response') and search_response.response:
-                    text = str(search_response.response).strip()
-                elif hasattr(search_response, 'message') and search_response.message:
-                    text = str(search_response.message).strip()
-            
-            # If still no text found, use empty string instead of the prompt
-            if not text or not text.strip():
-                logger.warning(f"Perplexity API returned no response content for query: {user_message[:50]}...")
-                text = ""
+            text = response.choices[0].message.content if response.choices else ""
+
+            # Perplexity may also return citations in the response metadata
+            if hasattr(response, 'citations') and response.citations:
+                # Append citation URLs to the text so _basic_text_metrics can extract them
+                citation_urls = "\n".join(
+                    f"Source: {url}" for url in response.citations if url
+                )
+                if citation_urls:
+                    text = f"{text}\n\nCitations:\n{citation_urls}"
+
+            if text:
+                logger.info(f"Perplexity API returned response of length {len(text)} for query: {prompt_text[:50]}...")
             else:
-                logger.info(f"Perplexity API returned response of length {len(text)} for query: {user_message[:50]}...")
-            
-            # Close the client
-            try:
-                perplexity_client.close()
-            except:
-                pass
-                
+                logger.warning(f"Perplexity API returned no response content for query: {prompt_text[:50]}...")
+
         except Exception as lib_error:
             logger.error(f"Perplexity API call failed: {str(lib_error)}")
-            # Return empty string instead of the prompt text
             text = ""
 
-        return _basic_text_metrics(text, user_domain)
+        return _basic_text_metrics(text or "", user_domain)
     except Exception as e:
         logger.error(f"Perplexity processing failed: {e}")
         raise

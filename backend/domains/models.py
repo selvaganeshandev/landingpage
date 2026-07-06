@@ -579,3 +579,54 @@ class ReferenceDocumentChunk(models.Model):
 
     def __str__(self):
         return f"{self.document.file_name} - Chunk {self.chunk_index}"
+
+
+class DomainRegion(models.Model):
+    """
+    A geographic region a domain tracks AI visibility for (G1 of geographic
+    AI-mention tracking — see docs/GEO_AI_MENTION_TRACKING_DESIGN.md).
+
+    A domain with NO DomainRegion rows behaves exactly as before: the engine
+    runs a single implicit 'GLOBAL' pass. Regions are opt-in per domain so the
+    per-region query multiplier (prompts x platforms x regions) only applies
+    where a brand actually wants multi-market tracking.
+    """
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='regions',
+        help_text="Domain this tracked region belongs to",
+    )
+    country_code = models.CharField(
+        max_length=2,
+        help_text="ISO 3166-1 alpha-2 country code, e.g. 'IN', 'US'",
+    )
+    country_name = models.CharField(
+        max_length=100,
+        help_text="Human-readable country name for display, e.g. 'India'",
+    )
+    locale = models.CharField(
+        max_length=10,
+        blank=True,
+        help_text="Optional locale hint for prompt localization, e.g. 'en-IN'",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether the engine should query this region on the next run",
+    )
+    is_primary = models.BooleanField(
+        default=False,
+        help_text="Primary region for the domain (seeded from Domain.country)",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'domain_regions'
+        verbose_name = 'Domain Region'
+        verbose_name_plural = 'Domain Regions'
+        ordering = ['-is_primary', 'country_name']
+        unique_together = ['domain', 'country_code']
+
+    def __str__(self):
+        return f"{self.domain.name} — {self.country_name} ({self.country_code})"

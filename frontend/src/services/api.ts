@@ -349,7 +349,7 @@ export const apiClient = {
   // ===== Content Generation key (Claude, Strategy pipeline only) =====
   getContentKey: () => apiRequest('/auth/organization/content-key/'),
 
-  updateContentKey: (data: { api_key?: string; token_limit?: number | null }) =>
+  updateContentKey: (data: { api_key?: string; admin_api_key?: string }) =>
     apiRequest('/auth/organization/content-key/', {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -362,6 +362,10 @@ export const apiClient = {
   // Reveal the decrypted content generation key on demand.
   revealContentKey: () =>
     apiRequest<{ api_key: string }>('/auth/organization/content-key/reveal/'),
+
+  // Reveal the decrypted admin (usage-reporting) key on demand.
+  revealAdminKey: () =>
+    apiRequest<{ api_key: string }>('/auth/organization/content-key/admin/reveal/'),
 
   getContentKeyUsage: () => apiRequest('/auth/organization/content-key/usage/'),
 

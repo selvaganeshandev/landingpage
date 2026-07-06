@@ -2,23 +2,22 @@
 Daily Content Generation usage digest email.
 
 Once a night a consolidated usage report is mailed to every active super-admin of
-each organisation that has a dedicated Content Generation (Claude) key
-configured. The report shows:
+each organisation that has an Anthropic Admin (usage-reporting) key configured.
+The report shows LIVE usage pulled directly from Anthropic's usage_report API:
 
-    * Today's consumption (requests + input/output/total tokens, or
+    * Today's consumption (input/output/total tokens + estimated cost, or
       "No activity today" when nothing was generated).
-    * Month-to-date (MTD) consumption.
-    * Remaining balance against the optional custom monthly token budget, with a
-      visual progress bar. When no budget is set the balance reads "Unlimited"
-      and the bar is omitted.
+    * Month-to-date (MTD) consumption + estimated cost.
 
-This is additive and isolated — it only reads ContentGenerationUsage rows and
-never raises into the Celery beat loop.
+The monthly token-limit / budget-bar concept was removed — live Anthropic usage
+and cost replace it entirely.
+
+This is additive and isolated — it only reads the Admin key + calls Anthropic,
+and never raises into the Celery beat loop.
 """
 import logging
 
 from django.conf import settings
-from django.db.models import Count, Sum
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -28,19 +27,123 @@ def _cfg(name, default):
     return getattr(settings, name, default)
 
 
-def _agg(qs):
-    """Aggregate a ContentGenerationUsage queryset into a metrics dict."""
-    a = qs.aggregate(
-        requests=Count("id"),
-        input_tokens=Sum("input_tokens"),
-        output_tokens=Sum("output_tokens"),
-        total_tokens=Sum("total_tokens"),
+# ---------------------------------------------------------------------------
+# Live Anthropic usage fetch (engine-side mirror of the backend helper)
+# ---------------------------------------------------------------------------
+class AnthropicCreditError(Exception):
+    """Raised when Anthropic's usage/billing API signals exhausted credits."""
+    pass
+
+
+# Anthropic pricing in USD per MILLION tokens. Keep in sync with the backend
+# ANTHROPIC_PRICING map (authentication/auth_views.py).
+# We define:
+# - input_uncached: Standard input tokens
+# - input_cached: Tokens read from prompt cache (typically 10% of base rate)
+# - input_cache_creation: Tokens written to prompt cache (typically 125% of base rate)
+# - output: Output tokens generated
+ANTHROPIC_PRICING = {
+    # Haiku family
+    'claude-3-5-haiku':  {'input_uncached': 0.80,  'input_cached': 0.08, 'input_cache_creation': 1.00,  'output': 4.00},
+    'claude-3-haiku':    {'input_uncached': 0.25,  'input_cached': 0.03, 'input_cache_creation': 0.31,  'output': 1.25},
+    'claude-haiku':      {'input_uncached': 1.00,  'input_cached': 0.10, 'input_cache_creation': 1.25,  'output': 5.00},
+    # Sonnet family
+    'claude-3-5-sonnet': {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
+    'claude-sonnet-4-5': {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
+    'claude-3-sonnet':   {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
+    'claude-sonnet':     {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
+    # Opus family
+    'claude-3-opus':     {'input_uncached': 15.00, 'input_cached': 1.50, 'input_cache_creation': 18.75, 'output': 75.00},
+    'claude-opus':       {'input_uncached': 15.00, 'input_cached': 1.50, 'input_cache_creation': 18.75, 'output': 75.00},
+    # Default fallback — sonnet rates
+    '_default':          {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
+}
+
+
+def _get_model_rates(model_name):
+    model_lower = (model_name or '').lower()
+    best_key = None
+    for key in ANTHROPIC_PRICING:
+        if key == '_default':
+            continue
+        if model_lower.startswith(key) and (best_key is None or len(key) > len(best_key)):
+            best_key = key
+    return ANTHROPIC_PRICING[best_key] if best_key else ANTHROPIC_PRICING['_default']
+
+
+def _fetch_live_anthropic_usage(admin_key, start_dt, end_dt):
+    """Aggregate live usage/cost from Anthropic's usage_report API.
+    Returns {input_tokens, output_tokens, total_tokens, estimated_cost_usd,
+    caching_savings_usd, caching_savings_pct}.
+    Raises AnthropicCreditError when credits are exhausted."""
+    import requests as req
+    r = req.get(
+        'https://api.anthropic.com/v1/organizations/usage_report/messages',
+        headers={'x-api-key': admin_key, 'anthropic-version': '2023-06-01'},
+        params={
+            'starting_at': start_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'ending_at': end_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'bucket_width': '1d',
+            'group_by[]': 'model',
+        },
+        timeout=20,
     )
+    if r.status_code == 402:
+        raise AnthropicCreditError('OUT_OF_CREDITS')
+    if r.status_code != 200:
+        try:
+            msg = (r.json().get('error', {}).get('message') or '').lower()
+            if any(w in msg for w in ('credit', 'billing', 'insufficient')):
+                raise AnthropicCreditError('OUT_OF_CREDITS')
+        except AnthropicCreditError:
+            raise
+        except Exception:
+            pass
+        r.raise_for_status()
+
+    data = r.json().get('data', [])
+    total_input = total_output = 0.0
+    total_cost = 0.0
+    total_normal_input_cost = 0.0
+    total_actual_input_cost = 0.0
+
+    for bucket in data:
+        rates = _get_model_rates(bucket.get('model', ''))
+        
+        uncached_inp = bucket.get('uncached_input_tokens', 0) or 0
+        cached_read = bucket.get('cache_read_input_tokens', 0) or 0
+        
+        cache_write_obj = bucket.get('cache_creation', {}) or {}
+        if not cache_write_obj:
+            cache_write_obj = {}
+        cached_write = (cache_write_obj.get('ephemeral_5m_input_tokens', 0) or 0) + \
+                       (cache_write_obj.get('ephemeral_1h_input_tokens', 0) or 0)
+        
+        inp = uncached_inp + cached_read + cached_write
+        out = bucket.get('output_tokens', 0) or 0
+        
+        total_input += inp
+        total_output += out
+        
+        cost_uncached = (uncached_inp / 1_000_000) * rates['input_uncached']
+        cost_cached = (cached_read / 1_000_000) * rates['input_cached']
+        cost_write = (cached_write / 1_000_000) * rates['input_cache_creation']
+        cost_out = (out / 1_000_000) * rates['output']
+        
+        total_cost += cost_uncached + cost_cached + cost_write + cost_out
+        total_actual_input_cost += cost_uncached + cost_cached + cost_write
+        total_normal_input_cost += (inp / 1_000_000) * rates['input_uncached']
+
+    caching_savings_usd = max(0.0, total_normal_input_cost - total_actual_input_cost)
+    caching_savings_pct = (caching_savings_usd / total_normal_input_cost * 100.0) if total_normal_input_cost > 0 else 0.0
+
     return {
-        "requests": a["requests"] or 0,
-        "input_tokens": a["input_tokens"] or 0,
-        "output_tokens": a["output_tokens"] or 0,
-        "total_tokens": a["total_tokens"] or 0,
+        'input_tokens': int(total_input),
+        'output_tokens': int(total_output),
+        'total_tokens': int(total_input + total_output),
+        'estimated_cost_usd': round(total_cost, 4),
+        'caching_savings_usd': round(caching_savings_usd, 4),
+        'caching_savings_pct': round(caching_savings_pct, 2),
     }
 
 
@@ -52,32 +155,11 @@ def _fmt(n):
         return "0"
 
 
-def _budget_view(limit, mtd_total):
-    """Compute the budget display model for the email.
-
-    Returns a dict with: unlimited (bool), limit, remaining, used_pct (float, may
-    exceed 100), bar_pct (0-100, capped for rendering), and bar_color.
-    """
-    if limit is None:
-        return {"unlimited": True}
-    limit = int(limit)
-    remaining = limit - int(mtd_total)
-    used_pct = (mtd_total / limit * 100.0) if limit > 0 else 100.0
-    bar_pct = max(0.0, min(100.0, used_pct))
-    if used_pct >= 100:
-        bar_color = "#dc2626"   # over / at budget — red
-    elif used_pct >= 75:
-        bar_color = "#d97706"   # nearing budget — amber
-    else:
-        bar_color = "#16a34a"   # healthy — green
-    return {
-        "unlimited": False,
-        "limit": limit,
-        "remaining": remaining,
-        "used_pct": used_pct,
-        "bar_pct": bar_pct,
-        "bar_color": bar_color,
-    }
+def _fmt_usd(n):
+    try:
+        return f"${float(n):,.4f}"
+    except (TypeError, ValueError):
+        return "$0.0000"
 
 
 # ---------------------------------------------------------------------------
@@ -95,12 +177,12 @@ def _metric_cell(label, value):
 
 
 def _metrics_grid(stats):
-    """Two rows of metric cells: requests/total on top, input/output below."""
+    """Two rows: total tokens / est. cost on top, input / output below."""
     return (
         '<table role="presentation" width="100%" style="border-collapse:separate;border-spacing:8px;">'
         "<tr>"
-        + _metric_cell("Requests", _fmt(stats["requests"]))
         + _metric_cell("Total Tokens", _fmt(stats["total_tokens"]))
+        + _metric_cell("Estimated Cost", _fmt_usd(stats["estimated_cost_usd"]))
         + "</tr><tr>"
         + _metric_cell("Input Tokens", _fmt(stats["input_tokens"]))
         + _metric_cell("Output Tokens", _fmt(stats["output_tokens"]))
@@ -108,13 +190,15 @@ def _metrics_grid(stats):
     )
 
 
-def _build_digest_email(org, today, mtd, limit, now):
-    """Return (subject, text_body, html_body) for one organisation's digest."""
+def _build_digest_email(org, today, month, now):
+    """Return (subject, text_body, html_body) for one organisation's digest.
+
+    `today` and `month` are live-usage dicts from _fetch_live_anthropic_usage.
+    """
     subject = f"Daily Content Generation Usage Report - {org.name}"
     today_label = now.strftime("%d %b %Y")
     month_label = now.strftime("%B %Y")
-    no_activity = today["requests"] == 0 and today["total_tokens"] == 0
-    budget = _budget_view(limit, mtd["total_tokens"])
+    no_activity = today["total_tokens"] == 0
 
     # ---- plain-text fallback ----
     tlines = [
@@ -127,29 +211,21 @@ def _build_digest_email(org, today, mtd, limit, now):
         tlines.append("  No activity today")
     else:
         tlines += [
-            f"  Requests:      {_fmt(today['requests'])}",
-            f"  Input Tokens:  {_fmt(today['input_tokens'])}",
-            f"  Output Tokens: {_fmt(today['output_tokens'])}",
-            f"  Total Tokens:  {_fmt(today['total_tokens'])}",
+            f"  Input Tokens:   {_fmt(today['input_tokens'])}",
+            f"  Output Tokens:  {_fmt(today['output_tokens'])}",
+            f"  Total Tokens:   {_fmt(today['total_tokens'])}",
+            f"  Estimated Cost: {_fmt_usd(today['estimated_cost_usd'])}",
         ]
     tlines += [
         "",
         f"MONTH-TO-DATE ({month_label}):",
-        f"  Requests:      {_fmt(mtd['requests'])}",
-        f"  Input Tokens:  {_fmt(mtd['input_tokens'])}",
-        f"  Output Tokens: {_fmt(mtd['output_tokens'])}",
-        f"  Total Tokens:  {_fmt(mtd['total_tokens'])}",
+        f"  Input Tokens:   {_fmt(month['input_tokens'])}",
+        f"  Output Tokens:  {_fmt(month['output_tokens'])}",
+        f"  Total Tokens:   {_fmt(month['total_tokens'])}",
+        f"  Estimated Cost: {_fmt_usd(month['estimated_cost_usd'])}",
         "",
+        "— Automated digest from the PromptMaxx engine (live Anthropic usage)",
     ]
-    if budget["unlimited"]:
-        tlines += ["Monthly Token Limit: Unlimited", "Remaining: Unlimited"]
-    else:
-        tlines += [
-            f"Monthly Token Limit: {_fmt(budget['limit'])}",
-            f"Used: {_fmt(mtd['total_tokens'])} ({budget['used_pct']:.1f}%)",
-            f"Remaining: {_fmt(budget['remaining'])}",
-        ]
-    tlines += ["", "— Automated digest from the PromptMaxx engine"]
     text_body = "\n".join(tlines)
 
     # ---- today block (HTML) ----
@@ -161,36 +237,6 @@ def _build_digest_email(org, today, mtd, limit, now):
         )
     else:
         today_block = _metrics_grid(today)
-
-    # ---- budget block (HTML) ----
-    if budget["unlimited"]:
-        budget_block = (
-            '<table role="presentation" width="100%" style="border-collapse:separate;border-spacing:8px;">'
-            "<tr>"
-            + _metric_cell("Monthly Token Limit", "Unlimited")
-            + _metric_cell("Remaining", "Unlimited")
-            + "</tr></table>"
-        )
-    else:
-        over = budget["remaining"] < 0
-        remaining_color = "#f87171" if over else "#34d399"
-        budget_block = (
-            '<table role="presentation" width="100%" style="border-collapse:separate;border-spacing:8px;">'
-            "<tr>"
-            + _metric_cell("Monthly Limit", _fmt(budget["limit"]))
-            + _metric_cell("Used This Month", f'{_fmt(mtd["total_tokens"])} ({budget["used_pct"]:.1f}%)')
-            + "</tr></table>"
-            '<div style="margin:6px 8px 0;">'
-            '<div style="height:14px;background:#0f1623;border:1px solid #1f2937;'
-            'border-radius:999px;overflow:hidden;">'
-            f'<div style="height:100%;width:{budget["bar_pct"]:.1f}%;background:{budget["bar_color"]};"></div>'
-            "</div>"
-            '<div style="display:flex;justify-content:space-between;margin-top:8px;">'
-            '<span style="color:#9ca3af;font-size:12px;">Remaining</span>'
-            f'<span style="color:{remaining_color};font-size:14px;font-weight:700;">{_fmt(budget["remaining"])} tokens</span>'
-            "</div>"
-            "</div>"
-        )
 
     def _section(title, inner):
         return (
@@ -211,11 +257,10 @@ def _build_digest_email(org, today, mtd, limit, now):
     </div>
     <div style="padding:18px 18px 24px;">
       {_section("Today's Consumption", today_block)}
-      {_section(f"Month to Date · {month_label}", _metrics_grid(mtd))}
-      {_section("Monthly Budget", budget_block)}
+      {_section(f"Month to Date · {month_label}", _metrics_grid(month))}
     </div>
     <div style="padding:14px 24px;border-top:1px solid #1f2937;color:#6b7280;font-size:12px;">
-      Automated digest from the PromptMaxx engine · {now.strftime('%d %b %Y, %H:%M UTC')}
+      Live Anthropic usage · {now.strftime('%d %b %Y, %H:%M UTC')}
     </div>
   </div>
 </div>
@@ -227,17 +272,20 @@ def _build_digest_email(org, today, mtd, limit, now):
 # Entry point
 # ---------------------------------------------------------------------------
 def run_daily_usage_digests():
-    """Build and send the daily usage digest to every eligible organisation.
+    """Build and send the daily live-usage digest to every eligible organisation.
 
-    Eligible = has a Content Generation key configured AND at least one active
-    super-admin recipient. Always sends, even when today's usage is zero. Never
-    raises; returns a small summary dict.
+    Eligible = has an Anthropic Admin key configured AND at least one active
+    super-admin recipient. Live usage is fetched per org from Anthropic; an org
+    whose fetch fails (credit/network/API error) is skipped and logged. Always
+    sends when usage is available, even if today's usage is zero. Never raises;
+    returns a small summary dict.
     """
     if not _cfg("USAGE_DIGEST_ENABLED", True):
         return {"skipped": "USAGE_DIGEST_ENABLED is False"}
 
     try:
-        from shared_models.models import Account, ContentGenerationUsage, Organisation
+        from shared_models.models import Account, Organisation
+        from shared_models.crypto import decrypt_value
     except Exception as e:
         logger.warning(f"[UsageDigest] models unavailable: {e}")
         return {"error": str(e)}
@@ -246,10 +294,10 @@ def run_daily_usage_digests():
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # Orgs with a configured Content Generation key (non-null, non-empty).
+    # Orgs with an Anthropic Admin (usage-reporting) key configured.
     orgs = (
-        Organisation.objects.exclude(content_generation_api_key__isnull=True)
-        .exclude(content_generation_api_key="")
+        Organisation.objects.exclude(content_admin_api_key__isnull=True)
+        .exclude(content_admin_api_key="")
     )
 
     sent, skipped, failed = [], [], []
@@ -274,12 +322,23 @@ def run_daily_usage_digests():
                 skipped.append({"org": org.id, "reason": "no active super_admin recipients"})
                 continue
 
-            base = ContentGenerationUsage.objects.filter(organisation=org)
-            today = _agg(base.filter(created_at__gte=today_start))
-            mtd = _agg(base.filter(created_at__gte=month_start))
-            limit = org.content_generation_token_limit
+            admin_key = decrypt_value(org.content_admin_api_key) if org.content_admin_api_key else ""
+            if not admin_key:
+                skipped.append({"org": org.id, "reason": "admin key empty after decrypt"})
+                continue
 
-            subject, text_body, html_body = _build_digest_email(org, today, mtd, limit, now)
+            try:
+                today = _fetch_live_anthropic_usage(admin_key, today_start, now)
+                month = _fetch_live_anthropic_usage(admin_key, month_start, now)
+            except AnthropicCreditError:
+                skipped.append({"org": org.id, "reason": "OUT_OF_CREDITS"})
+                continue
+            except Exception as fe:
+                logger.warning(f"[UsageDigest] org {org.id} live fetch failed: {fe}")
+                failed.append({"org": org.id, "reason": f"live fetch failed: {fe}"})
+                continue
+
+            subject, text_body, html_body = _build_digest_email(org, today, month, now)
             res = mailer.send_report_email(
                 recipients=recipients, subject=subject,
                 body_text=text_body, body_html=html_body,

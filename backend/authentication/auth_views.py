@@ -771,17 +771,6 @@ def _content_key_status_cache_key(org_id):
     return f'org_{org_id}_content_key_status'
 
 
-def _parse_token_limit(raw):
-    """Coerce a raw token-limit input into a positive int, or None (unlimited)."""
-    if raw is None or raw == '':
-        return None
-    try:
-        val = int(raw)
-    except (TypeError, ValueError):
-        return None
-    return val if val > 0 else None
-
-
 def _validate_content_key(raw_key):
     """Live-probe a Content Generation (Claude) key before it is committed.
 
@@ -800,6 +789,169 @@ def _validate_content_key(raw_key):
         return True, 'CONNECTED'
 
 
+class AnthropicCreditError(Exception):
+    """Raised when Anthropic's usage/billing API signals exhausted credits."""
+    pass
+
+
+# Anthropic pricing in USD per MILLION tokens. Update this map when Anthropic
+# changes rates — nothing else needs changing. Prefix-matched (see
+# _get_model_rates) so dated model ids like 'claude-sonnet-4-5-20250929'
+# resolve to their family entry.
+# We define:
+# - input_uncached: Standard input tokens
+# - input_cached: Tokens read from prompt cache (typically 10% of base rate)
+# - input_cache_creation: Tokens written to prompt cache (typically 125% of base rate)
+# - output: Output tokens generated
+ANTHROPIC_PRICING = {
+    # Haiku family
+    'claude-3-5-haiku':  {'input_uncached': 0.80,  'input_cached': 0.08, 'input_cache_creation': 1.00,  'output': 4.00},
+    'claude-3-haiku':    {'input_uncached': 0.25,  'input_cached': 0.03, 'input_cache_creation': 0.31,  'output': 1.25},
+    'claude-haiku':      {'input_uncached': 1.00,  'input_cached': 0.10, 'input_cache_creation': 1.25,  'output': 5.00},
+    # Sonnet family
+    'claude-3-5-sonnet': {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
+    'claude-sonnet-4-5': {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
+    'claude-3-sonnet':   {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
+    'claude-sonnet':     {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
+    # Opus family
+    'claude-3-opus':     {'input_uncached': 15.00, 'input_cached': 1.50, 'input_cache_creation': 18.75, 'output': 75.00},
+    'claude-opus':       {'input_uncached': 15.00, 'input_cached': 1.50, 'input_cache_creation': 18.75, 'output': 75.00},
+    # Default fallback — sonnet rates
+    '_default':          {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
+}
+
+
+def _get_model_rates(model_name: str) -> dict:
+    """Return pricing rates for a model name, prefix-matched against
+    ANTHROPIC_PRICING (longest match wins), falling back to '_default'."""
+    model_lower = (model_name or '').lower()
+    best_key = None
+    for key in ANTHROPIC_PRICING:
+        if key == '_default':
+            continue
+        if model_lower.startswith(key) and (best_key is None or len(key) > len(best_key)):
+            best_key = key
+    return ANTHROPIC_PRICING[best_key] if best_key else ANTHROPIC_PRICING['_default']
+
+
+def _validate_admin_key(raw_key):
+    """Live-probe an Anthropic Admin key. Returns (is_valid, detail).
+
+    Only an explicit authentication failure (401/403, or a 400 whose body names
+    an auth problem) rejects the key. Transient/network/param issues accept it as
+    stored-but-unverified so a real key is never blocked on an environment issue.
+    """
+    import requests as req
+    from datetime import timedelta
+    now = timezone.now()
+    start = (now - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    end = now.strftime('%Y-%m-%dT%H:%M:%SZ')
+    try:
+        r = req.get(
+            'https://api.anthropic.com/v1/organizations/usage_report/messages',
+            headers={'x-api-key': raw_key, 'anthropic-version': '2023-06-01'},
+            params={'starting_at': start, 'ending_at': end, 'bucket_width': '1h'},
+            timeout=15,
+        )
+    except Exception:
+        return True, 'CONNECTED'  # network issue — accept key, mark unverified
+
+    if r.status_code == 200:
+        return True, 'CONNECTED'
+    if r.status_code in (401, 403):
+        return False, 'INVALID_KEY'
+    if r.status_code == 400:
+        # Only reject if the 400 is about authentication, not parameters.
+        try:
+            body = r.json()
+            err = (body.get('error', {}).get('message') or '').lower()
+            if any(w in err for w in ('authentication', 'api key', 'unauthorized', 'forbidden')):
+                return False, 'INVALID_KEY'
+        except Exception:
+            pass
+        return True, 'CONNECTED'  # bad params but key authenticated
+    return True, 'CONNECTED'  # 5xx or other — accept, retry later
+
+
+def _fetch_live_anthropic_usage(admin_key, start_dt, end_dt):
+    """Call Anthropic's usage_report API and return aggregated stats:
+    input_tokens, output_tokens, total_tokens, estimated_cost_usd,
+    caching_savings_usd, caching_savings_pct, source, last_synced.
+    Raises AnthropicCreditError when credits are exhausted."""
+    import requests as req
+    r = req.get(
+        'https://api.anthropic.com/v1/organizations/usage_report/messages',
+        headers={'x-api-key': admin_key, 'anthropic-version': '2023-06-01'},
+        params={
+            'starting_at': start_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'ending_at': end_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'bucket_width': '1d',
+            'group_by[]': 'model',
+        },
+        timeout=20,
+    )
+
+    if r.status_code == 402:
+        raise AnthropicCreditError('OUT_OF_CREDITS')
+    if r.status_code != 200:
+        try:
+            msg = (r.json().get('error', {}).get('message') or '').lower()
+            if any(w in msg for w in ('credit', 'billing', 'insufficient')):
+                raise AnthropicCreditError('OUT_OF_CREDITS')
+        except AnthropicCreditError:
+            raise
+        except Exception:
+            pass
+        r.raise_for_status()
+
+    data = r.json().get('data', [])
+    total_input = total_output = 0.0
+    total_cost = 0.0
+    total_normal_input_cost = 0.0
+    total_actual_input_cost = 0.0
+
+    for bucket in data:
+        rates = _get_model_rates(bucket.get('model', ''))
+        
+        uncached_inp = bucket.get('uncached_input_tokens', 0) or 0
+        cached_read = bucket.get('cache_read_input_tokens', 0) or 0
+        
+        cache_write_obj = bucket.get('cache_creation', {}) or {}
+        if not cache_write_obj:
+            cache_write_obj = {}
+        cached_write = (cache_write_obj.get('ephemeral_5m_input_tokens', 0) or 0) + \
+                       (cache_write_obj.get('ephemeral_1h_input_tokens', 0) or 0)
+        
+        inp = uncached_inp + cached_read + cached_write
+        out = bucket.get('output_tokens', 0) or 0
+        
+        total_input += inp
+        total_output += out
+        
+        cost_uncached = (uncached_inp / 1_000_000) * rates['input_uncached']
+        cost_cached = (cached_read / 1_000_000) * rates['input_cached']
+        cost_write = (cached_write / 1_000_000) * rates['input_cache_creation']
+        cost_out = (out / 1_000_000) * rates['output']
+        
+        total_cost += cost_uncached + cost_cached + cost_write + cost_out
+        total_actual_input_cost += cost_uncached + cost_cached + cost_write
+        total_normal_input_cost += (inp / 1_000_000) * rates['input_uncached']
+
+    caching_savings_usd = max(0.0, total_normal_input_cost - total_actual_input_cost)
+    caching_savings_pct = (caching_savings_usd / total_normal_input_cost * 100.0) if total_normal_input_cost > 0 else 0.0
+
+    return {
+        'input_tokens': int(total_input),
+        'output_tokens': int(total_output),
+        'total_tokens': int(total_input + total_output),
+        'estimated_cost_usd': round(total_cost, 4),
+        'caching_savings_usd': round(caching_savings_usd, 4),
+        'caching_savings_pct': round(caching_savings_pct, 2),
+        'source': 'anthropic_api',
+        'last_synced': timezone.now().isoformat(),
+    }
+
+
 def _build_content_key_payload(org):
     """Build the content-generation-key section of the response."""
     encrypted = org.content_generation_api_key
@@ -808,11 +960,22 @@ def _build_content_key_payload(org):
     status_str = 'NOT_CONFIGURED'
     if configured:
         status_str = cache.get(_content_key_status_cache_key(org.id)) or 'CONNECTED'
+
+    # --- admin (usage-reporting) key ---
+    adm_raw = decrypt_value(org.content_admin_api_key) if org.content_admin_api_key else ''
+    adm_configured = bool(adm_raw)
+    adm_status = 'NOT_CONFIGURED'
+    if adm_configured:
+        adm_status = cache.get(f'org_{org.id}_admin_key_status') or 'CONNECTED'
+
     return {
         'configured': configured,
         'preview': _mask_key(raw) if raw else None,
         'status': status_str,
-        'token_limit': org.content_generation_token_limit,
+        # Admin key fields
+        'admin_key_configured': adm_configured,
+        'admin_key_preview': _mask_key(adm_raw) if adm_raw else None,
+        'admin_key_status': adm_status,
     }
 
 
@@ -837,8 +1000,10 @@ def content_generation_key(request):
 
     if request.method == 'DELETE':
         organization.content_generation_api_key = None
-        organization.save(update_fields=['content_generation_api_key', 'modified_at'])
+        organization.content_admin_api_key = None
+        organization.save(update_fields=['content_generation_api_key', 'content_admin_api_key', 'modified_at'])
         cache.delete(_content_key_status_cache_key(organization.id))
+        cache.delete(f'org_{organization.id}_admin_key_status')
         cache.delete(f'org_{organization.id}_settings')
         payload = _build_content_key_payload(organization)
         payload['message'] = 'Content generation key removed'
@@ -849,11 +1014,8 @@ def content_generation_key(request):
     data = request.data
     updated_fields = []
 
-    # Optional monthly token limit (accepts `token_limit` or full field name).
-    if 'token_limit' in data or 'content_generation_token_limit' in data:
-        raw_limit = data.get('token_limit', data.get('content_generation_token_limit'))
-        organization.content_generation_token_limit = _parse_token_limit(raw_limit)
-        updated_fields.append('content_generation_token_limit')
+    # NOTE: a legacy `token_limit` field in the PUT body is silently ignored
+    # (the monthly-limit concept was removed in favour of live Anthropic usage).
 
     # Optional key update — validated before commit. An empty value here is a
     # no-op (use DELETE to clear the key) so the limit can be edited alone.
@@ -870,6 +1032,22 @@ def content_generation_key(request):
             organization.content_generation_api_key = encrypt_value(new_key)
             updated_fields.append('content_generation_api_key')
             cache.set(_content_key_status_cache_key(organization.id), 'CONNECTED', 86400)
+
+    # Optional admin (usage-reporting) key — validated before commit. An empty
+    # value here is a no-op (use DELETE to clear).
+    if 'admin_api_key' in data or 'content_admin_api_key' in data:
+        new_admin = data.get('admin_api_key', data.get('content_admin_api_key'))
+        if new_admin is not None and str(new_admin).strip() != '':
+            new_admin = str(new_admin).strip()
+            is_valid, detail = _validate_admin_key(new_admin)
+            if not is_valid:
+                return Response(
+                    {'error': f'Invalid Anthropic Admin key: {detail}', 'status': 'INVALID_KEY'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            organization.content_admin_api_key = encrypt_value(new_admin)
+            updated_fields.append('content_admin_api_key')
+            cache.set(f'org_{organization.id}_admin_key_status', 'CONNECTED', 86400)
 
     if updated_fields:
         updated_fields.append('modified_at')
@@ -906,12 +1084,38 @@ def reveal_content_key(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def content_generation_usage(request):
-    """Token-usage stats for the content-generation pipeline. Super-admin only.
+def reveal_admin_key(request):
+    """Return the decrypted Anthropic Admin (usage-reporting) key on demand.
+    Super-admin only. Mirrors reveal_content_key."""
+    if request.user.role != 'super_admin':
+        return Response(
+            {'error': 'Only super administrators can reveal the admin key'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    organization = request.user.organisation
+    encrypted = organization.content_admin_api_key
+    raw = decrypt_value(encrypted) if encrypted else ''
+    if not raw:
+        return Response(
+            {'error': 'No admin key configured'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    response = Response({'api_key': raw})
+    response['Cache-Control'] = 'no-store'
+    response['Pragma'] = 'no-cache'
+    return response
 
-    Returns today + current-month aggregates plus the configured monthly limit
-    and how many tokens remain (negative if exceeded; null/Unlimited if no
-    limit is set). Usage is informational only — never a request blocker.
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def content_generation_usage(request):
+    """Live Anthropic usage for the organisation. Super-admin only.
+
+    Pulls today + month-to-date token usage and estimated cost directly from
+    Anthropic's usage_report API using the org's Admin key. Returns
+    {'source': 'not_configured'} when no Admin key is set, or
+    {'source': 'anthropic_api', 'status': 'OUT_OF_CREDITS'} when credits are
+    exhausted.
     """
     if request.user.role != 'super_admin':
         return Response(
@@ -919,45 +1123,29 @@ def content_generation_usage(request):
             status=status.HTTP_403_FORBIDDEN,
         )
     organization = request.user.organisation
+    admin_key = organization.content_admin_key  # decrypted
 
-    from content.models import ContentGenerationUsage
-    from django.db.models import Sum, Count
+    if not admin_key:
+        return Response({'source': 'not_configured'})
 
     now = timezone.now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    base = ContentGenerationUsage.objects.filter(organisation=organization)
-
-    def _agg(qs):
-        a = qs.aggregate(
-            requests=Count('id'),
-            input_tokens=Sum('input_tokens'),
-            output_tokens=Sum('output_tokens'),
-            total_tokens=Sum('total_tokens'),
-        )
-        return {
-            'requests': a['requests'] or 0,
-            'input_tokens': a['input_tokens'] or 0,
-            'output_tokens': a['output_tokens'] or 0,
-            'total_tokens': a['total_tokens'] or 0,
-        }
-
-    today_stats = _agg(base.filter(created_at__gte=today_start))
-    month_stats = _agg(base.filter(created_at__gte=month_start))
-
-    limit = organization.content_generation_token_limit
-    month_stats['token_limit'] = limit
-    # tokens_left is None => Unlimited; can go negative if the limit is exceeded.
-    month_stats['tokens_left'] = (limit - month_stats['total_tokens']) if limit is not None else None
-
-    last_event = base.order_by('-created_at').first()
+    try:
+        today = _fetch_live_anthropic_usage(admin_key, today_start, now)
+        month = _fetch_live_anthropic_usage(admin_key, month_start, now)
+    except AnthropicCreditError:
+        return Response({'source': 'anthropic_api', 'status': 'OUT_OF_CREDITS'})
+    except Exception as e:
+        logger.error(f'[AdminUsage] live usage fetch failed: {e}')
+        return Response({'source': 'error', 'detail': str(e)}, status=status.HTTP_502_BAD_GATEWAY)
 
     return Response({
-        'today': today_stats,
-        'month': month_stats,
-        'last_used': last_event.created_at if last_event else None,
-        'last_updated': organization.modified_at,
+        'today': today,
+        'month': month,
+        'last_synced': month['last_synced'],
+        'source': 'anthropic_api',
     })
 
 
