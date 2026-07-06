@@ -128,9 +128,12 @@ class Organisation(models.Model):
     content_generation_api_key = models.TextField(
         blank=True, null=True, help_text="Encrypted API Key for Content Generation"
     )
-    content_generation_token_limit = models.BigIntegerField(
+    # Dedicated Anthropic Admin key (sk-ant-admin) — used ONLY to fetch live
+    # organisation usage/cost from Anthropic's usage_report API. It never
+    # generates content.
+    content_admin_api_key = models.TextField(
         blank=True, null=True,
-        help_text="Optional monthly token limit for content generation (soft/informational only)"
+        help_text="Encrypted Anthropic Admin API Key (sk-ant-admin) for live usage reporting"
     )
 
     # Cryptographic properties for transparent access
@@ -189,6 +192,14 @@ class Organisation(models.Model):
     @content_generation_key.setter
     def content_generation_key(self, value):
         self.content_generation_api_key = encrypt_value(value) if value is not None else None
+
+    @property
+    def content_admin_key(self):
+        return decrypt_value(self.content_admin_api_key)
+
+    @content_admin_key.setter
+    def content_admin_key(self, value):
+        self.content_admin_api_key = encrypt_value(value) if value else None
 
 
     class Meta:

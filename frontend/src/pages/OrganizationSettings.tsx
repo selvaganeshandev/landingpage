@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { MODULES } from "@/types/auth";
 import { apiClient } from "@/services/api";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search, Activity, Key, Eye, EyeOff, Pencil, Copy } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search, Activity, Key, Eye, EyeOff, Pencil, Copy, RefreshCw } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -281,16 +281,28 @@ export default function OrganizationSettings() {
     configured: boolean;
     preview: string | null;
     status: string;
-    token_limit: number | null;
-  }>({ configured: false, preview: null, status: 'NOT_CONFIGURED', token_limit: null });
+    admin_key_configured: boolean;
+    admin_key_preview: string | null;
+    admin_key_status: string;
+  }>({
+    configured: false, preview: null, status: 'NOT_CONFIGURED',
+    admin_key_configured: false, admin_key_preview: null, admin_key_status: 'NOT_CONFIGURED',
+  });
   const [contentKeyInput, setContentKeyInput] = useState('');
-  const [contentLimitInput, setContentLimitInput] = useState('');
   const [showContentKey, setShowContentKey] = useState(false);
   const [editingContentKey, setEditingContentKey] = useState(false);
   const [savingContentKey, setSavingContentKey] = useState(false);
   const [revealedContentKey, setRevealedContentKey] = useState<string | null>(null);
   const [revealingContentKey, setRevealingContentKey] = useState(false);
   const [contentKeyCopied, setContentKeyCopied] = useState(false);
+  // Admin (usage-reporting) key states
+  const [adminKeyInput, setAdminKeyInput] = useState('');
+  const [showAdminKey, setShowAdminKey] = useState(false);
+  const [editingAdminKey, setEditingAdminKey] = useState(false);
+  const [savingAdminKey, setSavingAdminKey] = useState(false);
+  const [revealedAdminKey, setRevealedAdminKey] = useState<string | null>(null);
+  const [revealingAdminKey, setRevealingAdminKey] = useState(false);
+  const [adminKeyCopied, setAdminKeyCopied] = useState(false);
   const [contentUsage, setContentUsage] = useState<any>(null);
   const [loadingContentUsage, setLoadingContentUsage] = useState(false);
 
@@ -343,7 +355,6 @@ export default function OrganizationSettings() {
     try {
       const data: any = await apiClient.getContentKey();
       setContentKey(data);
-      setContentLimitInput(data.token_limit != null ? String(data.token_limit) : '');
     } catch (error) {
       console.error('Error loading content generation key:', error);
     }
@@ -363,19 +374,14 @@ export default function OrganizationSettings() {
 
   const handleSaveContentKey = async () => {
     const key = contentKeyInput.trim();
-    const limitRaw = contentLimitInput.trim();
-    if (!key && !contentKey.configured) {
+    if (!key) {
       toast({ title: 'API key required', description: 'Enter a Claude API key to configure content generation.', variant: 'destructive' });
       return;
     }
-    const payload: { api_key?: string; token_limit: number | null } = {
-      token_limit: limitRaw === '' ? null : Number(limitRaw),
-    };
-    if (key) payload.api_key = key;
     setSavingContentKey(true);
     try {
-      const res: any = await apiClient.updateContentKey(payload);
-      setContentKey({ configured: res.configured, preview: res.preview, status: res.status, token_limit: res.token_limit });
+      const res: any = await apiClient.updateContentKey({ api_key: key });
+      setContentKey(res);
       setContentKeyInput('');
       setEditingContentKey(false);
       setShowContentKey(false);
@@ -388,17 +394,22 @@ export default function OrganizationSettings() {
     }
   };
 
+  // DELETE clears BOTH the content-generation and admin keys in one operation.
   const handleDeleteContentKey = async () => {
     setSavingContentKey(true);
     try {
       const res: any = await apiClient.deleteContentKey();
-      setContentKey({ configured: false, preview: null, status: 'NOT_CONFIGURED', token_limit: res?.token_limit ?? null });
+      setContentKey(res);
       setContentKeyInput('');
       setEditingContentKey(false);
       setRevealedContentKey(null);
-      toast({ title: 'Content generation key removed' });
+      setAdminKeyInput('');
+      setEditingAdminKey(false);
+      setRevealedAdminKey(null);
+      await loadContentKeyUsage();
+      toast({ title: 'Keys removed', description: 'Content generation and admin keys were removed.' });
     } catch (error: any) {
-      toast({ title: 'Error', description: 'Failed to remove the content generation key.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to remove the keys.', variant: 'destructive' });
     } finally {
       setSavingContentKey(false);
     }
@@ -437,7 +448,64 @@ export default function OrganizationSettings() {
     setEditingContentKey(true);
     setRevealedContentKey(null);
     setContentKeyInput('');
-    setContentLimitInput(contentKey.token_limit != null ? String(contentKey.token_limit) : '');
+  };
+
+  // ----- Admin (usage-reporting) key handlers -----
+  const handleSaveAdminKey = async () => {
+    const key = adminKeyInput.trim();
+    if (!key) {
+      toast({ title: 'Admin key required', description: 'Enter an Anthropic Admin key (sk-ant-admin…).', variant: 'destructive' });
+      return;
+    }
+    setSavingAdminKey(true);
+    try {
+      const res: any = await apiClient.updateContentKey({ admin_api_key: key });
+      setContentKey(res);
+      setAdminKeyInput('');
+      setEditingAdminKey(false);
+      setShowAdminKey(false);
+      await loadContentKeyUsage();
+      toast({ title: 'Admin key saved', description: 'Your Anthropic Admin key has been validated and stored.' });
+    } catch (error: any) {
+      toast({ title: 'Error', description: error?.message || 'Failed to save the admin key.', variant: 'destructive' });
+    } finally {
+      setSavingAdminKey(false);
+    }
+  };
+
+  const fetchAdminPlaintextKey = async (): Promise<string | null> => {
+    try {
+      const data = await apiClient.revealAdminKey();
+      return data?.api_key ?? null;
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to retrieve the admin key.', variant: 'destructive' });
+      return null;
+    }
+  };
+
+  const handleRevealAdminKey = async () => {
+    setRevealingAdminKey(true);
+    const key = await fetchAdminPlaintextKey();
+    setRevealingAdminKey(false);
+    if (!key) return;
+    setRevealedAdminKey(key);
+    window.setTimeout(() => setRevealedAdminKey(null), REVEAL_TIMEOUT_MS);
+  };
+
+  const handleCopyAdminKey = async () => {
+    setRevealingAdminKey(true);
+    const key = await fetchAdminPlaintextKey();
+    setRevealingAdminKey(false);
+    if (!key) return;
+    await navigator.clipboard.writeText(key);
+    setAdminKeyCopied(true);
+    setTimeout(() => setAdminKeyCopied(false), 2000);
+  };
+
+  const handleEditAdminKey = () => {
+    setEditingAdminKey(true);
+    setRevealedAdminKey(null);
+    setAdminKeyInput('');
   };
 
   // Format an ISO timestamp as a short "x minutes ago" relative string.
@@ -2445,9 +2513,13 @@ export default function OrganizationSettings() {
                 ERROR:          { label: 'Error',          className: 'bg-red-500/15 text-red-400 border-red-500/30' },
               };
               const sc = statusConfig[status] ?? statusConfig['NOT_CONFIGURED'];
-              const today = contentUsage?.today ?? { requests: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0 };
-              const month = contentUsage?.month ?? { requests: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, token_limit: null, tokens_left: null };
-              const tokensLeftUnlimited = month.token_limit == null;
+              const usageSource = contentUsage?.source;
+              const outOfCredits = contentUsage?.status === 'OUT_OF_CREDITS';
+              const today = contentUsage?.today ?? { input_tokens: 0, output_tokens: 0, total_tokens: 0, estimated_cost_usd: 0 };
+              const month = contentUsage?.month ?? { input_tokens: 0, output_tokens: 0, total_tokens: 0, estimated_cost_usd: 0 };
+              const fmtUsd = (n: number | null | undefined) => `$${Number(n ?? 0).toFixed(4)}`;
+              const adminStatus = outOfCredits ? 'OUT_OF_CREDITS' : (contentKey.admin_key_status ?? 'NOT_CONFIGURED');
+              const adminSc = statusConfig[adminStatus] ?? statusConfig['NOT_CONFIGURED'];
 
               return (
                 <>
@@ -2463,7 +2535,7 @@ export default function OrganizationSettings() {
                           <div>
                             <CardTitle className="text-base">Content Generation Key (Claude)</CardTitle>
                             <CardDescription className="text-xs">
-                              Used only by the Strategy content pipeline. Never used by background scanning.
+                              Powers article writing, humanising, and refurbishing in the Strategy pipeline.
                             </CardDescription>
                           </div>
                         </div>
@@ -2524,12 +2596,6 @@ export default function OrganizationSettings() {
                               </Button>
                             </div>
                           </div>
-                          <div className="flex items-center justify-between text-xs text-muted-foreground px-3 py-1">
-                            <span>Monthly Token Limit:</span>
-                            <span className="font-semibold text-foreground">
-                              {contentKey.token_limit != null ? contentKey.token_limit.toLocaleString() : 'Unlimited'}
-                            </span>
-                          </div>
                         </div>
                       )}
 
@@ -2541,7 +2607,7 @@ export default function OrganizationSettings() {
                             <div className="relative">
                               <Input
                                 type={showContentKey ? 'text' : 'password'}
-                                placeholder={contentKey.configured ? 'Enter new key to replace…' : 'sk-ant-…'}
+                                placeholder={contentKey.configured ? 'Enter new key to replace…' : 'sk-ant-api…'}
                                 value={contentKeyInput}
                                 autoFocus={editingContentKey}
                                 onChange={e => setContentKeyInput(e.target.value)}
@@ -2556,20 +2622,6 @@ export default function OrganizationSettings() {
                               </button>
                             </div>
                           </div>
-                          <div className="space-y-1.5">
-                            <Label className="text-xs">Monthly Token Limit (optional)</Label>
-                            <Input
-                              type="number"
-                              min={0}
-                              placeholder="Leave empty for unlimited"
-                              value={contentLimitInput}
-                              onChange={e => setContentLimitInput(e.target.value)}
-                              className="text-sm"
-                            />
-                            <p className="text-[11px] text-muted-foreground">
-                              Soft limit — usage is tracked but generation is never blocked.
-                            </p>
-                          </div>
                           <div className="flex gap-2">
                             <Button size="sm" disabled={savingContentKey} onClick={handleSaveContentKey} className="gap-1.5">
                               {savingContentKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
@@ -2582,8 +2634,121 @@ export default function OrganizationSettings() {
                                   setEditingContentKey(false);
                                   setContentKeyInput('');
                                   setShowContentKey(false);
-                                  setContentLimitInput(contentKey.token_limit != null ? String(contentKey.token_limit) : '');
                                 }}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* ── Admin (usage-reporting) key card ── */}
+                  <Card className="border border-border relative overflow-hidden bg-muted/10">
+                    <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: '#D4A04A' }} />
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: '#D4A04A20' }}>
+                            <Activity className="h-4 w-4" style={{ color: '#D4A04A' }} />
+                          </div>
+                          <div>
+                            <CardTitle className="text-base">Usage Reporting Key (Admin)</CardTitle>
+                            <CardDescription className="text-xs">
+                              Fetches live token usage and cost directly from Anthropic. Does not generate content.
+                            </CardDescription>
+                          </div>
+                        </div>
+                        <Badge variant="outline" className={`gap-1.5 px-2.5 py-0.5 font-medium ${adminSc.className}`}>
+                          {adminSc.label}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+
+                    <CardContent className="space-y-3">
+                      {contentKey.admin_key_configured && !editingAdminKey && (
+                        <div className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Key className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="font-mono text-sm text-foreground truncate">
+                              {revealedAdminKey ?? contentKey.admin_key_preview ?? '••••••••••••••••'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0 ml-2">
+                            <Button
+                              size="sm" variant="ghost"
+                              className="h-8 px-2.5 gap-1.5 text-muted-foreground hover:text-foreground"
+                              disabled={revealingAdminKey}
+                              onClick={() => revealedAdminKey ? setRevealedAdminKey(null) : handleRevealAdminKey()}
+                            >
+                              {revealingAdminKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : revealedAdminKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                              <span className="text-xs font-medium">{revealedAdminKey ? 'Hide' : 'Reveal'}</span>
+                            </Button>
+                            <Button
+                              size="sm" variant="ghost"
+                              className="h-8 px-2.5 gap-1.5 text-muted-foreground hover:text-foreground"
+                              disabled={revealingAdminKey}
+                              onClick={handleCopyAdminKey}
+                            >
+                              {adminKeyCopied ? (
+                                <><Check className="h-3.5 w-3.5 text-emerald-500" /><span className="text-xs text-emerald-500 font-medium">Copied</span></>
+                              ) : (
+                                <><Copy className="h-3.5 w-3.5" /><span className="text-xs font-medium">Copy</span></>
+                              )}
+                            </Button>
+                            <Button
+                              size="sm" variant="ghost"
+                              className="h-8 px-2.5 gap-1.5 text-muted-foreground hover:text-foreground"
+                              disabled={revealingAdminKey}
+                              onClick={handleEditAdminKey}
+                            >
+                              <Pencil className="h-3.5 w-3.5" /><span className="text-xs font-medium">Edit</span>
+                            </Button>
+                            <Button
+                              size="sm" variant="ghost"
+                              className="h-8 px-2.5 gap-1.5 text-red-400 hover:text-red-300"
+                              disabled={savingContentKey}
+                              onClick={handleDeleteContentKey}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" /><span className="text-xs font-medium">Delete</span>
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {(!contentKey.admin_key_configured || editingAdminKey) && (
+                        <div className="space-y-3">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Anthropic Admin Key</Label>
+                            <div className="relative">
+                              <Input
+                                type={showAdminKey ? 'text' : 'password'}
+                                placeholder={contentKey.admin_key_configured ? 'Enter new key to replace…' : 'sk-ant-admin…'}
+                                value={adminKeyInput}
+                                autoFocus={editingAdminKey}
+                                onChange={e => setAdminKeyInput(e.target.value)}
+                                className="pr-10 font-mono text-sm"
+                              />
+                              <button
+                                type="button"
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                onClick={() => setShowAdminKey(v => !v)}
+                              >
+                                {showAdminKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button size="sm" disabled={savingAdminKey} onClick={handleSaveAdminKey} className="gap-1.5">
+                              {savingAdminKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                              Save
+                            </Button>
+                            {editingAdminKey && (
+                              <Button
+                                size="sm" variant="ghost"
+                                onClick={() => { setEditingAdminKey(false); setAdminKeyInput(''); setShowAdminKey(false); }}
                               >
                                 Cancel
                               </Button>
@@ -2599,58 +2764,97 @@ export default function OrganizationSettings() {
                     <CardHeader>
                       <div className="flex items-center justify-between">
                         <div>
-                          <CardTitle className="flex items-center gap-2"><Activity className="h-4 w-4" />Token Usage</CardTitle>
-                          <CardDescription>Content generation token consumption for this organization.</CardDescription>
+                          <CardTitle className="flex items-center gap-2">
+                            <Activity className="h-4 w-4" />Token Usage
+                            {usageSource === 'anthropic_api' && !outOfCredits && (
+                              <Badge variant="outline" className="gap-1.5 px-2 py-0 text-[11px] bg-emerald-500/15 text-emerald-500 border-emerald-500/30">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Live
+                              </Badge>
+                            )}
+                          </CardTitle>
+                          <CardDescription>Live token usage &amp; estimated cost from Anthropic.</CardDescription>
                         </div>
-                        {loadingContentUsage && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                        <div className="flex items-center gap-2">
+                          {usageSource === 'anthropic_api' && !outOfCredits && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 px-2 gap-1.5 text-muted-foreground hover:text-foreground"
+                              disabled={loadingContentUsage}
+                              onClick={loadContentKeyUsage}
+                            >
+                              <RefreshCw className={`h-3.5 w-3.5 ${loadingContentUsage ? 'animate-spin' : ''}`} />
+                              <span className="text-xs font-medium">Sync Now</span>
+                            </Button>
+                          )}
+                          {loadingContentUsage && usageSource !== 'anthropic_api' && (
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          )}
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* Today's Usage */}
-                        <div className="rounded-lg border border-border bg-muted/10 p-4">
-                          <h4 className="text-sm font-semibold mb-3">Today's Usage</h4>
-                          <div className="space-y-2 text-sm">
-                            <div className="flex justify-between"><span className="text-muted-foreground">Requests</span><span className="font-medium">{formatTokens(today.requests)}</span></div>
-                            <div className="flex justify-between"><span className="text-muted-foreground">Input Tokens</span><span className="font-medium">{formatTokens(today.input_tokens)}</span></div>
-                            <div className="flex justify-between"><span className="text-muted-foreground">Output Tokens</span><span className="font-medium">{formatTokens(today.output_tokens)}</span></div>
-                            <Separator className="my-1" />
-                            <div className="flex justify-between"><span className="text-muted-foreground">Total Tokens</span><span className="font-semibold">{formatTokens(today.total_tokens)}</span></div>
-                          </div>
+                      {(!usageSource || usageSource === 'not_configured') ? (
+                        <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-4 text-sm text-yellow-600 dark:text-yellow-400">
+                          Configure an Admin API Key above to enable live usage reporting.
                         </div>
-
-                        {/* This Month */}
-                        <div className="rounded-lg border border-border bg-muted/10 p-4">
-                          <h4 className="text-sm font-semibold mb-3">This Month</h4>
-                          <div className="space-y-2 text-sm">
-                            <div className="flex justify-between"><span className="text-muted-foreground">Requests</span><span className="font-medium">{formatTokens(month.requests)}</span></div>
-                            <div className="flex justify-between"><span className="text-muted-foreground">Input Tokens</span><span className="font-medium">{formatTokens(month.input_tokens)}</span></div>
-                            <div className="flex justify-between"><span className="text-muted-foreground">Output Tokens</span><span className="font-medium">{formatTokens(month.output_tokens)}</span></div>
-                            <div className="flex justify-between"><span className="text-muted-foreground">Total Tokens</span><span className="font-medium">{formatTokens(month.total_tokens)}</span></div>
-                            <Separator className="my-1" />
-                            <div className="flex justify-between items-center">
-                              <span className="text-muted-foreground">Tokens Left</span>
-                              {tokensLeftUnlimited ? (
-                                <span className="font-semibold text-emerald-500">Unlimited</span>
-                              ) : (
-                                <span className={`font-semibold ${month.tokens_left < 0 ? 'text-red-400' : 'text-foreground'}`}>
-                                  {formatTokens(month.tokens_left)}
-                                </span>
-                              )}
-                            </div>
-                            {!tokensLeftUnlimited && (
-                              <div className="flex justify-between text-[11px] text-muted-foreground">
-                                <span>Monthly Limit</span><span>{formatTokens(month.token_limit)}</span>
+                      ) : outOfCredits ? (
+                        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm font-medium text-red-500">
+                          Anthropic credits exhausted. Recharge your account to resume generation.
+                        </div>
+                      ) : usageSource === 'error' ? (
+                        <div className="rounded-lg border border-orange-500/30 bg-orange-500/10 p-4 text-sm text-orange-500">
+                          Could not reach Anthropic. Check your Admin Key and try again.
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Today's Usage */}
+                            <div className="rounded-lg border border-border bg-muted/10 p-4">
+                              <h4 className="text-sm font-semibold mb-3">Today's Usage</h4>
+                              <div className="space-y-2 text-sm">
+                                <div className="flex justify-between"><span className="text-muted-foreground">Input Tokens</span><span className="font-medium">{formatTokens(today.input_tokens)}</span></div>
+                                <div className="flex justify-between"><span className="text-muted-foreground">Output Tokens</span><span className="font-medium">{formatTokens(today.output_tokens)}</span></div>
+                                <div className="flex justify-between"><span className="text-muted-foreground">Total Tokens</span><span className="font-medium">{formatTokens(today.total_tokens)}</span></div>
+                                {today.caching_savings_usd > 0 && (
+                                  <div className="flex justify-between text-xs text-muted-foreground">
+                                    <span>Prompt Caching Savings</span>
+                                    <span className="text-emerald-500 font-medium">
+                                      {fmtUsd(today.caching_savings_usd)} ({today.caching_savings_pct}%)
+                                    </span>
+                                  </div>
+                                )}
+                                <Separator className="my-1" />
+                                <div className="flex justify-between"><span className="text-muted-foreground">Estimated Cost</span><span className="font-semibold text-emerald-500">{fmtUsd(today.estimated_cost_usd)}</span></div>
                               </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                            </div>
 
-                      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-muted-foreground pt-1">
-                        <span>Last Used: {formatRelativeTime(contentUsage?.last_used)}</span>
-                        <span>Last Updated: {formatRelativeTime(contentUsage?.last_updated)}</span>
-                      </div>
+                            {/* This Month */}
+                            <div className="rounded-lg border border-border bg-muted/10 p-4">
+                              <h4 className="text-sm font-semibold mb-3">This Month</h4>
+                              <div className="space-y-2 text-sm">
+                                <div className="flex justify-between"><span className="text-muted-foreground">Input Tokens</span><span className="font-medium">{formatTokens(month.input_tokens)}</span></div>
+                                <div className="flex justify-between"><span className="text-muted-foreground">Output Tokens</span><span className="font-medium">{formatTokens(month.output_tokens)}</span></div>
+                                <div className="flex justify-between"><span className="text-muted-foreground">Total Tokens</span><span className="font-medium">{formatTokens(month.total_tokens)}</span></div>
+                                {month.caching_savings_usd > 0 && (
+                                  <div className="flex justify-between text-xs text-muted-foreground">
+                                    <span>Prompt Caching Savings</span>
+                                    <span className="text-emerald-500 font-medium">
+                                      {fmtUsd(month.caching_savings_usd)} ({month.caching_savings_pct}%)
+                                    </span>
+                                  </div>
+                                )}
+                                <Separator className="my-1" />
+                                <div className="flex justify-between"><span className="text-muted-foreground">Estimated Cost</span><span className="font-semibold text-emerald-500">{fmtUsd(month.estimated_cost_usd)}</span></div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-muted-foreground pt-1">
+                            <span>Last synced: {formatRelativeTime(contentUsage?.last_synced)}</span>
+                          </div>
+                        </>
+                      )}
                     </CardContent>
                   </Card>
                 </>

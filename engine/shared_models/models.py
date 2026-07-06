@@ -36,7 +36,8 @@ class Organisation(models.Model):
     # exclusively for the Strategy content-generation pipeline — but the columns
     # are declared here so the shared ORM schema stays in sync.
     content_generation_api_key = models.TextField(blank=True, null=True, help_text="Encrypted API Key for Content Generation")
-    content_generation_token_limit = models.BigIntegerField(blank=True, null=True, help_text="Optional monthly token limit for content generation")
+    # Read-only mirror of the backend admin-usage key column (owned by backend).
+    content_admin_api_key = models.TextField(blank=True, null=True, help_text="Encrypted Anthropic Admin API Key for live usage reporting")
 
     class Meta:
         app_label = 'shared_models'
@@ -578,6 +579,12 @@ class PromptAnalytics(models.Model):
     )
     # domain/organisation removed; derive via prompt.group.domain
     platform = models.CharField(max_length=100, default='ChatGPT', help_text="Name of the AI platform used")
+    region = models.CharField(
+        max_length=8,
+        default='GLOBAL',
+        db_index=True,
+        help_text="Geographic region: ISO 3166-1 alpha-2 country code, or 'GLOBAL' for unattributed. See docs/GEO_AI_MENTION_TRACKING_DESIGN.md.",
+    )
     is_mention = models.BooleanField(
         default=False,
         help_text="Whether this analytics entry is a mention or not"
@@ -664,7 +671,7 @@ class PromptAnalytics(models.Model):
         verbose_name = 'Prompt Analytics'
         verbose_name_plural = 'Prompt Analytics'
         ordering = ['-created_at']
-        unique_together = ['prompt', 'platform']
+        unique_together = ['prompt', 'platform', 'region']
     
     def __str__(self):
         return f"Analytics for {self.prompt.prompt[:30]}... ({self.platform})"
@@ -1304,14 +1311,21 @@ class DomainMetricSnapshot(models.Model):
         help_text="Average position in search results"
     )
     
+    region = models.CharField(
+        max_length=8,
+        default='GLOBAL',
+        db_index=True,
+        help_text="Geographic region: ISO 3166-1 alpha-2 country code, or 'GLOBAL' for unattributed. See docs/GEO_AI_MENTION_TRACKING_DESIGN.md.",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         app_label = 'shared_models'
         db_table = 'domain_metric_snapshots'
         managed = True  # Let backend manage this table
-        unique_together = ['domain', 'platform', 'snapshot_date', 'period_type']
+        unique_together = ['domain', 'platform', 'snapshot_date', 'period_type', 'region']
         indexes = [
             models.Index(fields=['domain', 'snapshot_date']),
             models.Index(fields=['platform', 'snapshot_date']),
@@ -2221,3 +2235,53 @@ class GeneratedReport(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.generated_at.strftime('%Y-%m-%d')}"
+
+
+class DomainRegion(models.Model):
+    """
+    Engine-side mirror of the backend `domains.DomainRegion` table
+    (db_table='domain_regions'). Read by the engine's per-region query loop
+    (G2). Backend owns the DDL; this mirror is state-only in migrations.
+    See docs/GEO_AI_MENTION_TRACKING_DESIGN.md.
+    """
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='regions',
+        help_text="Domain this tracked region belongs to",
+    )
+    country_code = models.CharField(
+        max_length=2,
+        help_text="ISO 3166-1 alpha-2 country code, e.g. 'IN', 'US'",
+    )
+    country_name = models.CharField(
+        max_length=100,
+        help_text="Human-readable country name for display, e.g. 'India'",
+    )
+    locale = models.CharField(
+        max_length=10,
+        blank=True,
+        help_text="Optional locale hint for prompt localization, e.g. 'en-IN'",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether the engine should query this region on the next run",
+    )
+    is_primary = models.BooleanField(
+        default=False,
+        help_text="Primary region for the domain (seeded from Domain.country)",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        managed = True  # Let backend manage this table
+        db_table = 'domain_regions'
+        verbose_name = 'Domain Region'
+        verbose_name_plural = 'Domain Regions'
+        ordering = ['-is_primary', 'country_name']
+        unique_together = ['domain', 'country_code']
+
+    def __str__(self):
+        return f"{self.domain.name} — {self.country_name} ({self.country_code})"
