@@ -143,6 +143,12 @@ class PromptAnalytics(models.Model):
         help_text="Prompt this analytics data belongs to"
     )
     platform = models.CharField(max_length=100, default='ChatGPT', help_text="Name of the AI platform used")
+    region = models.CharField(
+        max_length=8,
+        default='GLOBAL',
+        db_index=True,
+        help_text="Geographic region: ISO 3166-1 alpha-2 country code, or 'GLOBAL' for unattributed. See docs/GEO_AI_MENTION_TRACKING_DESIGN.md.",
+    )
     is_mention = models.BooleanField(
         default=False,
         help_text="Whether this analytics entry is a mention or not"
@@ -210,7 +216,7 @@ class PromptAnalytics(models.Model):
         verbose_name = 'Prompt Analytics'
         verbose_name_plural = 'Prompt Analytics'
         ordering = ['-created_at']
-        unique_together = ['prompt', 'platform']
+        unique_together = ['prompt', 'platform', 'region']
         indexes = [
             models.Index(fields=['prompt', 'platform', 'created_at']),  # Time-series queries
             models.Index(fields=['prompt', 'is_mention', '-position']),  # Mention analysis
@@ -429,12 +435,19 @@ class DomainMetricSnapshot(models.Model):
         help_text="Average position in search results"
     )
     
+    region = models.CharField(
+        max_length=8,
+        default='GLOBAL',
+        db_index=True,
+        help_text="Geographic region: ISO 3166-1 alpha-2 country code, or 'GLOBAL' for unattributed. See docs/GEO_AI_MENTION_TRACKING_DESIGN.md.",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'domain_metric_snapshots'
-        unique_together = ['domain', 'platform', 'snapshot_date', 'period_type']
+        unique_together = ['domain', 'platform', 'snapshot_date', 'period_type', 'region']
         indexes = [
             models.Index(fields=['domain', 'snapshot_date']),
             models.Index(fields=['platform', 'snapshot_date']),

@@ -6,6 +6,7 @@ import { CompetitorComparison } from "@/components/CompetitorComparison";
 import { MentionTable } from "@/components/MentionTable";
 import { TrendChart } from "@/components/TrendChart";
 import { TimeFilter } from "@/components/TimeFilter";
+import { MentionsByCountry } from "@/components/MentionsByCountry";
 import { PageLoader } from "@/components/PageLoader";
 import { Eye, TrendingUp, Target, Bell, Link2, FileText, Download, CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,14 @@ import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
+function formatGADate(yyyymmdd: string): string {
+  if (!yyyymmdd || yyyymmdd.length !== 8) return yyyymmdd;
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const m = parseInt(yyyymmdd.slice(4, 6), 10);
+  const d = parseInt(yyyymmdd.slice(6, 8), 10);
+  return `${d} ${months[m - 1] ?? ""}`;
+}
+
 const Dashboard = () => {
   const { user } = useAuth();
   const { selectedDomain } = useDomainStore();
@@ -34,6 +43,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [domainId, setDomainId] = useState<string | null>(null);
+  const [dailyAudience, setDailyAudience] = useState<any[] | null>(null);
   const { toast } = useToast();
   const hasMountedRef = useRef(false);
 
@@ -144,6 +154,15 @@ const Dashboard = () => {
     void fetchSummary(true);
   };
 
+  // Time-range presets (1M / 6M / All time) drive the existing `days` window.
+  // Selecting one clears any custom date range so the preset actually applies
+  // (a complete range otherwise overrides `days` in fetchSummary).
+  const handleTimeRangeChange = (days: string) => {
+    setExportStartDate(undefined);
+    setExportEndDate(undefined);
+    setTimePeriod(days);
+  };
+
   async function fetchSummary(forceRefresh = false) {
     if (!user) return;
 
@@ -201,6 +220,24 @@ const Dashboard = () => {
         ...(useRange ? { start_date: startStr, end_date: endStr } : {}),
       });
       setSummary(data);
+
+      // Fetch GA daily traffic series for the Monthly Audience tab
+      api.getGAData(Number(currentDomainId), startStr || undefined, endStr || undefined)
+        .then((res: any) => {
+          const daily = res?.data?.daily || [];
+          if (daily.length > 0) {
+            setDailyAudience(daily.map((row: any) => ({
+              date: formatGADate(row.date),
+              sessions: Number(row.sessions || 0),
+              users: Number(row.totalUsers || 0),
+            })));
+          } else {
+            setDailyAudience(null);
+          }
+        })
+        .catch(() => {
+          setDailyAudience(null);
+        });
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
       // Only show error for actual errors, not empty data
@@ -257,7 +294,9 @@ const Dashboard = () => {
           <div className="min-w-0 flex-1">
             <h1 className="text-4xl font-bold tracking-tight">Insights</h1>
             <p className="text-muted-foreground mt-2 whitespace-nowrap">
-              Overview of your domain's AI search visibility performance
+              {selectedDomain?.name
+                ? `${domainName} • AI Visibility Overview`
+                : "AI Visibility Overview"}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -343,7 +382,48 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Key Metrics */}
+      {/* ROW 1 — AI Visibility Gauge & Trend Chart */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1">
+          <VisibilityScore
+            brand={domainName}
+            score={summary?.brand?.visibility_score ?? 0}
+            mentions={summary?.brand?.total_mentions ?? 0}
+            avgPosition={summary?.brand?.avg_position ?? 0}
+            sentiment={{
+              positive: Math.round(summary?.brand?.sentiment?.positive_percentage ?? 0),
+              neutral: Math.round(summary?.brand?.sentiment?.neutral_percentage ?? 0),
+              negative: Math.round(summary?.brand?.sentiment?.negative_percentage ?? 0),
+            }}
+          />
+        </div>
+        <div className="lg:col-span-2">
+          <TrendChart
+            data={summary?.trends}
+            metrics={summary?.metrics}
+            timeRange={exportStartDate && exportEndDate ? undefined : timePeriod}
+            onTimeRangeChange={handleTimeRangeChange}
+            audienceData={dailyAudience}
+          />
+        </div>
+      </div>
+
+      {/* ROW 2 — Distribution by LLM & Mentions by Country */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <PlatformMentions data={
+          Array.isArray(summary?.platforms)
+            ? summary.platforms.map((p: any) => ({
+                platform: p.platform ?? 'Platform',
+                count: p.mention_count ?? 0,
+                citations: p.cited_pages ?? 0,
+                avg_position: p.avg_position ?? 0,
+              }))
+            : undefined
+        } />
+        <MentionsByCountry data={summary?.countries} totalMentions={summary?.brand?.total_mentions ?? 0} />
+      </div>
+
+      {/* ROW 3 — Key Metrics (moved below the hero) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <MetricCard
           title="Total Prompts"
@@ -383,47 +463,18 @@ const Dashboard = () => {
         />
       </div>
 
-      {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 flex flex-col gap-6">
-          <VisibilityScore
-            brand={domainName}
-            score={summary?.brand?.visibility_score ?? 0}
-            mentions={summary?.brand?.total_mentions ?? 0}
-            avgPosition={summary?.brand?.avg_position ?? 0}
-            sentiment={{
-              positive: Math.round(summary?.brand?.sentiment?.positive_percentage ?? 0),
-              neutral: Math.round(summary?.brand?.sentiment?.neutral_percentage ?? 0),
-              negative: Math.round(summary?.brand?.sentiment?.negative_percentage ?? 0),
-            }}
-          />
-          <div className="flex-1">
-            <TrendChart data={summary?.trends} />
-          </div>
-        </div>
-        <div className="flex flex-col gap-6">
-          <PlatformMentions data={
-            Array.isArray(summary?.platforms)
-              ? summary.platforms.map((p: any) => ({
-                  platform: p.platform ?? 'Platform',
-                  count: p.mention_count ?? 0,
-                  avg_position: p.avg_position ?? 0,
-                }))
-              : undefined
-          } />
-          <CompetitorComparison competitors={
-            summary?.share_of_voice?.competitors?.map((c: any) => ({
-              name: c.name || `Competitor ${c.competitor_id}`,
-              url: c.url || '',
-              mentions: c.mention_count ?? 0,
-              shareOfVoice: c.share_percentage ?? 0,
-              trend: c.trend ?? 0,
-            }))
-          } />
-        </div>
-      </div>
+      {/* ROW 4 — Competitive context (moved below, full width) */}
+      <CompetitorComparison competitors={
+        summary?.share_of_voice?.competitors?.map((c: any) => ({
+          name: c.name || `Competitor ${c.competitor_id}`,
+          url: c.url || '',
+          mentions: c.mention_count ?? 0,
+          shareOfVoice: c.share_percentage ?? 0,
+          trend: c.trend ?? 0,
+        }))
+      } />
 
-      {/* Mentions Table */}
+      {/* ROW 5 — Mentions Table */}
       <MentionTable mentions={summary?.recent_mentions} />
     </div>
   );

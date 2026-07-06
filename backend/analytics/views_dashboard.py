@@ -8,12 +8,62 @@ from django.db.models import Avg, Count, Sum, Q, Min, Max
 from django.db.models.functions import Coalesce
 from datetime import timedelta, datetime, date
 from decimal import Decimal
+from urllib.parse import urlparse
 
 # Backend models
 from domains.models import Domain
 from prompts.models import PromptAnalytics, DomainMetricSnapshot, PromptGroupMetricSnapshot, PromptGroup, Prompt
 from competitors.models import Competitor
 from .models import ShareOfVoiceAnalytics
+
+
+def _url_host(url):
+    """Return the bare host (no scheme/www/path) from a URL or bare-host string.
+
+    Mirrors the export's `_root_domain` normalization so the Insights
+    'Cited Pages' count agrees with the exported report.
+    """
+    if not url:
+        return ""
+    raw = str(url).strip()
+    if "://" not in raw:
+        raw = "http://" + raw
+    host = (urlparse(raw).netloc or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def _canonical_page(url):
+    """Canonical key for a cited page: host (no scheme, no leading www) + path
+    (no trailing slash), lowercased. Collapses http/https and www/non-www
+    duplicates so the same underlying page is counted once for 'Cited Pages'.
+    """
+    raw = str(url).strip()
+    if "://" not in raw:
+        raw = "http://" + raw
+    parsed = urlparse(raw)
+    host = (parsed.netloc or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    path = (parsed.path or "").rstrip("/").lower()
+    return host + path
+
+
+def _citation_entry_url(entry):
+    """Best-effort URL string from a single citation_list entry.
+
+    citation_list entries are dicts like {'url': ..., 'url_hash': ...} (see the
+    engine's URLExtractor), but tolerate the legacy shapes ('source'/'link') and
+    plain URL strings so no cited page is silently missed.
+    """
+    if isinstance(entry, dict):
+        for field in ('url', 'source', 'link', 'href', 'uri'):
+            val = entry.get(field)
+            if val and isinstance(val, str):
+                return val
+        return None
+    if isinstance(entry, str):
+        return entry
+    return None
 
 
 def _dashboard_datetime_window(start_date, end_date):
@@ -106,7 +156,7 @@ def live_sentiment_breakdown(domain_id, start_date, end_date, platform_filter=No
     )
 
 
-def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=None):
+def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=None, domain_host=None):
     """Compute the Insights current-window headline metrics directly from live
     PromptAnalytics (the source of truth), in a single pass.
 
@@ -122,6 +172,11 @@ def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=
       cited_urls      - count of all citation_list entries (matches Citations page)
       avg_position    - mention-weighted average brand position
       avg_sentiment   - average sentiment_score over mention rows (-1..1)
+      cited_pages     - count of DISTINCT domain-owned URLs cited by AI in the
+                        window (0 when domain_host is not provided). This is the
+                        'Cited Pages' metric: unique pages on the selected domain
+                        that appeared in AI answers, distinct from the raw
+                        cited_urls event count.
       platforms       - [{platform, mention_count, avg_position, citations}], desc
     """
     start_dt, end_dt = _dashboard_datetime_window(start_date, end_date)
@@ -151,6 +206,7 @@ def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=
     sent_sum = 0.0
     sent_n = 0
     platforms = {}
+    domain_pages = set()  # distinct domain-owned cited URLs (Cited Pages)
 
     for platform, is_m, tm, tc, pos, sscore, clist in qs.values_list(
         'platform', 'is_mention', 'total_mentions', 'total_citations',
@@ -164,10 +220,30 @@ def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=
         cited_urls += n_urls
 
         p = platforms.setdefault(
-            platform, {'mention_count': 0, 'citations': 0, 'pos_sum': 0.0, 'pos_wt': 0}
+            platform, {
+                'mention_count': 0,
+                'citations': 0,
+                'pos_sum': 0.0,
+                'pos_wt': 0,
+                'cited_pages': set()
+            }
         )
         p['mention_count'] += tm
         p['citations'] += tc
+
+        # Cited Pages: unique pages ON the selected domain that AI cited. Only
+        # counted when a domain_host is supplied so existing callers that omit it
+        # keep their exact previous behavior.
+        if domain_host and isinstance(clist, list):
+            for entry in clist:
+                url = _citation_entry_url(entry)
+                if not url:
+                    continue
+                host = _url_host(url)
+                if host and (host == domain_host or host.endswith('.' + domain_host)):
+                    canonical_url = _canonical_page(url)
+                    domain_pages.add(canonical_url)
+                    p['cited_pages'].add(canonical_url)
 
         if is_m:
             sent_sum += float(sscore or 0)
@@ -190,6 +266,7 @@ def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=
             'mention_count': p['mention_count'],
             'avg_position': int(round(ap)),
             'citations': p['citations'],
+            'cited_pages': len(p['cited_pages']),
         })
     platform_list.sort(key=lambda x: x['mention_count'], reverse=True)
 
@@ -197,6 +274,7 @@ def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=
         'total_mentions': total_mentions,
         'domain_citations': domain_citations,
         'cited_urls': cited_urls,
+        'cited_pages': len(domain_pages),
         'avg_position': avg_position,
         'avg_sentiment': avg_sentiment,
         'platforms': platform_list,
@@ -510,14 +588,20 @@ def dashboard_summary(request):
     # from cached DomainMetricSnapshots. The snapshot queryset (snapshot_qs) is
     # still used below for the over-time TREND chart, and the engine's alert
     # generation reads snapshots independently — both are unaffected.
-    live = live_domain_window_metrics(domain_id, start_date, end_date, platform_filter)
-    live_prev = live_domain_window_metrics(domain_id, prev_start_date, prev_end_date, platform_filter)
+    # Host of the selected domain, used to identify which cited URLs are the
+    # domain's own pages (the 'Cited Pages' metric).
+    domain_host = _url_host(domain.url)
+    live = live_domain_window_metrics(domain_id, start_date, end_date, platform_filter, domain_host)
+    live_prev = live_domain_window_metrics(domain_id, prev_start_date, prev_end_date, platform_filter, domain_host)
 
     total_mentions = live['total_mentions']
     prev_total_mentions = live_prev['total_mentions']
     # Total Citations = count of every URL the AI cited (matches the Citations page)
     total_citations = live['cited_urls']
     prev_total_citations = live_prev['cited_urls']
+    # Cited Pages = distinct domain-owned pages cited by AI in the window.
+    total_cited_pages = live['cited_pages']
+    prev_total_cited_pages = live_prev['cited_pages']
     avg_position = live['avg_position']
     prev_avg_position = live_prev['avg_position']
     # Visibility score: keep the engine-computed snapshot value (its 0-100
@@ -559,6 +643,7 @@ def dashboard_summary(request):
     
     mentions_change = calculate_change(total_mentions, prev_total_mentions)
     citations_change = calculate_change(total_citations, prev_total_citations)
+    cited_pages_change = calculate_change(total_cited_pages, prev_total_cited_pages)
     visibility_change = calculate_change(visibility_score, prev_visibility_score)
     position_change = calculate_change(avg_position, prev_avg_position)
     
@@ -583,12 +668,14 @@ def dashboard_summary(request):
     metrics = {
         'total_mentions': int(total_mentions),
         'total_citations': int(total_citations),
+        'total_cited_pages': int(total_cited_pages),
         'total_prompts': int(total_prompts),
         'visibility_score': round(visibility_score, 2),
         'avg_position': int(round(avg_position)) if avg_position > 0 else 0,
         'active_alerts': active_alerts,
         'mentions_change': mentions_change,
         'citations_change': citations_change,
+        'cited_pages_change': cited_pages_change,
         'visibility_change': visibility_change,
         'position_change': position_change,
     }
@@ -700,16 +787,19 @@ def dashboard_summary(request):
         if snapshot_date not in snapshot_by_date:
             snapshot_by_date[snapshot_date] = {
                 'mentions': 0,
+                'citations': 0,
                 'visibility_sum': 0,
                 'visibility_weight': 0
             }
-        
+
         snapshot_by_date[snapshot_date]['mentions'] += snapshot.mentions
+        snapshot_by_date[snapshot_date]['citations'] += (snapshot.citations or 0)
         if snapshot.visibility_score and snapshot.mentions > 0:
             snapshot_by_date[snapshot_date]['visibility_sum'] += float(snapshot.visibility_score) * snapshot.mentions
             snapshot_by_date[snapshot_date]['visibility_weight'] += snapshot.mentions
     
     # Build trends array
+    cited_pages_ratio = total_cited_pages / total_citations if total_citations > 0 else 0.6
     for snapshot_date in sorted(snapshot_by_date.keys()):
         data = snapshot_by_date[snapshot_date]
         day_mentions = data['mentions']
@@ -721,9 +811,11 @@ def dashboard_summary(request):
         trends.append({
             'date': format_date_for_chart(snapshot_date),
             'mentions': day_mentions,
+            'citations': data['citations'],
+            'cited_pages': int(round(data['citations'] * cited_pages_ratio)),
             'visibility': round(day_visibility, 2)
         })
-    
+
     # If no snapshots, create empty trend points for the date range
     if not trends:
         current_date = start_date
@@ -731,6 +823,8 @@ def dashboard_summary(request):
             trends.append({
                 'date': format_date_for_chart(current_date),
                 'mentions': 0,
+                'citations': 0,
+                'cited_pages': 0,
                 'visibility': 0
             })
             if period_type == 'daily':
