@@ -2,6 +2,17 @@ from django.db import models
 from shared_models.models import Domain, Account
 
 
+# Period classification for MoM/YoY reporting (rolling_30d = legacy default).
+# Mirrors backend/integrations/models.py so the engine ORM can read/write the
+# shared `period_type` column on ga_traffic_insights / gsc_traffic_insights.
+PERIOD_TYPE_CHOICES = [
+    ('rolling_30d', 'Rolling 30 Days'),
+    ('current_month', 'Current Month'),
+    ('prev_month', 'Previous Month'),
+    ('yoy_month', 'YoY Month'),
+]
+
+
 class Integration(models.Model):
     INTEGRATION_TYPES = [
         ('google_analytics', 'Google Analytics'),
@@ -63,7 +74,12 @@ class GATrafficInsight(models.Model):
     # Date range for this insight
     start_date = models.DateField()
     end_date = models.DateField()
-    
+
+    # Period classification for MoM/YoY (rolling_30d = legacy default)
+    period_type = models.CharField(
+        max_length=20, choices=PERIOD_TYPE_CHOICES, default='rolling_30d', db_index=True
+    )
+
     # Overall metrics
     total_sessions = models.IntegerField(default=0)
     total_users = models.IntegerField(default=0)
@@ -125,7 +141,12 @@ class GSCTrafficInsight(models.Model):
     # Date range for this insight
     start_date = models.DateField()
     end_date = models.DateField()
-    
+
+    # Period classification for MoM/YoY (rolling_30d = legacy default)
+    period_type = models.CharField(
+        max_length=20, choices=PERIOD_TYPE_CHOICES, default='rolling_30d', db_index=True
+    )
+
     # Overall metrics
     total_impressions = models.IntegerField(default=0)
     total_clicks = models.IntegerField(default=0)
