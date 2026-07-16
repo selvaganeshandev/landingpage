@@ -261,7 +261,7 @@ GOOGLE_GEMINI_API_KEY = config('GOOGLE_GEMINI_API_KEY', default=None)
 # 404 "model not found, use a newer model") is a one-line env change, not a code
 # edit across every call site. Mirrors the engine's GEMINI_MODEL setting. Override
 # per-environment via the GEMINI_MODEL env var if a key only supports a specific model.
-GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-2.5-flash')
+GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-flash-latest')
 
 # ScrapingDog API Configuration (still used by misinformation crawler & domains/views.py — /scrape endpoint)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)

@@ -16,7 +16,7 @@ Config (engine/.env, read in settings.py):
     QUOTA_ALERT_ENABLED=True
     QUOTA_ALERT_RECIPIENTS=boss@example.com,ops@example.com   # comma-separated
     QUOTA_ALERT_REPEAT_HOURS=12        # re-remind if still depleted after N hours
-    GEMINI_MODEL=gemini-2.5-flash      # 2.0-flash is discontinued (404)
+    GEMINI_MODEL=gemini-flash-latest   # default stable version alias
 
 This module is additive and isolated — it makes only tiny probe calls and never
 raises into the Celery scheduler.
@@ -171,7 +171,7 @@ def _probe_provider(provider, api_key):
     if provider == "anthropic":
         return _probe_anthropic(api_key, _cfg("QUOTA_PROBE_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"))
     if provider == "gemini":
-        return _probe_gemini(api_key, _cfg("GEMINI_MODEL", "gemini-2.5-flash"))
+        return _probe_gemini(api_key, _cfg("GEMINI_MODEL", "gemini-flash-latest"))
     if provider == "perplexity":
         return _probe_openai_compatible("Perplexity", "perplexity", api_key,
                                         "https://api.perplexity.ai", _cfg("QUOTA_PROBE_PERPLEXITY_MODEL", "sonar"))
@@ -268,7 +268,7 @@ def check_all_quotas():
     results = [
         _probe_openai(_cfg("OPENAI_API_KEY", ""), _cfg("QUOTA_PROBE_OPENAI_MODEL", "gpt-4o-mini")),
         _probe_anthropic(_cfg("ANTHROPIC_API_KEY", ""), _cfg("QUOTA_PROBE_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")),
-        _probe_gemini(_cfg("GEMINI_API_KEY", ""), _cfg("GEMINI_MODEL", "gemini-2.5-flash")),
+        _probe_gemini(_cfg("GEMINI_API_KEY", ""), _cfg("GEMINI_MODEL", "gemini-flash-latest")),
         _probe_openai_compatible("Perplexity", "perplexity", _cfg("PERPLEXITY_API_KEY", ""),
                                  "https://api.perplexity.ai", _cfg("QUOTA_PROBE_PERPLEXITY_MODEL", "sonar")),
         _probe_openai_compatible("xAI / Grok", "xai", _cfg("XAI_API_KEY", ""),

@@ -195,7 +195,7 @@ XAI_WEB_SEARCH = config('XAI_WEB_SEARCH', default=True, cast=bool)
 XAI_MODEL = config('XAI_MODEL', default='grok-2-latest')
 GEMINI_WEB_SEARCH = config('GEMINI_WEB_SEARCH', default=True, cast=bool)
 # gemini-2.0-flash is discontinued (returns HTTP 404). Default to a current model.
-GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-2.5-flash')
+GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-flash-latest')
 DEEPSEEK_MODEL = config('DEEPSEEK_MODEL', default='deepseek-chat')
 
 # ==================== LLM QUOTA / CREDIT ALERTS ====================
