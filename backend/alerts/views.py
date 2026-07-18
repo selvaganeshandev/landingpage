@@ -14,7 +14,7 @@ class AlertViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        base_qs = Alert.objects.all() if getattr(user, 'role', None) == 'super_admin' else Alert.objects.filter(domain__organisation=user.organisation)
+        base_qs = Alert.objects.filter(domain__organisation=user.organisation)
         # Optional domain scoping via query param
         domain_id = self.request.query_params.get('domain_id') if hasattr(self, 'request') else None
         if domain_id:
@@ -109,7 +109,7 @@ class AlertRuleViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        base_qs = AlertRule.objects.all() if getattr(user, 'role', None) == 'super_admin' else AlertRule.objects.filter(domain__organisation=user.organisation)
+        base_qs = AlertRule.objects.filter(domain__organisation=user.organisation)
         # Optional domain scoping via query param
         domain_id = self.request.query_params.get('domain_id') if hasattr(self, 'request') else None
         if domain_id:
@@ -134,8 +134,6 @@ class AlertNotificationViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'super_admin':
-            return AlertNotification.objects.all()
         return AlertNotification.objects.filter(alert__domain__organisation=user.organisation)
 
 
@@ -162,7 +160,7 @@ def alert_configuration(request):
         
         # Check permissions
         user = request.user
-        if user.role != 'super_admin' and domain.organisation != user.organisation:
+        if domain.organisation != user.organisation:
             return Response(
                 {'error': 'Permission denied'}, 
                 status=status.HTTP_403_FORBIDDEN
@@ -263,7 +261,7 @@ def update_email_config(request):
         
         # Check permissions
         user = request.user
-        if user.role != 'super_admin' and domain.organisation != user.organisation:
+        if domain.organisation != user.organisation:
             return Response(
                 {'error': 'Permission denied'}, 
                 status=status.HTTP_403_FORBIDDEN

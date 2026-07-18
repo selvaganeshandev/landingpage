@@ -16,8 +16,7 @@ class TopicViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'super_admin':
-            return Topic.objects.all()
+        # Org-scoped for all roles (including super_admin) — tenant isolation.
         return Topic.objects.filter(domain__organisation=user.organisation)
     
     def perform_create(self, serializer):
@@ -353,7 +352,7 @@ class TopicAnalyticsViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        queryset = TopicAnalytics.objects.all() if user.role == 'super_admin' else TopicAnalytics.objects.filter(
+        queryset = TopicAnalytics.objects.filter(
             topic__domain__organisation=user.organisation
         )
         

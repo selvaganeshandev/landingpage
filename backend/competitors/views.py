@@ -25,7 +25,7 @@ class CompetitorViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        queryset = Competitor.objects.all() if user.role == 'super_admin' else Competitor.objects.filter(domain__organisation=user.organisation)
+        queryset = Competitor.objects.filter(domain__organisation=user.organisation)
 
         # Filter by domain_id if provided in query params
         domain_id = self.request.query_params.get('domain_id')
@@ -154,10 +154,7 @@ class CompetitorViewSet(viewsets.ModelViewSet):
         try:
             # Ensure user has access to this domain
             user = request.user
-            if user.role == 'super_admin':
-                domain = Domain.objects.get(id=domain_id)
-            else:
-                domain = Domain.objects.get(id=domain_id, organisation=user.organisation)
+            domain = Domain.objects.get(id=domain_id, organisation=user.organisation)
         except Domain.DoesNotExist:
             return Response(
                 {'error': 'Domain not found or you do not have access to it'},
@@ -316,8 +313,6 @@ class CompetitorAnalyticsViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'super_admin':
-            return CompetitorAnalytics.objects.all()
         return CompetitorAnalytics.objects.filter(
             competitor__domain__organisation=user.organisation
         )
@@ -356,13 +351,10 @@ class CompetitorPromptAnalyticsViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         user = self.request.user
 
-        # Base queryset with organization filter
-        if user.role == 'super_admin':
-            queryset = CompetitorPromptAnalytics.objects.all()
-        else:
-            queryset = CompetitorPromptAnalytics.objects.filter(
-                competitor__domain__organisation=user.organisation
-            )
+        # Base queryset with organization filter (org-scoped for all roles)
+        queryset = CompetitorPromptAnalytics.objects.filter(
+            competitor__domain__organisation=user.organisation
+        )
 
         # Apply query parameter filters for better performance
         domain_id = self.request.query_params.get('domain_id')
@@ -410,16 +402,11 @@ class CompetitorPromptAnalyticsViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = self.filter_queryset(self.get_queryset())
         competitor_analytics = queryset.select_related('prompt', 'competitor')
 
-        # Get user's brand data from PromptAnalytics
-        if user.role == 'super_admin':
-            pa_queryset = PromptAnalytics.objects.filter(
-                prompt__group__domain_id=domain_id
-            )
-        else:
-            pa_queryset = PromptAnalytics.objects.filter(
-                prompt__group__domain_id=domain_id,
-                prompt__group__domain__organisation=user.organisation
-            )
+        # Get user's brand data from PromptAnalytics (org-scoped for all roles)
+        pa_queryset = PromptAnalytics.objects.filter(
+            prompt__group__domain_id=domain_id,
+            prompt__group__domain__organisation=user.organisation
+        )
 
         # Apply platform filter if provided
         if platform:
@@ -574,8 +561,6 @@ class CompetitorPromptViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'super_admin':
-            return CompetitorPrompt.objects.all()
         return CompetitorPrompt.objects.filter(
             competitor__domain__organisation=user.organisation
         )
@@ -668,9 +653,7 @@ class CompetitorMetricSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        queryset = CompetitorMetricSnapshot.objects.all()
-        if user.role != 'super_admin':
-            queryset = queryset.filter(domain__organisation=user.organisation)
+        queryset = CompetitorMetricSnapshot.objects.filter(domain__organisation=user.organisation)
         return queryset
 
     def list(self, request, *args, **kwargs):
@@ -1851,7 +1834,7 @@ def process_competitor_single(request):
         
         # Check if user has access to this competitor's domain
         user = request.user
-        if user.role != 'super_admin' and competitor.domain.organisation != user.organisation:
+        if competitor.domain.organisation != user.organisation:
             return Response(
                 {'error': 'You do not have permission to process this competitor'},
                 status=status.HTTP_403_FORBIDDEN
@@ -2027,7 +2010,7 @@ def start_competitor_analysis(request):
 
         # Check if user has access to this domain
         user = request.user
-        if user.role != 'super_admin' and domain.organisation != user.organisation:
+        if domain.organisation != user.organisation:
             return Response(
                 {'error': 'You do not have permission to analyze competitors for this domain'},
                 status=status.HTTP_403_FORBIDDEN
@@ -2087,7 +2070,7 @@ def process_competitor(request, competitor_id):
         
         # Check if user has access to this competitor's domain
         user = request.user
-        if user.role != 'super_admin' and competitor.domain.organisation != user.organisation:
+        if competitor.domain.organisation != user.organisation:
             return Response(
                 {'error': 'You do not have permission to process this competitor'},
                 status=status.HTTP_403_FORBIDDEN

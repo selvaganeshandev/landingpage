@@ -20,8 +20,7 @@ class IntegrationViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'super_admin':
-            return Integration.objects.all()
+        # Org-scoped for all roles (including super_admin) — tenant isolation.
         return Integration.objects.filter(domain__organisation=user.organisation)
     
     def perform_create(self, serializer):
@@ -101,9 +100,11 @@ class IntegrationViewSet(viewsets.ModelViewSet):
             )
 
         user = request.user
-        queryset = Integration.objects.filter(secondary_domain_id=secondary_id)
-        if user.role != 'super_admin':
-            queryset = queryset.filter(secondary_domain__organisation=user.organisation)
+        # Org-scoped for all roles (including super_admin) — tenant isolation.
+        queryset = Integration.objects.filter(
+            secondary_domain_id=secondary_id,
+            secondary_domain__organisation=user.organisation,
+        )
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 

@@ -15,8 +15,7 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'super_admin':
-            return SentimentAnalytics.objects.all()
+        # Org-scoped for all roles (including super_admin) — tenant isolation.
         return SentimentAnalytics.objects.filter(domain__organisation=user.organisation)
     
     @action(detail=False, methods=['get'])
@@ -142,8 +141,7 @@ class ShareOfVoiceAnalyticsViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'super_admin':
-            return ShareOfVoiceAnalytics.objects.all()
+        # Org-scoped for all roles (including super_admin) — tenant isolation.
         return ShareOfVoiceAnalytics.objects.filter(domain__organisation=user.organisation)
     
     @action(detail=False, methods=['get'])
