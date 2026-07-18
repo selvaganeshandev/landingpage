@@ -33,6 +33,49 @@ ENV_KEY_MAP = {
 }
 
 
+def _decrypt_byok(encrypted: str) -> Optional[str]:
+    """Decrypt a per-org BYOK ciphertext regardless of which process we run in.
+
+    The engine exposes ``shared_models.crypto`` and the backend exposes
+    ``authentication.models.decrypt_value``; only one is importable in a given
+    process. Both derive the SAME Fernet key from ``API_KEY_ENCRYPTION_SECRET``
+    (salt ``llm-monitor-salt-123``, 100k PBKDF2 iterations), so whichever is
+    available yields identical plaintext. If neither module is importable we
+    derive the key inline as a guaranteed, process-agnostic last resort — this
+    is what makes BYOK resolve in the backend, where ``shared_models`` has no
+    ``crypto`` submodule and the old import silently fell through to ``.env``.
+
+    Returns None on any failure so the caller falls back to the ``.env`` key
+    instead of forwarding garbage. The backend helper returns the ciphertext
+    unchanged on failure, so a result equal to the input is treated as failure.
+    """
+    for module_path in ('shared_models.crypto', 'authentication.models'):
+        try:
+            from importlib import import_module
+            decrypt = getattr(import_module(module_path), 'decrypt_value')
+            value = decrypt(encrypted)
+            if value and value != encrypted:
+                return value
+        except Exception:
+            continue
+
+    # Inline derivation — matches backend/authentication and engine/shared_models.
+    try:
+        import base64
+        from cryptography.fernet import Fernet
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+        secret = getattr(django_settings, 'API_KEY_ENCRYPTION_SECRET', None) or django_settings.SECRET_KEY
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32,
+                         salt=b'llm-monitor-salt-123', iterations=100000)
+        key = base64.urlsafe_b64encode(kdf.derive(secret.encode()))
+        return Fernet(key).decrypt(encrypted.encode()).decode()
+    except Exception as e:
+        logger.warning(f"APIKeyService: BYOK decrypt failed: {e}")
+        return None
+
+
 def get_org_settings(org_id: int):
     """
     Return the Organisation object for the given org_id, using Redis cache.
@@ -73,16 +116,10 @@ def get_api_key(org, provider: str) -> Optional[str]:
     if org is not None:
         encrypted = getattr(org, f'{provider}_api_key', None)
         if encrypted:
-            try:
-                # Decrypt using the engine-local helper (the backend
-                # `authentication` app is not importable here). Returns "" on
-                # failure so we fall through to the .env key below.
-                from shared_models.crypto import decrypt_value
-                raw = decrypt_value(encrypted)
-                if raw:
-                    return raw
-            except Exception as e:
-                logger.warning(f"APIKeyService: decrypt failed for {provider}: {e}")
+            # Process-agnostic decrypt: works in both the backend and engine.
+            raw = _decrypt_byok(encrypted)
+            if raw:
+                return raw
 
     # .env fallback: try each candidate settings attribute in order.
     for env_attr in ENV_KEY_MAP.get(provider, ()):
