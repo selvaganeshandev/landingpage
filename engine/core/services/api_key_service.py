@@ -19,14 +19,17 @@ logger = logging.getLogger(__name__)
 
 CACHE_TTL = 300  # 5 minutes
 
-# Map provider slug → Django settings attribute name (.env fallback key)
+# Map provider slug → candidate Django settings attribute name(s) for the
+# .env fallback. Multiple names are tried in order so the same service works
+# across the backend and engine processes, which historically named the same
+# Gemini key differently (backend: GOOGLE_GEMINI_API_KEY, engine: GEMINI_API_KEY).
 ENV_KEY_MAP = {
-    'openai':     'OPENAI_API_KEY',
-    'gemini':     'GEMINI_API_KEY',
-    'perplexity': 'PERPLEXITY_API_KEY',
-    'anthropic':  'ANTHROPIC_API_KEY',
-    'xai':        'XAI_API_KEY',
-    'deepseek':   'DEEPSEEK_API_KEY',
+    'openai':     ('OPENAI_API_KEY',),
+    'gemini':     ('GEMINI_API_KEY', 'GOOGLE_GEMINI_API_KEY'),
+    'perplexity': ('PERPLEXITY_API_KEY',),
+    'anthropic':  ('ANTHROPIC_API_KEY',),
+    'xai':        ('XAI_API_KEY',),
+    'deepseek':   ('DEEPSEEK_API_KEY',),
 }
 
 
@@ -81,9 +84,8 @@ def get_api_key(org, provider: str) -> Optional[str]:
             except Exception as e:
                 logger.warning(f"APIKeyService: decrypt failed for {provider}: {e}")
 
-    # .env fallback
-    env_attr = ENV_KEY_MAP.get(provider)
-    if env_attr:
+    # .env fallback: try each candidate settings attribute in order.
+    for env_attr in ENV_KEY_MAP.get(provider, ()):
         fallback = getattr(django_settings, env_attr, None)
         if fallback:
             return fallback
