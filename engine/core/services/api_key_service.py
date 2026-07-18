@@ -27,7 +27,7 @@ ENV_KEY_MAP = {
     'openai':     ('OPENAI_API_KEY',),
     'gemini':     ('GEMINI_API_KEY', 'GOOGLE_GEMINI_API_KEY'),
     'perplexity': ('PERPLEXITY_API_KEY',),
-    'anthropic':  ('ANTHROPIC_API_KEY',),
+    'anthropic':  ('ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'),
     'xai':        ('XAI_API_KEY',),
     'deepseek':   ('DEEPSEEK_API_KEY',),
 }

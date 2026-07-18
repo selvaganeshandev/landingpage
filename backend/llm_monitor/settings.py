@@ -255,6 +255,11 @@ ENGINE_API_URL = config('ENGINE_API_URL', default='http://localhost:8001')
 # OpenAI API Configuration
 OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 
+# Anthropic (Claude) API Configuration. Accept either ANTHROPIC_API_KEY (engine's
+# canonical name) or the backend's historical CLAUDE_API_KEY env var, so the shared
+# api_key_service .env fallback can resolve Claude in the backend process too.
+ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default=config('CLAUDE_API_KEY', default=None))
+
 # Google Gemini API Configuration (for AI-powered features)
 GOOGLE_GEMINI_API_KEY = config('GOOGLE_GEMINI_API_KEY', default=None)
 # Gemini model name — single source of truth so a model retirement (Google returns
@@ -284,6 +289,17 @@ DATABLUE_ADVANCED = config('DATABLUE_ADVANCED', default=False, cast=bool)
 
 # Google PageSpeed Insights API Configuration (for Core Web Vitals & Performance)
 GOOGLE_PAGESPEED_API_KEY = config('GOOGLE_PAGESPEED_API_KEY', default=None)
+
+# Domain Overview / GEO audit tuning.
+# AVI_PROMPTS_PER_STAGE: funnel prompts generated per TOFU/MOFU/BOFU stage on a domain's
+# FIRST audit. Higher = broader category coverage / more statistical rigor, at a linear
+# BYOK cost (prompts x engines live LLM calls). Already-persisted prompt sets keep their
+# original size so the GEO trend stays apples-to-apples.
+AVI_PROMPTS_PER_STAGE = config('AVI_PROMPTS_PER_STAGE', default=3, cast=int)
+# Process-wide cap on concurrent background AVI jobs (async run mode). Bounds LLM fan-out
+# and stops heavy runs from exhausting web workers; the legacy backend has no Celery, so
+# this runs in-process. Excess jobs queue.
+AVI_JOB_WORKERS = config('AVI_JOB_WORKERS', default=2, cast=int)
 
 # Moz API Configuration (for Website Authority - free tier: 2,500 rows/month)
 MOZ_ACCESS_ID = config('MOZ_ACCESS_ID', default=None)
