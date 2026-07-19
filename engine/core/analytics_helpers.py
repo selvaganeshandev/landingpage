@@ -120,6 +120,10 @@ def extract_position_from_response(response: str, user_domain: str, citation_url
 	brand_variations = [v for v in brand_variations if v and len(v) >= 3]
 	lines = response.split("\n")
 	found_position = None
+	# Index the numbered items first so each item's search window ends where the NEXT item
+	# begins. A fixed lookahead (e.g. lines[i:i+5]) bleeds item #1's window into items
+	# #2-#5, so any brand in the top 5 was reported as position #1 — inflating #1 rates.
+	numbered_items = []
 	for i in range(len(lines)):
 		line = lines[i].strip()
 		# Match numbered patterns: "1.", "1)", "(1)", "1:", "1 -", etc.
@@ -130,10 +134,14 @@ def extract_position_from_response(response: str, user_domain: str, citation_url
 			# Validate position is reasonable (1-100), not a year or other large number
 			if position < 1 or position > 100:
 				continue
-			search_window = ' '.join(lines[i:min(i + 5, len(lines))]).lower()
-			if any(variant in search_window for variant in brand_variations):
-				found_position = position
-				break
+			numbered_items.append((i, position))
+
+	for idx, (line_no, position) in enumerate(numbered_items):
+		end = numbered_items[idx + 1][0] if idx + 1 < len(numbered_items) else min(line_no + 5, len(lines))
+		search_window = ' '.join(lines[line_no:end]).lower()
+		if any(variant in search_window for variant in brand_variations):
+			found_position = position
+			break
 	if found_position is not None:
 		return found_position
 	if citation_urls:
@@ -686,8 +694,12 @@ def _resolve_country_text(group: Any) -> str:
 def process_prompt_with_claude(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
     try:
         from anthropic import Anthropic
-        cfg = client or {}
-        anthropic_client = Anthropic(api_key=cfg.get('api_key'), timeout=cfg.get('timeout', 60))
+        # ClientFactory passes a ready Anthropic instance — use it directly.
+        # Only build one from .env when no client was supplied (calling cfg.get()
+        # on the client object raised TypeError and silently killed Claude tracking).
+        anthropic_client = client if isinstance(client, Anthropic) else Anthropic(
+            api_key=getattr(settings, 'ANTHROPIC_API_KEY', None), timeout=60
+        )
         country_text = _resolve_country_text(group)
         model_name = getattr(settings, 'ANTHROPIC_MODEL', 'claude-sonnet-4-6')
         user_message = _build_analytics_user_prompt(prompt_text, country_text)
@@ -748,11 +760,11 @@ def process_prompt_with_claude(prompt_text: str, user_domain: str, client: Any =
 def process_prompt_with_grok(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
     try:
         from openai import OpenAI
-        cfg = client or {}
-        xai_client = OpenAI(
-            api_key=cfg.get('api_key'),
-            base_url=cfg.get('base_url', 'https://api.x.ai/v1'),
-            timeout=cfg.get('timeout', 60),
+        # ClientFactory passes a ready OpenAI-compatible xAI client — use it directly.
+        xai_client = client if isinstance(client, OpenAI) else OpenAI(
+            api_key=getattr(settings, 'XAI_API_KEY', None),
+            base_url='https://api.x.ai/v1',
+            timeout=60,
         )
         country_text = _resolve_country_text(group)
         model_name = getattr(settings, 'XAI_MODEL', 'grok-2-latest')
@@ -813,11 +825,11 @@ def process_prompt_with_grok(prompt_text: str, user_domain: str, client: Any = N
 def process_prompt_with_deepseek(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
     try:
         from openai import OpenAI
-        cfg = client or {}
-        ds_client = OpenAI(
-            api_key=cfg.get('api_key'),
-            base_url=cfg.get('base_url', 'https://api.deepseek.com/v1'),
-            timeout=cfg.get('timeout', 60),
+        # ClientFactory passes a ready OpenAI-compatible DeepSeek client — use it directly.
+        ds_client = client if isinstance(client, OpenAI) else OpenAI(
+            api_key=getattr(settings, 'DEEPSEEK_API_KEY', None),
+            base_url='https://api.deepseek.com/v1',
+            timeout=60,
         )
         country_text = _resolve_country_text(group)
         system_prompt = (
