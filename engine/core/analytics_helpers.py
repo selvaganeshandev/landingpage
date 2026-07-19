@@ -534,6 +534,23 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
         raise
 
 
+# Models that have already rejected Google Search grounding. Sending the wrong
+# tool name made every grounded call fail, which silently doubled the number of
+# Gemini requests per prompt (one failed grounded call + one ungrounded fallback).
+# Caching the failure keeps steady-state cost at one API call per prompt.
+_GEMINI_GROUNDING_UNSUPPORTED: set = set()
+
+
+def _gemini_search_tool(model_name: str) -> Dict[str, Any]:
+    """Return the Google Search grounding tool config for this model generation.
+
+    Gemini 1.5 uses ``google_search_retrieval``; 2.x and later use ``google_search``.
+    """
+    if '1.5' in (model_name or '').lower():
+        return {"google_search_retrieval": {}}
+    return {"google_search": {}}
+
+
 def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
     try:
         country_text = _resolve_country_text(group)
@@ -564,18 +581,30 @@ def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, clien
 
         text = ""
         # Use Google Search grounding when enabled so Gemini browses live (matches
-        # the Gemini app behaviour). Falls back to ungrounded generate_content if
-        # the SDK / model on this key doesn't support the tool.
-        if getattr(settings, 'GEMINI_WEB_SEARCH', True):
+        # the Gemini app behaviour). The tool name differs by model generation, and
+        # once a model is known to reject grounding we skip the attempt entirely so
+        # each prompt costs one API call instead of two.
+        use_grounding = (
+            getattr(settings, 'GEMINI_WEB_SEARCH', True)
+            and model_name not in _GEMINI_GROUNDING_UNSUPPORTED
+        )
+        if use_grounding:
             try:
                 grounded_model = genai.GenerativeModel(
                     model_name,
-                    tools=[{"google_search_retrieval": {}}],
+                    tools=[_gemini_search_tool(model_name)],
                 )
                 grounded = grounded_model.generate_content(prompt, generation_config=gen_config)
                 text = grounded.text if getattr(grounded, 'text', None) else ""
             except Exception as ws_err:
-                logger.warning(f"Gemini google_search_retrieval path failed, falling back: {ws_err}")
+                # Grounding is unavailable for this model/key. Remember it so we stop
+                # paying for a failing grounded call on every subsequent prompt.
+                _GEMINI_GROUNDING_UNSUPPORTED.add(model_name)
+                logger.warning(
+                    "Gemini grounding unavailable for %s (%s); disabling grounded "
+                    "calls for this process and using ungrounded generation.",
+                    model_name, ws_err,
+                )
                 text = ""
 
         if not text:

@@ -345,18 +345,41 @@ class PromptAnalyticsProcessor:
                     track_message=f'Auto-reaped stale SCHD after {stale_minutes}m',
                     modified_at=now,
                 )
-                # Also reap any prompts in those groups still stuck in PROC/SCHD
-                stuck_prompts = Prompt.objects.filter(
+                # Also reap any prompts in those groups still stuck in PROC/SCHD.
+                # Guard: a prompt that was already auto-reaped once is NOT queued
+                # again. Re-queuing forever re-runs paid LLM calls every cycle, so a
+                # second failure is terminal and the prompt is marked FAIL instead.
+                stuck_qs = Prompt.objects.filter(
                     group_id__in=stale_groups,
                     track_status__in=['PROC', 'SCHD'],
-                ).update(
-                    track_status='INIT',
-                    track_message=f'Auto-reaped (group reaped at {now.isoformat()})',
-                    modified_at=now,
                 )
+                exhausted_ids = list(
+                    stuck_qs.filter(track_message__startswith='Auto-reaped')
+                    .values_list('id', flat=True)
+                )
+                retry_ids = list(
+                    stuck_qs.exclude(id__in=exhausted_ids).values_list('id', flat=True)
+                )
+
+                exhausted = 0
+                if exhausted_ids:
+                    exhausted = Prompt.objects.filter(id__in=exhausted_ids).update(
+                        track_status='FAIL',
+                        track_message='Auto-reaped twice; marked FAIL to stop repeated LLM re-runs',
+                        tracked_at=now,
+                        modified_at=now,
+                    )
+                stuck_prompts = 0
+                if retry_ids:
+                    stuck_prompts = Prompt.objects.filter(id__in=retry_ids).update(
+                        track_status='INIT',
+                        track_message=f'Auto-reaped (group reaped at {now.isoformat()})',
+                        modified_at=now,
+                    )
                 logger.warning(
-                    "[prompt schedule_tick] Reaped %s stale SCHD group(s) and %s stuck prompt(s) back to INIT",
-                    len(stale_groups), stuck_prompts,
+                    "[prompt schedule_tick] Reaped %s stale SCHD group(s); %s stuck "
+                    "prompt(s) back to INIT, %s exhausted prompt(s) marked FAIL",
+                    len(stale_groups), stuck_prompts, exhausted,
                 )
 
             # If a group is in progress, skip scheduling
@@ -653,21 +676,11 @@ class PromptAnalyticsProcessor:
                     )
                     continue
 
-                # Determine platform label stored in DB
-                if platform_key == 'chatgpt':
-                    platform_label = 'ChatGPT'
-                elif platform_key == 'gemini':
-                    platform_label = 'Google Gemini'
-                elif platform_key == 'perplexity':
-                    platform_label = 'Perplexity'
-                elif platform_key == 'claude':
-                    platform_label = 'Claude'
-                elif platform_key == 'grok':
-                    platform_label = 'Grok'
-                elif platform_key == 'deepseek':
-                    platform_label = 'DeepSeek'
-                else:
-                    platform_label = platform_key
+                # Determine the canonical platform label stored in DB. Going
+                # through the shared map avoids the raw-key writes that split
+                # Claude across 'claude'/'Claude'.
+                from shared_models.models import normalize_platform
+                platform_label = normalize_platform(platform_key)
 
                 # Extract position from context
                 extracted_position = None
