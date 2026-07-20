@@ -370,6 +370,13 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'core.processing_tasks.schedule_all_monthly_insights_task',
         'schedule': crontab(hour=1, minute=0),
     },
+    # Daily refresh of the ROLLING 30-day GA + GSC window (2:30 AM). Without this
+    # the rolling window stays frozen at whatever was fetched when the integration
+    # was first connected — only the monthly records above ever refreshed.
+    'rolling-insights-daily-refresh': {
+        'task': 'core.processing_tasks.schedule_all_rolling_insights_task',
+        'schedule': crontab(hour=2, minute=30),
+    },
     # LLM credit monitor — checks hourly so a depleted provider is caught within
     # ~1h, and emails QUOTA_ALERT_RECIPIENTS ONLY when a key is out of credits
     # (or recovers). Transient errors/rate-limits never trigger mail.

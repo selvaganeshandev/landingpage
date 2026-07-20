@@ -400,14 +400,22 @@ def process_misinformation_scan_task(self, domain_id: int, prompt_analytics_ids:
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
 def process_ga_insights_task(self, integration_id: int, days_back: int = 30):
-    """Process GA insights for an integration (legacy - kept for backward compatibility)"""
+    """Build and fetch today's rolling `days_back`-day GA insight for an integration.
+
+    Dispatched by schedule_all_rolling_insights_task. Also callable ad hoc to
+    force a refresh for one integration.
+    """
     processor = GAInsightsProcessor()
     return processor.process_integration(integration_id, days_back)
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
 def process_gsc_insights_task(self, integration_id: int, days_back: int = 30):
-    """Process GSC insights for an integration (legacy - kept for backward compatibility)"""
+    """Build and fetch today's rolling `days_back`-day GSC insight for an integration.
+
+    Dispatched by schedule_all_rolling_insights_task. Also callable ad hoc to
+    force a refresh for one integration.
+    """
     processor = GSCInsightsProcessor()
     return processor.process_integration(integration_id, days_back)
 
@@ -581,6 +589,49 @@ def schedule_all_monthly_insights_task(self):
         scheduled['gsc'] += 1
 
     logger.info(f"[Monthly Insights] Scheduled GA={scheduled['ga']} GSC={scheduled['gsc']} integrations")
+    return scheduled
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=1)
+def schedule_all_rolling_insights_task(self):
+    """
+    Daily beat task: refresh the rolling 30-day GA and GSC insight for every
+    active integration.
+
+    Without this the rolling window is built exactly once — at connect time by
+    select_ga_property / select_gsc_site — and then frozen forever: the hourly
+    INIT scheduler only picks up records that already exist, and nothing ever
+    re-INITs the rolling window. Only the monthly records refreshed daily.
+
+    Each run creates that day's (start_date, end_date) record and fetches it, so
+    readers that do `.order_by('-end_date').first()` see current data, and the
+    current/previous pair used for period-over-period comparison can resolve two
+    distinct rows instead of collapsing onto one frozen record.
+
+    Dispatches the per-integration tasks rather than creating INIT rows, because
+    the hourly INIT scheduler deliberately processes only ONE record per tick —
+    seeding it would drain at one integration per hour.
+    """
+    from integrations.models import Integration
+    scheduled = {'ga': 0, 'gsc': 0}
+
+    # Same filter the INIT scheduler uses: an integration with no selected
+    # property/site cannot be fetched and must not be dispatched.
+    ga_integrations = Integration.objects.filter(
+        type='google_analytics', status='active', provider_id__isnull=False
+    ).exclude(provider_id='')
+    for integration in ga_integrations:
+        process_ga_insights_task.delay(integration.id)
+        scheduled['ga'] += 1
+
+    gsc_integrations = Integration.objects.filter(
+        type='search_console', status='active', provider_id__isnull=False
+    ).exclude(provider_id='')
+    for integration in gsc_integrations:
+        process_gsc_insights_task.delay(integration.id)
+        scheduled['gsc'] += 1
+
+    logger.info(f"[Rolling Insights] Scheduled GA={scheduled['ga']} GSC={scheduled['gsc']} integrations")
     return scheduled
 
 
