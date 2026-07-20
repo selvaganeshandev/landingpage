@@ -219,6 +219,13 @@ VERTEX_LOCATION = config('VERTEX_LOCATION', default='us-central1')
 # at pipeline volume is a large cost with no benefit for mention detection.
 # 0 disables thinking; a positive value caps it; -1 leaves the model default.
 VERTEX_THINKING_BUDGET = config('VERTEX_THINKING_BUDGET', default=0, cast=int)
+# google-genai resolves credentials from the OS environment, but decouple only
+# exposes .env through config(), so a GOOGLE_APPLICATION_CREDENTIALS entry there
+# would never reach the SDK. Bridge it across without clobbering a real env var.
+_VERTEX_CREDENTIALS = config('GOOGLE_APPLICATION_CREDENTIALS', default=None)
+if _VERTEX_CREDENTIALS:
+    import os as _os
+    _os.environ.setdefault('GOOGLE_APPLICATION_CREDENTIALS', _VERTEX_CREDENTIALS)
 
 # ==================== LLM QUOTA / CREDIT ALERTS ====================
 # Probes every configured paid key and emails recipients when a key is
