@@ -551,27 +551,124 @@ def _gemini_search_tool(model_name: str) -> Dict[str, Any]:
     return {"google_search": {}}
 
 
+def _build_gemini_prompt(prompt_text: str, country_text: str) -> str:
+    """Shared prompt body so the AI Studio and Vertex paths stay identical."""
+    return (
+        f"{_today_context_line()}\n\n"
+        f"Original Question: {prompt_text}\n\n"
+        f"Context: Always provide answers in the context of {country_text} unless the user specifies another country.\n\n"
+        "Based on your knowledge, please provide a comprehensive and detailed response with:\n\n"
+        "1. A thorough answer incorporating the latest information\n"
+        "2. Include all relevant URLs and links\n"
+        "3. Mention specific companies, tools, platforms, and services\n"
+        "4. Provide detailed citations with current sources and dates where possible\n"
+        "5. Include pricing information, features, and comparisons from the most recent data\n"
+        "6. Add any additional current resources, alternatives, or related tools\n"
+        "7. Highlight which information comes from recent sources vs general knowledge\n\n"
+        "Format your response with proper current links, detailed descriptions, and up-to-date references. "
+        "Focus on providing the most current and relevant information available."
+    )
+
+
+# Cached Vertex client. Building it performs credential discovery, so it is reused
+# for the life of the worker process (same rationale as the ClientFactory cache).
+_VERTEX_CLIENT: Any = None
+
+
+def _gemini_vertex_client() -> Any:
+    """Return a cached google-genai client bound to Vertex AI."""
+    global _VERTEX_CLIENT
+    if _VERTEX_CLIENT is None:
+        from google import genai as genai_sdk
+
+        project = getattr(settings, 'VERTEX_PROJECT', None)
+        if not project:
+            raise RuntimeError(
+                "GEMINI_BACKEND=vertex requires VERTEX_PROJECT to be set "
+                "(and GOOGLE_APPLICATION_CREDENTIALS pointing at a service-account JSON)."
+            )
+        _VERTEX_CLIENT = genai_sdk.Client(
+            vertexai=True,
+            project=project,
+            location=getattr(settings, 'VERTEX_LOCATION', 'us-central1'),
+        )
+    return _VERTEX_CLIENT
+
+
+def _process_prompt_with_gemini_vertex(prompt_text: str, user_domain: str, group: Any = None) -> Dict[str, Any]:
+    """Vertex AI path for Gemini.
+
+    Vertex authenticates with Application Default Credentials rather than an API
+    key, so any per-organisation BYOK key is intentionally not used here - every
+    call bills to VERTEX_PROJECT. Grounding stays behind GEMINI_WEB_SEARCH because
+    on Vertex each grounded query is billed separately from tokens.
+    """
+    from google.genai import types as genai_types
+
+    country_text = _resolve_country_text(group)
+    prompt = _build_gemini_prompt(prompt_text, country_text)
+    model_name = getattr(settings, 'VERTEX_GEMINI_MODEL', 'gemini-2.5-flash')
+    client = _gemini_vertex_client()
+
+    # Gemini 2.5 thinks by default and bills those tokens as output, which buys
+    # nothing for mention detection. A negative budget leaves the model default.
+    thinking_budget = int(getattr(settings, 'VERTEX_THINKING_BUDGET', 0))
+
+    def _call(tools: Any) -> Any:
+        config_kwargs: Dict[str, Any] = {
+            'temperature': 0.7,
+            'top_k': 40,
+            'top_p': 0.95,
+            'max_output_tokens': 3000,
+            'tools': tools,
+        }
+        if thinking_budget >= 0:
+            try:
+                config_kwargs['thinking_config'] = genai_types.ThinkingConfig(
+                    thinking_budget=thinking_budget
+                )
+            except Exception:
+                # Older SDKs / non-thinking models do not expose ThinkingConfig.
+                pass
+        return client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(**config_kwargs),
+        )
+
+    text = ""
+    use_grounding = (
+        getattr(settings, 'GEMINI_WEB_SEARCH', True)
+        and model_name not in _GEMINI_GROUNDING_UNSUPPORTED
+    )
+    if use_grounding:
+        try:
+            text = getattr(_call([genai_types.Tool(google_search=genai_types.GoogleSearch())]), 'text', '') or ""
+        except Exception as ws_err:
+            _GEMINI_GROUNDING_UNSUPPORTED.add(model_name)
+            logger.warning(
+                "Vertex Gemini grounding unavailable for %s (%s); using ungrounded generation.",
+                model_name, ws_err,
+            )
+            text = ""
+
+    if not text:
+        text = getattr(_call(None), 'text', '') or ""
+    return _basic_text_metrics(text, user_domain)
+
+
 def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
     try:
+        # GEMINI_BACKEND=vertex routes through Vertex AI (billed to a GCP project);
+        # anything else keeps the default API-key path. Reverting is env-only.
+        if str(getattr(settings, 'GEMINI_BACKEND', 'aistudio')).lower() == 'vertex':
+            return _process_prompt_with_gemini_vertex(prompt_text, user_domain, group)
+
         country_text = _resolve_country_text(group)
         import google.generativeai as genai
         genai.configure(api_key=(client or {}).get('api_key'), transport="rest")
         model_name = getattr(settings, 'GEMINI_MODEL', 'gemini-2.0-flash')
-        prompt = (
-            f"{_today_context_line()}\n\n"
-            f"Original Question: {prompt_text}\n\n"
-            f"Context: Always provide answers in the context of {country_text} unless the user specifies another country.\n\n"
-            "Based on your knowledge, please provide a comprehensive and detailed response with:\n\n"
-            "1. A thorough answer incorporating the latest information\n"
-            "2. Include all relevant URLs and links\n"
-            "3. Mention specific companies, tools, platforms, and services\n"
-            "4. Provide detailed citations with current sources and dates where possible\n"
-            "5. Include pricing information, features, and comparisons from the most recent data\n"
-            "6. Add any additional current resources, alternatives, or related tools\n"
-            "7. Highlight which information comes from recent sources vs general knowledge\n\n"
-            "Format your response with proper current links, detailed descriptions, and up-to-date references. "
-            "Focus on providing the most current and relevant information available."
-        )
+        prompt = _build_gemini_prompt(prompt_text, country_text)
         gen_config = genai.types.GenerationConfig(
             temperature=0.7,
             top_k=40,

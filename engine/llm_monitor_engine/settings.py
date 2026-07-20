@@ -198,6 +198,28 @@ GEMINI_WEB_SEARCH = config('GEMINI_WEB_SEARCH', default=True, cast=bool)
 GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-flash-latest')
 DEEPSEEK_MODEL = config('DEEPSEEK_MODEL', default='deepseek-chat')
 
+# ==================== GEMINI BACKEND: AI Studio vs Vertex AI ====================
+# 'aistudio' (default) keeps the API-key path via google.generativeai.
+# 'vertex' routes Gemini through Vertex AI on a GCP project so calls bill against
+# that project's billing account (e.g. free-trial credit) instead of an API key.
+# Reverting is a single env change - GEMINI_BACKEND=aistudio - with no code change.
+#
+# Vertex auth uses Application Default Credentials, NOT an API key: point
+# GOOGLE_APPLICATION_CREDENTIALS at a service-account JSON whose account holds the
+# "Vertex AI User" role on VERTEX_PROJECT. Never commit that file.
+GEMINI_BACKEND = config('GEMINI_BACKEND', default='aistudio')
+# Vertex requires concrete model IDs; AI Studio's '-latest' aliases do not resolve
+# there, and gemini-2.0-* returns 404 on newer projects - verified against
+# gen-lang-client-0074241504, where only the 2.5 family is served.
+VERTEX_GEMINI_MODEL = config('VERTEX_GEMINI_MODEL', default='gemini-2.5-flash')
+VERTEX_PROJECT = config('VERTEX_PROJECT', default=None)
+VERTEX_LOCATION = config('VERTEX_LOCATION', default='us-central1')
+# Gemini 2.5 enables "thinking" by default and bills those tokens as output. A
+# measured call spent 1150 thinking tokens to produce 91 tokens of answer, which
+# at pipeline volume is a large cost with no benefit for mention detection.
+# 0 disables thinking; a positive value caps it; -1 leaves the model default.
+VERTEX_THINKING_BUDGET = config('VERTEX_THINKING_BUDGET', default=0, cast=int)
+
 # ==================== LLM QUOTA / CREDIT ALERTS ====================
 # Probes every configured paid key and emails recipients when a key is
 # depleted/erroring or recovers. Recipients are .env-configurable.
