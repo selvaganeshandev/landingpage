@@ -52,9 +52,12 @@ interface PillProps {
   value?: number;
   change?: number | null;
   colorVar: string;
+  /** Explanation shown on hover. The icon carries `cursor-help`, so it must
+   *  actually have something to say — without this it is an inert symbol. */
+  hint: string;
 }
 
-const MetricPill = ({ label, value, change, colorVar }: PillProps) => {
+const MetricPill = ({ label, value, change, colorVar, hint }: PillProps) => {
   // Always show trend next to value:
   // • null / undefined  → "N/A" (no prior-period data)
   // • 0                → "0%"  (flat)
@@ -68,7 +71,9 @@ const MetricPill = ({ label, value, change, colorVar }: PillProps) => {
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: `hsl(var(--${colorVar}))` }} />
         <span>{label}</span>
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-40 cursor-help flex-shrink-0"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        <span title={hint} aria-label={hint} className="inline-flex cursor-help">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-40 flex-shrink-0" role="img"><title>{hint}</title><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        </span>
       </div>
       <div className="flex items-baseline gap-1.5 flex-wrap">
         <span className="text-2xl font-bold tracking-tight text-foreground">{formatCompact(value)}</span>
@@ -144,9 +149,27 @@ export const TrendChart = ({ data = defaultData, metrics, timeRange, onTimeRange
           TrendChart render exactly as before. */}
       {metrics && (
         <div className="flex items-center gap-12 mb-6 flex-wrap">
-          <MetricPill label="Mentions" value={metrics.total_mentions} change={metrics.mentions_change} colorVar="primary" />
-          <MetricPill label="Citations" value={metrics.total_citations} change={metrics.citations_change} colorVar="chart-2" />
-          <MetricPill label="Cited Pages" value={metrics.total_cited_pages} change={metrics.cited_pages_change} colorVar="chart-3" />
+          <MetricPill
+            label="Mentions"
+            value={metrics.total_mentions}
+            change={metrics.mentions_change}
+            colorVar="primary"
+            hint="How many times your brand was mentioned in AI answers across your tracked prompts in this period. The percentage compares it with the previous period; N/A means there is no previous-period data to compare against."
+          />
+          <MetricPill
+            label="Citations"
+            value={metrics.total_citations}
+            change={metrics.citations_change}
+            colorVar="chart-2"
+            hint="Every URL the AI cited in its answers during this period — the same total shown on the Citations page. Counts each citation, so one page cited several times counts more than once."
+          />
+          <MetricPill
+            label="Cited Pages"
+            value={metrics.total_cited_pages}
+            change={metrics.cited_pages_change}
+            colorVar="chart-3"
+            hint="Distinct pages on your own domain that the AI cited in this period. Unlike Citations, each page is counted once no matter how often it was cited."
+          />
         </div>
       )}
 
