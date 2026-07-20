@@ -116,7 +116,14 @@ def _probe_gemini(api_key, model):
         gstatus = err.get("status", "")
         gmsg = err.get("message", r.text or "")
         if r.status_code == 429 or gstatus == "RESOURCE_EXHAUSTED":
-            st = "OUT_OF_CREDITS"
+            # 429 / RESOURCE_EXHAUSTED is usually a transient per-minute rate
+            # limit, not a depleted balance. Only call it depletion when the
+            # message actually points at billing/credits, otherwise a busy
+            # minute would flap the provider in and out of the alert set.
+            gml = (gmsg or "").lower()
+            st = ("OUT_OF_CREDITS"
+                  if any(t in gml for t in ("billing", "credit", "free tier", "plan"))
+                  else "RATE_LIMIT")
         elif r.status_code == 404:
             st = "MODEL_UNAVAILABLE"
         elif r.status_code in (400, 401, 403):
@@ -300,11 +307,43 @@ def _load_state():
 
 
 def _save_state(state):
+    """Write the dedupe state atomically.
+
+    A partially-written file would be unreadable by the next run, which resets
+    the dedupe and re-alerts, so the write goes to a temp file and is swapped in
+    with os.replace().
+    """
+    path = _state_path()
+    tmp = f"{path}.tmp"
     try:
-        with open(_state_path(), "w") as fh:
+        with open(tmp, "w") as fh:
             json.dump(state, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
     except Exception as e:
         logger.warning(f"[QuotaMonitor] could not save state: {e}")
+
+
+def _parse_ts(value):
+    """Parse an ISO timestamp from the state file; None if missing/corrupt."""
+    if not value:
+        return None
+    try:
+        return timezone.datetime.fromisoformat(value)
+    except Exception:
+        return None
+
+
+def _elapsed_since(value):
+    """Time since an ISO timestamp, or None if it can't be determined."""
+    ts = _parse_ts(value)
+    if ts is None:
+        return None
+    try:
+        return timezone.now() - ts
+    except Exception:
+        return None
 
 
 def _icon(state):
@@ -384,62 +423,101 @@ def _build_email(results, recovered=None):
     text_body = "\n".join(tlines)
 
     # ---- HTML ----
+    # Soft status chip (coloured dot + tinted label) per state.
+    _CHIP = {
+        "OK":             ("#ecfdf5", "#047857", "#10b981"),
+        "RATE_LIMIT":     ("#fffbeb", "#b45309", "#f59e0b"),
+        "NOT_CONFIGURED": ("#f1f5f9", "#64748b", "#94a3b8"),
+    }
+
+    def _chip(state):
+        bg, fg, dot = _CHIP.get(state, ("#fef2f2", "#b91c1c", "#ef4444"))  # bad states → red
+        return (
+            f'<span style="display:inline-block;padding:5px 11px 5px 9px;border-radius:999px;'
+            f'background:{bg};color:{fg};font-size:12px;font-weight:600;white-space:nowrap;">'
+            f'<span style="display:inline-block;width:7px;height:7px;border-radius:50%;'
+            f'background:{dot};margin-right:7px;vertical-align:middle;"></span>'
+            f'{_STATUS_LABEL.get(state, state)}</span>'
+        )
+
+    def _pill(count, text, bg, fg):
+        return (f'<span style="display:inline-block;padding:5px 12px;border-radius:999px;'
+                f'background:{bg};color:{fg};font-size:12px;font-weight:600;margin:0 8px 8px 0;">'
+                f'{count} {text}</span>')
+
+    # Status summary strip (surface the headline counts before the detail table).
+    n_ok = sum(1 for r in results if r["state"] == "OK")
+    n_attention = sum(1 for r in results if r["state"] in BAD_STATES)
+    n_other = len(results) - n_ok - n_attention
+    pills = _pill(n_ok, "operational", "#ecfdf5", "#047857")
+    if n_attention:
+        pills += _pill(n_attention, "need attention", "#fef2f2", "#b91c1c")
+    if n_other:
+        pills += _pill(n_other, "other", "#f1f5f9", "#64748b")
+
     rows = ""
-    for r in results:
-        c = _color(r["state"])
-        badge = (f'<span style="display:inline-block;padding:3px 10px;border-radius:12px;'
-                 f'background:{c};color:#fff;font-size:12px;font-weight:600;white-space:nowrap;">'
-                 f'{_STATUS_LABEL.get(r["state"], r["state"])}</span>')
+    for i, r in enumerate(results):
+        stripe = "#ffffff" if i % 2 == 0 else "#fafbfc"
+        note = _STATUS_NOTE.get(r["state"], "")
         rows += (
-            '<tr>'
-            f'<td style="padding:12px 16px;border-bottom:1px solid #eef0f3;font-weight:600;color:#111827;">{r["label"]}</td>'
-            f'<td style="padding:12px 16px;border-bottom:1px solid #eef0f3;text-align:center;">{badge}</td>'
-            f'<td style="padding:12px 16px;border-bottom:1px solid #eef0f3;color:#6b7280;font-size:13px;">{_STATUS_NOTE.get(r["state"], "")}</td>'
+            f'<tr style="background:{stripe};">'
+            '<td style="padding:13px 24px;border-bottom:1px solid #eef1f5;">'
+            f'<div style="font-weight:600;color:#0f172a;font-size:14px;">{r["label"]}</div>'
+            f'<div style="color:#94a3b8;font-size:12px;margin-top:3px;">{note}</div>'
+            '</td>'
+            '<td style="padding:13px 24px;border-bottom:1px solid #eef1f5;text-align:right;'
+            f'white-space:nowrap;vertical-align:top;">{_chip(r["state"])}</td>'
             '</tr>'
         )
 
     action_block = ""
     if depleted:
-        items = "".join(f'<li style="margin:4px 0;">{r["label"]}</li>' for r in depleted)
+        items = "".join(f'<li style="margin:5px 0;color:#7f1d1d;font-size:14px;">{r["label"]}</li>' for r in depleted)
         action_block = (
-            '<div style="margin:20px 0 4px;padding:16px 18px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;">'
-            '<div style="font-weight:700;color:#991b1b;margin-bottom:6px;">⚠ Action required — credits depleted</div>'
-            '<div style="color:#7f1d1d;font-size:14px;margin-bottom:8px;">Please top up / enable credits for:</div>'
-            f'<ul style="margin:0;padding-left:20px;color:#7f1d1d;font-size:14px;">{items}</ul>'
-            '<div style="color:#7f1d1d;font-size:13px;margin-top:10px;">Tracking repopulates automatically on the next scheduled run once credits are restored.</div>'
+            '<div style="padding:16px 18px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;">'
+            '<div style="font-weight:700;color:#991b1b;font-size:14px;margin-bottom:6px;">Action required — credits depleted</div>'
+            '<div style="color:#7f1d1d;font-size:13px;margin-bottom:8px;">Top up or re-enable credits for:</div>'
+            f'<ul style="margin:0;padding-left:20px;">{items}</ul>'
+            '<div style="color:#b91c1c;font-size:12px;margin-top:10px;">Tracking resumes automatically on the next scheduled run once credits are restored.</div>'
             '</div>'
         )
     elif recovered_rows:
-        items = "".join(f'<li style="margin:4px 0;">{r["label"]}</li>' for r in recovered_rows)
+        items = "".join(f'<li style="margin:5px 0;color:#166534;font-size:14px;">{r["label"]}</li>' for r in recovered_rows)
         action_block = (
-            '<div style="margin:20px 0 4px;padding:16px 18px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;">'
-            '<div style="font-weight:700;color:#166534;margin-bottom:6px;">✓ Credits restored</div>'
-            f'<ul style="margin:0;padding-left:20px;color:#166534;font-size:14px;">{items}</ul>'
+            '<div style="padding:16px 18px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;">'
+            '<div style="font-weight:700;color:#166534;font-size:14px;margin-bottom:6px;">Credits restored</div>'
+            f'<ul style="margin:0;padding-left:20px;">{items}</ul>'
             '</div>'
         )
 
     html_body = f"""\
-<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f5f7;">
-<div style="max-width:600px;margin:0 auto;padding:24px 12px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-  <div style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-    <div style="background:{banner_color};padding:18px 24px;">
-      <div style="color:#ffffff;font-size:18px;font-weight:700;">LLM Credit Status — {headline}</div>
-      <div style="color:#ffffffcc;font-size:13px;margin-top:2px;">{summary}</div>
+<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef1f5;">
+<div style="max-width:600px;margin:0 auto;padding:28px 14px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="padding:0 4px 14px;">
+    <span style="font-size:15px;font-weight:700;color:#0f172a;letter-spacing:-0.01em;">Prompt<span style="color:#4f46e5;">Maxx</span></span>
+    <span style="font-size:12px;color:#94a3b8;margin-left:8px;">LLM Credit Monitor</span>
+  </div>
+  <div style="background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 1px 2px rgba(15,23,42,0.06);">
+    <div style="background:{banner_color};padding:22px 24px;">
+      <div style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:-0.01em;">{headline}</div>
+      <div style="color:#ffffffd9;font-size:13px;margin-top:5px;line-height:1.5;">{summary}</div>
     </div>
-    <div style="padding:20px 24px;">
-      <table style="width:100%;border-collapse:collapse;">
-        <thead><tr>
-          <th style="text-align:left;padding:8px 16px;font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid #eef0f3;">Provider</th>
-          <th style="text-align:center;padding:8px 16px;font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid #eef0f3;">Status</th>
-          <th style="text-align:left;padding:8px 16px;font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid #eef0f3;">Note</th>
-        </tr></thead>
-        <tbody>{rows}</tbody>
-      </table>
+    <div style="padding:16px 24px 8px;border-bottom:1px solid #f1f5f9;">
+      {pills}
+    </div>
+    <table style="width:100%;border-collapse:collapse;">
+      <tbody>{rows}</tbody>
+    </table>
+    <div style="padding:20px 24px 4px;">
       {action_block}
     </div>
-    <div style="padding:14px 24px;border-top:1px solid #eef0f3;color:#9ca3af;font-size:12px;">
-      Automated alert from the PromptMaxx engine · {generated}
+    <div style="padding:16px 24px;border-top:1px solid #f1f5f9;color:#94a3b8;font-size:12px;">
+      Automated report from the PromptMaxx engine · {generated}
     </div>
+  </div>
+  <div style="text-align:center;color:#b0b7c3;font-size:11px;margin-top:14px;">
+    You are receiving this because you are a configured LLM credit alert recipient.
   </div>
 </div>
 </body></html>"""
@@ -458,11 +536,24 @@ def run_quota_check_and_alert():
 
     results = check_all_quotas()
     cur = {r["key"]: r["state"] for r in results if r["state"] != "NOT_CONFIGURED"}
-    # We ONLY care about credit depletion. Track the set of providers that are
-    # out of credits now vs last check; transient errors/rate-limits are ignored.
-    depleted_now = sorted(k for k, s in cur.items() if s in ALERT_STATES)
 
     state = _load_state()
+
+    # We ONLY care about credit depletion. A provider must look depleted on
+    # CONFIRM_RUNS consecutive checks before it counts — a single bad probe
+    # (network blip, momentary throttle) must never move a key in or out of the
+    # alert set, because every such move would otherwise send mail.
+    observed = sorted(k for k, s in cur.items() if s in ALERT_STATES)
+    prev_pending = state.get("pending", {}) or {}
+    pending = {}
+    for k in observed:
+        try:
+            pending[k] = int(prev_pending.get(k, 0)) + 1
+        except (TypeError, ValueError):
+            pending[k] = 1
+    confirm_runs = max(1, int(_cfg("QUOTA_ALERT_CONFIRM_RUNS", 2) or 2))
+    depleted_now = sorted(k for k, seen in pending.items() if seen >= confirm_runs)
+
     prev_depleted = sorted(state.get("depleted", []))
     last_alert = state.get("last_alert_ts")
 
@@ -471,20 +562,34 @@ def run_quota_check_and_alert():
     notify_recovery = bool(_cfg("QUOTA_ALERT_ON_RECOVERY", True)) and bool(recovered)
 
     # Reminder while still depleted (so it isn't forgotten), capped by REPEAT_HOURS.
-    repeat_hours = int(_cfg("QUOTA_ALERT_REPEAT_HOURS", 12) or 12)
+    # Set REPEAT_HOURS=0 to disable reminders entirely — then a depleted provider
+    # is mailed about exactly once, when it first runs out.
+    try:
+        repeat_hours = int(_cfg("QUOTA_ALERT_REPEAT_HOURS", 12))
+    except (TypeError, ValueError):
+        repeat_hours = 12
     stale = False
-    if depleted_now:
-        if not last_alert:
-            stale = True
-        else:
-            try:
-                stale = timezone.now() - timezone.datetime.fromisoformat(last_alert) > timedelta(hours=repeat_hours)
-            except Exception:
-                stale = True
+    if depleted_now and repeat_hours > 0:
+        elapsed = _elapsed_since(last_alert)
+        stale = elapsed is None or elapsed > timedelta(hours=repeat_hours)
+
+    # Hard floor between ANY two alert mails. This is the backstop: even if the
+    # depleted set churns (duplicate schedulers, a flapping provider, a broken
+    # mailer that never lets last_alert_ts advance), recipients can never be
+    # mailed more often than this.
+    min_interval = max(0, int(_cfg("QUOTA_ALERT_MIN_INTERVAL_MINUTES", 60) or 0))
+    since_attempt = _elapsed_since(state.get("last_attempt_ts"))
+    cooling_down = bool(min_interval) and since_attempt is not None and since_attempt < timedelta(minutes=min_interval)
 
     # Email ONLY when: a key newly ran out of credits, a key recovered, or a
-    # still-depleted reminder is due. Nothing else sends mail.
-    should_email = bool(recipients) and (bool(newly_depleted) or notify_recovery or (bool(depleted_now) and stale))
+    # still-depleted reminder is due — and never while cooling down.
+    triggered = bool(newly_depleted) or notify_recovery or (bool(depleted_now) and stale)
+    should_email = bool(recipients) and triggered and not cooling_down
+    if triggered and cooling_down:
+        logger.info(
+            f"[QuotaMonitor] alert suppressed (cooldown {min_interval}m): "
+            f"depleted={depleted_now} recovered={recovered}"
+        )
 
     emailed = False
     if should_email:
@@ -501,14 +606,31 @@ def run_quota_check_and_alert():
     elif not recipients:
         logger.warning("[QuotaMonitor] no QUOTA_ALERT_RECIPIENTS configured — skipping email")
 
-    new_state = {"statuses": cur, "depleted": depleted_now}
-    # Keep the last-alert timestamp only while still depleted (drives the reminder);
-    # clear it once everything is back so the next outage alerts immediately.
-    if emailed and depleted_now:
-        new_state["last_alert_ts"] = timezone.now().isoformat()
-    elif depleted_now:
-        new_state["last_alert_ts"] = last_alert
+    new_state = {"statuses": cur, "pending": pending}
+    if should_email and not emailed:
+        # The notification did not go out. Do NOT commit the transition —
+        # keep the previous depleted set so the same alert is retried on a
+        # later run instead of being silently swallowed. last_attempt_ts
+        # (set below) is what paces those retries.
+        new_state["depleted"] = prev_depleted
+        if prev_depleted:
+            new_state["last_alert_ts"] = last_alert
+    else:
+        new_state["depleted"] = depleted_now
+        # Keep the last-alert timestamp only while still depleted (drives the
+        # reminder); clear it once everything is back so the next outage alerts
+        # immediately.
+        if emailed and depleted_now:
+            new_state["last_alert_ts"] = timezone.now().isoformat()
+        elif depleted_now:
+            new_state["last_alert_ts"] = last_alert
+
+    new_state["last_attempt_ts"] = (
+        timezone.now().isoformat() if should_email else state.get("last_attempt_ts")
+    )
+    new_state = {k: v for k, v in new_state.items() if v is not None}
     _save_state(new_state)
 
     return {"statuses": cur, "depleted": depleted_now, "recovered": recovered,
-            "emailed": emailed, "recipients": recipients}
+            "emailed": emailed, "suppressed": bool(triggered and cooling_down),
+            "recipients": recipients}

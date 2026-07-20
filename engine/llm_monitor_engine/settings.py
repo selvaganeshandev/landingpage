@@ -236,6 +236,12 @@ QUOTA_ALERT_RECIPIENTS = config(
     cast=lambda v: [e.strip() for e in v.split(',') if e.strip()]
 )
 QUOTA_ALERT_REPEAT_HOURS = config('QUOTA_ALERT_REPEAT_HOURS', default=12, cast=int)
+# A provider must look depleted on this many consecutive checks before it is
+# alerted on, so one bad probe cannot flap a key in/out of the alert set.
+QUOTA_ALERT_CONFIRM_RUNS = config('QUOTA_ALERT_CONFIRM_RUNS', default=2, cast=int)
+# Hard floor between any two quota alert emails. Backstop against alert floods
+# (duplicate schedulers, flapping providers, a failing mailer). 0 disables it.
+QUOTA_ALERT_MIN_INTERVAL_MINUTES = config('QUOTA_ALERT_MIN_INTERVAL_MINUTES', default=60, cast=int)
 # Also email a one-time "credits restored" note when a depleted provider recovers.
 QUOTA_ALERT_ON_RECOVERY = config('QUOTA_ALERT_ON_RECOVERY', default=True, cast=bool)
 # Cheap models used only for the health probe (not for analysis).
