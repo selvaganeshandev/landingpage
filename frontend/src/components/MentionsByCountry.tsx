@@ -79,11 +79,29 @@ const Flag = ({ code }: { code: string }) => {
       </svg>
     );
   }
-  // Other / Global Icon
+  // Other / Global — inline SVG for the same reason the flags above are SVG:
+  // the 🌐 emoji this replaced has no glyph in the default Windows UI font, so
+  // it rendered as a question mark or an empty box. Every row that is not
+  // IN/US/UK lands here, and region data is currently "GLOBAL" for everything,
+  // so this is the icon nearly every row actually shows.
   return (
-    <span className="w-5 h-3.5 flex items-center justify-center text-xs opacity-60">
-      🌐
-    </span>
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="w-5 h-3.5 flex-shrink-0 opacity-60"
+      role="img"
+      aria-label="Global"
+    >
+      <title>Global</title>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
   );
 };
 
