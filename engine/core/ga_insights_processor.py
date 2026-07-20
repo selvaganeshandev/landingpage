@@ -20,6 +20,19 @@ from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
 
+# Independent sections fetched per insight: overall metrics, platform breakdown,
+# device breakdown, geographic breakdown, landing pages. _fetch_conversion_paths
+# is a stub that never calls the API, so it is not counted. If every section
+# fails there is no data at all and the insight is marked FAIL, not empty COMP.
+TOTAL_GA_SECTIONS = 5
+
+
+def _completion_message(partial_failures) -> str:
+    """track_message for a completed insight, naming any sections that failed."""
+    if not partial_failures:
+        return 'Successfully processed'
+    return 'Partially processed - could not fetch: ' + ', '.join(partial_failures)
+
 # AI-platform matching (regex + classification) lives in integrations.ai_platforms
 # so the engine and backend share one source of truth that mirrors the GA4 filter.
 
@@ -105,7 +118,7 @@ class GAInsightsProcessor:
                 with transaction.atomic():
                     insight = GATrafficInsight.objects.select_for_update().get(id=insight.id)
                     insight.track_status = 'COMP'
-                    insight.track_message = 'Successfully processed'
+                    insight.track_message = _completion_message(result.get('partial_failures'))
                     insight.save()
                 
                 logger.info(f"Successfully processed GA insight {insight_id}")
@@ -218,7 +231,7 @@ class GAInsightsProcessor:
                 with transaction.atomic():
                     insight = GATrafficInsight.objects.select_for_update().get(id=insight.id)
                     insight.track_status = 'COMP'
-                    insight.track_message = 'Successfully processed'
+                    insight.track_message = _completion_message(result.get('partial_failures'))
                     insight.save()
                 
                 logger.info(f"Successfully processed GA insights for integration {integration_id}")
@@ -363,23 +376,45 @@ class GAInsightsProcessor:
             if query_end < start_date:
                 query_end = start_date
 
+            # Each section swallows its own error so one bad dimension does not
+            # discard the rest, but the failures are collected: a section that
+            # errored is NOT the same as a section with genuinely no traffic,
+            # and reporting both as an empty COMP makes a broken sync
+            # indistinguishable from an idle property.
+            section_failures = []
+
             # Fetch overall metrics
-            overall_data = self._fetch_overall_metrics(service, property_id, start_date, query_end)
+            overall_data = self._fetch_overall_metrics(service, property_id, start_date, query_end,
+                    failures=section_failures)
 
             # Fetch AI platform breakdown
-            platform_data = self._fetch_platform_breakdown(service, property_id, start_date, query_end)
+            platform_data = self._fetch_platform_breakdown(service, property_id, start_date, query_end,
+                    failures=section_failures)
 
             # Fetch device breakdown
-            device_data = self._fetch_device_breakdown(service, property_id, start_date, query_end)
+            device_data = self._fetch_device_breakdown(service, property_id, start_date, query_end,
+                    failures=section_failures)
 
             # Fetch geographic breakdown
-            geo_data = self._fetch_geographic_breakdown(service, property_id, start_date, query_end)
+            geo_data = self._fetch_geographic_breakdown(service, property_id, start_date, query_end,
+                    failures=section_failures)
 
             # Fetch landing pages
-            landing_pages = self._fetch_landing_pages(service, property_id, start_date, query_end)
+            landing_pages = self._fetch_landing_pages(service, property_id, start_date, query_end,
+                    failures=section_failures)
 
-            # Fetch conversion paths (if available)
+            # Fetch conversion paths (if available). This is a stub that returns
+            # an empty list without calling the API, so it cannot fail and is not
+            # counted as a fetchable section.
             conversion_paths = self._fetch_conversion_paths(service, property_id, start_date, query_end)
+
+            # Every section failed — there is no data at all, so this is a real
+            # failure rather than a partial one and must not be stored as COMP.
+            if len(section_failures) == TOTAL_GA_SECTIONS:
+                return {
+                    'success': False,
+                    'error': 'All GA sections failed: ' + ', '.join(section_failures),
+                }
             
             # Update insight with all data
             insight.total_sessions = overall_data.get('sessions', 0)
@@ -395,8 +430,8 @@ class GAInsightsProcessor:
             insight.landing_pages = landing_pages
             insight.conversion_paths = conversion_paths
             insight.save()
-            
-            return {'success': True}
+
+            return {'success': True, 'partial_failures': section_failures}
             
         except HttpError as e:
             logger.error(f"Google Analytics API error: {e}")
@@ -405,7 +440,8 @@ class GAInsightsProcessor:
             logger.error(f"Error fetching GA data: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
     
-    def _fetch_overall_metrics(self, service, property_id: str, start_date: date, end_date: date) -> Dict[str, Any]:
+    def _fetch_overall_metrics(self, service, property_id: str, start_date: date, end_date: date,
+                               failures: list = None) -> Dict[str, Any]:
         """Fetch overall metrics from GA"""
         try:
             response = service.properties().runReport(
@@ -447,9 +483,12 @@ class GAInsightsProcessor:
             }
         except Exception as e:
             logger.error(f"Error fetching overall metrics: {e}")
+            if failures is not None:
+                failures.append('overall metrics')
             return {}
     
-    def _fetch_platform_breakdown(self, service, property_id: str, start_date: date, end_date: date) -> Dict[str, Any]:
+    def _fetch_platform_breakdown(self, service, property_id: str, start_date: date, end_date: date,
+                                  failures: list = None) -> Dict[str, Any]:
         """Fetch AI platform breakdown.
 
         Filters sessionSource with the same regex GA4's Explorations use (see
@@ -571,10 +610,13 @@ class GAInsightsProcessor:
 
         except Exception as e:
             logger.error(f"Error fetching platform breakdown: {e}")
+            if failures is not None:
+                failures.append('platform breakdown')
 
         return platform_data
     
-    def _fetch_device_breakdown(self, service, property_id: str, start_date: date, end_date: date) -> Dict[str, Any]:
+    def _fetch_device_breakdown(self, service, property_id: str, start_date: date, end_date: date,
+                                failures: list = None) -> Dict[str, Any]:
         """Fetch device breakdown"""
         device_data = {}
         
@@ -619,10 +661,13 @@ class GAInsightsProcessor:
                     
         except Exception as e:
             logger.error(f"Error fetching device breakdown: {e}")
+            if failures is not None:
+                failures.append('device breakdown')
         
         return device_data
     
-    def _fetch_geographic_breakdown(self, service, property_id: str, start_date: date, end_date: date) -> Dict[str, Any]:
+    def _fetch_geographic_breakdown(self, service, property_id: str, start_date: date, end_date: date,
+                                    failures: list = None) -> Dict[str, Any]:
         """Fetch geographic breakdown"""
         geo_data = {}
         
@@ -670,10 +715,13 @@ class GAInsightsProcessor:
                     
         except Exception as e:
             logger.error(f"Error fetching geographic breakdown: {e}")
+            if failures is not None:
+                failures.append('geographic breakdown')
         
         return geo_data
     
-    def _fetch_landing_pages(self, service, property_id: str, start_date: date, end_date: date) -> list:
+    def _fetch_landing_pages(self, service, property_id: str, start_date: date, end_date: date,
+                             failures: list = None) -> list:
         """Fetch top landing pages"""
         landing_pages = []
         
@@ -714,6 +762,8 @@ class GAInsightsProcessor:
                 
         except Exception as e:
             logger.error(f"Error fetching landing pages: {e}")
+            if failures is not None:
+                failures.append('landing pages')
         
         return landing_pages
     

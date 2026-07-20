@@ -19,6 +19,18 @@ from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
 
+# Independent sections fetched per insight: overall metrics, top queries, top
+# pages, device breakdown, country breakdown. If every one of them fails there
+# is no data at all, so the insight is marked FAIL rather than an empty COMP.
+TOTAL_GSC_SECTIONS = 5
+
+
+def _completion_message(partial_failures) -> str:
+    """track_message for a completed insight, naming any sections that failed."""
+    if not partial_failures:
+        return 'Successfully processed'
+    return 'Partially processed - could not fetch: ' + ', '.join(partial_failures)
+
 
 class GSCInsightsProcessor:
     """
@@ -94,7 +106,7 @@ class GSCInsightsProcessor:
                 with transaction.atomic():
                     insight = GSCTrafficInsight.objects.select_for_update().get(id=insight.id)
                     insight.track_status = 'COMP'
-                    insight.track_message = 'Successfully processed'
+                    insight.track_message = _completion_message(result.get('partial_failures'))
                     insight.save()
                 
                 logger.info(f"Successfully processed GSC insight {insight_id}")
@@ -207,7 +219,7 @@ class GSCInsightsProcessor:
                 with transaction.atomic():
                     insight = GSCTrafficInsight.objects.select_for_update().get(id=insight.id)
                     insight.track_status = 'COMP'
-                    insight.track_message = 'Successfully processed'
+                    insight.track_message = _completion_message(result.get('partial_failures'))
                     insight.save()
                 
                 logger.info(f"Successfully processed GSC insights for integration {integration_id}")
@@ -338,21 +350,41 @@ class GSCInsightsProcessor:
             service = build('searchconsole', 'v1', credentials=credentials)
             site_url = integration.provider_id
             
+            # Each section swallows its own error so one bad dimension does not
+            # discard the rest, but the failures are collected: a section that
+            # errored is NOT the same as a section with genuinely no traffic,
+            # and reporting both as an empty COMP makes a broken sync
+            # indistinguishable from an idle site.
+            section_failures = []
+
             # Fetch overall metrics
-            overall_data = self._fetch_overall_metrics(service, site_url, start_date, end_date)
-            
+            overall_data = self._fetch_overall_metrics(service, site_url, start_date, end_date,
+                                                       failures=section_failures)
+
             # Fetch top queries
-            top_queries = self._fetch_top_queries(service, site_url, start_date, end_date)
-            
+            top_queries = self._fetch_top_queries(service, site_url, start_date, end_date,
+                                                  failures=section_failures)
+
             # Fetch top pages
-            top_pages = self._fetch_top_pages(service, site_url, start_date, end_date)
-            
+            top_pages = self._fetch_top_pages(service, site_url, start_date, end_date,
+                                              failures=section_failures)
+
             # Fetch device breakdown
-            device_data = self._fetch_device_breakdown(service, site_url, start_date, end_date)
-            
+            device_data = self._fetch_device_breakdown(service, site_url, start_date, end_date,
+                                                       failures=section_failures)
+
             # Fetch country breakdown
-            country_data = self._fetch_country_breakdown(service, site_url, start_date, end_date)
-            
+            country_data = self._fetch_country_breakdown(service, site_url, start_date, end_date,
+                                                         failures=section_failures)
+
+            # Every section failed — there is no data at all, so this is a real
+            # failure rather than a partial one and must not be stored as COMP.
+            if len(section_failures) == TOTAL_GSC_SECTIONS:
+                return {
+                    'success': False,
+                    'error': 'All GSC sections failed: ' + ', '.join(section_failures),
+                }
+
             # Update insight with all data
             insight.total_impressions = overall_data.get('impressions', 0)
             insight.total_clicks = overall_data.get('clicks', 0)
@@ -363,8 +395,8 @@ class GSCInsightsProcessor:
             insight.device_breakdown = device_data
             insight.country_breakdown = country_data
             insight.save()
-            
-            return {'success': True}
+
+            return {'success': True, 'partial_failures': section_failures}
             
         except HttpError as e:
             logger.error(f"Google Search Console API error: {e}")
@@ -373,8 +405,9 @@ class GSCInsightsProcessor:
             logger.error(f"Error fetching GSC data: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
     
-    def _fetch_overall_metrics(self, service, site_url: str, start_date: date, end_date: date) -> Dict[str, Any]:
-        """Fetch overall metrics from GSC"""
+    def _fetch_overall_metrics(self, service, site_url: str, start_date: date, end_date: date,
+                               failures: list = None) -> Dict[str, Any]:
+        """Fetch overall metrics from GSC. Records its name in `failures` if it errors."""
         try:
             request = {
                 'startDate': start_date.strftime('%Y-%m-%d'),
@@ -403,10 +436,13 @@ class GSCInsightsProcessor:
             }
         except Exception as e:
             logger.error(f"Error fetching overall metrics: {e}")
+            if failures is not None:
+                failures.append('overall metrics')
             return {}
     
-    def _fetch_top_queries(self, service, site_url: str, start_date: date, end_date: date, limit: int = 10) -> list:
-        """Fetch top search queries"""
+    def _fetch_top_queries(self, service, site_url: str, start_date: date, end_date: date, limit: int = 10,
+                           failures: list = None) -> list:
+        """Fetch top search queries. Records its name in `failures` if it errors."""
         queries = []
         
         try:
@@ -441,11 +477,14 @@ class GSCInsightsProcessor:
                 
         except Exception as e:
             logger.error(f"Error fetching top queries: {e}")
-        
+            if failures is not None:
+                failures.append('top queries')
+
         return queries
     
-    def _fetch_top_pages(self, service, site_url: str, start_date: date, end_date: date, limit: int = 10) -> list:
-        """Fetch top pages"""
+    def _fetch_top_pages(self, service, site_url: str, start_date: date, end_date: date, limit: int = 10,
+                         failures: list = None) -> list:
+        """Fetch top pages. Records its name in `failures` if it errors."""
         pages = []
         
         try:
@@ -480,11 +519,14 @@ class GSCInsightsProcessor:
                 
         except Exception as e:
             logger.error(f"Error fetching top pages: {e}")
-        
+            if failures is not None:
+                failures.append('top pages')
+
         return pages
     
-    def _fetch_device_breakdown(self, service, site_url: str, start_date: date, end_date: date) -> Dict[str, Any]:
-        """Fetch device breakdown"""
+    def _fetch_device_breakdown(self, service, site_url: str, start_date: date, end_date: date,
+                                failures: list = None) -> Dict[str, Any]:
+        """Fetch device breakdown. Records its name in `failures` if it errors."""
         device_data = {}
         
         try:
@@ -512,11 +554,14 @@ class GSCInsightsProcessor:
                 
         except Exception as e:
             logger.error(f"Error fetching device breakdown: {e}")
-        
+            if failures is not None:
+                failures.append('device breakdown')
+
         return device_data
     
-    def _fetch_country_breakdown(self, service, site_url: str, start_date: date, end_date: date) -> Dict[str, Any]:
-        """Fetch country breakdown"""
+    def _fetch_country_breakdown(self, service, site_url: str, start_date: date, end_date: date,
+                                 failures: list = None) -> Dict[str, Any]:
+        """Fetch country breakdown. Records its name in `failures` if it errors."""
         country_data = {}
         
         try:
@@ -548,6 +593,8 @@ class GSCInsightsProcessor:
                 
         except Exception as e:
             logger.error(f"Error fetching country breakdown: {e}")
-        
+            if failures is not None:
+                failures.append('country breakdown')
+
         return country_data
 
