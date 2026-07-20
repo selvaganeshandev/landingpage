@@ -4,7 +4,11 @@
  */
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const ENGINE_URL = import.meta.env.VITE_ENGINE_URL || 'http://localhost:8001';
+// VITE_ENGINE_API_URL is accepted as an alias because two call sites used to read
+// that name directly while .env only ever defined VITE_ENGINE_URL — so they
+// silently fell back to localhost in every build. Resolve it once, here, and use
+// this constant everywhere so the two names cannot drift apart again.
+const ENGINE_URL = import.meta.env.VITE_ENGINE_URL || import.meta.env.VITE_ENGINE_API_URL || 'http://localhost:8001';
 
 interface RequestOptions extends RequestInit {
   skipAuth?: boolean;
@@ -1034,7 +1038,7 @@ export const apiClient = {
 
   // ===== Engine (port 8001) helpers for competitor sentiment (optional for Sentiment page)
   getEngine: <T>(endpoint: string) => {
-    const engineBaseUrl = import.meta.env.VITE_ENGINE_API_URL || 'http://localhost:8001';
+    const engineBaseUrl = ENGINE_URL;
     const apiUrl = `${engineBaseUrl}${endpoint}`;
     return fetch(apiUrl, {
       method: 'GET',
@@ -1103,7 +1107,7 @@ export const apiClient = {
   getEngineCompetitorDetail: (id: number) => apiRequest(`/competitors/competitors/${id}/`),
   getEngineCompetitorAnalytics: (id: number) => apiRequest(`/competitors/competitor-analytics/?competitor_id=${id}`),
   processCompetitor: async (id: number) => {
-    const engineBaseUrl = import.meta.env.VITE_ENGINE_API_URL || 'http://localhost:8001';
+    const engineBaseUrl = ENGINE_URL;
     const token = getAuthToken();
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -1201,6 +1205,12 @@ export const apiClient = {
     const filename = params.filename || `AI_Visibility_${timestamp}.xlsx`;
     return downloadFile(`/analytics/dashboard/export/?${queryParams.toString()}`, filename);
   },
+
+  downloadGeoReport: (domainName: string) =>
+    downloadFile(
+      `/analytics/dashboard/geo-report/?domain_name=${encodeURIComponent(domainName)}`,
+      `geo-audit-${domainName}.pdf`,
+    ),
 
   // ===== Integrations =====
   getIntegrations: () => apiRequest('/integrations/integrations/'),
