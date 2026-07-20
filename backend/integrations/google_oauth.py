@@ -3,7 +3,7 @@ Google OAuth 2.0 integration for Google Analytics and Search Console.
 """
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.conf import settings
 from django.shortcuts import redirect
@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from google_auth_oauthlib.flow import Flow
+from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -371,8 +372,52 @@ def google_callback(request):
         return _fail('oauth_failed')
 
 
-def get_credentials_from_integration(integration):
-    """Convert stored credentials back to Google Credentials object."""
+def _parse_stored_expiry(raw_expiry):
+    """Parse the stored ISO expiry into the naive-UTC datetime google-auth expects.
+
+    The expiry was always written to the credentials JSON but never read back, so
+    google-auth saw expiry=None, considered the token valid forever, never
+    refreshed proactively, and let calls fail instead.
+    """
+    if not raw_expiry:
+        return None
+    try:
+        expiry = datetime.fromisoformat(raw_expiry)
+    except (TypeError, ValueError):
+        logger.warning(f"Unparseable stored token expiry: {raw_expiry!r}")
+        return None
+    if expiry.tzinfo is not None:
+        expiry = expiry.astimezone(dt_timezone.utc).replace(tzinfo=None)
+    return expiry
+
+
+def _persist_refreshed_credentials(integration, credentials):
+    """Write a newly refreshed access token back onto the integration.
+
+    Without this the refreshed token is discarded when the request ends, so the
+    stored token stays stale forever and the integration survives only on its
+    refresh token — if a reconnect ever returns no new refresh token, auth dies
+    with no path back.
+    """
+    try:
+        creds_data = dict(integration.credentials or {})
+        creds_data['token'] = credentials.token
+        creds_data['expiry'] = credentials.expiry.isoformat() if credentials.expiry else None
+        integration.credentials = creds_data
+        integration.save(update_fields=['credentials'])
+        logger.info(f"Refreshed and stored Google access token for integration {integration.id}")
+    except Exception as e:
+        # A failed write must not break the caller — the in-memory credentials
+        # are still usable for this request.
+        logger.warning(f"Could not persist refreshed token for integration {integration.id}: {e}")
+
+
+def get_credentials_from_integration(integration, persist=True):
+    """Convert stored credentials back to Google Credentials object.
+
+    Refreshes the access token when it has expired and, unless persist=False,
+    stores the new token so later requests reuse it.
+    """
     creds_data = integration.credentials
     if not creds_data:
         return None
@@ -384,7 +429,17 @@ def get_credentials_from_integration(integration):
         client_id=creds_data.get('client_id'),
         client_secret=creds_data.get('client_secret'),
         scopes=creds_data.get('scopes', SCOPES),
+        expiry=_parse_stored_expiry(creds_data.get('expiry')),
     )
+
+    if persist and credentials.expired and credentials.refresh_token:
+        try:
+            credentials.refresh(GoogleAuthRequest())
+            _persist_refreshed_credentials(integration, credentials)
+        except Exception as e:
+            # Let the caller proceed and surface the real API error; a refresh
+            # failure here usually means the grant was revoked.
+            logger.warning(f"Token refresh failed for integration {integration.id}: {e}")
 
     return credentials
 

@@ -6,6 +6,7 @@ from typing import Dict, Any
 from datetime import datetime, timedelta, date
 import calendar
 from decimal import Decimal
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -362,12 +363,13 @@ class GSCInsightsProcessor:
                                                        failures=section_failures)
 
             # Fetch top queries
+            top_rows = getattr(settings, 'GSC_TOP_ROWS_LIMIT', 100)
             top_queries = self._fetch_top_queries(service, site_url, start_date, end_date,
-                                                  failures=section_failures)
+                                                  limit=top_rows, failures=section_failures)
 
             # Fetch top pages
             top_pages = self._fetch_top_pages(service, site_url, start_date, end_date,
-                                              failures=section_failures)
+                                              limit=top_rows, failures=section_failures)
 
             # Fetch device breakdown
             device_data = self._fetch_device_breakdown(service, site_url, start_date, end_date,
@@ -534,6 +536,8 @@ class GSCInsightsProcessor:
                 'startDate': start_date.strftime('%Y-%m-%d'),
                 'endDate': end_date.strftime('%Y-%m-%d'),
                 'dimensions': ['device'],
+                # GSC only ever returns DESKTOP / MOBILE / TABLET, so 10 can
+                # never truncate this section — deliberately not configurable.
                 'rowLimit': 10
             }
             
@@ -569,7 +573,7 @@ class GSCInsightsProcessor:
                 'startDate': start_date.strftime('%Y-%m-%d'),
                 'endDate': end_date.strftime('%Y-%m-%d'),
                 'dimensions': ['country'],
-                'rowLimit': 10,
+                'rowLimit': getattr(settings, 'GSC_COUNTRY_ROWS_LIMIT', 25),
                 'orderBys': [{
                     'dimension': 'clicks',
                     'sortOrder': 'DESCENDING'

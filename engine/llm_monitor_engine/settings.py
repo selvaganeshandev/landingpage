@@ -322,6 +322,16 @@ from datetime import timedelta
 CELERY_RESULT_EXPIRES = timedelta(days=config('CELERY_RESULT_EXPIRES_DAYS', default=1, cast=int))
 
 # Celery Beat schedule: tick every 15 seconds to dispatch domain processing
+# Row caps for the per-insight "top N" sections. These were hardcoded to 10,
+# which made every report look permanently half-empty. Kept moderate and
+# configurable rather than maximal because the consumers do NOT paginate or
+# slice: reports/services/widget_data_fetcher renders every stored row into the
+# report table, and the keywords endpoint returns all of them. Raising these
+# directly grows report length, API payloads and the stored JSON.
+GSC_TOP_ROWS_LIMIT = config('GSC_TOP_ROWS_LIMIT', default=100, cast=int)
+GSC_COUNTRY_ROWS_LIMIT = config('GSC_COUNTRY_ROWS_LIMIT', default=25, cast=int)
+GA_TOP_ROWS_LIMIT = config('GA_TOP_ROWS_LIMIT', default=100, cast=int)
+
 CELERY_BEAT_SCHEDULE = {
     'domain-scheduler-tick-every-15s': {
         'task': 'core.processing_tasks.scheduler_tick',

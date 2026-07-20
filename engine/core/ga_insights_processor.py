@@ -5,6 +5,7 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta, date
 from decimal import Decimal
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.db.models import Q
@@ -690,7 +691,7 @@ class GAInsightsProcessor:
                         'metric': {'metricName': 'sessions'},
                         'desc': True
                     }],
-                    'limit': 10
+                    'limit': getattr(settings, 'GA_TOP_ROWS_LIMIT', 100)
                 }
             ).execute()
             
@@ -744,7 +745,7 @@ class GAInsightsProcessor:
                         'metric': {'metricName': 'sessions'},
                         'desc': True
                     }],
-                    'limit': 10
+                    'limit': getattr(settings, 'GA_TOP_ROWS_LIMIT', 100)
                 }
             ).execute()
             
