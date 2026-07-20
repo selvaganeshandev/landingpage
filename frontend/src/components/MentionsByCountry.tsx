@@ -1,4 +1,6 @@
 import { Card } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Info } from "lucide-react";
 
 interface CountryShare {
   code: string;
@@ -114,13 +116,18 @@ export const MentionsByCountry = ({ data, totalMentions = 0 }: MentionsByCountry
       <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
         <div className="flex items-center gap-1.5">
           <h3 className="text-base font-semibold font-inter">Mentions by Country</h3>
-          <span
-            title="Which countries your brand mentions came from, based on the country context each prompt was run for. 'Other' groups every country outside the top three."
-            aria-label="Which countries your brand mentions came from, based on the country context each prompt was run for."
-            className="inline-flex cursor-help"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-40 flex-shrink-0" role="img"><title>Which countries your brand mentions came from, based on the country context each prompt was run for.</title><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-          </span>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="inline-flex cursor-pointer text-muted-foreground opacity-50 hover:opacity-100 transition-opacity">
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-xs text-xs">
+                Breakdown of brand mentions by target prompt location.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       </div>
 

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from "recharts";
+import { TrendingUp, TrendingDown, Info } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const defaultData = [
   { date: "Oct 1", mentions: 45, visibility: 72 },
@@ -52,8 +53,7 @@ interface PillProps {
   value?: number;
   change?: number | null;
   colorVar: string;
-  /** Explanation shown on hover. The icon carries `cursor-help`, so it must
-   *  actually have something to say — without this it is an inert symbol. */
+  /** Explanation shown on hover via styled UI Tooltip. */
   hint: string;
 }
 
@@ -71,9 +71,18 @@ const MetricPill = ({ label, value, change, colorVar, hint }: PillProps) => {
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: `hsl(var(--${colorVar}))` }} />
         <span>{label}</span>
-        <span title={hint} aria-label={hint} className="inline-flex cursor-help">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-40 flex-shrink-0" role="img"><title>{hint}</title><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-        </span>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="inline-flex cursor-pointer text-muted-foreground opacity-50 hover:opacity-100 transition-opacity">
+                <Info className="h-3 w-3 flex-shrink-0" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs text-xs">
+              {hint}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
       <div className="flex items-baseline gap-1.5 flex-wrap">
         <span className="text-2xl font-bold tracking-tight text-foreground">{formatCompact(value)}</span>
@@ -188,7 +197,7 @@ export const TrendChart = ({ data = defaultData, metrics, timeRange, onTimeRange
                   stroke="hsl(var(--muted-foreground))"
                   fontSize={12}
                 />
-                <Tooltip
+                <RechartsTooltip
                   contentStyle={{
                     backgroundColor: "hsl(var(--card))",
                     border: "1px solid hsl(var(--border))",
@@ -239,7 +248,7 @@ export const TrendChart = ({ data = defaultData, metrics, timeRange, onTimeRange
                 stroke="hsl(var(--muted-foreground))"
                 fontSize={12}
               />
-              <Tooltip
+              <RechartsTooltip
                 contentStyle={{
                   backgroundColor: "hsl(var(--card))",
                   border: "1px solid hsl(var(--border))",
