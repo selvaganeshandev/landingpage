@@ -21,6 +21,7 @@ from googleapiclient.errors import HttpError
 from .ai_platforms import AI_SOURCE_REGEX, resolve_platform
 
 from .models import Integration
+from .utils.reconnect import preserved_provider_id
 from domains.models import Domain, DomainAccess
 
 logger = logging.getLogger(__name__)
@@ -308,6 +309,30 @@ def google_callback(request):
         # integration is anchored on `secondary_domain` (domain stays NULL) so it
         # never appears in primary-domain queries, lists, or processing.
         lookup = {'secondary_domain': secondary} if secondary else {'domain': domain}
+
+        # These defaults are applied on UPDATE as well as CREATE, so an empty
+        # provider_id would wipe the user's selected property/site every time
+        # they press "Connect" again on an already-connected domain. The sync
+        # schedulers skip any integration with an empty provider_id, so that
+        # silently stops all tracking. Keep the existing selection when the
+        # reconnected account still exposes it.
+        existing = Integration.objects.filter(type=integration_type, **lookup).first()
+        if existing:
+            available = credentials_data.get('available_properties')
+            if available is None:
+                available = credentials_data.get('available_sites')
+            provider_id = preserved_provider_id(
+                existing.provider_id,
+                available,
+                fetch_succeeded=(integration_status == 'active'),
+            )
+            if existing.provider_id and not provider_id:
+                logger.info(
+                    f"Reconnect for integration {existing.id} ({integration_type}): previously "
+                    f"selected '{existing.provider_id}' is no longer available to this account — "
+                    "clearing so the user re-selects."
+                )
+
         integration, created = Integration.objects.update_or_create(
             type=integration_type,
             **lookup,
