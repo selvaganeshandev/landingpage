@@ -3,6 +3,30 @@ from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
 
 
+# Canonical platform labels stored in `prompt_analytics.platform`.
+# Mirrors backend/prompts/models.py PLATFORM_MAP — keep the two in sync (both
+# apps write the same table). Gemini is stored as "Google Gemini", NOT "Gemini".
+# Writing a raw/lowercase key is what historically split Claude across
+# 'claude'/'Claude' and skewed dashboard aggregates.
+PLATFORM_MAP = {
+    'chatgpt': 'ChatGPT',
+    'gemini': 'Google Gemini',
+    'google gemini': 'Google Gemini',
+    'claude': 'Claude',
+    'perplexity': 'Perplexity',
+    'grok': 'Grok',
+    'deepseek': 'DeepSeek',
+}
+
+
+def normalize_platform(value):
+    """Return the canonical DB label for a platform key or name."""
+    if not value:
+        return value
+    key = str(value).strip()
+    return PLATFORM_MAP.get(key.lower(), key.title())
+
+
 class Organisation(models.Model):
     """
     Organisation model representing companies or organizations
