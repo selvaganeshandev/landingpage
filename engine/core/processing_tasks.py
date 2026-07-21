@@ -11,6 +11,7 @@ from .misinformation_processor import MisinformationProcessor
 from .ga_insights_processor import GAInsightsProcessor
 from .gsc_insights_processor import GSCInsightsProcessor
 from .cms_manager_processor import CMSManagerProcessor
+from . import weekly_sweep_guard
 import logging
 
 # Import from engine's integrations app
@@ -87,14 +88,34 @@ def process_prompt_analytics_scheduler(self):
     return processor.schedule_tick()
 
 
+# NOTE: max_retries here is inert — there is no autoretry_for and no self.retry()
+# call, so a failure ends the task. Do not add a retry without also passing
+# force=True on the retried entry call: a retry reuses the original args, so it
+# would come back with last_id=0 and be refused by the cooldown this same run
+# recorded, silently turning a retry into a no-op.
 @shared_task(bind=True, ignore_result=True, max_retries=3)
-def schedule_weekly_prompt_batches(self, last_id: int = 0):
+def schedule_weekly_prompt_batches(self, last_id: int = 0, force: bool = False):
     """
     Weekly batch re-scheduler for prompt analytics.
     - Resets prompts (excluding PROC) to INIT in batches
     - Enqueues prompt analytics tasks
     - Chains itself until all prompts are scheduled
+
+    A full sweep is ~2,700 prompts x every enabled platform (~10,800 LLM calls),
+    so it is cost-guarded on entry: refused inside the cooldown window, or when
+    no enabled platform has a usable key. Pass force=True to override.
     """
+    # Chained continuation batches always carry the last real prompt id (>= 1),
+    # so last_id == 0 is the only true entry point. Guarding on that rather than
+    # a separate flag also means in-flight chained messages from a previous
+    # deploy keep running instead of being blocked by their own sweep's stamp.
+    if last_id == 0:
+        blocked = weekly_sweep_guard.sweep_blocked(weekly_sweep_guard.PROMPTS, force=force)
+        if blocked:
+            logger.warning(f"[Weekly Prompts] Sweep refused: {blocked}")
+            return blocked
+        weekly_sweep_guard.record_sweep_start(weekly_sweep_guard.PROMPTS)
+
     qs = (
         Prompt.objects
         .exclude(track_status='PROC')  # don't clobber in-flight work
@@ -109,16 +130,37 @@ def schedule_weekly_prompt_batches(self, last_id: int = 0):
         return {'done': True}
 
     now = timezone.now()
-    for pid in ids:
-        Prompt.objects.filter(id=pid).update(
-            track_status='INIT',
-            track_message=f"Weekly reprocess scheduled at {now}",
-            modified_at=now,
-        )
-        process_prompt_analytics_task.delay(pid)
+    try:
+        for pid in ids:
+            Prompt.objects.filter(id=pid).update(
+                track_status='INIT',
+                track_message=f"Weekly reprocess scheduled at {now}",
+                modified_at=now,
+            )
+            process_prompt_analytics_task.delay(pid)
 
-    # Chain next batch
-    schedule_weekly_prompt_batches.delay(last_id=ids[-1])
+        # Chain next batch
+        schedule_weekly_prompt_batches.delay(last_id=ids[-1])
+    except Exception:
+        # The cooldown was stamped before any work was enqueued, so a crash here
+        # leaves a partial sweep that will NOT retry on its own and will be
+        # refused for the next WEEKLY_SWEEP_COOLDOWN_DAYS. Say so loudly — a
+        # generic task-failure line does not tell an operator what to do.
+        if last_id == 0:
+            logger.error(
+                "[Weekly Prompts] Entry batch failed AFTER the cooldown was recorded. "
+                "The sweep is partial and will be refused until the cooldown expires. "
+                "Re-run with: schedule_weekly_prompt_batches.delay(force=True)",
+                exc_info=True,
+            )
+        else:
+            logger.error(
+                f"[Weekly Prompts] Batch failed at last_id={last_id}; sweep is incomplete. "
+                f"Resume with: schedule_weekly_prompt_batches.delay(last_id={last_id})",
+                exc_info=True,
+            )
+        raise
+
     logger.info(f"[Weekly Prompts] Scheduled batch of {len(ids)} prompts (last_id={ids[-1]})")
     return {'queued': len(ids), 'last_id': ids[-1]}
 
@@ -276,13 +318,23 @@ def process_single_competitor_task(self, competitor_id: int):
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
-def schedule_weekly_competitor_batches(self, last_id: int = 0):
+def schedule_weekly_competitor_batches(self, last_id: int = 0, force: bool = False):
     """
     Weekly batch re-scheduler for competitor analytics.
     - Resets competitors (excluding PROC) to INIT in batches
     - Enqueues competitor processing tasks
     - Chains itself until all competitors are scheduled
+
+    Cost-guarded on entry exactly like schedule_weekly_prompt_batches, under its
+    own cooldown so the two sweeps never consume each other's window.
     """
+    if last_id == 0:
+        blocked = weekly_sweep_guard.sweep_blocked(weekly_sweep_guard.COMPETITORS, force=force)
+        if blocked:
+            logger.warning(f"[Weekly Competitors] Sweep refused: {blocked}")
+            return blocked
+        weekly_sweep_guard.record_sweep_start(weekly_sweep_guard.COMPETITORS)
+
     qs = (
         Competitor.objects
         .exclude(track_status='PROC')  # don't clobber in-flight work
@@ -297,16 +349,35 @@ def schedule_weekly_competitor_batches(self, last_id: int = 0):
         return {'done': True}
 
     now = timezone.now()
-    for cid in ids:
-        Competitor.objects.filter(id=cid).update(
-            track_status='INIT',
-            track_message=f"Weekly reprocess scheduled at {now}",
-            modified_at=now,
-        )
-        process_single_competitor_task.delay(cid)
+    try:
+        for cid in ids:
+            Competitor.objects.filter(id=cid).update(
+                track_status='INIT',
+                track_message=f"Weekly reprocess scheduled at {now}",
+                modified_at=now,
+            )
+            process_single_competitor_task.delay(cid)
 
-    # Chain next batch
-    schedule_weekly_competitor_batches.delay(last_id=ids[-1])
+        # Chain next batch
+        schedule_weekly_competitor_batches.delay(last_id=ids[-1])
+    except Exception:
+        # See the note in schedule_weekly_prompt_batches — the cooldown is
+        # already spent, so the operator needs to know to force a re-run.
+        if last_id == 0:
+            logger.error(
+                "[Weekly Competitors] Entry batch failed AFTER the cooldown was recorded. "
+                "The sweep is partial and will be refused until the cooldown expires. "
+                "Re-run with: schedule_weekly_competitor_batches.delay(force=True)",
+                exc_info=True,
+            )
+        else:
+            logger.error(
+                f"[Weekly Competitors] Batch failed at last_id={last_id}; sweep is incomplete. "
+                f"Resume with: schedule_weekly_competitor_batches.delay(last_id={last_id})",
+                exc_info=True,
+            )
+        raise
+
     logger.info(f"[Weekly Competitors] Scheduled batch of {len(ids)} competitors (last_id={ids[-1]})")
     return {'queued': len(ids), 'last_id': ids[-1]}
 

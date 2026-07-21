@@ -251,6 +251,19 @@ QUOTA_PROBE_PERPLEXITY_MODEL = config('QUOTA_PROBE_PERPLEXITY_MODEL', default='s
 QUOTA_PROBE_XAI_MODEL = config('QUOTA_PROBE_XAI_MODEL', default='grok-2-latest')
 QUOTA_PROBE_DEEPSEEK_MODEL = config('QUOTA_PROBE_DEEPSEEK_MODEL', default='deepseek-chat')
 
+# ==================== WEEKLY SWEEP COST GUARDS ====================
+# A weekly sweep resets EVERY prompt/competitor and re-queries every enabled
+# platform — roughly 10,800 LLM calls per run. These guard against paying for
+# it more often than intended. See core/weekly_sweep_guard.py.
+# Minimum days between two sweeps of the same type. The cron is every 7 days,
+# so 6 leaves slack for jitter while still refusing an accidental manual re-run.
+# 0 disables the cooldown.
+WEEKLY_SWEEP_COOLDOWN_DAYS = config('WEEKLY_SWEEP_COOLDOWN_DAYS', default=6, cast=float)
+# Probe provider keys before starting a sweep and refuse to start when NO
+# enabled platform has a usable key (which would burn the queue for nothing and
+# strand every prompt in INIT). A sweep still runs if even one platform is up.
+WEEKLY_SWEEP_PREFLIGHT_ENABLED = config('WEEKLY_SWEEP_PREFLIGHT_ENABLED', default=True, cast=bool)
+
 # ScrapingDog API Configuration (still used by misinformation crawler — /scrape endpoint)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
 
