@@ -258,6 +258,7 @@ const ContentEditor = () => {
   const [subtitle, setSubtitle] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [exportingDocx, setExportingDocx] = useState(false);
   const [contentData, setContentData] = useState<any>(null);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
 
@@ -2224,6 +2225,44 @@ const ContentEditor = () => {
     URL.revokeObjectURL(url);
   };
 
+  // Export as a real Word document. Unlike handleExportDocx above (which
+  // relabels HTML as .doc), this posts the editor HTML to the backend and gets
+  // back genuine OOXML, so Word, Google Docs and Pages all open it cleanly.
+  const handleExportRealDocx = async () => {
+    const htmlContent = editorRef.current?.innerHTML || content;
+    if (!htmlContent) {
+      toast({ title: "Nothing to export", description: "Editor content is empty." });
+      return;
+    }
+    if (!id) {
+      toast({
+        title: "Save required",
+        description: "Save the article once before exporting as .docx.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const filename = (title || "content").replace(/[^a-zA-Z0-9\s-]/g, "").trim().replace(/\s+/g, "_");
+    setExportingDocx(true);
+    try {
+      await apiClient.exportContentDocx(
+        parseInt(id),
+        htmlContent,
+        title || "Content",
+        `${filename || "content"}.docx`,
+      );
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description: error instanceof Error ? error.message : "Could not build the Word document.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingDocx(false);
+    }
+  };
+
   // Export as HTML file (Issue 6: download options)
   const handleExportHtml = () => {
     const htmlContent = editorRef.current?.innerHTML || content;
@@ -2393,6 +2432,9 @@ const ContentEditor = () => {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleExportRealDocx} disabled={exportingDocx}>
+                  {exportingDocx ? "Preparing Word file…" : "Export as Word (.docx)"}
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleExportDocx}>
                   Export as Word (.doc)
                 </DropdownMenuItem>

@@ -2847,6 +2847,254 @@ def download_bulk_upload_template(request):
     return response
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_bulk_upload_docx_template(request):
+    """
+    Download the Word (.docx) bulk upload template.
+
+    Query params:
+    - domain_id (optional): prefill the first brief from the domain's
+      content guidelines. Scoped to the caller's organisation.
+    - count (optional): number of blank brief tables (default 10).
+    """
+    from django.http import HttpResponse
+    from .docx_bulk_upload import build_docx_template, DEFAULT_BRIEF_COUNT
+
+    domain = None
+    domain_id = request.query_params.get('domain_id')
+    if domain_id:
+        try:
+            domain = Domain.objects.get(
+                id=int(domain_id),
+                organisation=request.user.organisation,
+            )
+        except (Domain.DoesNotExist, ValueError, TypeError):
+            domain = None  # unknown or not ours — fall back to a blank template
+
+    try:
+        count = int(request.query_params.get('count') or DEFAULT_BRIEF_COUNT)
+    except (ValueError, TypeError):
+        count = DEFAULT_BRIEF_COUNT
+
+    try:
+        content = build_docx_template(
+            type_map=BULK_CONTENT_TYPE_MAP,
+            country_map=BULK_COUNTRY_MAP,
+            count=count,
+            domain=domain,
+        )
+    except Exception as e:
+        logger.error(f"Failed to build docx template: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': 'Failed to build Word template'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    response = HttpResponse(
+        content,
+        content_type=(
+            'application/vnd.openxmlformats-officedocument'
+            '.wordprocessingml.document'
+        )
+    )
+    response['Content-Disposition'] = (
+        'attachment; filename="bulk_content_upload_template.docx"'
+    )
+    return response
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def export_content_docx(request, content_id):
+    """
+    Export a generated article as a real Word (.docx) document.
+
+    Body (optional):
+    - html: the live editor HTML. Sent so the download matches what the user
+      is looking at, including edits not saved yet. Falls back to the stored
+      content_html when absent.
+    - title: same, for the heading and filename.
+    """
+    from django.http import HttpResponse
+    from .docx_export import build_docx
+
+    try:
+        content = get_object_or_404(
+            GeneratedContent,
+            id=content_id,
+            domain__organisation=request.user.organisation
+        )
+    except Http404:
+        return Response({
+            'status': 'error',
+            'message': 'Generated content not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    html = request.data.get('html') or content.content_html or ''
+    title = (request.data.get('title') or content.title or 'content').strip()
+
+    if not html.strip():
+        return Response({
+            'status': 'error',
+            'message': 'There is no content to export'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        document = build_docx(html, title=title)
+    except Exception as e:
+        logger.error(
+            f"Failed to build docx for content {content_id}: {str(e)}",
+            exc_info=True
+        )
+        return Response({
+            'status': 'error',
+            'message': 'Failed to build the Word document'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    filename = re.sub(r'[^A-Za-z0-9\s-]', '', title).strip()
+    filename = re.sub(r'\s+', '_', filename) or 'content'
+
+    response = HttpResponse(
+        document,
+        content_type=(
+            'application/vnd.openxmlformats-officedocument'
+            '.wordprocessingml.document'
+        )
+    )
+    response['Content-Disposition'] = f'attachment; filename="{filename}.docx"'
+    return response
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def bulk_upload_content_docx(request):
+    """
+    Upload a .docx of content briefs for bulk generation.
+
+    One two-column table per brief. Parses, validates, creates batch + items,
+    then starts the same queue engine the Excel path uses.
+
+    Form data:
+    - file: the .docx file
+    - domain_id: int
+    """
+    from .docx_bulk_upload import parse_docx_briefs
+
+    try:
+        domain_id = request.data.get('domain_id') or request.POST.get('domain_id')
+        if not domain_id:
+            return Response({
+                'status': 'error',
+                'message': 'domain_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            domain = Domain.objects.get(
+                id=int(domain_id),
+                organisation=request.user.organisation
+            )
+        except (Domain.DoesNotExist, ValueError, TypeError):
+            return Response({
+                'status': 'error',
+                'message': 'Domain not found or you do not have access'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({
+                'status': 'error',
+                'message': 'No file uploaded'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not uploaded_file.name.lower().endswith('.docx'):
+            return Response({
+                'status': 'error',
+                'message': 'Only .docx files are supported on this endpoint'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if uploaded_file.size > 5 * 1024 * 1024:  # 5MB, same as the Excel path
+            return Response({
+                'status': 'error',
+                'message': 'File size must be under 5MB'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        items_data, errors = parse_docx_briefs(
+            uploaded_file,
+            type_map=BULK_CONTENT_TYPE_MAP,
+            country_map=BULK_COUNTRY_MAP,
+            language_map=BULK_LANGUAGE_MAP,
+            audience_map=BULK_AUDIENCE_MAP,
+        )
+
+        # All-or-nothing, matching the Excel path.
+        if errors:
+            return Response({
+                'status': 'error',
+                'message': f'Validation failed for {len(errors)} brief(s)',
+                'validation_errors': errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not items_data:
+            return Response({
+                'status': 'error',
+                'message': (
+                    'No filled briefs found. Check that the "Field" header row '
+                    'is intact and at least one brief has values.'
+                )
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Clean up previous completed batches for this domain
+        # (items are deleted automatically via CASCADE)
+        BulkUploadBatch.objects.filter(
+            domain=domain,
+            status__in=['completed', 'completed_with_errors', 'failed'],
+        ).delete()
+
+        with transaction.atomic():
+            batch = BulkUploadBatch.objects.create(
+                domain=domain,
+                uploaded_by=request.user,
+                file_name=uploaded_file.name,
+                status='processing',
+                total_items=len(items_data),
+            )
+
+            bulk_items = [
+                BulkUploadItem(batch=batch, **item_data, status='processed')
+                for item_data in items_data
+            ]
+            BulkUploadItem.objects.bulk_create(bulk_items)
+
+        # Start the same queue engine the Excel path uses
+        thread = threading.Thread(
+            target=_run_bulk_generation_queue,
+            args=(batch.id,),
+            daemon=True
+        )
+        thread.start()
+
+        logger.info(
+            f"Bulk docx upload batch {batch.id} created with "
+            f"{len(items_data)} briefs, queue engine started"
+        )
+
+        serializer = BulkUploadBatchSerializer(batch)
+        return Response({
+            'status': 'success',
+            'message': f'Uploaded {len(items_data)} briefs. Generation started automatically.',
+            'data': serializer.data
+        }, status=status.HTTP_202_ACCEPTED)
+
+    except Exception as e:
+        logger.error(f"Bulk docx upload error: {str(e)}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': f'Bulk upload failed: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser])

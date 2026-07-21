@@ -12,10 +12,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import {
   Upload,
   Download,
+  FileText,
+  ChevronDown,
   Loader2,
   CheckCircle2,
   XCircle,
@@ -66,7 +74,25 @@ interface BatchData {
   items: BulkItem[];
 }
 
+interface ValidationError {
+  row: number;
+  errors: string[];
+}
+
 const ITEMS_PER_PAGE = 10;
+
+/** Upload formats the page accepts. Extension check is case-insensitive. */
+const ACCEPTED_EXTENSIONS = [".xlsx", ".docx"];
+
+const getFileExtension = (fileName: string) =>
+  fileName.slice(fileName.lastIndexOf(".")).toLowerCase();
+
+const isAcceptedFile = (fileName: string) =>
+  ACCEPTED_EXTENSIONS.includes(getFileExtension(fileName));
+
+/** Word briefs are numbered "Brief N"; Excel rows keep "Row N". */
+const errorRowLabel = (fileName: string | undefined, row: number) =>
+  fileName && getFileExtension(fileName) === ".docx" ? `Brief ${row}` : `Row ${row}`;
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
   processed: { label: "Queued", color: "bg-muted text-muted-foreground", icon: Clock },
@@ -87,6 +113,7 @@ const BulkContentUpload = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
 
   // Batch state
   const [batchData, setBatchData] = useState<BatchData | null>(null);
@@ -190,39 +217,51 @@ const BulkContentUpload = () => {
     }
   };
 
+  const handleDownloadDocxTemplate = async () => {
+    try {
+      await apiClient.downloadBulkUploadDocxTemplate(selectedDomain?.id);
+      toast({ title: "Template downloaded", description: "Fill in one table per brief and upload it back." });
+    } catch {
+      toast({ title: "Download failed", variant: "destructive" });
+    }
+  };
+
+  const acceptFile = (file: File) => {
+    if (!isAcceptedFile(file.name)) {
+      toast({
+        title: "Invalid file",
+        description: "Only .xlsx and .docx files are supported",
+        variant: "destructive",
+      });
+      return;
+    }
+    setValidationErrors([]);
+    setSelectedFile(file);
+  };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (!file.name.endsWith('.xlsx')) {
-        toast({ title: "Invalid file", description: "Only .xlsx files are supported", variant: "destructive" });
-        return;
-      }
-      setSelectedFile(file);
-    }
+    if (file) acceptFile(file);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) {
-      if (!file.name.endsWith('.xlsx')) {
-        toast({ title: "Invalid file", description: "Only .xlsx files are supported", variant: "destructive" });
-        return;
-      }
-      setSelectedFile(file);
-    }
+    if (file) acceptFile(file);
   };
 
   const handleUpload = async () => {
     if (!selectedFile || !selectedDomain || isProcessing) return;
 
     setUploading(true);
+    setValidationErrors([]);
+    const isDocx = getFileExtension(selectedFile.name) === ".docx";
     try {
-      const response: any = await apiClient.uploadBulkContent(
-        Number(selectedDomain.id),
-        selectedFile
-      );
+      const upload = isDocx
+        ? apiClient.uploadBulkContentDocx
+        : apiClient.uploadBulkContent;
+      const response: any = await upload(Number(selectedDomain.id), selectedFile);
 
       if (response?.data?.id) {
         const newBatchId = response.data.id;
@@ -241,13 +280,12 @@ const BulkContentUpload = () => {
       const errorData = err?.response;
       if (errorData?.validation_errors) {
         const errorCount = errorData.validation_errors.length;
-        const firstErrors = errorData.validation_errors.slice(0, 3);
-        const errorDetails = firstErrors
-          .map((e: any) => `Row ${e.row}: ${e.errors.join(', ')}`)
-          .join('\n');
+        const unit = isDocx ? "brief" : "row";
+        // Keep every error on the page — the toast only summarises.
+        setValidationErrors(errorData.validation_errors);
         toast({
-          title: `Validation failed (${errorCount} row${errorCount > 1 ? 's' : ''})`,
-          description: errorDetails,
+          title: `Validation failed (${errorCount} ${unit}${errorCount > 1 ? 's' : ''})`,
+          description: "Nothing was imported. See the details below.",
           variant: "destructive",
         });
       } else {
@@ -351,24 +389,41 @@ const BulkContentUpload = () => {
             </div>
             <div>
               <h3 className="text-base font-semibold">Upload Content</h3>
-              <p className="text-xs text-muted-foreground">Fill in the Excel template and upload to auto-generate content</p>
+              <p className="text-xs text-muted-foreground">Fill in the Excel or Word template and upload to auto-generate content</p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            onClick={handleDownloadTemplate}
-            size="sm"
-          >
-            <Download className="h-4 w-4 mr-2" />
-            Download Template
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Download className="h-4 w-4 mr-2" />
+                Download Template
+                <ChevronDown className="h-3.5 w-3.5 ml-2 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={handleDownloadTemplate} className="gap-2">
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                <div className="flex flex-col">
+                  <span className="text-sm">Excel Template</span>
+                  <span className="text-xs text-muted-foreground">.xlsx — one row per article</span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleDownloadDocxTemplate} className="gap-2">
+                <FileText className="h-4 w-4 text-blue-600" />
+                <div className="flex flex-col">
+                  <span className="text-sm">Word Template</span>
+                  <span className="text-xs text-muted-foreground">.docx — one table per brief</span>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Row 2: Drop zone (100px height) */}
         <input
           type="file"
           ref={fileInputRef}
-          accept=".xlsx"
+          accept=".xlsx,.docx"
           onChange={handleFileSelect}
           className="hidden"
           disabled={isProcessing}
@@ -391,19 +446,25 @@ const BulkContentUpload = () => {
         >
           {selectedFile ? (
             <div className="flex flex-col items-center gap-1">
-              <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+              {getFileExtension(selectedFile.name) === ".docx" ? (
+                <FileText className="h-5 w-5 text-blue-600" />
+              ) : (
+                <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+              )}
               <span className="font-medium text-sm text-emerald-700 dark:text-emerald-400 truncate">
                 {selectedFile.name}
               </span>
               <span className="text-xs text-muted-foreground">
-                {(selectedFile.size / 1024).toFixed(1)} KB — Ready to upload
+                {(selectedFile.size / 1024).toFixed(1)} KB —{" "}
+                {getFileExtension(selectedFile.name) === ".docx" ? "Word" : "Excel"} — Ready to upload
               </span>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-1">
               <Upload className="h-5 w-5 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">
-                Drop <span className="font-medium text-foreground">.xlsx</span> file here or click to browse
+                Drop <span className="font-medium text-foreground">.xlsx</span> or{" "}
+                <span className="font-medium text-foreground">.docx</span> file here or click to browse
               </span>
             </div>
           )}
@@ -435,6 +496,37 @@ const BulkContentUpload = () => {
           <div className="flex items-center gap-2 text-xs text-blue-600 bg-blue-500/10 rounded-md px-3 py-2 mt-3">
             <Loader2 className="h-3.5 w-3.5 animate-spin flex-shrink-0" />
             <span>A batch is currently processing. Upload will be available once it completes.</span>
+          </div>
+        )}
+
+        {/* Validation errors — every error, not just the first few */}
+        {validationErrors.length > 0 && (
+          <div className="mt-4 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50/60 dark:bg-red-500/5 overflow-hidden">
+            <div className="flex items-start gap-2 px-3 py-2.5 border-b border-red-200 dark:border-red-500/30">
+              <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-red-700 dark:text-red-400">
+                  {validationErrors.length} problem{validationErrors.length > 1 ? 's' : ''} found — nothing was imported
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Fix these in your file and upload it again.
+                </p>
+              </div>
+            </div>
+            <div className="max-h-56 overflow-y-auto divide-y divide-red-200/60 dark:divide-red-500/20">
+              {validationErrors.map((entry) => (
+                <div key={entry.row} className="flex gap-3 px-3 py-2">
+                  <span className="text-xs font-medium text-red-700 dark:text-red-400 whitespace-nowrap pt-0.5">
+                    {errorRowLabel(selectedFile?.name, entry.row)}
+                  </span>
+                  <ul className="text-xs text-muted-foreground space-y-0.5">
+                    {entry.errors.map((message, i) => (
+                      <li key={i}>{message}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </Card>

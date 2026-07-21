@@ -14,6 +14,9 @@ urlpatterns = [
     path('<int:content_id>/update/', views.update_generated_content, name='update_generated_content'),
     path('<int:content_id>/delete/', views.delete_generated_content, name='delete_generated_content'),
 
+    # Export endpoints
+    path('<int:content_id>/export/docx/', views.export_content_docx, name='export_content_docx'),
+
     # Humanise endpoints
     path('<int:content_id>/humanise/', views.humanise_content, name='humanise_content'),
     path('<int:content_id>/humanise-status/', views.humanise_status, name='humanise_status'),
@@ -36,7 +39,9 @@ urlpatterns = [
 
     # Bulk Upload endpoints
     path('bulk-upload/template/', views.download_bulk_upload_template, name='bulk_upload_template'),
+    path('bulk-upload/template-docx/', views.download_bulk_upload_docx_template, name='bulk_upload_template_docx'),
     path('bulk-upload/', views.bulk_upload_content, name='bulk_upload_content'),
+    path('bulk-upload/docx/', views.bulk_upload_content_docx, name='bulk_upload_content_docx'),
     path('bulk-upload/batches/', views.get_bulk_upload_batches, name='bulk_upload_batches'),
     path('bulk-upload/batches/<int:batch_id>/', views.get_bulk_upload_batch_detail, name='bulk_upload_batch_detail'),
     path('bulk-upload/items/<int:item_id>/retry/', views.retry_bulk_upload_item, name='bulk_upload_item_retry'),

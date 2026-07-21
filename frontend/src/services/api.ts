@@ -260,6 +260,54 @@ async function downloadFile(endpoint: string, filename: string): Promise<void> {
   document.body.removeChild(a);
 }
 
+/**
+ * Download file handler for endpoints that need a request body (POST).
+ *
+ * Same save-the-blob flow as downloadFile, but lets the caller send state the
+ * server does not have yet — e.g. unsaved editor HTML.
+ */
+async function downloadFilePost(
+  endpoint: string,
+  filename: string,
+  body: unknown,
+): Promise<void> {
+  const token = getAuthToken();
+  const headers: HeadersInit = { 'Content-Type': 'application/json' };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    // Errors come back as JSON even though the success path is binary.
+    let message = response.statusText;
+    try {
+      const error = await response.json();
+      message = error?.message || message;
+    } catch {
+      // Non-JSON error body — keep the status text.
+    }
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+}
+
 // ==================== API Client with All Methods ====================
 
 export const apiClient = {
@@ -1440,6 +1488,11 @@ export const apiClient = {
     method: 'DELETE',
   }),
 
+  // Export the article as a real Word document. The current editor HTML is
+  // posted so the download includes edits that have not been saved yet.
+  exportContentDocx: (contentId: number, html: string, title: string, filename: string) =>
+    downloadFilePost(`/content/${contentId}/export/docx/`, filename, { html, title }),
+
   // AI Content Detection
   detectAiContent: (text: string, contentId?: number) => apiRequest('/content/detect-ai/', {
     method: 'POST',
@@ -1697,6 +1750,49 @@ export const apiClient = {
     a.click();
     window.URL.revokeObjectURL(blobUrl);
     document.body.removeChild(a);
+  },
+
+  downloadBulkUploadDocxTemplate: async (domainId?: number) => {
+    const token = getAuthToken();
+    const url = domainId
+      ? `${API_BASE_URL}/content/bulk-upload/template-docx/?domain_id=${domainId}`
+      : `${API_BASE_URL}/content/bulk-upload/template-docx/`;
+    const response = await fetch(url, {
+      headers: {
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+    });
+    if (!response.ok) throw new Error('Failed to download template');
+    const blob = await response.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = 'bulk_content_upload_template.docx';
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(blobUrl);
+    document.body.removeChild(a);
+  },
+
+  uploadBulkContentDocx: async (domainId: number, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('domain_id', String(domainId));
+
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/content/bulk-upload/docx/`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw { response: data, status: response.status };
+    }
+    return data;
   },
 
   uploadBulkContent: async (domainId: number, file: File) => {
