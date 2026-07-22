@@ -720,10 +720,19 @@ def citations_list(request):
     all_citations = []
     domain_url_clean = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
 
+    def _norm_url(u):
+        if not u:
+            return ''
+        u = u.strip()
+        return u[:-1] if u.endswith('/') else u
+
     # Pre-fetch all citation URLs for this domain to avoid N+1 queries
     citation_urls_map = {}
     for citation_url in CitationURL.objects.filter(domain=domain).only('url', 'crawl_status', 'http_status_code'):
         citation_urls_map[citation_url.url] = citation_url
+        norm = _norm_url(citation_url.url)
+        if norm:
+            citation_urls_map[norm] = citation_url
 
     # Process analytics in batches and use early exit strategy
     # We'll stop fetching once we have enough results for the current page
@@ -731,7 +740,7 @@ def citations_list(request):
     offset = 0
     target_citations = page * page_size + 50  # Fetch a bit extra to account for filtering
 
-    while offset < 1000:  # Max limit to prevent excessive processing
+    while offset < 10000:  # Allow scanning up to 10,000 analytics records for filtered results
         batch = analytics_qs[offset:offset + batch_size]
         if not batch:
             break
@@ -754,7 +763,7 @@ def citations_list(request):
                             continue
 
                     # Check if this URL has been crawled (from pre-fetched map)
-                    crawled_citation = citation_urls_map.get(url)
+                    crawled_citation = citation_urls_map.get(url) or citation_urls_map.get(_norm_url(url))
 
                     display_status = 'pending'
                     http_status_code = None
@@ -766,12 +775,13 @@ def citations_list(request):
 
                         if crawl_status == 'success' and http_status_code and http_status_code < 400:
                             display_status = 'valid'
-                        elif http_status_code and http_status_code >= 400:
-                            display_status = 'broken'
                         elif crawl_status == 'blocked':
+                            # Check blocked BEFORE the >=400 branch: blocked citations
+                            # carry http_status_code=403, so the generic >=400 test
+                            # would otherwise mis-map them to 'broken'.
                             display_status = 'blocked'
-                        elif crawl_status == 'failed':
-                            display_status = 'failed'
+                        elif (http_status_code and http_status_code >= 400) or crawl_status in ('failed', 'broken'):
+                            display_status = 'broken'
 
                     # Status filter - support both 'valid'/'success' and 'broken'/'failed'
                     if status_filter and status_filter.lower() != 'all':
