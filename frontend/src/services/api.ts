@@ -1009,8 +1009,20 @@ export const apiClient = {
     return apiRequest(`/topics/topics/${topicId}/optimize/`);
   },
 
-  getTopicTrends: (params: { domainId?: number; topicId?: number; days?: number } = {}) => {
-    const { domainId, topicId, days = 30 } = params;
+  getTopicTrends: (params: { domainId?: number; topicId?: number; days?: number } | number = {}, daysArg?: number) => {
+    let domainId: number | undefined;
+    let topicId: number | undefined;
+    let days = 30;
+
+    if (typeof params === 'number') {
+      topicId = params;
+      if (daysArg) days = daysArg;
+    } else if (typeof params === 'object' && params !== null) {
+      domainId = params.domainId;
+      topicId = params.topicId;
+      days = params.days ?? 30;
+    }
+
     const urlParams = new URLSearchParams({ days: String(days) });
     if (domainId) urlParams.append('domain_id', String(domainId));
     if (topicId) urlParams.append('topic_id', String(topicId));

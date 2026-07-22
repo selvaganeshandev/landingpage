@@ -97,6 +97,26 @@ export const VisibilityScore = ({ brand, score, mentions, avgPosition = 0, senti
           <p className="text-sm text-muted-foreground text-center">{band.description}</p>
         </div>
 
+        {/* Maturity ladder — shows every stage so users see where they sit and what "better" looks like (P2). */}
+        <div className="flex gap-1 pt-1" role="list" aria-label={`Visibility maturity stages, currently ${band.label}`}>
+          {[...SCORE_BANDS].reverse().map((stage) => {
+            const isCurrent = stage.label === band.label;
+            return (
+              <div key={stage.label} role="listitem" className="flex flex-1 flex-col items-center gap-1">
+                <div
+                  className="h-1.5 w-full rounded-full transition-colors"
+                  style={{ backgroundColor: isCurrent ? band.color : "hsl(var(--muted))" }}
+                />
+                <span
+                  className={`text-center text-[10px] leading-tight ${isCurrent ? "font-semibold text-foreground" : "text-muted-foreground"}`}
+                >
+                  {stage.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
         <div className="grid grid-cols-2 gap-4 pt-2">
           <div>
             <p className="text-sm text-muted-foreground">Total Mentions</p>

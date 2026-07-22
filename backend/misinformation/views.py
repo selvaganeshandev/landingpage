@@ -629,6 +629,22 @@ def citations_dashboard(request):
     domain_counts = Counter(extract_domain_from_url(u['url']) for u in all_urls)
     top_domains = [{'domain': d, 'count': c} for d, c in domain_counts.most_common(10)]
 
+    if not top_domains:
+        try:
+            from seo_rankings.services import datablue_service
+            raw = datablue_service.fetch_one(keyword_text=domain.name)
+            if raw:
+                counts = {}
+                for item in (raw.get('organic_results') or []):
+                    host = extract_domain_from_url(item.get('link') or item.get('url') or '')
+                    if host and domain.name.lower() not in host.lower():
+                        counts[host] = counts.get(host, 0) + 1
+                if counts:
+                    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:10]
+                    top_domains = [{'domain': h, 'count': c} for h, c in ranked]
+        except Exception as e:
+            logger.debug(f"DataBlue dashboard fallback notice: {e}")
+
     return Response({
         'summary': {
             'total_citations': total_citations,
@@ -696,8 +712,9 @@ def citations_list(request):
     ).exclude(citation_list=[]).order_by('-created_at')
 
     # Platform filter at DB level
-    if platform:
-        analytics_qs = analytics_qs.filter(platform=platform)
+    if platform and platform.lower() != 'all':
+        clean_platform = platform.lower().replace('google ', '')
+        analytics_qs = analytics_qs.filter(platform__icontains=clean_platform)
 
     # Extract all citations with metadata
     all_citations = []
@@ -756,9 +773,17 @@ def citations_list(request):
                         elif crawl_status == 'failed':
                             display_status = 'failed'
 
-                    # Status filter
-                    if status_filter and display_status != status_filter:
-                        continue
+                    # Status filter - support both 'valid'/'success' and 'broken'/'failed'
+                    if status_filter and status_filter.lower() != 'all':
+                        sf = status_filter.lower()
+                        if sf in ('success', 'valid'):
+                            if display_status not in ('valid', 'success'):
+                                continue
+                        elif sf in ('failed', 'broken'):
+                            if display_status not in ('broken', 'failed'):
+                                continue
+                        elif display_status != sf:
+                            continue
 
                     all_citations.append({
                         'url': url,
@@ -868,6 +893,28 @@ def citations_by_source(request):
     for source, data in source_data.items():
         data['platforms'] = list(data['platforms'])
         results.append(data)
+
+    if not results:
+        try:
+            from seo_rankings.services import datablue_service
+            raw = datablue_service.fetch_one(keyword_text=domain.name)
+            if raw:
+                counts = {}
+                for item in (raw.get('organic_results') or []):
+                    host = extract_domain_from_url(item.get('link') or item.get('url') or '')
+                    if host and domain.name.lower() not in host.lower():
+                        counts[host] = counts.get(host, 0) + 1
+                if counts:
+                    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+                    results = [{
+                        'source_domain': h,
+                        'mention_count': c,
+                        'is_your_domain': domain_url_clean in h,
+                        'platforms': ['DataBlue SERP'],
+                        'last_cited': timezone.now()
+                    } for h, c in ranked]
+        except Exception as e:
+            logger.debug(f"DataBlue citations_by_source fallback notice: {e}")
 
     # Sort by mention_count
     results.sort(key=lambda x: x['mention_count'], reverse=True)

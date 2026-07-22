@@ -92,6 +92,24 @@ const Dashboard = () => {
   const [exporting, setExporting] = useState(false);
   const [exportStartDate, setExportStartDate] = useState<Date | undefined>(undefined);
   const [exportEndDate, setExportEndDate] = useState<Date | undefined>(undefined);
+  const [isStartOpen, setIsStartOpen] = useState(false);
+  const [isEndOpen, setIsEndOpen] = useState(false);
+
+  const handleSelectStartDate = (date: Date | undefined) => {
+    setExportStartDate(date);
+    setIsStartOpen(false);
+    if (date) {
+      if (exportEndDate && exportEndDate < date) {
+        setExportEndDate(undefined);
+      }
+      setIsEndOpen(true);
+    }
+  };
+
+  const handleSelectEndDate = (date: Date | undefined) => {
+    setExportEndDate(date);
+    setIsEndOpen(false);
+  };
 
   const handleExportReport = async () => {
     const currentDomainId = selectedDomain?.id ? String(selectedDomain.id) : domainId || '';
@@ -313,7 +331,7 @@ const Dashboard = () => {
               </SelectContent>
             </Select>
             {/* <TimeFilter selected={timePeriod} onSelect={setTimePeriod} /> */}
-            <Popover>
+            <Popover open={isStartOpen} onOpenChange={setIsStartOpen}>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
@@ -330,13 +348,13 @@ const Dashboard = () => {
                 <Calendar
                   mode="single"
                   selected={exportStartDate}
-                  onSelect={setExportStartDate}
+                  onSelect={handleSelectStartDate}
                   disabled={(date) => date > new Date()}
                   initialFocus
                 />
               </PopoverContent>
             </Popover>
-            <Popover>
+            <Popover open={isEndOpen} onOpenChange={setIsEndOpen}>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
@@ -353,7 +371,7 @@ const Dashboard = () => {
                 <Calendar
                   mode="single"
                   selected={exportEndDate}
-                  onSelect={setExportEndDate}
+                  onSelect={handleSelectEndDate}
                   disabled={(date) => date > new Date() || (exportStartDate ? date < exportStartDate : false)}
                   initialFocus
                 />
@@ -366,6 +384,8 @@ const Dashboard = () => {
                 onClick={() => {
                   setExportStartDate(undefined);
                   setExportEndDate(undefined);
+                  setIsStartOpen(false);
+                  setIsEndOpen(false);
                 }}
               >
                 Clear

@@ -462,31 +462,31 @@ const Citations = () => {
                 />
               </div>
 
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select value={statusFilter} onValueChange={(val) => { setStatusFilter(val); setCurrentPage(1); }}>
                 <SelectTrigger className="w-[130px]">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="success">Valid</SelectItem>
-                  <SelectItem value="failed">Broken</SelectItem>
+                  <SelectItem value="valid">Valid</SelectItem>
+                  <SelectItem value="broken">Broken</SelectItem>
                   <SelectItem value="blocked">Blocked</SelectItem>
                   <SelectItem value="pending">Pending</SelectItem>
                 </SelectContent>
               </Select>
 
-              <Select value={platformFilter} onValueChange={setPlatformFilter}>
+              <Select value={platformFilter} onValueChange={(val) => { setPlatformFilter(val); setCurrentPage(1); }}>
                 <SelectTrigger className="w-[130px]">
                   <SelectValue placeholder="Platform" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Platforms</SelectItem>
-                  <SelectItem value="ChatGPT">ChatGPT</SelectItem>
-                  <SelectItem value="Claude">Claude</SelectItem>
-                  <SelectItem value="Google Gemini">Gemini</SelectItem>
-                  <SelectItem value="Perplexity">Perplexity</SelectItem>
-                  <SelectItem value="Grok">Grok</SelectItem>
-                  <SelectItem value="DeepSeek">DeepSeek</SelectItem>
+                  <SelectItem value="chatgpt">ChatGPT</SelectItem>
+                  <SelectItem value="claude">Claude</SelectItem>
+                  <SelectItem value="gemini">Gemini</SelectItem>
+                  <SelectItem value="perplexity">Perplexity</SelectItem>
+                  <SelectItem value="grok">Grok</SelectItem>
+                  <SelectItem value="deepseek">DeepSeek</SelectItem>
                 </SelectContent>
               </Select>
             </div>
