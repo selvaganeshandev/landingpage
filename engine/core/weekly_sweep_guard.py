@@ -14,24 +14,39 @@ things made it cost more than intended:
      credits, churning the whole queue for nothing and leaving thousands of
      prompts stranded in INIT.
 
-This module holds both guards:
+  3. The cooldown lived in a JSON file under BASE_DIR, which made the guard
+     PER-MACHINE. A sweep launched from a laptop pointed at the production
+     database read that laptop's empty state file, allowed itself, and stamped
+     the cooldown where the server could never see it — so the server's guard
+     still believed no sweep had ever run. On 2026-07-23 a full sweep started
+     that way at 03:44 with no trace in beat.log or worker.log. The state now
+     lives in the shared database (``sweep_guard_state``), the one place every
+     caller must reach, so a sweep started anywhere is visible everywhere.
 
-  * ``cooldown_block``  — refuse a sweep that starts too soon after the last one.
-  * ``preflight_block`` — refuse a sweep when no enabled platform has a usable key.
+This module holds three guards:
 
-Both are advisory-by-design: they return a reason dict instead of raising, and
-an operator can always override with ``force=True``.
+  * ``killswitch_block`` — refuse a sweep whose DB row has ``enabled=False``.
+  * ``cooldown_block``   — refuse a sweep that starts too soon after the last one.
+  * ``preflight_block``  — refuse a sweep when no enabled platform has a usable key.
+
+The cooldown and preflight guards are advisory-by-design: they return a reason
+dict instead of raising, and an operator can override with ``force=True``.
+The KILL SWITCH is deliberately NOT overridable — ``force=True`` does not
+bypass it. Turning a sweep back on is an explicit database edit
+(``enable_sweep()``), so no ad-hoc invocation from any host can restart the
+spend.
 
 Config (engine/.env, read via settings):
     WEEKLY_SWEEP_COOLDOWN_DAYS=6        # 0 disables the cooldown guard
     WEEKLY_SWEEP_PREFLIGHT_ENABLED=True
-    WEEKLY_SWEEP_STATE_FILE=<BASE_DIR>/weekly_sweep_state.json
 
-Imports no models, so it stays unit-testable without a database.
+Model imports are lazy (inside functions) so the module still imports without a
+configured database, and so the guards can be unit-tested by stubbing
+``_load_state``/``_save_state``.
 """
-import json
 import logging
 import os
+import socket
 from datetime import timedelta
 
 from django.conf import settings
@@ -68,55 +83,64 @@ def _cfg(name, default):
 
 
 # ---------------------------------------------------------------------------
-# State file (last sweep start per sweep type)
+# State (shared DB row per sweep type)
 # ---------------------------------------------------------------------------
-def _state_path():
-    base = str(_cfg("BASE_DIR", os.getcwd()))
-    return _cfg("WEEKLY_SWEEP_STATE_FILE", os.path.join(base, "weekly_sweep_state.json"))
+# Shape returned by _load_state(), used when the row is missing or the database
+# is unreachable. Defaults are permissive for the cooldown (never run) but the
+# kill switch defaults to enabled so a DB outage cannot silently stop all data
+# collection — a wasted sweep costs money, a permanently skipped one costs the
+# product.
+_DEFAULT_ENTRY = {
+    "enabled": True,
+    "disabled_reason": "",
+    "last_started_at": None,
+    "runs": 0,
+}
 
 
-def _load_state():
-    try:
-        with open(_state_path(), "r") as fh:
-            state = json.load(fh)
-        return state if isinstance(state, dict) else {}
-    except Exception:
-        return {}
+def _caller_id():
+    """Best-effort 'who started this', stored for attribution.
 
-
-def _save_state(state):
-    """Write the sweep state atomically.
-
-    A half-written file would be unreadable next run, which would silently
-    forget the last sweep and re-open the door to the double-spend this module
-    exists to prevent — so write to a temp file and swap it in.
+    The 2026-07-23 incident took an hour of forensics to attribute because
+    nothing recorded the origin of a sweep. Recording it costs one column.
     """
-    path = _state_path()
-    tmp = f"{path}.tmp"
     try:
-        with open(tmp, "w") as fh:
-            json.dump(state, fh)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-    except Exception as e:
-        logger.warning(f"[WeeklySweep] could not save state: {e}")
-
-
-def _parse_ts(value):
-    """Parse an ISO timestamp from the state file; None if missing/corrupt."""
-    if not value:
-        return None
-    try:
-        return timezone.datetime.fromisoformat(value)
+        return f"{socket.gethostname()}:{os.getpid()}"[:255]
     except Exception:
-        return None
+        return ""
+
+
+def _model():
+    """Lazy import so this module loads without Django apps being ready."""
+    from shared_models.models import SweepGuardState
+
+    return SweepGuardState
+
+
+def _load_state(sweep):
+    """Current guard row for `sweep` as a plain dict.
+
+    Falls back to permissive defaults if the row is missing or the DB is
+    unreachable — see _DEFAULT_ENTRY for why that direction.
+    """
+    try:
+        row = _model().objects.filter(sweep=sweep).first()
+    except Exception as e:
+        logger.warning(f"[WeeklySweep] could not read guard state for {sweep}, allowing: {e}")
+        return dict(_DEFAULT_ENTRY)
+    if row is None:
+        return dict(_DEFAULT_ENTRY)
+    return {
+        "enabled": bool(row.enabled),
+        "disabled_reason": row.disabled_reason or "",
+        "last_started_at": row.last_started_at,
+        "runs": int(row.runs or 0),
+    }
 
 
 def last_started_at(sweep):
     """When the given sweep last began, or None if never / unreadable."""
-    entry = _load_state().get(sweep) or {}
-    return _parse_ts(entry.get("last_started_at"))
+    return _load_state(sweep).get("last_started_at")
 
 
 def record_sweep_start(sweep, now=None):
@@ -125,13 +149,62 @@ def record_sweep_start(sweep, now=None):
     Called at the moment the sweep is admitted, BEFORE any work is enqueued, so
     that a crash midway still consumes the cooldown. Re-running a half-finished
     sweep is a deliberate act that should use force=True.
+
+    Writes to the shared DB row, so a sweep started on ANY host consumes the
+    cooldown for every other host.
     """
     now = now or timezone.now()
-    state = _load_state()
-    entry = dict(state.get(sweep) or {})
-    entry["last_started_at"] = now.isoformat()
-    entry["runs"] = int(entry.get("runs") or 0) + 1
-    _save_state({**state, sweep: entry})
+    try:
+        row, _ = _model().objects.get_or_create(sweep=sweep)
+        row.last_started_at = now
+        # Plain increment rather than F(): concurrent sweeps are the very thing
+        # this module prevents, and `runs` is only for observability.
+        row.runs = int(row.runs or 0) + 1
+        row.last_started_by = _caller_id()
+        row.save(update_fields=["last_started_at", "runs", "last_started_by", "modified_at"])
+    except Exception as e:
+        # Never let a bookkeeping failure crash an admitted sweep, but say so
+        # loudly: an unrecorded start means the next sweep is not cooldown-blocked.
+        logger.error(f"[WeeklySweep] could not record sweep start for {sweep}: {e}")
+
+
+def disable_sweep(sweep, reason=""):
+    """Flip the kill switch OFF for `sweep`. Refuses every run, force included."""
+    row, _ = _model().objects.get_or_create(sweep=sweep)
+    row.enabled = False
+    row.disabled_reason = str(reason or "")[:2000]
+    row.save(update_fields=["enabled", "disabled_reason", "modified_at"])
+    logger.warning("[WeeklySweep] %s sweep DISABLED: %s", sweep, reason)
+
+
+def enable_sweep(sweep):
+    """Flip the kill switch back ON for `sweep`. Deliberate operator action."""
+    row, _ = _model().objects.get_or_create(sweep=sweep)
+    row.enabled = True
+    row.disabled_reason = ""
+    row.save(update_fields=["enabled", "disabled_reason", "modified_at"])
+    logger.warning("[WeeklySweep] %s sweep re-enabled", sweep)
+
+
+# ---------------------------------------------------------------------------
+# Guard 0 — kill switch (NOT bypassable with force)
+# ---------------------------------------------------------------------------
+def killswitch_block(sweep):
+    """Reason dict if this sweep is switched off in the database, else None.
+
+    Checked before `force`, so an ad-hoc `force=True` call from any host cannot
+    restart a sweep an operator has deliberately turned off.
+    """
+    state = _load_state(sweep)
+    if state.get("enabled", True):
+        return None
+    return {
+        "skipped": True,
+        "reason": "disabled",
+        "sweep": sweep,
+        "disabled_reason": state.get("disabled_reason") or "",
+        "hint": "re-enable with weekly_sweep_guard.enable_sweep(<sweep>)",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -245,8 +318,21 @@ def sweep_blocked(sweep, force=False, now=None):
 
     Call once when a sweep is *entered* (not for chained continuation batches),
     and call record_sweep_start() when it returns None.
+
+    Order matters: the kill switch is evaluated BEFORE `force`, so a deliberate
+    shutdown cannot be undone by passing force=True from a shell on any host.
+    Only the cooldown and preflight guards are force-overridable.
     """
+    disabled = killswitch_block(sweep)
+    if disabled:
+        logger.warning(
+            "[WeeklySweep] %s sweep refused — kill switch is off%s",
+            sweep,
+            " (force ignored)" if force else "",
+        )
+        return disabled
+
     if force:
-        logger.warning("[WeeklySweep] %s sweep forced — guards bypassed", sweep)
+        logger.warning("[WeeklySweep] %s sweep forced — cooldown/preflight bypassed", sweep)
         return None
     return cooldown_block(sweep, now=now) or preflight_block()

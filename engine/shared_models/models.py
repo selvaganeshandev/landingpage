@@ -2309,3 +2309,62 @@ class DomainRegion(models.Model):
 
     def __str__(self):
         return f"{self.domain.name} — {self.country_name} ({self.country_code})"
+
+class SweepGuardState(models.Model):
+    """Cross-machine control state for the weekly full-corpus reprocess sweeps.
+
+    Mirror of the backend model (backend app: prompts.SweepGuardState), which
+    owns the physical `sweep_guard_state` table; the engine's migration for it
+    is state-only.
+
+    The engine's cost guard used to keep its cooldown in a JSON file under
+    BASE_DIR, so the guard was per-machine: a sweep launched from a laptop
+    against this same database read that laptop's empty state and allowed
+    itself. Keeping the state in the shared database is what makes the cooldown
+    hold no matter where the sweep is triggered from.
+
+    `enabled` is a hard kill switch — while False the sweep is refused even
+    with force=True.
+    """
+
+    sweep = models.CharField(
+        max_length=32,
+        unique=True,
+        help_text="Sweep identifier: 'prompts' or 'competitors'",
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text="Kill switch. When False this sweep is refused even with force=True.",
+    )
+    disabled_reason = models.TextField(
+        blank=True,
+        default='',
+        help_text="Why the sweep was disabled, shown in the refusal payload",
+    )
+    last_started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this sweep last began (stamped before any work is enqueued)",
+    )
+    runs = models.PositiveIntegerField(
+        default=0,
+        help_text="How many times this sweep has been admitted",
+    )
+    last_started_by = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="host/pid that last started the sweep, for attribution",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        managed = True  # Let backend manage this table
+        db_table = 'sweep_guard_state'
+        verbose_name = 'Sweep Guard State'
+        verbose_name_plural = 'Sweep Guard States'
+
+    def __str__(self):
+        return f"{self.sweep} (enabled={self.enabled}, runs={self.runs})"

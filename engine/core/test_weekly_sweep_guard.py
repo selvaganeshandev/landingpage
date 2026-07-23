@@ -13,10 +13,8 @@ database, environment, or network access required.
 Run:  python core/test_weekly_sweep_guard.py
 """
 import importlib.util
-import json
 import os
 import sys
-import tempfile
 import types
 from datetime import datetime, timedelta, timezone as _tz
 
@@ -81,13 +79,58 @@ def check(name, condition, detail=''):
     print(f"  {'PASS' if condition else 'FAIL'}  {name}{('  -> ' + str(detail)) if detail and not condition else ''}")
 
 
+class _Row:
+    """Stand-in for one SweepGuardState row."""
+
+    def __init__(self, sweep):
+        self.sweep = sweep
+        self.enabled = True
+        self.disabled_reason = ''
+        self.last_started_at = None
+        self.runs = 0
+        self.last_started_by = ''
+
+    def save(self, update_fields=None):
+        _ROWS[self.sweep] = self
+
+
+class _QuerySet:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+
+class _Manager:
+    def filter(self, **kwargs):
+        sweep = kwargs.get('sweep')
+        row = _ROWS.get(sweep)
+        return _QuerySet([row] if row is not None else [])
+
+    def get_or_create(self, sweep=None, **kwargs):
+        if sweep in _ROWS:
+            return _ROWS[sweep], False
+        row = _Row(sweep)
+        _ROWS[sweep] = row
+        return row, True
+
+
+class _FakeModel:
+    objects = _Manager()
+
+
+# In-memory stand-in for the shared `sweep_guard_state` table. The real guard
+# reads/writes this row in the database so the cooldown is shared across every
+# machine that can reach it — the file-based state it replaced was per-machine
+# and was how the 2026-07-23 laptop-triggered sweep slipped past the guard.
+_ROWS = {}
+
+
 def reset(**overrides):
-    """Fresh state file + default settings, with per-test overrides."""
-    fd, path = tempfile.mkstemp(suffix='.json')
-    os.close(fd)
-    os.unlink(path)
+    """Fresh guard state + default settings, with per-test overrides."""
+    _ROWS.clear()
     values = {
-        'WEEKLY_SWEEP_STATE_FILE': path,
         'WEEKLY_SWEEP_COOLDOWN_DAYS': 6,
         'WEEKLY_SWEEP_PREFLIGHT_ENABLED': True,
         'ENABLED_PLATFORMS': ['chatgpt', 'gemini', 'claude', 'perplexity'],
@@ -97,7 +140,8 @@ def reset(**overrides):
     _NOW[0] = datetime(2026, 7, 21, 6, 0, tzinfo=_tz.utc)
     _QUOTA_RESULTS[0] = [{'key': p, 'state': 'OK'} for p in
                          ('openai', 'gemini', 'anthropic', 'perplexity')]
-    return path
+    GUARD._model = lambda: _FakeModel
+    return _ROWS
 
 
 def advance(days=0, hours=0):
@@ -149,37 +193,79 @@ reset(WEEKLY_SWEEP_COOLDOWN_DAYS=0)
 GUARD.record_sweep_start(GUARD.PROMPTS)
 check('cooldown_days=0 disables the guard', GUARD.sweep_blocked(GUARD.PROMPTS) is None)
 
-# A corrupt or truncated state file must not wedge sweeps forever.
-path = reset()
-with open(path, 'w') as fh:
-    fh.write('{not json')
-check('corrupt state file does not block', GUARD.sweep_blocked(GUARD.PROMPTS) is None)
+# An unreachable database must not wedge sweeps forever: a permanently skipped
+# sweep costs the product more than a wasted one costs in credits.
+reset()
 
-path = reset()
-with open(path, 'w') as fh:
-    json.dump({'prompts': {'last_started_at': 'not-a-timestamp'}}, fh)
-check('unparseable timestamp does not block', GUARD.sweep_blocked(GUARD.PROMPTS) is None)
+
+def _boom():
+    raise RuntimeError('database is down')
+
+
+GUARD._model = _boom
+check('unreadable guard state does not block', GUARD.sweep_blocked(GUARD.PROMPTS) is None)
 
 # USE_TZ flipped between runs: comparing naive to aware raises, and a raising
 # guard would stop data collection entirely. Must fail open.
-path = reset()
-with open(path, 'w') as fh:
-    json.dump({'prompts': {'last_started_at': datetime(2026, 7, 21, 5, 0).isoformat()}}, fh)
+reset()
+GUARD.record_sweep_start(GUARD.PROMPTS)
+_ROWS['prompts'].last_started_at = datetime(2026, 7, 21, 5, 0)  # naive
 check('naive/aware timestamp mismatch does not block',
       GUARD.sweep_blocked(GUARD.PROMPTS) is None)
 
-path = reset()
+reset()
 GUARD.record_sweep_start(GUARD.PROMPTS)
-check('start is persisted to disk', os.path.exists(path))
+check('start is persisted to the shared row', 'prompts' in _ROWS)
 check('start timestamp round-trips', GUARD.last_started_at(GUARD.PROMPTS) == _NOW[0],
       GUARD.last_started_at(GUARD.PROMPTS))
+check('start records who launched it', bool(_ROWS['prompts'].last_started_by),
+      _ROWS['prompts'].last_started_by)
 GUARD.record_sweep_start(GUARD.COMPETITORS)
 advance(days=7)
 GUARD.record_sweep_start(GUARD.PROMPTS)
-with open(path) as fh:
-    saved = json.load(fh)
-check('run counter increments per sweep', saved['prompts']['runs'] == 2, saved)
-check('recording one sweep preserves the other', saved['competitors']['runs'] == 1, saved)
+check('run counter increments per sweep', _ROWS['prompts'].runs == 2, _ROWS['prompts'].runs)
+check('recording one sweep preserves the other', _ROWS['competitors'].runs == 1,
+      _ROWS['competitors'].runs)
+
+# The real 2026-07-23 bypass: the guard state lived in a per-machine file, so a
+# sweep launched from another host never saw the server's cooldown. State now
+# lives in one shared row, so a start recorded by "another machine" blocks here.
+reset()
+_ROWS['prompts'] = _Row('prompts')
+_ROWS['prompts'].last_started_at = _NOW[0] - timedelta(hours=2)
+_ROWS['prompts'].last_started_by = 'someone-elses-laptop:9999'
+blocked = GUARD.sweep_blocked(GUARD.PROMPTS)
+check('sweep started on another machine blocks this one',
+      blocked is not None and blocked['reason'] == 'cooldown', blocked)
+
+
+# ---------------------------------------------------------------------------
+print('\nKill switch')
+# ---------------------------------------------------------------------------
+reset()
+GUARD.disable_sweep(GUARD.PROMPTS, reason='credits drained 2026-07-23')
+blocked = GUARD.sweep_blocked(GUARD.PROMPTS)
+check('disabled sweep is refused', blocked is not None and blocked['reason'] == 'disabled', blocked)
+check('refusal carries the reason',
+      blocked and blocked['disabled_reason'] == 'credits drained 2026-07-23', blocked)
+
+# The whole point: force must NOT reopen a deliberately closed switch, or any
+# shell on any host can restart the spend.
+blocked = GUARD.sweep_blocked(GUARD.PROMPTS, force=True)
+check('force=True does NOT bypass the kill switch',
+      blocked is not None and blocked['reason'] == 'disabled', blocked)
+
+check('disabling one sweep leaves the other runnable',
+      GUARD.sweep_blocked(GUARD.COMPETITORS) is None)
+
+GUARD.enable_sweep(GUARD.PROMPTS)
+check('re-enabling restores the sweep', GUARD.sweep_blocked(GUARD.PROMPTS) is None)
+check('re-enabling clears the reason', _ROWS['prompts'].disabled_reason == '')
+
+# A brand-new install has no row at all — that must behave as enabled, not as
+# silently switched off.
+reset()
+check('missing row defaults to enabled', GUARD.sweep_blocked(GUARD.PROMPTS) is None)
 
 
 # ---------------------------------------------------------------------------

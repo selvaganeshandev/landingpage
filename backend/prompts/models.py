@@ -459,3 +459,67 @@ class DomainMetricSnapshot(models.Model):
     def __str__(self):
         platform_str = f" - {self.platform}" if self.platform else " (All Platforms)"
         return f"{self.domain.name}{platform_str} - {self.snapshot_date} ({self.period_type})"
+
+class SweepGuardState(models.Model):
+    """Cross-machine control state for the weekly full-corpus reprocess sweeps.
+
+    A sweep resets EVERY prompt (or competitor) to INIT and re-queries every
+    enabled platform — ~2,700 prompts x 4 platforms, roughly 10,800 paid LLM
+    calls. The engine's cost guard used to keep its cooldown in a JSON file on
+    the local filesystem, which made it per-machine: a sweep launched from a
+    developer's laptop against this same database read that laptop's empty
+    state, allowed itself, and stamped the cooldown somewhere the server could
+    never see. That is exactly how five sweeps ran in the eleven days to
+    2026-07-23 when only two were scheduled.
+
+    Holding the state HERE — in the one database every caller must reach —
+    makes the guard machine-independent: a sweep started anywhere is visible to
+    every other caller.
+
+    `enabled` is a hard kill switch. While it is False the sweep is refused
+    unconditionally, including force=True, so no ad-hoc invocation can restart
+    the spend. Re-enabling is a deliberate database edit, not a flag on a call.
+
+    Owned by the backend; the engine declares a read/write mirror in
+    shared_models and its migration is state-only.
+    """
+
+    sweep = models.CharField(
+        max_length=32,
+        unique=True,
+        help_text="Sweep identifier: 'prompts' or 'competitors'",
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text="Kill switch. When False this sweep is refused even with force=True.",
+    )
+    disabled_reason = models.TextField(
+        blank=True,
+        default='',
+        help_text="Why the sweep was disabled, shown in the refusal payload",
+    )
+    last_started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this sweep last began (stamped before any work is enqueued)",
+    )
+    runs = models.PositiveIntegerField(
+        default=0,
+        help_text="How many times this sweep has been admitted",
+    )
+    last_started_by = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="host/pid that last started the sweep, for attribution",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sweep_guard_state'
+        verbose_name = 'Sweep Guard State'
+        verbose_name_plural = 'Sweep Guard States'
+
+    def __str__(self):
+        return f"{self.sweep} (enabled={self.enabled}, runs={self.runs})"
