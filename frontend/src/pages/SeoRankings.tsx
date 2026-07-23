@@ -82,6 +82,9 @@ import {
   Upload,
   FileUp,
   ArrowLeft,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from "lucide-react";
 
 // Types matching the backend SeoKeywordRankSerializer
@@ -193,6 +196,10 @@ const SeoRankings = () => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [rankFilter, setRankFilter] = useState<"all" | "top3" | "top10" | "top50" | "nr">("all");
+  // Sortable columns. `null` key = the API's own ordering, which is the default
+  // so the table looks unchanged until the user asks for a sort.
+  const [sortKey, setSortKey] = useState<"rank" | "volume" | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [showOverview, setShowOverview] = useState(true);
   const [selectedKeywords, setSelectedKeywords] = useState<number[]>([]);
@@ -657,8 +664,66 @@ const SeoRankings = () => {
       default: return true;
     }
   };
-  const filteredKeywords = seoKeywords.filter(kw =>
-    kw.keyword.toLowerCase().includes(searchQuery.toLowerCase()) && matchesRankFilter(kw)
+  const matchesSearch = (kw: typeof seoKeywords[number]) =>
+    kw.keyword.toLowerCase().includes(searchQuery.toLowerCase());
+
+  // Sorting is applied to the FILTERED list rather than to the current page, so
+  // "best rank" means best across all 290 keywords, not just the 25 on screen.
+  // Export and select-all read the same list, so they stay in step.
+  //
+  // Unranked keywords (rank == null) and keywords with no volume (NA) always
+  // sink to the bottom in BOTH directions — they carry no value to compare, so
+  // letting them lead an ascending sort would bury the rows the user wants.
+  const sortedKeywords = (() => {
+    const rows = seoKeywords.filter(kw => matchesSearch(kw) && matchesRankFilter(kw));
+    if (!sortKey) return rows;
+
+    const valueOf = (kw: typeof seoKeywords[number]) =>
+      sortKey === "rank" ? kw.rank : kw.volume;
+
+    return [...rows].sort((a, b) => {
+      const av = valueOf(a);
+      const bv = valueOf(b);
+      const aMissing = av == null;
+      const bMissing = bv == null;
+      if (aMissing && bMissing) return 0;
+      if (aMissing) return 1;
+      if (bMissing) return -1;
+      return sortDir === "asc" ? Number(av) - Number(bv) : Number(bv) - Number(av);
+    });
+  })();
+
+  const filteredKeywords = sortedKeywords;
+
+  const handleSort = (key: "rank" | "volume") => {
+    if (sortKey === key) {
+      // Third click clears the sort and restores the API's ordering.
+      if (sortDir === "asc") setSortDir("desc");
+      else { setSortKey(null); setSortDir("asc"); }
+    } else {
+      // Rank ascends first (1 is best); volume descends first (biggest first).
+      setSortKey(key);
+      setSortDir(key === "rank" ? "asc" : "desc");
+    }
+    setCurrentPage(1);
+  };
+
+  const SortableHead = ({ label, sortId, className }: { label: string; sortId: "rank" | "volume"; className?: string }) => (
+    <TableHead className={className}>
+      <button
+        type="button"
+        onClick={() => handleSort(sortId)}
+        className="inline-flex items-center gap-1 mx-auto hover:text-foreground transition-colors"
+        aria-label={`Sort by ${label}`}
+      >
+        {label}
+        {sortKey === sortId ? (
+          sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-40" />
+        )}
+      </button>
+    </TableHead>
   );
 
   // Toggle a rank-range filter from the Comparison card and jump to the
@@ -1624,9 +1689,9 @@ const SeoRankings = () => {
                     </TableHead>
                     <TableHead className="w-20 text-xs font-semibold py-2">ACTIONS</TableHead>
                     <TableHead className="text-xs font-semibold py-2">KEYWORD</TableHead>
-                    <TableHead className="text-center text-xs font-semibold py-2 w-14">RANK</TableHead>
+                    <SortableHead label="RANK" sortId="rank" className="text-center text-xs font-semibold py-2 w-14" />
                     {visibleColumns.volume && (
-                      <TableHead className="text-center text-xs font-semibold py-2 w-16">VOLUME</TableHead>
+                      <SortableHead label="VOLUME" sortId="volume" className="text-center text-xs font-semibold py-2 w-16" />
                     )}
                     {visibleColumns.best && (
                       <TableHead className="text-center text-xs font-semibold py-2 w-12">BEST</TableHead>
@@ -2059,7 +2124,7 @@ const SeoRankings = () => {
                           />
                         </TableHead>
                         <TableHead className="text-xs font-semibold py-1.5">KEYWORD</TableHead>
-                        <TableHead className="text-center text-xs font-semibold py-1.5 w-14">RANK</TableHead>
+                        <SortableHead label="RANK" sortId="rank" className="text-center text-xs font-semibold py-1.5 w-14" />
                         <TableHead className="text-center text-xs font-semibold py-1.5 w-14">TAGS</TableHead>
                         <TableHead className="w-8 py-1.5"></TableHead>
                       </TableRow>
