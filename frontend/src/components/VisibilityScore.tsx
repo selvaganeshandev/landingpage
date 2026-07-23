@@ -15,14 +15,17 @@ interface VisibilityScoreProps {
 }
 
 /**
- * Score bands calibrated to the visibility score's real distribution.
+ * Score bands for the visibility gauge.
  *
- * The backend (`_calculate_visibility_score`) normalizes mentions, citations
- * and position against the MAXIMUM across ALL domains, so only the single
- * strongest domain approaches 90-100 and typical domains land far lower
- * (the backend's own comments cite ~22 as a common value). Semrush-style
- * fixed bands ("92 = Great") would therefore read "Poor" for healthy domains.
- * These thresholds skew accordingly so mid-tier domains read Average/Good.
+ * The score is built from absolute RATES over the domain's own tracked prompts
+ * (see `compute_visibility_score` in backend/analytics/views_dashboard.py):
+ * mentions 40%, citations 30%, sentiment 20%, position 10%. Because every
+ * component is bounded 0-1 by construction, the full 0-100 range is reachable
+ * and these are ordinary fixed thresholds — no skew is needed.
+ *
+ * They previously WERE skewed, to compensate for an older formula that divided
+ * by the MAX across all domains and pinned almost every domain into 11-29. That
+ * normalization is gone; do not reintroduce compensating thresholds here.
  *
  * Tune here if the scoring distribution changes — this is the single source
  * of truth for the gauge's label logic and is pure frontend (no API change).
@@ -60,8 +63,21 @@ export const VisibilityScore = ({ brand, score, mentions, avgPosition = 0, senti
                   <Info className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
+              {/* Names all four components and their weights. The previous text
+                  described only mentions and position, leaving half the score
+                  (citations + sentiment) unexplained — so a user whose score
+                  moved could not tell what had actually changed. */}
               <TooltipContent side="right" className="max-w-xs text-xs">
-                Measures how frequently and prominently your brand appears in AI-generated answers across your tracked prompts (0 to 100).
+                <p className="font-medium mb-1">How your brand shows up in AI answers (0–100)</p>
+                <p className="mb-1.5 text-muted-foreground">
+                  Measured across the prompts you track, as a share of the answers we checked.
+                </p>
+                <ul className="space-y-0.5">
+                  <li>• <strong>40%</strong> how often you're mentioned</li>
+                  <li>• <strong>30%</strong> how often your site is cited</li>
+                  <li>• <strong>20%</strong> how positively you're described</li>
+                  <li>• <strong>10%</strong> how early you appear in the answer</li>
+                </ul>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
