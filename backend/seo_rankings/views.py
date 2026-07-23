@@ -6041,7 +6041,8 @@ def _competitors_from_comp_today(comp_today, comp_type: str, our_rank):
         bucket = comp_today.get(comp_type) or []
         return bucket if isinstance(bucket, list) else []
 
-    # Current shape: keyed by SERP position.
+    # Current shape: keyed by SERP position. Emit the short keys the UI reads
+    # (rn = rank, dn = domain, lk = link) — matching the legacy bucketed shape.
     entries = []
     for key, val in comp_today.items():
         if not isinstance(val, dict):
@@ -6051,20 +6052,20 @@ def _competitors_from_comp_today(comp_today, comp_type: str, our_rank):
         except (TypeError, ValueError):
             continue
         entries.append({
-            'rank': rank,
-            'domain': val.get('domain', ''),
-            'url': val.get('url', ''),
+            'rn': rank,
+            'dn': val.get('domain', ''),
+            'lk': val.get('url', ''),
             'title': val.get('title', ''),
         })
-    entries.sort(key=lambda e: e['rank'])
+    entries.sort(key=lambda e: e['rn'])
 
     our = our_rank or 0
     if comp_type == 'bf':
         # Ranked above us. If we're unranked (0), everyone is ahead.
-        return entries if not our else [e for e in entries if e['rank'] < our]
+        return entries if not our else [e for e in entries if e['rn'] < our]
     if comp_type == 'ar':
         # Ranked below us. Nobody is below an unranked keyword.
-        return [] if not our else [e for e in entries if e['rank'] > our]
+        return [] if not our else [e for e in entries if e['rn'] > our]
     return entries[:10]
 
 
