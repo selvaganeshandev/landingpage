@@ -12,15 +12,7 @@ interface CountryShare {
 
 interface MentionsByCountryProps {
   data?: CountryShare[];
-  totalMentions?: number;
 }
-
-const DEFAULT_COUNTRIES: CountryShare[] = [
-  { code: "IN", name: "IN", percentage: 79.1, count: 36300, color: "bg-[#7C3AED]" },
-  { code: "US", name: "US", percentage: 9.6,  count: 4400,  color: "bg-[#10B981]" },
-  { code: "UK", name: "UK", percentage: 1.7,  count: 800,   color: "bg-[#8B5CF6]" },
-  { code: "Other", name: "Other", percentage: 9.5, count: 4400, color: "bg-[#F59E0B]" },
-];
 
 const fmt = (n: number): string => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
@@ -107,8 +99,11 @@ const Flag = ({ code }: { code: string }) => {
   );
 };
 
-export const MentionsByCountry = ({ data, totalMentions = 0 }: MentionsByCountryProps) => {
-  const countries = data && data.length ? data : DEFAULT_COUNTRIES;
+export const MentionsByCountry = ({ data }: MentionsByCountryProps) => {
+  // Only real, backend-computed country data is rendered. There is no sample
+  // fallback: an empty window must read as "no mentions", never as a made-up split.
+  const countries = data ?? [];
+  const hasData = countries.length > 0;
 
   return (
     <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80 h-full flex flex-col">
@@ -131,6 +126,12 @@ export const MentionsByCountry = ({ data, totalMentions = 0 }: MentionsByCountry
         </div>
       </div>
 
+      {!hasData ? (
+        <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+          No mentions in this period.
+        </div>
+      ) : (
+      <>
       {/* Stacked bar */}
       <div className="h-5 w-full rounded-md overflow-hidden flex mb-6 bg-muted/40 border border-border/50">
         {countries.map((c) => {
@@ -175,6 +176,8 @@ export const MentionsByCountry = ({ data, totalMentions = 0 }: MentionsByCountry
           </div>
         ))}
       </div>
+      </>
+      )}
     </Card>
   );
 };

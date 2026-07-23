@@ -16,6 +16,12 @@ from prompts.models import PromptAnalytics, DomainMetricSnapshot, PromptGroupMet
 from competitors.models import Competitor
 from .models import ShareOfVoiceAnalytics
 
+# 'Mentions by Country' (Insights). Prompts are run for the India market and the
+# engine stamps every analytics row region='GLOBAL' until a domain opts into
+# per-region tracking, so both values count as India mentions.
+INDIA_REGION_CODES = ('IN', 'GLOBAL')
+INDIA_BAR_COLOR = 'bg-[#7C3AED]'
+
 
 def _url_host(url):
     """Return the bare host (no scheme/www/path) from a URL or bare-host string.
@@ -154,6 +160,44 @@ def live_sentiment_breakdown(domain_id, start_date, end_date, platform_filter=No
         round(counts['neutral'] / total * 100, 2),
         round(counts['negative'] / total * 100, 2),
     )
+
+
+def live_country_breakdown(domain_id, start_date, end_date, platform_filter=None):
+    """Insights 'Mentions by Country' — India only, from live PromptAnalytics.
+
+    Per-region tracking (DomainRegion, see docs/GEO_AI_MENTION_TRACKING_DESIGN.md)
+    is opt-in and no domain enables it, so the engine writes every analytics row
+    with region='GLOBAL' against the India market. India is therefore the only
+    country with real mention data behind it, and it is the only row we return —
+    the widget previously fell back to an invented IN/US/UK/Other split.
+
+    Returns [] when the window has no mentions, so the card shows an empty state
+    instead of a fabricated 100% bar. When real per-region rows start landing,
+    the non-IN regions here become additional entries.
+    """
+    start_dt, end_dt = _dashboard_datetime_window(start_date, end_date)
+    qs = PromptAnalytics.objects.annotate(
+        _window_dt=Coalesce('tracked_at', 'created_at'),
+    ).filter(
+        prompt__group__domain_id=domain_id,
+        track_status='COMP',
+        _window_dt__gte=start_dt,
+        _window_dt__lte=end_dt,
+        region__in=INDIA_REGION_CODES,
+    )
+    if platform_filter:
+        qs = qs.filter(platform=platform_filter)
+
+    india_mentions = int(qs.aggregate(n=Sum('total_mentions'))['n'] or 0)
+    if india_mentions <= 0:
+        return []
+    return [{
+        'code': 'IN',
+        'name': 'India',
+        'percentage': 100.0,
+        'count': india_mentions,
+        'color': INDIA_BAR_COLOR,
+    }]
 
 
 def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=None, domain_host=None):
@@ -882,6 +926,7 @@ def dashboard_summary(request):
         'metrics': metrics,
         'brand': brand,
         'platforms': platforms,
+        'countries': live_country_breakdown(domain_id, start_date, end_date, platform_filter),
         'share_of_voice': share_of_voice,
         'trends': trends,
         'recent_mentions': recent_mentions

@@ -440,7 +440,7 @@ const Dashboard = () => {
               }))
             : undefined
         } />
-        <MentionsByCountry data={summary?.countries} totalMentions={summary?.brand?.total_mentions ?? 0} />
+        <MentionsByCountry data={summary?.countries} />
       </div>
 
       {/* ROW 3 — Key Metrics (moved below the hero) */}
