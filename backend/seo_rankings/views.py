@@ -6023,6 +6023,58 @@ def seo_keyword_volume(request, seo_kw_id):
 # Keyword Competitors — mirrors RankMax Competitors tab
 # ---------------------------------------------------------------------------
 
+# Domain classification for the Competitors tab. A SERP result is not
+# automatically a business competitor: Google routinely ranks Instagram posts,
+# Pinterest pins, YouTube videos and Reddit threads for commercial queries.
+# Those occupy SERP space but you can't compete with them the way you compete
+# with a rival product site, so the UI separates them. Matching is done on
+# dot-delimited labels so country/sub domains (in.pinterest.com, amazon.in,
+# www.instagram.com) classify correctly, while lookalikes such as
+# "amazon-clone.com" do not (its label is "amazon-clone", not "amazon").
+_SOCIAL_BRANDS = {
+    'instagram', 'facebook', 'pinterest', 'twitter', 'tiktok', 'linkedin',
+    'snapchat', 'threads', 'tumblr',
+}
+_VIDEO_BRANDS = {'youtube', 'youtu', 'vimeo', 'dailymotion'}
+_FORUM_BRANDS = {
+    'reddit', 'quora', 'stackoverflow', 'stackexchange', 'medium', 'substack',
+}
+_MARKETPLACE_BRANDS = {
+    'codecanyon', 'envato', 'themeforest', 'amazon', 'ebay', 'etsy',
+    'flipkart', 'alibaba', 'aliexpress', 'g2', 'capterra', 'trustpilot',
+    'clutch', 'producthunt',
+}
+# Short/ambiguous names that would false-positive as bare labels.
+_EXACT_SOCIAL_DOMAINS = {'x.com', 'fb.com', 'vk.com', 't.me'}
+
+# Types treated as genuine business competitors by default. Marketplaces are
+# included deliberately: for a query like "airbnb clone script", codecanyon is a
+# real rival selling the same product, so filtering marketplaces would hide a
+# true competitor.
+COMPETITOR_DEFAULT_TYPES = ('business', 'marketplace')
+
+
+def _classify_competitor_domain(domain: str) -> str:
+    """Return business | social | video | forum | marketplace for a SERP domain."""
+    d = (domain or '').lower().strip().rstrip('.')
+    if not d:
+        return 'business'
+    if d.startswith('www.'):
+        d = d[4:]
+    if d in _EXACT_SOCIAL_DOMAINS:
+        return 'social'
+    labels = set(d.split('.'))
+    if labels & _SOCIAL_BRANDS:
+        return 'social'
+    if labels & _VIDEO_BRANDS:
+        return 'video'
+    if labels & _FORUM_BRANDS:
+        return 'forum'
+    if labels & _MARKETPLACE_BRANDS:
+        return 'marketplace'
+    return 'business'
+
+
 def _competitors_from_comp_today(comp_today, comp_type: str, our_rank):
     """Build the competitor list for the requested view from ``comp_today``.
 
@@ -6051,11 +6103,13 @@ def _competitors_from_comp_today(comp_today, comp_type: str, our_rank):
             rank = int(val.get('rank') or key)
         except (TypeError, ValueError):
             continue
+        dn = val.get('domain', '')
         entries.append({
             'rn': rank,
-            'dn': val.get('domain', ''),
+            'dn': dn,
             'lk': val.get('url', ''),
             'title': val.get('title', ''),
+            'type': _classify_competitor_domain(dn),
         })
     entries.sort(key=lambda e: e['rn'])
 
@@ -6113,8 +6167,16 @@ def seo_keyword_competitors(request, seo_kw_id):
                 'is_recent': domain in ad_recent,
             })
 
+    # Split business competitors from social/UGC results so the UI can default
+    # to real rivals while still reporting how much of the SERP is social.
+    primary = [c for c in competitors if c.get('type') in COMPETITOR_DEFAULT_TYPES]
+    other = [c for c in competitors if c.get('type') not in COMPETITOR_DEFAULT_TYPES]
+
     return Response({
-        'competitors': competitors,
+        'competitors': competitors,   # full list (unchanged for existing callers)
+        'primary_competitors': primary,
+        'other_results': other,
+        'other_count': len(other),
         'ads': ads,
         'type': comp_type,
     })

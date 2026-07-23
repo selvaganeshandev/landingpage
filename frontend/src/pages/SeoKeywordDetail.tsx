@@ -130,6 +130,8 @@ interface Competitor {
   rn: number;
   dn: string;
   lk: string;
+  /** business | marketplace | social | video | forum */
+  type?: string;
 }
 
 interface Note {
@@ -226,6 +228,11 @@ const SeoKeywordDetail = () => {
 
   // Competitors
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
+  // Social/video/forum results that rank but aren't business rivals. Kept
+  // separate so the list defaults to real competitors, with a toggle to reveal
+  // how much of the SERP these occupy.
+  const [otherResults, setOtherResults] = useState<Competitor[]>([]);
+  const [showOtherResults, setShowOtherResults] = useState(false);
   const [competitorAds, setCompetitorAds] = useState<any[]>([]);
   const [compType, setCompType] = useState("tp");
   const [isLoadingComp, setIsLoadingComp] = useState(false);
@@ -309,7 +316,9 @@ const SeoKeywordDetail = () => {
     try {
       setIsLoadingComp(true);
       const data = await apiClient.getSeoKeywordCompetitors(parseInt(id!), compType) as any;
-      setCompetitors(data.competitors || []);
+      // Prefer the split payload; fall back to the flat list for older responses.
+      setCompetitors(data.primary_competitors ?? data.competitors ?? []);
+      setOtherResults(data.other_results ?? []);
       setCompetitorAds(data.ads || []);
     } catch { /* empty */ } finally {
       setIsLoadingComp(false);
@@ -473,6 +482,12 @@ const SeoKeywordDetail = () => {
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
+  // Business competitors by default; social/forum results only when toggled on,
+  // re-sorted by SERP position so the combined list still reads top-down.
+  const visibleCompetitors = showOtherResults
+    ? [...competitors, ...otherResults].sort((a, b) => (a.rn || 0) - (b.rn || 0))
+    : competitors;
+
   if (isLoading) return <PageLoader />;
 
   if (!kwData) {
@@ -992,15 +1007,17 @@ const SeoKeywordDetail = () => {
               <div className="flex items-center justify-center py-16">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
               </div>
-            ) : competitors.length === 0 ? (
+            ) : visibleCompetitors.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground">
-                No competitor data available.
+                {otherResults.length > 0
+                  ? `No business competitors in this view — all ${otherResults.length} ranking results are social/forum pages.`
+                  : "No competitor data available."}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {competitors.map((comp, i) => (
+                {visibleCompetitors.map((comp, i) => (
                   <div
-                    key={i}
+                    key={`${comp.dn}-${comp.rn}-${i}`}
                     className="flex items-center gap-4 p-3 rounded-lg border border-border/50 hover:border-primary/30 transition-colors"
                   >
                     <span className="w-8 h-8 flex items-center justify-center rounded-full bg-muted text-sm font-bold shrink-0">
@@ -1015,8 +1032,31 @@ const SeoKeywordDetail = () => {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{comp.dn}</p>
                     </div>
+                    {comp.type && comp.type !== "business" && (
+                      <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">
+                        {comp.type}
+                      </span>
+                    )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Social/video/forum pages rank here too, but they aren't business
+                rivals — surfaced behind a toggle so the count stays visible. */}
+            {!isLoadingComp && otherResults.length > 0 && (
+              <div className="mt-4 flex items-center justify-between rounded-lg border border-dashed border-border/60 px-3 py-2">
+                <span className="text-xs text-muted-foreground">
+                  {otherResults.length} social/forum result{otherResults.length === 1 ? "" : "s"} also rank for this keyword
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => setShowOtherResults((v) => !v)}
+                >
+                  {showOtherResults ? "Hide" : "Show"}
+                </Button>
               </div>
             )}
           </Card>
