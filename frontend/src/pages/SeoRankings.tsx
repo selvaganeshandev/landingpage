@@ -142,6 +142,18 @@ interface OverviewData {
   comparison: Array<{ status: string; today: number; yesterday: number; best: number }>;
 }
 
+type SortKey = "rank" | "volume" | "best" | "clicks" | "impressions";
+
+// Columns where a SMALLER number is better, so the first click sorts ascending.
+// Everything else (volume, clicks, impressions) leads with the biggest number.
+const ASCENDING_FIRST: SortKey[] = ["rank", "best"];
+
+// Clicks and impressions come from Search Console, which finalises data on a
+// ~2-3 day lag — so the sync reads 7 complete days ending 3 days back rather
+// than the last 7 calendar days. Surfaced as a header tooltip because a bare
+// "CLKS 174" invites the reader to assume it means all-time, or today.
+const GSC_WINDOW_HINT = "Search Console data from the last 7 days";
+
 // Helper: format keyword for UI display
 function mapKeywordForUI(kw: SeoKeyword) {
   return {
@@ -198,7 +210,7 @@ const SeoRankings = () => {
   const [rankFilter, setRankFilter] = useState<"all" | "top3" | "top10" | "top50" | "nr">("all");
   // Sortable columns. `null` key = the API's own ordering, which is the default
   // so the table looks unchanged until the user asks for a sort.
-  const [sortKey, setSortKey] = useState<"rank" | "volume" | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [showOverview, setShowOverview] = useState(true);
@@ -678,8 +690,16 @@ const SeoRankings = () => {
     const rows = seoKeywords.filter(kw => matchesSearch(kw) && matchesRankFilter(kw));
     if (!sortKey) return rows;
 
-    const valueOf = (kw: typeof seoKeywords[number]) =>
-      sortKey === "rank" ? kw.rank : kw.volume;
+    const valueOf = (kw: typeof seoKeywords[number]) => {
+      switch (sortKey) {
+        case "rank": return kw.rank;
+        case "volume": return kw.volume;
+        case "best": return kw.best;
+        case "clicks": return kw.clicks;
+        case "impressions": return kw.impressions;
+        default: return null;
+      }
+    };
 
     return [...rows].sort((a, b) => {
       const av = valueOf(a);
@@ -695,26 +715,31 @@ const SeoRankings = () => {
 
   const filteredKeywords = sortedKeywords;
 
-  const handleSort = (key: "rank" | "volume") => {
+  const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       // Third click clears the sort and restores the API's ordering.
       if (sortDir === "asc") setSortDir("desc");
       else { setSortKey(null); setSortDir("asc"); }
     } else {
-      // Rank ascends first (1 is best); volume descends first (biggest first).
       setSortKey(key);
-      setSortDir(key === "rank" ? "asc" : "desc");
+      setSortDir(ASCENDING_FIRST.includes(key) ? "asc" : "desc");
     }
     setCurrentPage(1);
   };
 
-  const SortableHead = ({ label, sortId, className }: { label: string; sortId: "rank" | "volume"; className?: string }) => (
-    <TableHead className={className}>
+  const SortableHead = ({ label, sortId, className, hint }: {
+    label: string;
+    sortId: SortKey;
+    className?: string;
+    /** Optional tooltip explaining what the column measures. */
+    hint?: string;
+  }) => {
+    const button = (
       <button
         type="button"
         onClick={() => handleSort(sortId)}
         className="inline-flex items-center gap-1 mx-auto hover:text-foreground transition-colors"
-        aria-label={`Sort by ${label}`}
+        aria-label={`Sort by ${label}${hint ? `. ${hint}` : ""}`}
       >
         {label}
         {sortKey === sortId ? (
@@ -723,8 +748,21 @@ const SeoRankings = () => {
           <ArrowUpDown className="h-3 w-3 opacity-40" />
         )}
       </button>
-    </TableHead>
-  );
+    );
+
+    return (
+      <TableHead className={className}>
+        {hint ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>{button}</TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">{hint}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : button}
+      </TableHead>
+    );
+  };
 
   // Toggle a rank-range filter from the Comparison card and jump to the
   // keyword list so the user immediately sees the filtered data. Clicking
@@ -1694,13 +1732,13 @@ const SeoRankings = () => {
                       <SortableHead label="VOLUME" sortId="volume" className="text-center text-xs font-semibold py-2 w-16" />
                     )}
                     {visibleColumns.best && (
-                      <TableHead className="text-center text-xs font-semibold py-2 w-12">BEST</TableHead>
+                      <SortableHead label="BEST" sortId="best" className="text-center text-xs font-semibold py-2 w-12" hint="Best rank this keyword has ever reached" />
                     )}
                     {visibleColumns.clicks && (
-                      <TableHead className="text-center text-xs font-semibold py-2 w-12">CLKS</TableHead>
+                      <SortableHead label="CLKS" sortId="clicks" className="text-center text-xs font-semibold py-2 w-12" hint={`Clicks — ${GSC_WINDOW_HINT}`} />
                     )}
                     {visibleColumns.impressions && (
-                      <TableHead className="text-center text-xs font-semibold py-2 w-12">IMPS</TableHead>
+                      <SortableHead label="IMPS" sortId="impressions" className="text-center text-xs font-semibold py-2 w-12" hint={`Impressions — ${GSC_WINDOW_HINT}`} />
                     )}
                     {visibleColumns["1d"] && (
                       <TableHead className="text-center text-xs font-semibold py-2 w-12">1D</TableHead>
