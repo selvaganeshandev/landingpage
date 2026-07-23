@@ -207,7 +207,12 @@ const SeoKeywordDetail = () => {
   // Core data
   const [kwData, setKwData] = useState<SeoKeyword | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "overview");
+  // "volume-history" is hidden (no volume data source) — an old bookmarked
+  // ?tab=volume-history link would otherwise land on a tab with no trigger.
+  const requestedTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState(
+    !requestedTab || requestedTab === "volume-history" ? "overview" : requestedTab
+  );
 
   // Rank History
   const [rankHistory, setRankHistory] = useState<RankHistoryPoint[]>([]);
@@ -528,9 +533,10 @@ const SeoKeywordDetail = () => {
           <TabsTrigger value="rank-history" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
             Rank History
           </TabsTrigger>
-          <TabsTrigger value="volume-history" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
-            Volume History
-          </TabsTrigger>
+          {/* Volume History hidden: DataBlue's SERP API returns no search-volume
+              data and no other volume provider is configured, so the tab could
+              only ever render zeros. Restore this trigger (and the matching
+              TabsContent) once a keyword-volume source is wired up. */}
           <TabsTrigger value="competitors" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
             Competitors
           </TabsTrigger>
@@ -663,7 +669,7 @@ const SeoKeywordDetail = () => {
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="text-sm font-semibold flex items-center gap-1">
                     Current Google SERP view of your website
-                    <span className="text-muted-foreground text-xs cursor-help" title="Shows how your website appears in Google search results"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="inline-block align-[-1px] opacity-50" role="img"><title>Shows how your website appears in Google search results</title><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span>
+                    <span className="text-muted-foreground text-xs cursor-pointer" title="Shows how your website appears in Google search results"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="inline-block align-[-1px] opacity-50" role="img"><title>Shows how your website appears in Google search results</title><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span>
                   </h4>
                   <a
                     href={`https://www.google.com/search?q=${encodeURIComponent(kwData.keyword_text)}`}
@@ -865,7 +871,7 @@ const SeoKeywordDetail = () => {
               {/* Volume summary cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Card className="p-5 text-center border border-border">
-                  <p className="text-xs text-muted-foreground mb-2 font-medium">Top <span className="cursor-help" title="Highest search volume in the past year"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="inline-block align-[-1px] opacity-50" role="img"><title>Highest search volume in the past year</title><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span></p>
+                  <p className="text-xs text-muted-foreground mb-2 font-medium">Top <span className="cursor-pointer" title="Highest search volume in the past year"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="inline-block align-[-1px] opacity-50" role="img"><title>Highest search volume in the past year</title><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span></p>
                   <span className="text-3xl font-bold">{formatVolume(volumeData?.top_volume || 0)}</span>
                 </Card>
                 <Card className="p-5 text-center border border-border">
@@ -885,7 +891,7 @@ const SeoKeywordDetail = () => {
               {/* Monthly volume breakdown cards */}
               <Card className="p-6 border border-border">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold">Keyword Search Volume History <span className="text-muted-foreground text-xs cursor-help" title="Monthly search volume breakdown"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="inline-block align-[-1px] opacity-50" role="img"><title>Monthly search volume breakdown</title><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span></h3>
+                  <h3 className="text-lg font-semibold">Keyword Search Volume History <span className="text-muted-foreground text-xs cursor-pointer" title="Monthly search volume breakdown"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="inline-block align-[-1px] opacity-50" role="img"><title>Monthly search volume breakdown</title><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span></h3>
                   {volumeData?.top_volume ? (
                     <span className="text-sm text-muted-foreground">
                       Top volume <strong>{formatVolume(volumeData.top_volume)}</strong> (1 Year)

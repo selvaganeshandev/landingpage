@@ -6023,6 +6023,51 @@ def seo_keyword_volume(request, seo_kw_id):
 # Keyword Competitors — mirrors RankMax Competitors tab
 # ---------------------------------------------------------------------------
 
+def _competitors_from_comp_today(comp_today, comp_type: str, our_rank):
+    """Build the competitor list for the requested view from ``comp_today``.
+
+    The live rank pipeline stores comp_today keyed by SERP position --
+    ``{"1": {domain, url, title, rank}, "2": {...}}`` -- while older rows used
+    pre-bucketed ``{'tp'|'bf'|'ar': [...]}``. The endpoint previously only read
+    the bucketed shape, so every keyword written by the current pipeline
+    returned an empty list ("No competitor data available") even though the
+    SERP competitors were captured. Support both shapes.
+    """
+    if not isinstance(comp_today, dict) or not comp_today:
+        return []
+
+    # Legacy shape: already bucketed by type.
+    if any(k in comp_today for k in ('tp', 'bf', 'ar')):
+        bucket = comp_today.get(comp_type) or []
+        return bucket if isinstance(bucket, list) else []
+
+    # Current shape: keyed by SERP position.
+    entries = []
+    for key, val in comp_today.items():
+        if not isinstance(val, dict):
+            continue
+        try:
+            rank = int(val.get('rank') or key)
+        except (TypeError, ValueError):
+            continue
+        entries.append({
+            'rank': rank,
+            'domain': val.get('domain', ''),
+            'url': val.get('url', ''),
+            'title': val.get('title', ''),
+        })
+    entries.sort(key=lambda e: e['rank'])
+
+    our = our_rank or 0
+    if comp_type == 'bf':
+        # Ranked above us. If we're unranked (0), everyone is ahead.
+        return entries if not our else [e for e in entries if e['rank'] < our]
+    if comp_type == 'ar':
+        # Ranked below us. Nobody is below an unranked keyword.
+        return [] if not our else [e for e in entries if e['rank'] > our]
+    return entries[:10]
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def seo_keyword_competitors(request, seo_kw_id):
@@ -6052,7 +6097,7 @@ def seo_keyword_competitors(request, seo_kw_id):
 
     if serp_history:
         comp_today = serp_history.comp_today or {}
-        competitors = comp_today.get(comp_type, [])
+        competitors = _competitors_from_comp_today(comp_today, comp_type, seo_kw.rank_now)
 
         # Get ad snippet data
         ad_history = serp_history.ad_snippet_history or {}
