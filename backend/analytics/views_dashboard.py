@@ -335,6 +335,124 @@ def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=
     }
 
 
+# --- Visibility score -------------------------------------------------------
+#
+# Weights are unchanged from the original formula; only the normalization is.
+# Each component is now an ABSOLUTE rate rather than a ratio against MAX() across
+# every domain in the database. That old normalization had two fatal properties:
+#
+#   1. No usable range. Dividing a domain's mentions by the largest domain's
+#      total crushed real performance to near zero, while absent sentiment and
+#      absent position each scored full/half credit for free. Every domain landed
+#      between ~11 and ~29 and could never reach "Good" (50), regardless of how
+#      well it actually performed.
+#   2. Cross-tenant coupling. The MAX() had no organization filter, so one
+#      customer's score moved when an unrelated customer's data grew, and a
+#      stored score could not be reproduced later because the ceiling had shifted.
+#
+# Rates fix both: they are bounded 0-1 by construction, depend only on the
+# domain's own tracked prompts, and are reproducible forever. They also put the
+# brand on the same conceptual scale as competitors, which were already scored
+# as mentioned_count / total_prompts.
+VISIBILITY_WEIGHTS = {
+    'mentions': 0.4,    # frequency  - how often the brand shows up at all
+    'citations': 0.3,   # authority  - how often AI cites the brand's own site
+    'sentiment': 0.2,   # perception - how favourably it is described
+    'position': 0.1,    # prominence - where in the answer it appears
+}
+
+# Position at which prominence credit reaches zero. Position 1 scores 1.0,
+# position 10 or worse scores 0.0. Absolute, so it never shifts with the data.
+VISIBILITY_POSITION_FLOOR = 10.0
+
+
+def compute_visibility_score(responses, mentioned, own_cited, avg_sentiment, avg_position):
+    """Visibility score (0-100) from absolute rates. See VISIBILITY_WEIGHTS above.
+
+    Args:
+        responses:     total AI responses tracked in the window (the denominator)
+        mentioned:     responses that mentioned the brand
+        own_cited:     responses that cited the brand's own domain
+        avg_sentiment: mean sentiment over mention rows, -1..1
+        avg_position:  mean position over mention rows, 1 = best, 0 = unknown
+
+    A domain with no mentions scores 0.0 — sentiment and position contribute
+    nothing when there is nothing to be sentimental about or to position.
+    """
+    if not responses or not mentioned:
+        return 0.0
+
+    norm_mentions = max(0.0, min(1.0, mentioned / responses))
+    norm_citations = max(0.0, min(1.0, own_cited / responses))
+    norm_sentiment = max(0.0, min(1.0, (float(avg_sentiment or 0) + 1.0) / 2.0))
+    if avg_position and float(avg_position) > 0:
+        span = VISIBILITY_POSITION_FLOOR - 1.0
+        norm_position = (VISIBILITY_POSITION_FLOOR - float(avg_position)) / span
+        norm_position = max(0.0, min(1.0, norm_position))
+    else:
+        norm_position = 0.0
+
+    w = VISIBILITY_WEIGHTS
+    score = (
+        w['mentions'] * norm_mentions
+        + w['citations'] * norm_citations
+        + w['sentiment'] * norm_sentiment
+        + w['position'] * norm_position
+    ) * 100
+    return round(score, 2)
+
+
+def live_visibility_score(domain_id, start_date, end_date, platform_filter=None, domain_host=None):
+    """Compute the visibility score directly from live PromptAnalytics.
+
+    Reads the same rows, over the same window, as every other headline figure on
+    the card, so the gauge and the Total Mentions beneath it can no longer
+    disagree about which population they describe.
+    """
+    start_dt, end_dt = _dashboard_datetime_window(start_date, end_date)
+    qs = PromptAnalytics.objects.annotate(
+        _window_dt=Coalesce('tracked_at', 'created_at'),
+    ).filter(
+        prompt__group__domain_id=domain_id,
+        track_status='COMP',
+        _window_dt__gte=start_dt,
+        _window_dt__lte=end_dt,
+    )
+    if platform_filter:
+        qs = qs.filter(platform=platform_filter)
+
+    responses = 0
+    mentioned = 0
+    own_cited = 0
+    sent_sum = 0.0
+    pos_sum = 0.0
+    pos_n = 0
+
+    for is_mention, position, sentiment, citation_list in qs.values_list(
+        'is_mention', 'position', 'sentiment_score', 'citation_list',
+    ):
+        responses += 1
+
+        if domain_host and isinstance(citation_list, list):
+            for entry in citation_list:
+                url = _citation_entry_url(entry)
+                host = _url_host(url) if url else ''
+                if host and (host == domain_host or host.endswith('.' + domain_host)):
+                    own_cited += 1
+                    break
+
+        if is_mention:
+            mentioned += 1
+            sent_sum += float(sentiment or 0)
+            if position and float(position) > 0:
+                pos_sum += float(position)
+                pos_n += 1
+
+    avg_sentiment = (sent_sum / mentioned) if mentioned else 0.0
+    avg_position = (pos_sum / pos_n) if pos_n else 0.0
+    return compute_visibility_score(responses, mentioned, own_cited, avg_sentiment, avg_position)
+
+
 def _latest_snapshot_per_platform(domain_id, start_date, end_date, platform_filter=None):
     """Return the newest DomainMetricSnapshot per platform inside the window.
 
@@ -819,8 +937,25 @@ def dashboard_summary(request):
         return sum(
             float(s.visibility_score or 0) * s.mentions for s in snapshots
         ) / snap_mentions
-    visibility_score = _snapshot_weighted_visibility(snapshot_qs) if total_mentions > 0 else 0.0
-    prev_visibility_score = _snapshot_weighted_visibility(prev_snapshot_qs) if prev_total_mentions > 0 else 0.0
+    # Trailing windows score LIVE from PromptAnalytics, using the rate-based
+    # formula in compute_visibility_score() — same rows, same window as every
+    # other figure on the card. Historical windows have no live rows to score, so
+    # they keep the engine's stored snapshot value; those were written under the
+    # old MAX()-normalized formula and stay on the old scale until the engine
+    # reprocesses them.
+    if using_snapshot_history:
+        visibility_score = _snapshot_weighted_visibility(snapshot_qs) if total_mentions > 0 else 0.0
+    else:
+        visibility_score = live_visibility_score(
+            domain_id, start_date, end_date, platform_filter, domain_host
+        )
+    prev_live_mentions = live_prev['total_mentions']
+    if prev_live_mentions > 0 and not using_snapshot_history:
+        prev_visibility_score = live_visibility_score(
+            domain_id, prev_start_date, prev_end_date, platform_filter, domain_host
+        )
+    else:
+        prev_visibility_score = _snapshot_weighted_visibility(prev_snapshot_qs) if prev_total_mentions > 0 else 0.0
 
     # Datetime window reused by the "recent mentions" section further below.
     end_datetime = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
@@ -927,6 +1062,39 @@ def dashboard_summary(request):
     if platform_filter:
         sov_qs = sov_qs.filter(platform=platform_filter)
     
+    # Baseline for the share-of-voice trend: the most recent reading BEFORE the
+    # current window opened. Share of voice is a percentage that already sums to
+    # 100 across brands, so the meaningful trend is the change in percentage
+    # POINTS (+3.2 = gained 3.2 points of share), not a percentage-of-percentage.
+    #
+    # Deliberately not restricted to the previous period: readings are irregular
+    # (roughly weekly, and sparser for some domains), so a strict previous-window
+    # filter would find nothing and silently report "no change". Taking the last
+    # reading before the window always compares against real earlier data.
+    baseline_qs = ShareOfVoiceAnalytics.objects.filter(
+        domain_id=domain_id,
+        timestamp__lt=start_date,
+    )
+    if platform_filter:
+        baseline_qs = baseline_qs.filter(platform=platform_filter)
+
+    baseline_shares = {}
+    baseline_day = baseline_qs.aggregate(d=Max('timestamp'))['d']
+    if baseline_day:
+        for row in baseline_qs.filter(timestamp=baseline_day):
+            baseline_shares[row.competitor_id] = float(row.share_percentage or 0)
+
+    def _share_trend(competitor_id, current_share):
+        """Change in share-of-voice POINTS vs the baseline reading.
+
+        Returns None when this brand has no earlier reading to compare against —
+        a brand first seen in this window has no trend, which is different from a
+        trend of zero. The UI shows nothing rather than a misleading 0%.
+        """
+        if competitor_id not in baseline_shares:
+            return None
+        return round(current_share - baseline_shares[competitor_id], 2)
+
     share_of_voice = None
     if sov_qs.exists():
         latest_day = sov_qs.order_by('-timestamp').first().timestamp
@@ -948,7 +1116,9 @@ def dashboard_summary(request):
                     'share_percentage': float(comp_row.share_percentage),
                     'mention_count': comp_row.mention_count,
                     'market_position': comp_row.market_position,
-                    'trend': 0  # TODO: Calculate trend if needed
+                    'trend': _share_trend(
+                        comp_row.competitor_id, float(comp_row.share_percentage)
+                    ),
                 })
             except Competitor.DoesNotExist:
                 continue
@@ -963,7 +1133,9 @@ def dashboard_summary(request):
                 'share_percentage': float(your_brand.share_percentage),
                 'mention_count': your_brand.mention_count,
                 'market_position': 1,
-                'trend': 0,
+                # competitor_id is None for your own brand — the baseline map is
+                # keyed the same way, so this looks up your own earlier reading.
+                'trend': _share_trend(None, float(your_brand.share_percentage)),
                 'is_you': True
             })
         

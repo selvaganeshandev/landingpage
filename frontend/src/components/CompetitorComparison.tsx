@@ -1,16 +1,19 @@
 import { Card } from "@/components/ui/card";
-import { TrendingUp } from "lucide-react";
+import { TrendingUp, TrendingDown } from "lucide-react";
 
 interface Competitor {
   name: string;
   url: string;
   mentions: number;
   shareOfVoice: number;
-  trend: number;
+  /** Change in share-of-voice POINTS vs the last reading before this window.
+   *  null when the brand has no earlier reading — no trend is not the same as
+   *  a trend of zero, so it renders as nothing rather than "0%". */
+  trend: number | null;
 }
 
 export interface CompetitorComparisonProps {
-  competitors?: Array<{ name?: string; url?: string; mentions?: number; shareOfVoice?: number; trend?: number; }>;
+  competitors?: Array<{ name?: string; url?: string; mentions?: number; shareOfVoice?: number; trend?: number | null; }>;
 }
 
 export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonProps) => {
@@ -19,7 +22,9 @@ export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonP
     url: c.url || '',
     mentions: c.mentions ?? 0,
     shareOfVoice: c.shareOfVoice ?? 0,
-    trend: c.trend ?? 0,
+    // Keep null distinct from 0 — `?? 0` here is what used to turn "unknown"
+    // into a confident-looking 0%.
+    trend: c.trend ?? null,
   })) : [];
   return (
     <Card className="p-6 h-full flex flex-col border border-border">
@@ -44,10 +49,25 @@ export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonP
               </div>
               <div className="text-right flex-shrink-0">
                 <p className="text-sm font-medium">{competitor.mentions} mentions</p>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <TrendingUp className="h-3 w-3" />
-                  {competitor.trend > 0 ? "+" : ""}{competitor.trend}%
-                </div>
+                {competitor.trend !== null && (
+                  <div
+                    className={`flex items-center justify-end gap-1 text-xs ${
+                      competitor.trend > 0
+                        ? "text-success"
+                        : competitor.trend < 0
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }`}
+                    title="Change in share of voice vs the previous reading"
+                  >
+                    {competitor.trend < 0 ? (
+                      <TrendingDown className="h-3 w-3" />
+                    ) : (
+                      <TrendingUp className="h-3 w-3" />
+                    )}
+                    {competitor.trend > 0 ? "+" : ""}{competitor.trend} pts
+                  </div>
+                )}
               </div>
             </div>
             <div className="space-y-1">
