@@ -451,7 +451,7 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.7,
-                max_tokens=3000,
+                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
                 timeout=60,
             )
             text = response.choices[0].message.content
@@ -619,7 +619,7 @@ def _process_prompt_with_gemini_vertex(prompt_text: str, user_domain: str, group
             'temperature': 0.7,
             'top_k': 40,
             'top_p': 0.95,
-            'max_output_tokens': 3000,
+            'max_output_tokens': getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
             'tools': tools,
         }
         if thinking_budget >= 0:
@@ -673,7 +673,7 @@ def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, clien
             temperature=0.7,
             top_k=40,
             top_p=0.95,
-            max_output_tokens=3000,
+            max_output_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
         )
 
         text = ""
@@ -744,7 +744,7 @@ def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, c
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.7,
-                max_tokens=3000,
+                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
                 timeout=90,
             )
             text = response.choices[0].message.content if response.choices else ""
@@ -844,7 +844,7 @@ def process_prompt_with_claude(prompt_text: str, user_domain: str, client: Any =
                 )
                 grounded = anthropic_client.messages.create(
                     model=model_name,
-                    max_tokens=3000,
+                    max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
                     temperature=0.7,
                     system=grounded_system,
                     tools=[{
@@ -869,7 +869,7 @@ def process_prompt_with_claude(prompt_text: str, user_domain: str, client: Any =
             )
             response = anthropic_client.messages.create(
                 model=model_name,
-                max_tokens=3000,
+                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
                 temperature=0.7,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
@@ -915,7 +915,7 @@ def process_prompt_with_grok(prompt_text: str, user_domain: str, client: Any = N
                         {"role": "user", "content": user_message},
                     ],
                     temperature=0.7,
-                    max_tokens=3000,
+                    max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
                     timeout=90,
                     extra_body={"search_parameters": {"mode": "auto"}},
                 )
@@ -938,7 +938,7 @@ def process_prompt_with_grok(prompt_text: str, user_domain: str, client: Any = N
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.7,
-                max_tokens=3000,
+                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
                 timeout=60,
             )
             text = response.choices[0].message.content if response.choices else ""
@@ -972,7 +972,7 @@ def process_prompt_with_deepseek(prompt_text: str, user_domain: str, client: Any
                 {"role": "user", "content": _build_analytics_user_prompt(prompt_text, country_text)},
             ],
             temperature=0.7,
-            max_tokens=3000,
+            max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
             timeout=60,
         )
         text = response.choices[0].message.content if response.choices else ""

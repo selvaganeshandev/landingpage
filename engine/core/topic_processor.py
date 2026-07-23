@@ -5,6 +5,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
 from difflib import SequenceMatcher
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from shared_models.models import Domain, Keyword, Topic, TopicKeyword
@@ -146,7 +147,7 @@ Return ONLY the JSON array, no markdown, no explanations."""
                 return self._fallback_group_keywords(keywords)
             
             response = self.chatgpt_client.client.chat.completions.create(
-                model="gpt-4o",
+                model=getattr(settings, "OPENAI_INTERNAL_MODEL", "gpt-4o-mini"),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
@@ -411,7 +412,7 @@ Return ONLY the JSON object."""
                 return None
             
             response = self.chatgpt_client.client.chat.completions.create(
-                model="gpt-4o",
+                model=getattr(settings, "OPENAI_INTERNAL_MODEL", "gpt-4o-mini"),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}

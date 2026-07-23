@@ -198,6 +198,28 @@ GEMINI_WEB_SEARCH = config('GEMINI_WEB_SEARCH', default=True, cast=bool)
 GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-flash-latest')
 DEEPSEEK_MODEL = config('DEEPSEEK_MODEL', default='deepseek-chat')
 
+# Ceiling on the generated answer length for EVERY pipeline LLM call (was
+# hardcoded at 3000 in nine places).
+#
+# This is a SAFETY CEILING, NOT a cost saving. Measured on prod 2026-07-23 over
+# 8 real prompts on gpt-4o: output was 455-640 tokens (median 579) and every
+# call ended with finish_reason='stop' — the 3000 cap was never once reached.
+# You are billed for tokens actually generated, so lowering the cap saves
+# nothing here; the cost driver is the NUMBER of calls, not their length.
+#
+# 1500 leaves ~2.3x headroom over the observed median so nothing gets truncated
+# (a truncated answer loses the citations models list at the end, which the
+# Citations page counts), while still bounding a pathological runaway response.
+# Tunable from .env without a deploy.
+LLM_MAX_OUTPUT_TOKENS = config('LLM_MAX_OUTPUT_TOKENS', default=1500, cast=int)
+
+# Model for INTERNAL LLM work (topic extraction, prompt generation, competitor
+# insight summaries) — output nobody reads as "what ChatGPT says about my
+# brand", so it does not need the flagship model. The mention-tracking call
+# deliberately keeps OPENAI_CHATGPT_MODEL: that one exists to measure what real
+# ChatGPT users are told, so cheapening it would change the measurement itself.
+OPENAI_INTERNAL_MODEL = config('OPENAI_INTERNAL_MODEL', default='gpt-4o-mini')
+
 # ==================== GEMINI BACKEND: AI Studio vs Vertex AI ====================
 # 'aistudio' (default) keeps the API-key path via google.generativeai.
 # 'vertex' routes Gemini through Vertex AI on a GCP project so calls bill against
