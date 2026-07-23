@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from domains.models import Domain
 from prompts.models import PromptAnalytics, DomainMetricSnapshot, PromptGroupMetricSnapshot, PromptGroup, Prompt
 from competitors.models import Competitor
-from .models import ShareOfVoiceAnalytics
+from .models import ShareOfVoiceAnalytics, SentimentAnalytics
 
 # 'Mentions by Country' (Insights). Prompts are run for the India market and the
 # engine stamps every analytics row region='GLOBAL' until a domain opts into
@@ -34,7 +34,13 @@ def _url_host(url):
     raw = str(url).strip()
     if "://" not in raw:
         raw = "http://" + raw
-    host = (urlparse(raw).netloc or "").lower()
+    try:
+        host = (urlparse(raw).netloc or "").lower()
+    except ValueError:
+        # Malformed cited URLs reach here straight from LLM output (an unbalanced
+        # '[' makes urlparse raise "Invalid IPv6 URL"). One such citation used to
+        # 500 the entire Insights page for the domain, so treat it as hostless.
+        return ""
     return host[4:] if host.startswith("www.") else host
 
 
@@ -46,7 +52,11 @@ def _canonical_page(url):
     raw = str(url).strip()
     if "://" not in raw:
         raw = "http://" + raw
-    parsed = urlparse(raw)
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        # Same malformed-URL guard as _url_host above.
+        return ""
     host = (parsed.netloc or "").lower()
     if host.startswith("www."):
         host = host[4:]
@@ -325,6 +335,113 @@ def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=
     }
 
 
+def _latest_snapshot_per_platform(domain_id, start_date, end_date, platform_filter=None):
+    """Return the newest DomainMetricSnapshot per platform inside the window.
+
+    Snapshot `mentions`/`citations` are CUMULATIVE running totals re-recorded on
+    each processing day, so the newest row per platform describes the domain's
+    state as of the end of the window. Summing every row instead would count the
+    same mentions once per snapshot date.
+    """
+    period_types = get_period_types_for_query((end_date - start_date).days or 1)
+    qs = DomainMetricSnapshot.objects.filter(
+        domain_id=domain_id,
+        snapshot_date__gte=start_date,
+        snapshot_date__lte=end_date,
+        period_type__in=period_types,
+    ).exclude(platform__isnull=True).exclude(platform='')
+    if platform_filter:
+        qs = qs.filter(platform=platform_filter)
+
+    latest = {}
+    for s in qs:
+        current = latest.get(s.platform)
+        # Tie-break on id so several period_type rows sharing the newest date
+        # still contribute exactly one snapshot per platform.
+        if current is None or (s.snapshot_date, s.id) > (current.snapshot_date, current.id):
+            latest[s.platform] = s
+    return list(latest.values())
+
+
+def snapshot_window_metrics(domain_id, start_date, end_date, platform_filter=None):
+    """Historical fallback for `live_domain_window_metrics`, read from snapshots.
+
+    `PromptAnalytics` rows are updated IN PLACE on every run, so `tracked_at`
+    always points at the most recent run and no per-day history survives there.
+    Any window that ends before the latest run therefore has zero live rows, even
+    though the period genuinely had activity. DomainMetricSnapshot is the only
+    real history, so it backs historical windows.
+
+    Returns the same keys as `live_domain_window_metrics` so callers can swap it
+    in directly. Two keys cannot be reconstructed from snapshots:
+      cited_urls  - snapshots store domain citation COUNTS, not the citation_list
+                    URL events the live path counts, so this mirrors `citations`
+                    (the same definition the trend chart already plots).
+      cited_pages - no per-URL detail is retained; always 0.
+    """
+    snapshots = _latest_snapshot_per_platform(domain_id, start_date, end_date, platform_filter)
+
+    total_mentions = sum(s.mentions for s in snapshots)
+    total_citations = sum(s.citations or 0 for s in snapshots)
+
+    pos_sum = sum(float(s.average_position or 0) * s.mentions for s in snapshots if s.mentions > 0)
+    pos_wt = sum(s.mentions for s in snapshots if s.mentions > 0 and float(s.average_position or 0) > 0)
+    avg_position = (pos_sum / pos_wt) if pos_wt > 0 else 0.0
+
+    sent_sum = sum(float(s.sentiment_score or 0) * s.mentions for s in snapshots if s.mentions > 0)
+    avg_sentiment = (sent_sum / total_mentions) if total_mentions > 0 else 0.0
+
+    platform_list = [{
+        'platform': s.platform,
+        'mention_count': s.mentions,
+        'avg_position': int(round(float(s.average_position or 0))),
+        'citations': s.citations or 0,
+        'cited_pages': 0,
+    } for s in snapshots]
+    platform_list.sort(key=lambda x: x['mention_count'], reverse=True)
+
+    return {
+        'total_mentions': total_mentions,
+        'domain_citations': total_citations,
+        'cited_urls': total_citations,
+        'cited_pages': 0,
+        'avg_position': avg_position,
+        'avg_sentiment': avg_sentiment,
+        'platforms': platform_list,
+    }
+
+
+def snapshot_sentiment_breakdown(domain_id, start_date, end_date, platform_filter=None):
+    """Historical sentiment split, read from SentimentAnalytics.
+
+    `SentimentAnalytics` keeps positive/neutral/negative percentages per theme
+    per platform per date, so unlike DomainMetricSnapshot it can rebuild the
+    sentiment bar for a past window. Rows on the newest date in the window are
+    combined weighted by `mention_count`.
+    """
+    qs = SentimentAnalytics.objects.filter(
+        domain_id=domain_id,
+        snapshot_date__gte=start_date,
+        snapshot_date__lte=end_date,
+    )
+    if platform_filter:
+        qs = qs.filter(platform=platform_filter)
+
+    newest = qs.aggregate(d=Max('snapshot_date'))['d']
+    if not newest:
+        return (0, 0, 0)
+
+    rows = list(qs.filter(snapshot_date=newest))
+    weight = sum(r.mention_count or 0 for r in rows)
+    if weight <= 0:
+        return (0, 0, 0)
+
+    pos = sum(float(r.positive_percentage or 0) * (r.mention_count or 0) for r in rows) / weight
+    neu = sum(float(r.neutral_percentage or 0) * (r.mention_count or 0) for r in rows) / weight
+    neg = sum(float(r.negative_percentage or 0) * (r.mention_count or 0) for r in rows) / weight
+    return (round(pos, 2), round(neu, 2), round(neg, 2))
+
+
 def calculate_relative_time(dt):
     """Calculate relative time string like '2 hours ago'"""
     now = timezone.now()
@@ -500,13 +617,19 @@ def dashboard_summary(request):
     # Normalize platform name if provided (e.g., 'chatgpt' -> 'ChatGPT')
     platform_filter = None
     if llm_model and llm_model != 'all':
-        # Map lowercase to proper case platform names (must match DB values exactly)
+        # Map lowercase to proper case platform names (must match DB values exactly).
+        # This must stay in sync with the engine's authoritative map in
+        # engine/core/domain_processor.py:833 — that is what actually writes the
+        # platform strings. The `.capitalize()` fallback below cannot be relied on
+        # for multi-word or inner-capital names: it turns 'deepseek' into
+        # 'Deepseek', which never matches the 'DeepSeek' the engine writes.
         platform_map = {
             'chatgpt': 'ChatGPT',
             'claude': 'Claude',
             'gemini': 'Google Gemini',  # Fixed: DB stores as "Google Gemini" not "Gemini"
             'perplexity': 'Perplexity',
-            'grok': 'Grok'
+            'grok': 'Grok',
+            'deepseek': 'DeepSeek',
         }
         platform_filter = platform_map.get(llm_model.lower(), llm_model.capitalize())
         logger.info(f"Dashboard API: Filtering by platform: {platform_filter}")
@@ -638,6 +761,24 @@ def dashboard_summary(request):
     live = live_domain_window_metrics(domain_id, start_date, end_date, platform_filter, domain_host)
     live_prev = live_domain_window_metrics(domain_id, prev_start_date, prev_end_date, platform_filter, domain_host)
 
+    # Historical windows: PromptAnalytics is updated in place, so `tracked_at`
+    # always points at the latest run and a window ending before that run has no
+    # live rows at all — the page used to render entirely empty even for periods
+    # that demonstrably had activity. Snapshots are the only surviving history,
+    # so fall back to them whenever the window has no live data but snapshots do.
+    # Trailing windows (which include the latest run) still take the live path
+    # unchanged, so this only ever adds data where there was none.
+    using_snapshot_history = False
+    if live['total_mentions'] == 0:
+        snap_live = snapshot_window_metrics(domain_id, start_date, end_date, platform_filter)
+        if snap_live['total_mentions'] > 0:
+            live = snap_live
+            using_snapshot_history = True
+    if live_prev['total_mentions'] == 0:
+        snap_prev = snapshot_window_metrics(domain_id, prev_start_date, prev_end_date, platform_filter)
+        if snap_prev['total_mentions'] > 0:
+            live_prev = snap_prev
+
     total_mentions = live['total_mentions']
     prev_total_mentions = live_prev['total_mentions']
     # Total Citations = count of every URL the AI cited (matches the Citations page)
@@ -653,12 +794,30 @@ def dashboard_summary(request):
     # live window-aggregates), but GATE it on live presence — a domain with zero
     # live mentions in the window has no real visibility, so we never surface a
     # stale snapshot score for it (this was the phantom "22.14 with 0 mentions").
+    #
+    # Snapshot `mentions` is the platform's CUMULATIVE running total, re-recorded
+    # on every processing day — not that day's new mentions. Summing every row in
+    # the window therefore counts the same mentions once per snapshot date (e.g.
+    # ChatGPT 57 on Jul 18 and 57 again on Jul 19 is one set of 57, not 114),
+    # which skewed the weighting toward whichever platforms happened to be
+    # processed on more days. Keeping only the LATEST snapshot per platform
+    # reproduces the live mention total exactly (verified across domains and
+    # across 7/30/90/180-day windows), so the weights now sum to the same
+    # "Total Mentions" figure the card prints beneath the gauge.
     def _snapshot_weighted_visibility(sqs):
-        snap_mentions = sum(s.mentions for s in sqs)
+        latest_by_platform = {}
+        for s in sqs:
+            current = latest_by_platform.get(s.platform)
+            # Tie-break on id so a platform with several rows on its latest date
+            # (one per period_type) still contributes exactly one weight.
+            if current is None or (s.snapshot_date, s.id) > (current.snapshot_date, current.id):
+                latest_by_platform[s.platform] = s
+        snapshots = [s for s in latest_by_platform.values() if s.mentions > 0]
+        snap_mentions = sum(s.mentions for s in snapshots)
         if snap_mentions <= 0:
             return 0.0
         return sum(
-            float(s.visibility_score or 0) * s.mentions for s in sqs if s.mentions > 0
+            float(s.visibility_score or 0) * s.mentions for s in snapshots
         ) / snap_mentions
     visibility_score = _snapshot_weighted_visibility(snapshot_qs) if total_mentions > 0 else 0.0
     prev_visibility_score = _snapshot_weighted_visibility(prev_snapshot_qs) if prev_total_mentions > 0 else 0.0
@@ -731,6 +890,12 @@ def dashboard_summary(request):
     positive_pct, neutral_pct, negative_pct = live_sentiment_breakdown(
         domain_id, start_date, end_date, platform_filter
     )
+    # Historical window: rebuild the split from SentimentAnalytics, which (unlike
+    # DomainMetricSnapshot) retains the positive/neutral/negative percentages.
+    if using_snapshot_history and (positive_pct, neutral_pct, negative_pct) == (0, 0, 0):
+        positive_pct, neutral_pct, negative_pct = snapshot_sentiment_breakdown(
+            domain_id, start_date, end_date, platform_filter
+        )
     
     brand = {
         'visibility_score': round(visibility_score, 2),
