@@ -429,12 +429,36 @@ class DomainMetricSnapshot(models.Model):
         help_text="Average sentiment score (-1.00 to 1.00)"
     )
     average_position = models.DecimalField(
-        max_digits=8, 
-        decimal_places=2, 
+        max_digits=8,
+        decimal_places=2,
         default=0.00,
         help_text="Average position in search results"
     )
-    
+
+    # SEMANTICS: `mentions` and `citations` above are RUNNING TOTALS — the
+    # domain's all-time figures as at snapshot_date, re-recorded on every
+    # processing run (the engine aggregates PromptAnalytics with no date
+    # filter). They are state, not activity: summing them across dates
+    # double-counts, and charting them can only ever climb.
+    #
+    # `cited_pages` follows the same running-total convention. The `period_*`
+    # fields hold activity WITHIN this snapshot's period, windowed on each
+    # analytics row's last-run date. Those are additive across dates, so a trend
+    # chart built from them shows real rises and falls.
+    cited_pages = models.PositiveIntegerField(
+        default=0,
+        help_text="Distinct pages on this domain cited by AI (running total as at snapshot_date)",
+    )
+    period_mentions = models.PositiveIntegerField(
+        default=0, help_text="Mentions recorded within this snapshot's period"
+    )
+    period_citations = models.PositiveIntegerField(
+        default=0, help_text="Citation URLs recorded within this snapshot's period"
+    )
+    period_cited_pages = models.PositiveIntegerField(
+        default=0, help_text="Distinct domain-owned pages cited within this snapshot's period"
+    )
+
     region = models.CharField(
         max_length=8,
         default='GLOBAL',

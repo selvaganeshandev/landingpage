@@ -1329,12 +1329,30 @@ class DomainMetricSnapshot(models.Model):
         help_text="Average sentiment score (-1.00 to 1.00)"
     )
     average_position = models.DecimalField(
-        max_digits=8, 
-        decimal_places=2, 
+        max_digits=8,
+        decimal_places=2,
         default=0.00,
         help_text="Average position in search results"
     )
-    
+
+    # Mirrors backend/prompts/models.py DomainMetricSnapshot — keep in sync.
+    # `mentions`/`citations`/`cited_pages` are RUNNING TOTALS as at
+    # snapshot_date; the `period_*` fields are activity WITHIN the period and
+    # are the ones safe to chart.
+    cited_pages = models.PositiveIntegerField(
+        default=0,
+        help_text="Distinct pages on this domain cited by AI (running total as at snapshot_date)",
+    )
+    period_mentions = models.PositiveIntegerField(
+        default=0, help_text="Mentions recorded within this snapshot's period"
+    )
+    period_citations = models.PositiveIntegerField(
+        default=0, help_text="Citation URLs recorded within this snapshot's period"
+    )
+    period_cited_pages = models.PositiveIntegerField(
+        default=0, help_text="Distinct domain-owned pages cited within this snapshot's period"
+    )
+
     region = models.CharField(
         max_length=8,
         default='GLOBAL',

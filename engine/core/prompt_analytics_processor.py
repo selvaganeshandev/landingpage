@@ -8,8 +8,10 @@ from shared_models.models import (
     PromptMetricSnapshot, PromptGroupMetricSnapshot, DomainMetricSnapshot,
     Competitor
 )
+from django.db.models.functions import Coalesce
 from decimal import Decimal
-from datetime import date
+from datetime import date, timedelta
+from urllib.parse import urlparse
 import logging
 import re
 from collections import Counter
@@ -1581,11 +1583,77 @@ class PromptAnalyticsProcessor:
         except Exception as e:
             logger.error(f"Error creating group metric snapshots: {str(e)}", exc_info=True)
     
+    @staticmethod
+    def _snapshot_period_start(snapshot_date: date, period_type: str) -> date:
+        """First day covered by a snapshot of this period_type."""
+        if period_type == 'weekly':
+            return snapshot_date - timedelta(days=6)
+        if period_type == 'monthly':
+            return snapshot_date - timedelta(days=29)
+        if period_type == 'quarterly':
+            return snapshot_date - timedelta(days=89)
+        return snapshot_date  # daily
+
+    @staticmethod
+    def _domain_host(url: str) -> str:
+        """Bare host for a domain URL, mirroring the backend's `_url_host`."""
+        if not url:
+            return ''
+        raw = str(url).strip()
+        if '://' not in raw:
+            raw = 'http://' + raw
+        try:
+            host = (urlparse(raw).netloc or '').lower()
+        except ValueError:
+            return ''
+        return host[4:] if host.startswith('www.') else host
+
+    @classmethod
+    def _cited_page_stats(cls, queryset, domain_host: str):
+        """(citation_url_count, distinct_domain_owned_pages) for a queryset.
+
+        `citation_list` entries are dicts from the engine's URLExtractor, but
+        tolerate legacy string entries so no citation is silently skipped.
+        """
+        url_count = 0
+        pages = set()
+        for citation_list in queryset.values_list('citation_list', flat=True):
+            if not isinstance(citation_list, list):
+                continue
+            url_count += len(citation_list)
+            if not domain_host:
+                continue
+            for entry in citation_list:
+                url = None
+                if isinstance(entry, dict):
+                    for field in ('url', 'source', 'link', 'href', 'uri'):
+                        val = entry.get(field)
+                        if val and isinstance(val, str):
+                            url = val
+                            break
+                elif isinstance(entry, str):
+                    url = entry
+                if not url:
+                    continue
+                host = cls._domain_host(url)
+                if host and (host == domain_host or host.endswith('.' + domain_host)):
+                    # Canonical key: host + path, no scheme/query/trailing slash,
+                    # so http/https and www/non-www collapse to one page.
+                    try:
+                        parsed = urlparse(url if '://' in url else 'http://' + url)
+                    except ValueError:
+                        continue
+                    h = (parsed.netloc or '').lower()
+                    if h.startswith('www.'):
+                        h = h[4:]
+                    pages.add(h + (parsed.path or '').rstrip('/').lower())
+        return url_count, len(pages)
+
     def _create_domain_metric_snapshots(
-        self, 
-        domain: Domain, 
-        analytics, 
-        snapshot_date: date, 
+        self,
+        domain: Domain,
+        analytics,
+        snapshot_date: date,
         period_type: str = 'daily'
     ) -> None:
         """Create metric snapshots for domain (per platform only)"""
@@ -1615,7 +1683,27 @@ class PromptAnalyticsProcessor:
             
             created_count = 0
             updated_count = 0
-            
+
+            # Resolved once for the whole loop rather than per platform.
+            domain_host = self._domain_host(getattr(domain, 'url', '') or '')
+            period_start = self._snapshot_period_start(snapshot_date, period_type)
+
+            # Domain-wide distinct cited pages, deduplicated ACROSS platforms.
+            # Written identically onto each platform row for this date — see the
+            # note at the write site on why these are not per-platform.
+            _, domain_cited_pages = self._cited_page_stats(
+                analytics_with_platform, domain_host
+            )
+            domain_period_qs = analytics_with_platform.annotate(
+                _window_dt=Coalesce('tracked_at', 'created_at'),
+            ).filter(
+                _window_dt__date__gte=period_start,
+                _window_dt__date__lte=snapshot_date,
+            )
+            _, domain_period_cited_pages = self._cited_page_stats(
+                domain_period_qs, domain_host
+            )
+
             for platform in platforms:
                 if not platform:  # Skip None or empty platforms
                     logger.warning(f"Skipping empty platform for domain {domain.id}")
@@ -1655,7 +1743,36 @@ class PromptAnalyticsProcessor:
                     average_position=platform_avg_pos,
                     scope='snapshot'
                 )
-                
+
+                # Cited-page counts are DISTINCT counts, so unlike mentions and
+                # citations they are NOT additive: a page cited by both ChatGPT
+                # and Gemini is one page, not two. Summing per-platform values
+                # across a date therefore overcounts (Appkodes: 16+2+6=24 for a
+                # true 20). Store the DOMAIN-WIDE distinct count on every
+                # platform row for the date; the dashboard takes max() across
+                # platforms rather than sum(). Per-platform page counts are
+                # deliberately not stored — nothing charts them, and keeping them
+                # would invite the same faulty summing.
+                platform_cited_urls, _ = self._cited_page_stats(
+                    platform_analytics, domain_host
+                )
+
+                # Activity WITHIN the period. `platform_analytics` is all-time
+                # (no date filter), so window it on the row's last-run date —
+                # tracked_at, falling back to created_at for rows that never
+                # recorded one. Analytics rows are updated in place on each run,
+                # so "rows last run inside this period" is exactly the work this
+                # period did.
+                period_qs = platform_analytics.annotate(
+                    _window_dt=Coalesce('tracked_at', 'created_at'),
+                ).filter(
+                    _window_dt__date__gte=period_start,
+                    _window_dt__date__lte=snapshot_date,
+                )
+                period_totals = period_qs.aggregate(total_mentions=Sum('total_mentions'))
+                period_mentions = period_totals['total_mentions'] or 0
+                period_citations, _ = self._cited_page_stats(period_qs, domain_host)
+
                 try:
                     snapshot, created = DomainMetricSnapshot.objects.update_or_create(
                         domain=domain,
@@ -1665,6 +1782,10 @@ class PromptAnalyticsProcessor:
                         defaults={
                             'mentions': platform_total_mentions,
                             'citations': platform_total_citations,
+                            'cited_pages': domain_cited_pages,
+                            'period_mentions': period_mentions,
+                            'period_citations': period_citations,
+                            'period_cited_pages': domain_period_cited_pages,
                             'visibility_score': platform_visibility_score,
                             'sentiment_score': platform_avg_sentiment,
                             'average_position': platform_avg_pos,

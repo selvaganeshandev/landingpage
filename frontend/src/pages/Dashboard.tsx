@@ -424,6 +424,7 @@ const Dashboard = () => {
             timeRange={exportStartDate && exportEndDate ? undefined : timePeriod}
             onTimeRangeChange={handleTimeRangeChange}
             audienceData={dailyAudience}
+            isPeriodData={summary?.trends_are_period}
           />
         </div>
       </div>

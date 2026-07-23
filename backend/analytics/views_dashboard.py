@@ -1169,33 +1169,96 @@ def dashboard_summary(request):
             snapshot_by_date[snapshot_date] = {
                 'mentions': 0,
                 'citations': 0,
+                'period_mentions': 0,
+                'period_citations': 0,
+                'period_cited_pages': 0,
                 'visibility_sum': 0,
                 'visibility_weight': 0
             }
 
         snapshot_by_date[snapshot_date]['mentions'] += snapshot.mentions
         snapshot_by_date[snapshot_date]['citations'] += (snapshot.citations or 0)
+        # Per-period activity, written by the engine alongside the running
+        # totals. Snapshots taken before those columns existed carry 0, which is
+        # why the totals above are kept as a fallback (see `trends_are_period`).
+        snapshot_by_date[snapshot_date]['period_mentions'] += (snapshot.period_mentions or 0)
+        snapshot_by_date[snapshot_date]['period_citations'] += (snapshot.period_citations or 0)
+        # MAX, not sum: cited pages is a DISTINCT count that the engine writes
+        # domain-wide (identical on every platform row for the date), because a
+        # page cited by two platforms is still one page. Summing would overcount.
+        snapshot_by_date[snapshot_date]['period_cited_pages'] = max(
+            snapshot_by_date[snapshot_date]['period_cited_pages'],
+            snapshot.period_cited_pages or 0,
+        )
         if snapshot.visibility_score and snapshot.mentions > 0:
             snapshot_by_date[snapshot_date]['visibility_sum'] += float(snapshot.visibility_score) * snapshot.mentions
             snapshot_by_date[snapshot_date]['visibility_weight'] += snapshot.mentions
     
-    # Build trends array
-    cited_pages_ratio = total_cited_pages / total_citations if total_citations > 0 else 0.6
-    for snapshot_date in sorted(snapshot_by_date.keys()):
+    # Build trends array.
+    #
+    # Prefer the engine's PER-PERIOD columns: those describe activity within each
+    # period, so the line rises AND falls like a real trend. `mentions` /
+    # `citations` are running totals (all-time state as at that date), so a chart
+    # built from them can only ever climb.
+    #
+    # Snapshots written before those columns existed carry 0, so fall back to the
+    # running totals until the engine has reprocessed. `trends_are_period` tells
+    # the frontend which it is getting, so it can label the chart honestly rather
+    # than silently presenting totals as activity.
+    trends_are_period = any(
+        d['period_mentions'] or d['period_citations'] or d['period_cited_pages']
+        for d in snapshot_by_date.values()
+    )
+
+    # Snapshots written before the engine recorded per-period counts carry 0 in
+    # those columns — not because nothing happened that period, but because the
+    # columns did not exist. Charting them in period mode would draw a long run
+    # of false zeros and make a domain's history look wiped.
+    #
+    # So in period mode, start the series at the first date that actually has
+    # period data and drop everything before it. A chart that begins a few weeks
+    # ago is honest; one that claims a year of zero activity is not.
+    #
+    # Only LEADING dates are dropped. A zero after that point is a real quiet
+    # period and is kept, so genuine gaps still show.
+    ordered_dates = sorted(snapshot_by_date.keys())
+    if trends_are_period:
+        first_with_data = next(
+            (
+                d for d in ordered_dates
+                if snapshot_by_date[d]['period_mentions']
+                or snapshot_by_date[d]['period_citations']
+                or snapshot_by_date[d]['period_cited_pages']
+            ),
+            None,
+        )
+        if first_with_data is not None:
+            ordered_dates = [d for d in ordered_dates if d >= first_with_data]
+
+    for snapshot_date in ordered_dates:
         data = snapshot_by_date[snapshot_date]
-        day_mentions = data['mentions']
         day_visibility = (
-            data['visibility_sum'] / data['visibility_weight'] 
+            data['visibility_sum'] / data['visibility_weight']
             if data['visibility_weight'] > 0 else 0
         )
-        
-        trends.append({
+
+        point = {
             'date': format_date_for_chart(snapshot_date),
-            'mentions': day_mentions,
-            'citations': data['citations'],
-            'cited_pages': int(round(data['citations'] * cited_pages_ratio)),
-            'visibility': round(day_visibility, 2)
-        })
+            'visibility': round(day_visibility, 2),
+        }
+        if trends_are_period:
+            point['mentions'] = data['period_mentions']
+            point['citations'] = data['period_citations']
+            # Real measured value now — no longer estimated from a flat ratio.
+            point['cited_pages'] = data['period_cited_pages']
+        else:
+            point['mentions'] = data['mentions']
+            point['citations'] = data['citations']
+            # Deliberately omitted: there is no cited-pages history on these
+            # older snapshots, and the previous estimate
+            # (citations x total_cited_pages/total_citations) was a scaled copy
+            # of the citations line rather than a measurement.
+        trends.append(point)
 
     # If no snapshots, create empty trend points for the date range
     if not trends:
@@ -1266,5 +1329,8 @@ def dashboard_summary(request):
         'countries': live_country_breakdown(domain_id, start_date, end_date, platform_filter),
         'share_of_voice': share_of_voice,
         'trends': trends,
+        # True  -> `trends` holds per-period activity (real rises and falls)
+        # False -> `trends` holds running totals, so the line can only climb.
+        'trends_are_period': trends_are_period,
         'recent_mentions': recent_mentions
     })

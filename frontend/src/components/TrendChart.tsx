@@ -31,6 +31,10 @@ interface TrendChartProps {
   timeRange?: string;
   onTimeRangeChange?: (days: string) => void;
   audienceData?: Array<{ date: string; sessions: number; users: number }> | null;
+  /** API's `trends_are_period`: true when `data` holds per-period activity,
+   *  false when it holds running totals. Undefined for callers that don't
+   *  supply it, which suppresses the caption rather than guessing. */
+  isPeriodData?: boolean;
 }
 
 // Time-range presets wired to the existing `days` query param on the dashboard
@@ -57,14 +61,22 @@ interface PillProps {
   hint: string;
 }
 
+// Above this, a percentage stops informing and starts misleading. A domain that
+// went from 8 mentions to 3,700 is arithmetically "+45,562%", which reads as a
+// data error rather than as growth — and the real story is simply that tracking
+// had barely started. Past this point we say "New" instead.
+const MAX_MEANINGFUL_CHANGE = 999;
+
 const MetricPill = ({ label, value, change, colorVar, hint }: PillProps) => {
   // Always show trend next to value:
-  // • null / undefined  → "N/A" (no prior-period data)
-  // • 0                → "0%"  (flat)
-  // • non-zero number  → colored +-%
+  // • null / undefined      → "N/A"  (no prior-period data)
+  // • 0                     → "0%"   (flat)
+  // • > MAX_MEANINGFUL_...  → "New"  (prior period was ~nothing; see above)
+  // • non-zero number       → colored +-%
   const isNoData = change === undefined || change === null;
   const isUp = !isNoData && change > 0;
   const isFlat = !isNoData && change === 0;
+  const isNew = !isNoData && change > MAX_MEANINGFUL_CHANGE;
 
   return (
     <div className="flex flex-col gap-1">
@@ -90,6 +102,18 @@ const MetricPill = ({ label, value, change, colorVar, hint }: PillProps) => {
           <span className="text-xs text-muted-foreground">N/A</span>
         ) : isFlat ? (
           <span className="text-xs text-muted-foreground">0%</span>
+        ) : isNew ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-xs font-semibold text-success cursor-default">New</span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs text-xs">
+                Grew from almost nothing in the previous period, so a percentage
+                would not be meaningful.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         ) : (
           <span className={`text-xs font-semibold ${isUp ? "text-success" : "text-destructive"}`}>
             {isUp ? "+" : ""}{change}%
@@ -108,7 +132,7 @@ const CHART_TABS: Array<{ label: string; value: ChartTab }> = [
   { label: "AI Visibility", value: "visibility" },
 ];
 
-export const TrendChart = ({ data = defaultData, metrics, timeRange, onTimeRangeChange, audienceData }: TrendChartProps) => {
+export const TrendChart = ({ data = defaultData, metrics, timeRange, onTimeRangeChange, audienceData, isPeriodData }: TrendChartProps) => {
   const [chartTab, setChartTab] = useState<ChartTab>("main");
   const hasCitationsSeries = data[0]?.citations !== undefined;
   const hasVisibilitySeries = data[0]?.visibility !== undefined;
@@ -235,7 +259,13 @@ export const TrendChart = ({ data = defaultData, metrics, timeRange, onTimeRange
           </div>
         )
       ) : (
-        <div className="flex-1 min-h-[300px]">
+        /* Two nested boxes on purpose. ResponsiveContainer sizes itself to its
+           parent, so any sibling in that same parent feeds its own height back
+           into the measurement and the chart grows without bound on every
+           re-measure. The inner `min-h-0` box therefore holds ONLY the chart,
+           and the caption lives outside it. */
+        <div className="flex-1 min-h-[300px] flex flex-col">
+          <div className="flex-1 min-h-0">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -304,6 +334,13 @@ export const TrendChart = ({ data = defaultData, metrics, timeRange, onTimeRange
                       activeDot={{ r: 6 }}
                     />
                   )}
+                  {/* Cited Pages is plotted ONLY when the API reports per-period
+                      data. Older snapshots predate the engine's cited-pages
+                      column, and the API used to estimate the series as
+                      `citations x (total_cited_pages / total_citations)` — a
+                      scaled copy of the citations line, not a measurement. The
+                      API now omits `cited_pages` entirely in that case rather
+                      than inventing it, so this guard keeps the fake line off. */}
                   {data[0]?.cited_pages !== undefined && (
                     <Line
                       type="monotone"
@@ -319,6 +356,19 @@ export const TrendChart = ({ data = defaultData, metrics, timeRange, onTimeRange
               )}
             </LineChart>
           </ResponsiveContainer>
+          </div>
+          {/* Shown only while the API is still serving RUNNING TOTALS — i.e.
+              snapshots written before the engine recorded per-period counts.
+              Those totals can only climb, so a point reads "the total stood at X
+              on this date", not "X happened on this date"; without this note the
+              shape reads as explosive growth. Disappears by itself once the
+              engine reprocesses and `trends_are_period` turns true.
+              Kept OUTSIDE the chart box above — see the note on the wrapper. */}
+          {isPeriodData === false && (
+            <p className="mt-2 shrink-0 text-[11px] text-muted-foreground text-center">
+              Running totals as at each date, not activity within the period.
+            </p>
+          )}
         </div>
       )}
     </Card>
