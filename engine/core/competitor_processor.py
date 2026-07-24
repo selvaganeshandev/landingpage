@@ -18,6 +18,7 @@ import json
 import logging
 import re
 from typing import Dict, Any, List, Tuple
+from .telemetry import observe, trace_metadata
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -122,6 +123,7 @@ class CompetitorProcessor:
         logger.info(f"CompetitorProcessor initialized with max_concurrent_prompts={max_concurrent_prompts}")
         self._openai_client = None
     
+    @observe(name="competitor.process_competitor", ignore_inputs=["self", "competitor"])
     def process_competitor(self, competitor: Competitor) -> Dict[str, Any]:
         """
         Process a specific competitor. This is the main entry point for processing a single competitor.
@@ -133,6 +135,11 @@ class CompetitorProcessor:
             dict: Status information about the processing result
         """
         try:
+            trace_metadata(
+                trace_type="competitor",
+                domain_id=getattr(competitor, "domain_id", None),
+                competitor_id=getattr(competitor, "id", None),
+            )
             # Check if competitor can be processed
             if competitor.track_status not in ['INIT', 'FAIL', 'COMP']:
                 return {

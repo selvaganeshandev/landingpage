@@ -78,3 +78,52 @@ def flush_laminar():
         Laminar.flush()
     except Exception as exc:  # noqa: BLE001
         logger.error("Laminar flush failed: %s", exc)
+
+
+def _enabled():
+    """Whether telemetry should be active for this process (checked at import
+    time by the observe() decorator, so `lmnr` is only imported when on)."""
+    return (
+        _truthy(os.getenv("ENABLE_LAMINAR"))
+        and bool(os.getenv("LMNR_PROJECT_API_KEY"))
+        and not _should_skip()
+    )
+
+
+def observe(**observe_kwargs):
+    """Wrap a workflow entrypoint with Laminar's @observe when telemetry is
+    enabled; a transparent pass-through otherwise.
+
+    Because the decorator is applied at import time, the disabled path returns
+    the original function WITHOUT importing lmnr — so processor modules stay
+    importable and side-effect-free when ENABLE_LAMINAR is off.
+    """
+    def decorator(func):
+        if not _enabled():
+            return func
+        try:
+            from lmnr import observe as _lmnr_observe
+
+            return _lmnr_observe(**observe_kwargs)(func)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Laminar observe wrap failed for %s: %s",
+                         getattr(func, "__name__", func), exc)
+            return func
+
+    return decorator
+
+
+def trace_metadata(**fields):
+    """Attach tenant/provider metadata (organization_id, domain_id, provider,
+    model, …) to the CURRENT trace. No-op unless Laminar is initialized. Drops
+    None values so callers can pass optional fields freely."""
+    if not _initialized:
+        return
+    try:
+        from lmnr import Laminar
+
+        clean = {k: v for k, v in fields.items() if v is not None}
+        if clean:
+            Laminar.set_trace_metadata(clean)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Laminar set_trace_metadata failed: %s", exc)

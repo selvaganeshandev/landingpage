@@ -21,6 +21,7 @@ from .metric_snapshot_logger import (
     log_snapshot_error, log_snapshot_creation_complete, log_method_call,
     log_database_query
 )
+from .telemetry import observe, trace_metadata
 
 
 logger = logging.getLogger(__name__)
@@ -481,6 +482,7 @@ class PromptAnalyticsProcessor:
                 pass
             return {'error': str(e)}
 
+    @observe(name="prompt_analytics.process_single_prompt", ignore_inputs=["self"])
     def process_single_prompt(self, prompt_id: int) -> Dict[str, Any]:
         """
         Process analytics for a single prompt across all platforms.
@@ -508,6 +510,14 @@ class PromptAnalyticsProcessor:
                 org_id = prompt.group.domain.organisation_id
             except Exception:
                 org_id = None
+
+            # Attach tenant attribution to the Laminar trace (no-op when off).
+            trace_metadata(
+                trace_type="prompt_analytics",
+                organization_id=org_id,
+                domain_id=prompt.group.domain_id,
+                prompt_id=prompt_id,
+            )
 
             # Lazy import ClientFactory
             try:
