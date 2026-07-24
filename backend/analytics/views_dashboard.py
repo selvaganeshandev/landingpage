@@ -453,6 +453,76 @@ def live_visibility_score(domain_id, start_date, end_date, platform_filter=None,
     return compute_visibility_score(responses, mentioned, own_cited, avg_sentiment, avg_position)
 
 
+def live_visibility_by_snapshot_date(domain_id, start_date, end_date, snapshot_dates,
+                                     platform_filter=None, domain_host=None):
+    """Rate-based visibility per trend bucket, computed live from PromptAnalytics.
+
+    The trend line historically plotted each snapshot's STORED ``visibility_score``,
+    which the engine wrote under an older MAX()-normalized formula — a different
+    scale from the gauge, so the line and the gauge disagreed (e.g. 33 vs 57 for
+    the same domain/window).
+
+    This recomputes visibility per period with the SAME rate-based
+    ``compute_visibility_score`` the gauge uses, in a single pass over the window:
+    each live row is assigned to the earliest ``snapshot_date >= its own date``
+    (the snapshot that closes the period it falls in), so the returned keys line
+    up with the trend's x-axis. Periods with no live rows are simply absent, so
+    the caller falls back to the stored value and pure-historical windows are
+    left untouched.
+
+    Returns ``{snapshot_date: visibility_float}``.
+    """
+    import bisect
+    if not snapshot_dates:
+        return {}
+    ordered = sorted(snapshot_dates)
+    start_dt, end_dt = _dashboard_datetime_window(start_date, end_date)
+    qs = PromptAnalytics.objects.annotate(
+        _window_dt=Coalesce('tracked_at', 'created_at'),
+    ).filter(
+        prompt__group__domain_id=domain_id,
+        track_status='COMP',
+        _window_dt__gte=start_dt,
+        _window_dt__lte=end_dt,
+    )
+    if platform_filter:
+        qs = qs.filter(platform=platform_filter)
+
+    acc = {}
+    for window_dt, is_mention, position, sentiment, citation_list in qs.values_list(
+        '_window_dt', 'is_mention', 'position', 'sentiment_score', 'citation_list',
+    ):
+        row_date = window_dt.date()
+        idx = bisect.bisect_left(ordered, row_date)
+        key = ordered[idx] if idx < len(ordered) else ordered[-1]
+        bucket = acc.setdefault(key, {
+            'responses': 0, 'mentioned': 0, 'own_cited': 0,
+            'sent_sum': 0.0, 'pos_sum': 0.0, 'pos_n': 0,
+        })
+        bucket['responses'] += 1
+        if domain_host and isinstance(citation_list, list):
+            for entry in citation_list:
+                url = _citation_entry_url(entry)
+                host = _url_host(url) if url else ''
+                if host and (host == domain_host or host.endswith('.' + domain_host)):
+                    bucket['own_cited'] += 1
+                    break
+        if is_mention:
+            bucket['mentioned'] += 1
+            bucket['sent_sum'] += float(sentiment or 0)
+            if position and float(position) > 0:
+                bucket['pos_sum'] += float(position)
+                bucket['pos_n'] += 1
+
+    result = {}
+    for key, b in acc.items():
+        avg_sentiment = (b['sent_sum'] / b['mentioned']) if b['mentioned'] else 0.0
+        avg_position = (b['pos_sum'] / b['pos_n']) if b['pos_n'] else 0.0
+        result[key] = float(compute_visibility_score(
+            b['responses'], b['mentioned'], b['own_cited'], avg_sentiment, avg_position))
+    return result
+
+
 def _latest_snapshot_per_platform(domain_id, start_date, end_date, platform_filter=None):
     """Return the newest DomainMetricSnapshot per platform inside the window.
 
@@ -1235,12 +1305,22 @@ def dashboard_summary(request):
         if first_with_data is not None:
             ordered_dates = [d for d in ordered_dates if d >= first_with_data]
 
+    # Recompute each period's visibility with the SAME rate-based formula as the
+    # gauge, so the line and the gauge share one scale. The stored snapshot
+    # values are on an older MAX()-normalized scale, which made the line (e.g.
+    # 33) disagree with the gauge (57). Periods with no live rows keep the stored
+    # value, so pure-historical windows are unaffected.
+    live_vis_map = live_visibility_by_snapshot_date(
+        domain_id, start_date, end_date, ordered_dates, platform_filter, domain_host,
+    )
+
     for snapshot_date in ordered_dates:
         data = snapshot_by_date[snapshot_date]
-        day_visibility = (
+        stored_visibility = (
             data['visibility_sum'] / data['visibility_weight']
             if data['visibility_weight'] > 0 else 0
         )
+        day_visibility = live_vis_map.get(snapshot_date, stored_visibility)
 
         point = {
             'date': format_date_for_chart(snapshot_date),
