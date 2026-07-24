@@ -10,7 +10,9 @@ from django.db.utils import ProgrammingError
 from django.conf import settings
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from .models import Domain, DomainAccess, InternalLinkMap, ReferenceDocument, BrandLink, BrandLinkChunk
-from authentication.models import UserPermission
+from authentication.models import UserPermission, Account
+from authentication.services import ClientService, ClientDomainError
+from core.permissions import CanManageUsers
 from .serializers import (
     DomainMinimalSerializer, DomainSerializer, DomainDetailSerializer,
     DomainAccessSerializer, DomainAccessCreateSerializer,
@@ -4226,3 +4228,91 @@ def brand_link_recrawl(request, domain_id, link_id):
         'message': 'Re-crawling brand link in the background.',
         'brand_link': serializer.data
     })
+
+
+# ---------------------------------------------------------------------------
+# Client access — a read-only login for a single domain's client.
+# Domain-centric: the domain IS the client; the admin issues read access to it.
+# ---------------------------------------------------------------------------
+
+def _serialize_domain_client(account):
+    return {
+        'id': account.id,
+        'email': account.email,
+        'first_name': account.first_name,
+        'last_name': account.last_name,
+        'account_status': account.account_status,
+        'last_login': account.last_login,
+        'created_at': account.created_at,
+    }
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([CanManageUsers])
+def domain_client_access(request, domain_id):
+    """List or create read-only client logins scoped to this one domain."""
+    try:
+        domain = Domain.objects.get(id=domain_id, organisation=request.user.organisation)
+    except Domain.DoesNotExist:
+        return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        clients = Account.objects.filter(
+            role='client',
+            domain_access__domain=domain,
+            domain_access__is_active=True,
+        ).distinct().order_by('-created_at')
+        return Response({'clients': [_serialize_domain_client(c) for c in clients]})
+
+    data = request.data
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password')
+    if not email or not password:
+        return Response({'error': 'email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
+    if Account.objects.filter(email=email).exists():
+        return Response({'error': 'An account with this email already exists'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        client = ClientService.create_client(
+            acting_user=request.user,
+            email=email,
+            password=password,
+            first_name=data.get('first_name', ''),
+            last_name=data.get('last_name', ''),
+            domain_ids=[domain.id],  # 1:1 — client sees only this domain
+            request=request,
+        )
+    except ClientDomainError as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response(
+        {'message': 'Client access granted', 'client': _serialize_domain_client(client)},
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([CanManageUsers])
+def domain_client_access_detail(request, domain_id, client_id):
+    """Suspend/reactivate or remove a domain's client login."""
+    try:
+        Domain.objects.get(id=domain_id, organisation=request.user.organisation)
+        client = Account.objects.get(
+            id=client_id, role='client', organisation=request.user.organisation,
+        )
+    except (Domain.DoesNotExist, Account.DoesNotExist):
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'DELETE':
+        ClientService.deactivate_client(acting_user=request.user, client_id=client.id)
+        return Response({'message': 'Client access removed'})
+
+    account_status = request.data.get('account_status')
+    valid_statuses = {c[0] for c in Account.ACCOUNT_STATUS_CHOICES}
+    if account_status not in valid_statuses:
+        return Response({'error': 'Invalid account_status'}, status=status.HTTP_400_BAD_REQUEST)
+    client = ClientService.update_client(
+        acting_user=request.user, client_id=client.id,
+        account_status=account_status, request=request,
+    )
+    return Response({'message': 'Client updated', 'client': _serialize_domain_client(client)})

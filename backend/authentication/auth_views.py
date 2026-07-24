@@ -11,8 +11,7 @@ from django.conf import settings
 from django.core.cache import cache
 from .models import Account, Organisation, TeamInvitation, UserPermission, PasswordResetToken, decrypt_value
 from domains.models import Domain, DomainAccess
-from .services import ClientService, ClientDomainError
-from core.permissions import CanManageUsers
+from .services import ClientService  # used for client login activity logging
 from .serializers import (
     AccountSerializer, AccountUpdateSerializer,
     TeamInvitationSerializer, TeamInvitationCreateSerializer,
@@ -1266,88 +1265,7 @@ def check_permissions(request):
     return Response({'permissions': serializer.data, 'user': AccountSerializer(request.user).data})
 
 
-# ---------------------------------------------------------------------------
-# Client account management (agency side) — gated by the manage_users capability
-# ---------------------------------------------------------------------------
-
-def _serialize_client(client):
-    """Shape a client Account for the admin management UI."""
-    domains = ClientService.granted_domains(client)
-    return {
-        'id': client.id,
-        'email': client.email,
-        'first_name': client.first_name,
-        'last_name': client.last_name,
-        'account_status': client.account_status,
-        'last_login': client.last_login,
-        'active_domain_id': client.active_domain_id,
-        'domains': [{'id': d.id, 'name': d.name, 'url': d.url} for d in domains],
-        'created_at': client.created_at,
-    }
-
-
-@api_view(['GET', 'POST'])
-@permission_classes([CanManageUsers])
-def client_list_create(request):
-    """List client accounts, or create a new one with domain grants."""
-    if request.method == 'GET':
-        clients = ClientService.list_clients(request.user.organisation)
-        return Response({'clients': [_serialize_client(c) for c in clients]})
-
-    data = request.data
-    email = (data.get('email') or '').strip().lower()
-    password = data.get('password')
-    if not email or not password:
-        return Response({'error': 'email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
-    if Account.objects.filter(email=email).exists():
-        return Response({'error': 'An account with this email already exists'}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        client = ClientService.create_client(
-            acting_user=request.user,
-            email=email,
-            password=password,
-            first_name=data.get('first_name', ''),
-            last_name=data.get('last_name', ''),
-            domain_ids=data.get('domain_ids', []),
-            request=request,
-        )
-    except ClientDomainError as exc:
-        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-    return Response(
-        {'message': 'Client created successfully', 'client': _serialize_client(client)},
-        status=status.HTTP_201_CREATED,
-    )
-
-
-@api_view(['PATCH', 'DELETE'])
-@permission_classes([CanManageUsers])
-def client_detail(request, client_id):
-    """Update a client's domain grants / status, or deactivate the account."""
-    try:
-        if request.method == 'DELETE':
-            client = ClientService.deactivate_client(
-                acting_user=request.user, client_id=client_id
-            )
-            return Response({'message': 'Client deactivated', 'client': _serialize_client(client)})
-
-        account_status = request.data.get('account_status')
-        valid_statuses = {c[0] for c in Account.ACCOUNT_STATUS_CHOICES}
-        if account_status is not None and account_status not in valid_statuses:
-            return Response({'error': 'Invalid account_status'}, status=status.HTTP_400_BAD_REQUEST)
-
-        client = ClientService.update_client(
-            acting_user=request.user,
-            client_id=client_id,
-            domain_ids=request.data.get('domain_ids'),  # None when absent = leave grants unchanged
-            account_status=account_status,
-            request=request,
-        )
-        return Response({'message': 'Client updated', 'client': _serialize_client(client)})
-    except Account.DoesNotExist:
-        return Response({'error': 'Client not found'}, status=status.HTTP_404_NOT_FOUND)
-    except ClientDomainError as exc:
-        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+# Client accounts are managed per-domain from the domains app
+# (see domains.views.domain_client_access) — the domain is the client.
 
 
