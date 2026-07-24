@@ -700,11 +700,14 @@ class CompetitorProcessor:
                 previous_date = timezone.now() - timedelta(days=7)
 
                 from shared_models.models import CompetitorMetricSnapshot, AlertRule, Alert
+                # CompetitorMetricSnapshot has no period_type/start_date (those
+                # are DomainMetricSnapshot fields) — it's keyed by `timestamp`.
+                # The old copy-pasted filter raised FieldError every run (caught
+                # by the surrounding try/except), so surge alerts never fired.
                 previous_snapshot = CompetitorMetricSnapshot.objects.filter(
                     competitor=competitor,
-                    period_type='weekly',
-                    start_date__lte=previous_date
-                ).order_by('-start_date').first()
+                    timestamp__lte=previous_date,
+                ).order_by('-timestamp').first()
 
                 current_mentions = int(competitor.total_mentions or 0)
                 previous_mentions = int(previous_snapshot.total_mentions if previous_snapshot else current_mentions)
