@@ -55,3 +55,16 @@ hf-xet==1.1.10
 
 # Laminar (lmnr) observability — auto-instruments LLM SDK calls (OpenTelemetry).
 lmnr[all]>=0.7.42,<0.8.0
+# lmnr's bundled OpenAI instrumentor imports opentelemetry._events, which was
+# REMOVED in opentelemetry 1.44. Pin the whole OTel stack to the 1.43 line (has
+# _events) so ChatGPT/Grok/DeepSeek/Perplexity/Vertex-Gemini auto-trace. Keep
+# these together — mixing 1.43/1.44 breaks the OTLP exporter.
+opentelemetry-api==1.43.0
+opentelemetry-sdk==1.43.0
+opentelemetry-semantic-conventions==0.64b0
+opentelemetry-instrumentation==0.64b0
+opentelemetry-instrumentation-threading==0.64b0
+opentelemetry-exporter-otlp-proto-grpc==1.43.0
+opentelemetry-exporter-otlp-proto-http==1.43.0
+opentelemetry-exporter-otlp-proto-common==1.43.0
+opentelemetry-proto==1.43.0

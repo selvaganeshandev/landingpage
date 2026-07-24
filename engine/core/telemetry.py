@@ -66,24 +66,16 @@ def init_laminar():
         logger.warning("ENABLE_LAMINAR is on but LMNR_PROJECT_API_KEY is missing — skipping init")
         return
     try:
-        from lmnr import Laminar, Instruments
+        from lmnr import Laminar
 
-        # Enable ONLY the LLM-provider instrumentors this app uses. This skips
-        # ~30 unused framework/vector-db instrumentors from lmnr[all] — one of
-        # which fails on a missing `opentelemetry._events` in this OTel build —
-        # and trims overhead. OPENAI also covers the OpenAI-SDK transports we use
-        # for Grok/DeepSeek/Perplexity/Vertex-Gemini; GOOGLE_GENAI covers the
-        # native google-generativeai SDK. hasattr guards against enum drift.
-        _wanted = ("OPENAI", "ANTHROPIC", "GOOGLE_GENAI", "VERTEXAI",
-                   "GROQ", "MISTRAL", "LITELLM")
-        instruments = {getattr(Instruments, n) for n in _wanted if hasattr(Instruments, n)}
-
-        # Pass the key explicitly (decouple keeps it out of os.environ, which is
-        # where lmnr would otherwise look). base_url -> self-hosted instance.
+        # Default instrument set (all providers). This requires opentelemetry
+        # pinned to the 1.43 line — lmnr's bundled OpenAI instrumentor imports
+        # opentelemetry._events, which 1.44 removed; the pins live in
+        # engine/requirements.txt. Pass the key explicitly (decouple keeps it out
+        # of os.environ). base_url -> self-hosted instance.
         init_kwargs = {
             "project_api_key": api_key,
             "metadata": {"environment": _env("ENVIRONMENT", "dev")},
-            "instruments": instruments,
         }
         base_url = _env("LMNR_BASE_URL", "")
         if base_url:
