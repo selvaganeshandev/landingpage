@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from django.conf import settings
 from django.shortcuts import redirect
 from django.utils import timezone
+from django.core.cache import cache
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
@@ -830,6 +831,19 @@ def get_ga_data(request):
         )
 
 
+# GA4 enforces a per-property hourly report quota. The dashboard re-fetches the
+# AI-referral endpoints on every load (and can storm them on re-renders), so
+# without caching a busy property exhausts its quota and 429s constantly. The
+# window "ends yesterday", so the data is settled — a short cache is safe and
+# stops repeated loads from each hitting GA4.
+AI_REFERRAL_CACHE_TTL = 15 * 60   # 15 min: reuse a successful GA4 result across reloads
+AI_REFERRAL_ERROR_TTL = 2 * 60    # 2 min: negative-cache a 429 so it doesn't spawn MORE GA4 calls
+
+
+def _ai_referral_cache_key(prefix, domain_id, start_date, end_date, days, platform=None):
+    return f"{prefix}:v1:{domain_id}:{start_date}:{end_date}:{days}:{platform or ''}"
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_ai_referral_data(request):
@@ -839,6 +853,9 @@ def get_ai_referral_data(request):
     Matches the same sessionSource regex GA4's Explorations use, so the numbers
     reconcile with GA4. Accepts ?days=7|14|21|28 (default 28) for the lookback
     windows the team compares, or explicit ?start_date=&end_date=.
+
+    Cached for AI_REFERRAL_CACHE_TTL so repeated dashboard loads reuse one GA4
+    call instead of exhausting the property's hourly quota.
     """
     domain_id = request.query_params.get('domain_id')
     start_date = request.query_params.get('start_date')
@@ -865,6 +882,11 @@ def get_ai_referral_data(request):
         window_start = window_end - timedelta(days=days - 1)
         end_date = window_end.strftime('%Y-%m-%d')
         start_date = window_start.strftime('%Y-%m-%d')
+
+    cache_key = _ai_referral_cache_key('ai_referral', domain_id, start_date, end_date, days)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return Response(cached['body'], status=cached.get('status', status.HTTP_200_OK))
 
     try:
         integration = Integration.objects.get(
@@ -951,7 +973,7 @@ def get_ai_referral_data(request):
         # client that a figure is exact vs. a GA4 estimate. See _extract_sampling.
         sampling = _extract_sampling_metadata(report_metadata)
 
-        return Response({
+        body = {
             'success': True,
             'ai_traffic': ai_traffic,
             'platform_breakdown': ai_traffic['platform_breakdown'],
@@ -959,7 +981,9 @@ def get_ai_referral_data(request):
             'currency_code': currency_code,
             'sampling': sampling,
             'date_range': {'start': start_date, 'end': end_date, 'days': days},
-        })
+        }
+        cache.set(cache_key, {'body': body}, AI_REFERRAL_CACHE_TTL)
+        return Response(body)
 
     except Integration.DoesNotExist:
         return Response(
@@ -968,10 +992,11 @@ def get_ai_referral_data(request):
         )
     except Exception as e:
         logger.error(f"Error fetching AI referral data: {str(e)}")
-        return Response(
-            {'error': str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        body = {'error': str(e)}
+        # Negative-cache the failure briefly so a quota 429 doesn't trigger a
+        # burst of further GA4 calls that all 429 and deepen the exhaustion.
+        cache.set(cache_key, {'body': body, 'status': status.HTTP_500_INTERNAL_SERVER_ERROR}, AI_REFERRAL_ERROR_TTL)
+        return Response(body, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
@@ -1011,6 +1036,11 @@ def get_ai_referral_timeseries(request):
         window_start = window_end - timedelta(days=days - 1)
         end_date = window_end.strftime('%Y-%m-%d')
         start_date = window_start.strftime('%Y-%m-%d')
+
+    cache_key = _ai_referral_cache_key('ai_referral_ts', domain_id, start_date, end_date, days)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return Response(cached['body'], status=cached.get('status', status.HTTP_200_OK))
 
     try:
         integration = Integration.objects.get(
@@ -1070,12 +1100,14 @@ def get_ai_referral_timeseries(request):
         data = parse_ga_response(response)
         sampling = _extract_sampling_metadata(response.get('metadata', {}))
 
-        return Response({
+        body = {
             'success': True,
             'data': data,
             'date_range': {'start': start_date, 'end': end_date, 'days': days},
             'sampling': sampling,
-        })
+        }
+        cache.set(cache_key, {'body': body}, AI_REFERRAL_CACHE_TTL)
+        return Response(body)
 
     except Integration.DoesNotExist:
         return Response(
@@ -1084,16 +1116,14 @@ def get_ai_referral_timeseries(request):
         )
     except HttpError as e:
         logger.error(f"Google Analytics API error (AI timeseries): {e}")
-        return Response(
-            {'error': f'Google Analytics API error: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        body = {'error': f'Google Analytics API error: {str(e)}'}
+        cache.set(cache_key, {'body': body, 'status': status.HTTP_500_INTERNAL_SERVER_ERROR}, AI_REFERRAL_ERROR_TTL)
+        return Response(body, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
         logger.error(f"Error fetching AI referral timeseries: {str(e)}")
-        return Response(
-            {'error': str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        body = {'error': str(e)}
+        cache.set(cache_key, {'body': body, 'status': status.HTTP_500_INTERNAL_SERVER_ERROR}, AI_REFERRAL_ERROR_TTL)
+        return Response(body, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def parse_ga_response(response):
