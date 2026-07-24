@@ -36,6 +36,19 @@ def _truthy(value):
     return str(value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _env(key, default=None):
+    """Read a setting the way the rest of the app does — python-decouple's
+    ``config()`` reads ``.env``. Those values are NOT exported to ``os.environ``
+    under decouple, so ``os.getenv`` alone silently misses them (that was the
+    original 'never initialized' bug). Falls back to ``os.environ`` if decouple
+    isn't importable in some context."""
+    try:
+        from decouple import config
+        return config(key, default=default)
+    except Exception:
+        return os.getenv(key, default)
+
+
 def _should_skip():
     return len(sys.argv) > 1 and sys.argv[1] in SKIP_COMMANDS
 
@@ -45,24 +58,28 @@ def init_laminar():
     global _initialized
     if _initialized or _should_skip():
         return
-    if not _truthy(os.getenv("ENABLE_LAMINAR")):
+    if not _truthy(_env("ENABLE_LAMINAR", "false")):
         logger.debug("Laminar telemetry disabled (ENABLE_LAMINAR not truthy)")
         return
-    if not os.getenv("LMNR_PROJECT_API_KEY"):
+    api_key = _env("LMNR_PROJECT_API_KEY", "")
+    if not api_key:
         logger.warning("ENABLE_LAMINAR is on but LMNR_PROJECT_API_KEY is missing — skipping init")
         return
     try:
         from lmnr import Laminar
 
-        # project_api_key is read from LMNR_PROJECT_API_KEY automatically.
-        # base_url can point at a self-hosted instance via LMNR_BASE_URL.
-        init_kwargs = {"metadata": {"environment": os.getenv("ENVIRONMENT", "dev")}}
-        base_url = os.getenv("LMNR_BASE_URL")
+        # Pass the key explicitly (decouple keeps it out of os.environ, which is
+        # where lmnr would otherwise look). base_url -> self-hosted instance.
+        init_kwargs = {
+            "project_api_key": api_key,
+            "metadata": {"environment": _env("ENVIRONMENT", "dev")},
+        }
+        base_url = _env("LMNR_BASE_URL", "")
         if base_url:
             init_kwargs["base_url"] = base_url
         Laminar.initialize(**init_kwargs)
         _initialized = True
-        logger.info("Laminar telemetry initialized [env=%s]", os.getenv("ENVIRONMENT", "dev"))
+        logger.info("Laminar telemetry initialized [env=%s]", _env("ENVIRONMENT", "dev"))
     except Exception as exc:  # noqa: BLE001 — telemetry must never break startup
         logger.error("Failed to initialize Laminar: %s", exc)
 
@@ -84,8 +101,8 @@ def _enabled():
     """Whether telemetry should be active for this process (checked at import
     time by the observe() decorator, so `lmnr` is only imported when on)."""
     return (
-        _truthy(os.getenv("ENABLE_LAMINAR"))
-        and bool(os.getenv("LMNR_PROJECT_API_KEY"))
+        _truthy(_env("ENABLE_LAMINAR", "false"))
+        and bool(_env("LMNR_PROJECT_API_KEY", ""))
         and not _should_skip()
     )
 
