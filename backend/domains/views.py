@@ -209,11 +209,13 @@ def domain_list(request):
                     # The keywords field in the domain stores the comma-separated list
                     # for reference, but actual Keyword objects are created by the frontend.
 
-                    # Auto-grant DomainAccess to all existing org members
+                    # Auto-grant DomainAccess to all existing org members.
+                    # Clients are excluded: they must only ever see domains
+                    # explicitly assigned to them, never every new domain.
                     org_members = Account.objects.filter(
                         organisation=request.user.organisation,
                         is_active=True
-                    )
+                    ).exclude(role='client')
                     for member in org_members:
                         DomainAccess.objects.get_or_create(
                             user=member,

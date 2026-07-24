@@ -433,6 +433,30 @@ export const apiClient = {
     body: JSON.stringify({ role }),
   }),
 
+  // ===== Client Management (agency side) =====
+  getClients: () => apiRequest<{ clients: any[] }>('/auth/clients/'),
+
+  createClient: (data: {
+    email: string;
+    password: string;
+    first_name?: string;
+    last_name?: string;
+    domain_ids: number[];
+  }) => apiRequest('/auth/clients/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  updateClient: (id: number, data: { domain_ids?: number[]; account_status?: string }) =>
+    apiRequest(`/auth/clients/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  deactivateClient: (id: number) => apiRequest(`/auth/clients/${id}/`, {
+    method: 'DELETE',
+  }),
+
   sendInvitation: (data: any) => apiRequest('/auth/invite/', {
     method: 'POST',
     body: JSON.stringify(data),

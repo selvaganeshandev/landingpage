@@ -8,6 +8,7 @@ from django.db.models import Q, Sum, Avg
 from django.db import connection
 from .models import Topic, TopicAnalytics
 from .serializers import TopicSerializer, TopicAnalyticsSerializer
+from core.queryset_scoping import filter_by_accessible_domains
 
 
 class TopicViewSet(viewsets.ModelViewSet):
@@ -16,8 +17,8 @@ class TopicViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        # Org-scoped for all roles (including super_admin) — tenant isolation.
-        return Topic.objects.filter(domain__organisation=user.organisation)
+        # Scoped to the user's accessible domains — tenant + domain isolation.
+        return filter_by_accessible_domains(Topic.objects.all(), user, self.request)
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)

@@ -303,6 +303,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return true;
     }
 
+    // Client: read-only access to data modules, never admin modules.
+    // Backend domain-scoping is the real boundary; this only shapes the UI.
+    if (state.user?.role === 'client') {
+      const CLIENT_ADMIN_MODULES = ['organization_settings', 'team_management'];
+      if (CLIENT_ADMIN_MODULES.includes(module)) return false;
+      return requiredLevel === 'read';
+    }
+
     // Organization settings default for admin: allow unless explicitly restricted
     if (module === 'organization_settings' && state.user?.role === 'admin') {
       if (!permission) {

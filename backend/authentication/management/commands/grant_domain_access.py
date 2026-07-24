@@ -28,11 +28,12 @@ class Command(BaseCommand):
         if dry_run:
             self.stdout.write(self.style.WARNING('DRY RUN - No changes will be made\n'))
 
-        # Get all non-super_admin users with an organization
+        # Get all staff users with an organization. Super admins already have
+        # global access; clients are domain-scoped and must never be bulk-granted.
         users = Account.objects.filter(
             organisation__isnull=False,
             is_active=True
-        ).exclude(role='super_admin')
+        ).exclude(role__in=['super_admin', 'client'])
 
         total_grants = 0
 

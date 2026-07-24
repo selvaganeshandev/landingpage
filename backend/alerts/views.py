@@ -6,6 +6,7 @@ from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from .models import Alert, AlertRule, AlertNotification, AlertConfiguration
 from .serializers import AlertSerializer, AlertRuleSerializer, AlertNotificationSerializer, AlertConfigurationSerializer
+from core.queryset_scoping import filter_by_accessible_domains
 
 
 class AlertViewSet(viewsets.ModelViewSet):
@@ -14,7 +15,7 @@ class AlertViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        base_qs = Alert.objects.filter(domain__organisation=user.organisation)
+        base_qs = filter_by_accessible_domains(Alert.objects.all(), user, self.request)
         # Optional domain scoping via query param
         domain_id = self.request.query_params.get('domain_id') if hasattr(self, 'request') else None
         if domain_id:
@@ -109,7 +110,7 @@ class AlertRuleViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        base_qs = AlertRule.objects.filter(domain__organisation=user.organisation)
+        base_qs = filter_by_accessible_domains(AlertRule.objects.all(), user, self.request)
         # Optional domain scoping via query param
         domain_id = self.request.query_params.get('domain_id') if hasattr(self, 'request') else None
         if domain_id:
@@ -134,7 +135,10 @@ class AlertNotificationViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        return AlertNotification.objects.filter(alert__domain__organisation=user.organisation)
+        return filter_by_accessible_domains(
+            AlertNotification.objects.all(), user, self.request,
+            domain_field='alert__domain_id',
+        )
 
 
 @api_view(['GET', 'POST', 'PUT'])

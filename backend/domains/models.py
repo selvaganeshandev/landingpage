@@ -142,11 +142,25 @@ class Domain(models.Model):
         return f"{self.name} ({self.url})"
 
 
-# DomainAccess model removed - domain-level access management deprecated
+# Default access level granted to a client on a domain.
+DEFAULT_CLIENT_ACCESS_LEVEL = 'viewer'
+
+
 class DomainAccess(models.Model):
     """
-    Controls which users can access specific domains (no granular levels)
+    Controls which users can access specific domains.
+
+    ``access_level`` is reserved for future granular rights (unused in Phase 1 —
+    every grant is a viewer). ``is_active`` is a soft-delete flag: revoking a
+    client's access flips it to False rather than deleting the row, preserving
+    assignment history and allowing instant restoration.
     """
+    ACCESS_LEVEL_CHOICES = [
+        ('viewer', 'Viewer'),
+        ('analyst', 'Analyst'),
+        ('manager', 'Manager'),
+    ]
+
     user = models.ForeignKey(
         'authentication.Account',
         on_delete=models.CASCADE,
@@ -156,6 +170,16 @@ class DomainAccess(models.Model):
         Domain,
         on_delete=models.CASCADE,
         related_name='user_access'
+    )
+    access_level = models.CharField(
+        max_length=15,
+        choices=ACCESS_LEVEL_CHOICES,
+        default=DEFAULT_CLIENT_ACCESS_LEVEL,
+        help_text="Granular access level (reserved; unused in Phase 1)"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Soft-delete flag; False revokes access while preserving history"
     )
     granted_by = models.ForeignKey(
         'authentication.Account',

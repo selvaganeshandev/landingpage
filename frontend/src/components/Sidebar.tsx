@@ -619,6 +619,43 @@ export const Sidebar = () => {
                   </Link>
                 )
               )}
+              {(user.role === 'admin' || user.role === 'super_admin') && (
+                !isOpen ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Link
+                        to="/clients"
+                        className={cn(
+                          "flex items-center",
+                          location.pathname === "/clients"
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                          "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
+                        )}
+                      >
+                        <Users className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/clients" ? "text-primary-foreground" : "text-muted-foreground")} />
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <p>Clients</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Link
+                    to="/clients"
+                    className={cn(
+                      "flex items-center",
+                      location.pathname === "/clients"
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
+                    )}
+                  >
+                    <Users className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/clients" ? "text-primary-foreground" : "text-muted-foreground")} />
+                    <span>Clients</span>
+                  </Link>
+                )
+              )}
               {!isOpen ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
