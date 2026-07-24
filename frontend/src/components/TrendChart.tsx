@@ -59,6 +59,16 @@ interface TrendChartProps {
    *  false when it holds running totals. Undefined for callers that don't
    *  supply it, which suppresses the caption rather than guessing. */
   isPeriodData?: boolean;
+  /** Whether the domain's Google Analytics integration is connected+active.
+   *  Only `false` means "not connected" — undefined/null = unknown (still
+   *  loading), so we never wrongly prompt a connected user to connect. */
+  gaConnected?: boolean | null;
+  /** The AI-referral (platform breakdown) fetch failed — e.g. GA4 hit its
+   *  per-property hourly quota (429). Distinguishes "rate-limited" from
+   *  "genuinely no AI traffic" in the empty state. */
+  aiTrafficError?: boolean;
+  /** The AI-referral timeseries fetch (correlation) failed, same idea. */
+  aiTrafficDailyError?: boolean;
 }
 
 // Time-range presets wired to the existing `days` query param on the dashboard
@@ -225,7 +235,7 @@ const EmptyState = ({ title, subtitle }: { title: string; subtitle: string }) =>
   </div>
 );
 
-export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, aiTrafficDaily, shareOfVoice, aiTraffic, isPeriodData }: TrendChartProps) => {
+export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, aiTrafficDaily, shareOfVoice, aiTraffic, isPeriodData, gaConnected, aiTrafficError, aiTrafficDailyError }: TrendChartProps) => {
   const [chartTab, setChartTab] = useState<ChartTab>("main");
   const hasCitationsSeries = data[0]?.citations !== undefined;
   const hasVisibilitySeries = data[0]?.visibility !== undefined;
@@ -309,6 +319,22 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
     ];
   })();
 
+  // Empty-state copy for the GA-dependent tabs. Critically, only prompt to
+  // "Connect Google Analytics" when we KNOW GA is disconnected (gaConnected ===
+  // false). If GA is connected but the fetch failed, it's almost always GA4's
+  // per-property hourly quota (429) — say so, don't imply it's disconnected.
+  const RATE_LIMIT_SUBTITLE = "Google Analytics is temporarily rate-limited for this property (GA4 caps how many reports a property can run per hour). It usually clears within an hour — try again shortly.";
+  const aiTrafficEmpty = gaConnected === false
+    ? { title: "Connect Google Analytics", subtitle: "Connect GA to see sessions arriving from ChatGPT, Gemini, Perplexity, Claude and more." }
+    : aiTrafficError
+      ? { title: "Couldn't load AI traffic", subtitle: RATE_LIMIT_SUBTITLE }
+      : { title: "No AI-referred traffic in this period", subtitle: "No sessions arrived from AI platforms in the selected window. Try a wider time range." };
+  const correlationEmpty = gaConnected === false
+    ? { title: "Connect Google Analytics", subtitle: "Connect GA so we can chart AI Visibility against AI-referred traffic over time." }
+    : aiTrafficDailyError
+      ? { title: "Couldn't load AI traffic", subtitle: RATE_LIMIT_SUBTITLE }
+      : { title: "Not enough overlapping data", subtitle: "We need AI-referred traffic and visibility on the same dates to chart the correlation. Try a wider time range." };
+
   return (
     <Card className="p-6 h-full flex flex-col border border-border">
       {/* Top row: chart-type tabs (left) + time-range buttons (right) */}
@@ -377,10 +403,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
             </ResponsiveContainer>
           </div>
         ) : (
-          <EmptyState
-            title="No AI-referred traffic yet"
-            subtitle="Connect Google Analytics to see sessions arriving from ChatGPT, Gemini, Perplexity and more."
-          />
+          <EmptyState title={aiTrafficEmpty.title} subtitle={aiTrafficEmpty.subtitle} />
         )
       ) : chartTab === "correlation" ? (
         hasCorrelationSeries ? (
@@ -419,10 +442,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
             </ResponsiveContainer>
           </div>
         ) : (
-          <EmptyState
-            title="Not enough data to compare"
-            subtitle="Connect Google Analytics so we can chart AI Visibility against AI-referred traffic over time."
-          />
+          <EmptyState title={correlationEmpty.title} subtitle={correlationEmpty.subtitle} />
         )
       ) : data.length === 0 ? (
         <EmptyState
