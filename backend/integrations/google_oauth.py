@@ -974,6 +974,128 @@ def get_ai_referral_data(request):
         )
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_ai_referral_timeseries(request):
+    """
+    Daily AI-referred traffic (sessions + users) for a domain.
+
+    Same GA4 ``sessionSource`` AI filter as :func:`get_ai_referral_data`, but
+    dimensioned by DATE instead of source, so the dashboard can plot AI traffic
+    over time and correlate it against the AI Visibility trend. Accepts
+    ?days=N or explicit ?start_date=&end_date=. Returns the same
+    ``{data: {daily, totals}}`` shape as :func:`get_ga_data` (each daily row is
+    ``{date: 'YYYYMMDD', sessions, totalUsers}``) so the frontend reuses the
+    existing GA parsing path.
+    """
+    domain_id = request.query_params.get('domain_id')
+    start_date = request.query_params.get('start_date')
+    end_date = request.query_params.get('end_date')
+    days_param = request.query_params.get('days')
+
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Match get_ai_referral_data's window semantics: when no explicit range is
+    # given, end YESTERDAY (GA4 treats today as an incomplete day) over `days`.
+    days = None
+    if not (start_date and end_date):
+        try:
+            days = int(days_param) if days_param else 28
+        except (TypeError, ValueError):
+            days = 28
+        window_end = datetime.now().date() - timedelta(days=1)
+        window_start = window_end - timedelta(days=days - 1)
+        end_date = window_end.strftime('%Y-%m-%d')
+        start_date = window_start.strftime('%Y-%m-%d')
+
+    try:
+        integration = Integration.objects.get(
+            domain_id=domain_id,
+            type='google_analytics',
+            status='active'
+        )
+
+        if not integration.provider_id or integration.provider_id == '':
+            return Response({
+                'error': 'Please select a GA4 property first',
+                'needs_property_selection': True,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        credentials = get_credentials_from_integration(integration)
+        if not credentials:
+            return Response(
+                {'error': 'No valid credentials found'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        service = build('analyticsdata', 'v1beta', credentials=credentials)
+
+        property_id = integration.provider_id
+        if not property_id.startswith('properties/'):
+            property_id = f'properties/{property_id}'
+
+        # Date-dimensioned report, filtered to AI sources with the SAME regex the
+        # single-window AI-referral report uses, so daily totals reconcile with it.
+        response = service.properties().runReport(
+            property=property_id,
+            body={
+                'dateRanges': [{'startDate': start_date, 'endDate': end_date}],
+                'metrics': [
+                    {'name': 'sessions'},
+                    {'name': 'totalUsers'},
+                ],
+                'dimensions': [
+                    {'name': 'date'},
+                ],
+                'dimensionFilter': {
+                    'filter': {
+                        'fieldName': 'sessionSource',
+                        'stringFilter': {
+                            'matchType': 'PARTIAL_REGEXP',
+                            'value': AI_SOURCE_REGEX,
+                            'caseSensitive': False,
+                        }
+                    }
+                },
+                'orderBys': [
+                    {'dimension': {'dimensionName': 'date'}}
+                ]
+            }
+        ).execute()
+
+        data = parse_ga_response(response)
+        sampling = _extract_sampling_metadata(response.get('metadata', {}))
+
+        return Response({
+            'success': True,
+            'data': data,
+            'date_range': {'start': start_date, 'end': end_date, 'days': days},
+            'sampling': sampling,
+        })
+
+    except Integration.DoesNotExist:
+        return Response(
+            {'error': 'Google Analytics integration not found or not active'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except HttpError as e:
+        logger.error(f"Google Analytics API error (AI timeseries): {e}")
+        return Response(
+            {'error': f'Google Analytics API error: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    except Exception as e:
+        logger.error(f"Error fetching AI referral timeseries: {str(e)}")
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 def parse_ga_response(response):
     """Parse Google Analytics API response into a cleaner format."""
     rows = response.get('rows', [])
