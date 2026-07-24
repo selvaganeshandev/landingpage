@@ -44,6 +44,7 @@ import ResetPassword from "./pages/ResetPassword";
 import AcceptInvitation from "./pages/AcceptInvitation";
 import OrganizationSettings from "./pages/OrganizationSettings";
 import TeamMemberPermissions from "./pages/TeamMemberPermissions";
+import Clients from "./pages/Clients";
 import DomainSettings from "./pages/DomainSettings";
 import MisinformationAlerts from "./pages/MisinformationAlerts";
 import Citations from "./pages/Citations";
@@ -209,6 +210,11 @@ const App = () => (
               <Route path="/organization-settings/members/:memberId" element={
                 <ProtectedRoute requiredPermission={MODULES.TEAM_MANAGEMENT} requiredLevel="admin">
                   <TeamMemberPermissions />
+                </ProtectedRoute>
+              } />
+              <Route path="/clients" element={
+                <ProtectedRoute requiredPermission={MODULES.TEAM_MANAGEMENT} requiredLevel="admin">
+                  <Clients />
                 </ProtectedRoute>
               } />
               <Route path="/organization-settings/domains/:domainId" element={

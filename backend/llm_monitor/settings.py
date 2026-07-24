@@ -90,6 +90,9 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'llm_monitor.middleware.ThreadLocalRequestMiddleware',
+    # Fail-closed domain-access backstop; must run after auth middleware so a
+    # session user is populated, and it resolves JWT bearer tokens itself.
+    'llm_monitor.middleware_domain_access.DomainAccessMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -192,7 +195,9 @@ AUTH_USER_MODEL = 'authentication.Account'
 # Django REST Framework configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        # Status-aware JWT: rejects tokens for suspended/disabled accounts on
+        # every request (immediate lockout, not at token expiry).
+        'authentication.jwt_auth.StatusCheckingJWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [

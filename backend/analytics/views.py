@@ -7,6 +7,7 @@ from django.utils import timezone
 from django.db.models import Sum, Avg
 from .models import SentimentAnalytics, ShareOfVoiceAnalytics
 from .serializers import SentimentAnalyticsSerializer, ShareOfVoiceAnalyticsSerializer
+from core.queryset_scoping import filter_by_accessible_domains
 
 
 class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
@@ -15,8 +16,11 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        # Org-scoped for all roles (including super_admin) — tenant isolation.
-        return SentimentAnalytics.objects.filter(domain__organisation=user.organisation)
+        # Scoped to the user's accessible domains (org-wide for admins, granted
+        # domains for users/clients) — tenant + domain isolation.
+        return filter_by_accessible_domains(
+            SentimentAnalytics.objects.all(), user, self.request
+        )
     
     @action(detail=False, methods=['get'])
     def by_domain(self, request):
@@ -141,8 +145,11 @@ class ShareOfVoiceAnalyticsViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        # Org-scoped for all roles (including super_admin) — tenant isolation.
-        return ShareOfVoiceAnalytics.objects.filter(domain__organisation=user.organisation)
+        # Scoped to the user's accessible domains (org-wide for admins, granted
+        # domains for users/clients) — tenant + domain isolation.
+        return filter_by_accessible_domains(
+            ShareOfVoiceAnalytics.objects.all(), user, self.request
+        )
     
     @action(detail=False, methods=['get'])
     def by_domain(self, request):

@@ -109,6 +109,14 @@ export const DomainSelector = () => {
     void syncToServer();
   }, [domains, user, selectedDomain]);
 
+  // Clients with exactly one assigned domain: auto-select it so their dashboards
+  // load without ever touching a switcher.
+  useEffect(() => {
+    if (user?.role === 'client' && domains.length === 1 && !selectedDomain) {
+      setSelectedDomain(domains[0]);
+    }
+  }, [user, domains, selectedDomain, setSelectedDomain]);
+
   // Show error if domain loading failed
   useEffect(() => {
     if (error) {
@@ -196,6 +204,18 @@ export const DomainSelector = () => {
       >
         <Globe className="mr-2 h-4 w-4 flex-shrink-0" />
         <span className="text-left flex-1">No domain added</span>
+      </Button>
+    );
+  }
+
+  // Clients with a single domain get a static label instead of a switcher —
+  // there is nothing to switch to.
+  if (user?.role === 'client' && domains.length === 1) {
+    const only = domains[0];
+    return (
+      <Button variant="outline" className="w-full justify-start" disabled>
+        <Globe className="mr-2 h-4 w-4 flex-shrink-0" />
+        <span className="text-left flex-1 truncate">{only.name}</span>
       </Button>
     );
   }

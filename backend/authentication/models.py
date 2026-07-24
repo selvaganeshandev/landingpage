@@ -220,6 +220,14 @@ class Account(AbstractUser):
         ('super_admin', 'Super Administrator'),
         ('admin', 'Administrator'),
         ('user', 'User'),
+        ('client', 'Client'),
+    ]
+
+    ACCOUNT_STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('suspended', 'Suspended'),
+        ('pending', 'Pending'),
+        ('disabled', 'Disabled'),
     ]
 
     JOB_ROLE_CHOICES = [
@@ -236,7 +244,13 @@ class Account(AbstractUser):
         max_length=12,
         choices=ROLE_CHOICES,
         default='user',
-        help_text="Role of the account (super-admin, admin or user)"
+        help_text="Role of the account (super-admin, admin, user or client)"
+    )
+    account_status = models.CharField(
+        max_length=15,
+        choices=ACCOUNT_STATUS_CHOICES,
+        default='active',
+        help_text="Lifecycle status; non-active accounts are denied access even with a valid token"
     )
     job_role = models.CharField(
         max_length=20,
@@ -504,3 +518,61 @@ class PasswordResetToken(models.Model):
     def can_be_used(self):
         """Check if the reset token can be used"""
         return self.status == 'pending' and not self.is_expired()
+
+
+class ClientActivityLog(models.Model):
+    """
+    Audit trail of client-account activity (login, logout, report export).
+
+    Phase 1 records coarse events only — per-page 'view_dashboard' events are
+    intentionally excluded because a single dashboard load fires many API calls
+    and would flood this table; they can be added later behind a retention policy.
+    """
+    ACTION_CHOICES = [
+        ('login', 'Login'),
+        ('logout', 'Logout'),
+        ('export_report', 'Export Report'),
+    ]
+
+    user = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name='activity_logs',
+        help_text="Account the activity belongs to"
+    )
+    domain = models.ForeignKey(
+        'domains.Domain',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='client_activity_logs',
+        help_text="Domain in context when the action occurred, if any"
+    )
+    action = models.CharField(
+        max_length=50,
+        choices=ACTION_CHOICES,
+        help_text="What the client did"
+    )
+    details = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Optional structured context for the action"
+    )
+    ip_address = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text="Client IP address at the time of the action"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'client_activity_logs'
+        verbose_name = 'Client Activity Log'
+        verbose_name_plural = 'Client Activity Logs'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.action} @ {self.created_at:%Y-%m-%d %H:%M}"

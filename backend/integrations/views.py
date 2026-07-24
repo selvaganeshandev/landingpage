@@ -6,6 +6,7 @@ from django.conf import settings
 from django.utils import timezone
 from .models import Integration, GATrafficInsight, GSCTrafficInsight
 from .serializers import IntegrationSerializer, IntegrationPublicSerializer
+from core.queryset_scoping import filter_by_accessible_domains
 from .utils.prorate import apply_prorate_gsc, apply_prorate_ga
 
 
@@ -20,8 +21,8 @@ class IntegrationViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        # Org-scoped for all roles (including super_admin) — tenant isolation.
-        return Integration.objects.filter(domain__organisation=user.organisation)
+        # Scoped to the user's accessible domains — tenant + domain isolation.
+        return filter_by_accessible_domains(Integration.objects.all(), user, self.request)
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)

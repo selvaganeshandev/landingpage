@@ -10,6 +10,7 @@ from datetime import timedelta
 from django.utils import timezone
 from .models import Competitor, CompetitorAnalytics, CompetitorPrompt, CompetitorPromptAnalytics, CompetitorMetricSnapshot, CompetitiveInsight
 from domains.models import Domain
+from core.queryset_scoping import filter_by_accessible_domains
 from prompts.models import PromptAnalytics
 from analytics.models import ShareOfVoiceAnalytics
 from .serializers import (
@@ -25,7 +26,7 @@ class CompetitorViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        queryset = Competitor.objects.filter(domain__organisation=user.organisation)
+        queryset = filter_by_accessible_domains(Competitor.objects.all(), user, self.request)
 
         # Filter by domain_id if provided in query params
         domain_id = self.request.query_params.get('domain_id')
@@ -653,7 +654,9 @@ class CompetitorMetricSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        queryset = CompetitorMetricSnapshot.objects.filter(domain__organisation=user.organisation)
+        queryset = filter_by_accessible_domains(
+            CompetitorMetricSnapshot.objects.all(), user, self.request
+        )
         return queryset
 
     def list(self, request, *args, **kwargs):
