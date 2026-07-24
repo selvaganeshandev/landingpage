@@ -31,6 +31,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name='clientactivitylog',
-            index=models.Index(fields=['user', '-created_at'], name='client_acti_user_id_created_idx'),
+            index=models.Index(fields=['user', '-created_at'], name='client_acti_user_id_c93507_idx'),
         ),
     ]
