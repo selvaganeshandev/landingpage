@@ -458,6 +458,7 @@ export const apiClient = {
       method: 'DELETE',
     }),
 
+
   sendInvitation: (data: any) => apiRequest('/auth/invite/', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -1400,6 +1401,15 @@ export const apiClient = {
     if (endDate) queryParams.set('end_date', endDate);
     if (days) queryParams.set('days', String(days));
     return apiRequest(`/integrations/google/ai-referrals/?${queryParams.toString()}`);
+  },
+
+  // Daily AI-referred traffic (sessions/users by date) for the correlation chart.
+  getAIReferralTimeseries: (domainId: number, startDate?: string, endDate?: string, days?: number) => {
+    const queryParams = new URLSearchParams({ domain_id: String(domainId) });
+    if (startDate) queryParams.set('start_date', startDate);
+    if (endDate) queryParams.set('end_date', endDate);
+    if (days) queryParams.set('days', String(days));
+    return apiRequest(`/integrations/google/ai-referrals/timeseries/?${queryParams.toString()}`);
   },
 
   // ===== Reports =====

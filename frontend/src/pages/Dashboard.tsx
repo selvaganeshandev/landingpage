@@ -43,7 +43,8 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [domainId, setDomainId] = useState<string | null>(null);
-  const [dailyAudience, setDailyAudience] = useState<any[] | null>(null);
+  const [aiTrafficDaily, setAiTrafficDaily] = useState<any[] | null>(null);
+  const [aiTraffic, setAiTraffic] = useState<any | null>(null);
   const { toast } = useToast();
   const hasMountedRef = useRef(false);
 
@@ -239,22 +240,50 @@ const Dashboard = () => {
       });
       setSummary(data);
 
-      // Fetch GA daily traffic series for the Monthly Audience tab
-      api.getGAData(Number(currentDomainId), startStr || undefined, endStr || undefined)
+      // Fetch the daily AI-referred traffic series (GA4 sessionSource filtered,
+      // dimensioned by date) for the Visibility vs Traffic correlation chart.
+      api.getAIReferralTimeseries(
+        Number(currentDomainId),
+        startStr || undefined,
+        endStr || undefined,
+        useRange ? undefined : Number(timePeriod),
+      )
         .then((res: any) => {
           const daily = res?.data?.daily || [];
           if (daily.length > 0) {
-            setDailyAudience(daily.map((row: any) => ({
+            setAiTrafficDaily(daily.map((row: any) => ({
               date: formatGADate(row.date),
               sessions: Number(row.sessions || 0),
               users: Number(row.totalUsers || 0),
             })));
           } else {
-            setDailyAudience(null);
+            setAiTrafficDaily(null);
           }
         })
         .catch(() => {
-          setDailyAudience(null);
+          setAiTrafficDaily(null);
+        });
+
+      // Fetch AI-referred traffic (GA4 sessionSource filtered) for the AI Traffic
+      // tab. Falls back to the selected `days` window when no explicit range.
+      api.getAIReferralData(
+        Number(currentDomainId),
+        startStr || undefined,
+        endStr || undefined,
+        useRange ? undefined : Number(timePeriod),
+      )
+        .then((res: any) => {
+          if (res?.totals || res?.platform_breakdown) {
+            setAiTraffic({
+              totals: res.totals ?? {},
+              platform_breakdown: res.platform_breakdown ?? {},
+            });
+          } else {
+            setAiTraffic(null);
+          }
+        })
+        .catch(() => {
+          setAiTraffic(null);
         });
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
@@ -423,7 +452,9 @@ const Dashboard = () => {
             metrics={summary?.metrics}
             timeRange={exportStartDate && exportEndDate ? undefined : timePeriod}
             onTimeRangeChange={handleTimeRangeChange}
-            audienceData={dailyAudience}
+            aiTrafficDaily={aiTrafficDaily}
+            shareOfVoice={summary?.share_of_voice?.your_brand?.share_percentage ?? null}
+            aiTraffic={aiTraffic}
           />
         </div>
       </div>

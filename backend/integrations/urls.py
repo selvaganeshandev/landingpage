@@ -8,6 +8,7 @@ from .google_oauth import (
     select_ga_property,
     get_ga_data,
     get_ai_referral_data,
+    get_ai_referral_timeseries,
     get_gsc_sites,
     select_gsc_site,
 )
@@ -25,6 +26,7 @@ urlpatterns = [
     path('google/select-property/', select_ga_property, name='select_ga_property'),
     path('google/analytics-data/', get_ga_data, name='get_ga_data'),
     path('google/ai-referrals/', get_ai_referral_data, name='get_ai_referral_data'),
+    path('google/ai-referrals/timeseries/', get_ai_referral_timeseries, name='get_ai_referral_timeseries'),
     # Google Search Console endpoints
     path('google/search-console/sites/', get_gsc_sites, name='get_gsc_sites'),
     path('google/search-console/select-site/', select_gsc_site, name='select_gsc_site'),
