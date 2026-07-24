@@ -32,4 +32,8 @@ urlpatterns = [
     path('<int:domain_id>/brand-links/', views.brand_link_list, name='brand_link_list'),
     path('<int:domain_id>/brand-links/<int:link_id>/', views.brand_link_detail, name='brand_link_detail'),
     path('<int:domain_id>/brand-links/<int:link_id>/recrawl/', views.brand_link_recrawl, name='brand_link_recrawl'),
+
+    # Client Access — read-only client login(s) scoped to this domain
+    path('<int:domain_id>/client-access/', views.domain_client_access, name='domain_client_access'),
+    path('<int:domain_id>/client-access/<int:client_id>/', views.domain_client_access_detail, name='domain_client_access_detail'),
 ]

@@ -433,29 +433,30 @@ export const apiClient = {
     body: JSON.stringify({ role }),
   }),
 
-  // ===== Client Management (agency side) =====
-  getClients: () => apiRequest<{ clients: any[] }>('/auth/clients/'),
+  // ===== Client Access (per-domain; the domain is the client) =====
+  getDomainClients: (domainId: number) =>
+    apiRequest<{ clients: any[] }>(`/domains/${domainId}/client-access/`),
 
-  createClient: (data: {
+  createDomainClient: (domainId: number, data: {
     email: string;
     password: string;
     first_name?: string;
     last_name?: string;
-    domain_ids: number[];
-  }) => apiRequest('/auth/clients/', {
+  }) => apiRequest(`/domains/${domainId}/client-access/`, {
     method: 'POST',
     body: JSON.stringify(data),
   }),
 
-  updateClient: (id: number, data: { domain_ids?: number[]; account_status?: string }) =>
-    apiRequest(`/auth/clients/${id}/`, {
+  updateDomainClient: (domainId: number, clientId: number, data: { account_status: string }) =>
+    apiRequest(`/domains/${domainId}/client-access/${clientId}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
 
-  deactivateClient: (id: number) => apiRequest(`/auth/clients/${id}/`, {
-    method: 'DELETE',
-  }),
+  removeDomainClient: (domainId: number, clientId: number) =>
+    apiRequest(`/domains/${domainId}/client-access/${clientId}/`, {
+      method: 'DELETE',
+    }),
 
   sendInvitation: (data: any) => apiRequest('/auth/invite/', {
     method: 'POST',

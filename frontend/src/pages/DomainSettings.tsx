@@ -50,7 +50,9 @@ import {
   Globe,
   RefreshCw,
   Eye,
+  ShieldCheck,
 } from "lucide-react";
+import { DomainClientAccess } from "@/components/DomainClientAccess";
 import {
   Table,
   TableBody,
@@ -1512,6 +1514,12 @@ export default function DomainSettings() {
               Reference Repository
             </TabsTrigger>
           )}
+          {!isTeamMember && (
+            <TabsTrigger value="client-access" className="gap-2 data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+              <ShieldCheck className="h-4 w-4" />
+              Client Access
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Basic Info Tab */}
@@ -2781,6 +2789,12 @@ export default function DomainSettings() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {!isTeamMember && (
+          <TabsContent value="client-access" className="space-y-4 mt-6">
+            {domainId && <DomainClientAccess domainId={parseInt(domainId)} />}
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Add Text Note Dialog */}
