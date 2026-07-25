@@ -2914,18 +2914,27 @@ export default function OrganizationSettings() {
                       <span className="font-medium">User</span>
                     </div>
                   </SelectItem>
-                  <SelectItem value="admin">
-                    <div className="flex items-center gap-2">
-                      <Crown className="h-4 w-4" />
-                      <span className="font-medium">Admin</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="client">
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck className="h-4 w-4" />
-                      <span className="font-medium">Client</span>
-                    </div>
-                  </SelectItem>
+                  {/* Only admins may hand out Admin or Client. A regular user can
+                      invite peers, but creating an admin is privilege escalation and
+                      creating a client grants domain access — both admin decisions.
+                      The backend enforces this too; hiding the options here keeps a
+                      user from picking something that would only come back a 403. */}
+                  {!isTeamMember && (
+                    <>
+                      <SelectItem value="admin">
+                        <div className="flex items-center gap-2">
+                          <Crown className="h-4 w-4" />
+                          <span className="font-medium">Admin</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="client">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="h-4 w-4" />
+                          <span className="font-medium">Client</span>
+                        </div>
+                      </SelectItem>
+                    </>
+                  )}
                 </SelectContent>
               </Select>
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">

@@ -127,18 +127,38 @@ PRIVILEGED_MODULES = ('organization_settings', 'team_management')
 
 
 def _has_team_management(user):
-    """Check if a 'user' role has team_management permission.
+    """Full team management: invite any role, change roles, remove members.
 
     Requires the 'admin' level, not merely the presence of a row. Every invited
     user used to receive a read-level row for every module, so an existence
-    check granted team management — and therefore invitation sending — to the
-    entire organisation.
+    check granted team management — and therefore the ability to mint ADMIN
+    accounts — to the entire organisation.
     """
     if user.role in ['admin', 'super_admin']:
         return True
     return UserPermission.objects.filter(
         user=user, module='team_management', permission_level='admin'
     ).exists()
+
+
+def _can_view_team(user):
+    """Who may see the team roster. Everyone but clients, who are domain-scoped
+    outsiders and must never enumerate the organisation's staff."""
+    return user.role in ['admin', 'super_admin', 'user']
+
+
+def _invitable_roles(user):
+    """Roles this actor is allowed to hand out.
+
+    A regular user may invite peers so teams can grow without an admin in the
+    loop, but may not create admins (privilege escalation) or clients (that
+    grants domain access, which is an administrative decision).
+    """
+    if _has_team_management(user):
+        return {'admin', 'user', 'client'}
+    if user.role == 'user':
+        return {'user'}
+    return set()
 
 
 
@@ -293,8 +313,17 @@ def logout(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def send_invitation(request):
-    if not _has_team_management(request.user):
-        return Response({'error': 'Only organisation administrators can send invitations'}, status=status.HTTP_403_FORBIDDEN)
+    allowed_roles = _invitable_roles(request.user)
+    if not allowed_roles:
+        return Response({'error': 'You do not have permission to send invitations'}, status=status.HTTP_403_FORBIDDEN)
+    # The role is checked BEFORE the serializer so a user cannot escalate by
+    # inviting an admin. Defaults to 'user' to match the serializer's default.
+    requested_role = request.data.get('role', 'user')
+    if requested_role not in allowed_roles:
+        return Response(
+            {'error': f"You can only invite the following role(s): {', '.join(sorted(allowed_roles))}"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
     serializer = TeamInvitationCreateSerializer(data=request.data, context={'organisation': request.user.organisation})
     if serializer.is_valid():
         invitation = serializer.save(invited_by=request.user, organisation=request.user.organisation, expires_at=timezone.now() + timezone.timedelta(days=7))
@@ -1215,8 +1244,8 @@ def delete_invitation(request, invitation_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def team_members(request):
-    if not _has_team_management(request.user):
-        return Response({'error': 'Only organisation administrators can view team members'}, status=status.HTTP_403_FORBIDDEN)
+    if not _can_view_team(request.user):
+        return Response({'error': 'You do not have permission to view team members'}, status=status.HTTP_403_FORBIDDEN)
     members = Account.objects.filter(organisation=request.user.organisation).exclude(role='super_admin')
     members_data = []
     for member in members:
