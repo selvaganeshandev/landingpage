@@ -194,7 +194,7 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client, grou
         system_prompt = f"You are a helpful assistant with access to current web search results. When answering questions, analyze the provided search results and combine them with your knowledge to provide comprehensive, up-to-date responses with current citations and links. Always prioritize the most recent and relevant information from the search results.{country_text}"
         
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": "Original Question: " + prompt_text + "\n\nBased on your knowledge, please provide a comprehensive and detailed response with:\n\n1. A thorough answer incorporating the latest information\n2. Include all relevant URLs and links\n3. Mention specific companies, tools, platforms, and services\n4. Provide detailed citations with current sources and dates where possible\n5. Include pricing information, features, and comparisons from the most recent data\n6. Add any additional current resources, alternatives, or related tools\n7. Highlight which information comes from recent sources vs general knowledge\n\nFormat your response with proper current links, detailed descriptions, and up-to-date references. Focus on providing the most current and relevant information available."}
@@ -1278,13 +1278,20 @@ def get_openai_client():
         except (ImportError, Exception) as db_err:
             logger.info(f"DB settings unavailable for OpenAI, trying env: {db_err}")
 
-        # Fallback to environment variable
+        # Every caller of this helper is internal (non-measured) work, so it runs
+        # through OpenRouter. The tracked ChatGPT measurement does not come
+        # through here — it uses core.analytics_helpers.get_openai_client, which
+        # still hits OpenAI directly.
         from django.conf import settings as django_settings
-        api_key = getattr(django_settings, 'OPENAI_API_KEY', None) or os.environ.get('OPENAI_API_KEY')
+        api_key = getattr(django_settings, 'OPENROUTER_API_KEY', None) or os.environ.get('OPENROUTER_API_KEY')
         if not api_key:
-            raise Exception("OpenAI API key not found in database or environment")
+            raise Exception("OPENROUTER_API_KEY not found in database or environment")
 
-        return openai.OpenAI(api_key=api_key, timeout=60)
+        return openai.OpenAI(
+            api_key=api_key,
+            base_url=getattr(django_settings, 'OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
+            timeout=60,
+        )
     except Exception as e:
         raise Exception(f"Failed to initialize OpenAI client: {str(e)}")
 
@@ -1412,9 +1419,9 @@ def extract_domains(text: str) -> list:
 
 
 def analyze_keyword_domain(keyword: str, user_domain: str, client):
-    # Query GPT-5
+    # Internal keyword/domain analysis via OpenRouter
     response = client.chat.completions.create(
-        model="gpt-5",
+        model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
         messages=[
             {"role": "system", "content": "You are an AI that provides clear answers and may reference relevant websites or brands."},
             {"role": "user", "content": f"Give me detailed information about {keyword}, including any relevant sources or brand names."}
@@ -1717,7 +1724,7 @@ Return ONLY a JSON array format like this:
 Generate exactly {limit} prompts."""
 
             response = openai_client.chat.completions.create(
-                model="gpt-4o",
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}

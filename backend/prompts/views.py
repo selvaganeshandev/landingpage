@@ -23,14 +23,12 @@ logger = logging.getLogger(__name__)
 
 # Import OpenAI client helper
 def get_openai_client():
-    """Return OpenAI client for the current organization or settings fallback; else raise."""
-    from llm_monitor.middleware import get_current_org_id
-    from engine.core.services.client_factory import get_client
-    org_id = get_current_org_id()
+    """Return the INTERNAL LLM client (OpenRouter) for non-measured work."""
+    from core.openrouter_client import get_internal_client
     try:
-        return get_client('openai', org_id)
+        return get_internal_client()
     except Exception as e:
-        raise Exception(f"Failed to initialize OpenAI client: {e}")
+        raise Exception(f"Failed to initialize internal LLM client: {e}")
 
 
 @api_view(['GET'])
@@ -2954,7 +2952,7 @@ Example format:
 
         try:
             response = openai_client.chat.completions.create(
-                model="gpt-4o",
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}

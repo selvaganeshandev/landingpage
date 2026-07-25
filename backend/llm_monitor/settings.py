@@ -276,6 +276,10 @@ OPENROUTER_SITE_URL = config('OPENROUTER_SITE_URL', default=None)
 OPENROUTER_SITE_TITLE = config('OPENROUTER_SITE_TITLE', default=None)
 # OpenRouter model slug, not an Anthropic model id.
 ANTHROPIC_MODEL = config('ANTHROPIC_MODEL', default='anthropic/claude-sonnet-5')
+# Internal (non-measured) LLM work runs through OpenRouter on this slug. The AI
+# Mention Check deliberately does NOT — it keeps hitting OpenAI directly so it
+# measures what a real ChatGPT user is told.
+OPENROUTER_INTERNAL_MODEL = config('OPENROUTER_INTERNAL_MODEL', default='openai/gpt-5-mini')
 
 # Google Gemini API Configuration (for AI-powered features)
 GOOGLE_GEMINI_API_KEY = config('GOOGLE_GEMINI_API_KEY', default=None)

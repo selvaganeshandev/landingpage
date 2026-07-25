@@ -147,7 +147,7 @@ Return ONLY the JSON array, no markdown, no explanations."""
                 return self._fallback_group_keywords(keywords)
             
             response = self.chatgpt_client.client.chat.completions.create(
-                model=getattr(settings, "OPENAI_INTERNAL_MODEL", "gpt-4o-mini"),
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
@@ -412,7 +412,7 @@ Return ONLY the JSON object."""
                 return None
             
             response = self.chatgpt_client.client.chat.completions.create(
-                model=getattr(settings, "OPENAI_INTERNAL_MODEL", "gpt-4o-mini"),
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}

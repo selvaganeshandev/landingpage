@@ -105,9 +105,11 @@ Be thorough but fair. Only flag genuine issues ABOUT {brand_name}, not minor wor
         Args:
             model: OpenAI model to use (default: gpt-4o-mini for cost efficiency)
         """
+        # Misinformation comparison is internal analysis, not a measurement of
+        # what ChatGPT tells users, so it runs on the OpenRouter internal slug.
         self.model = model or getattr(
-            settings, 'MISINFO_COMPARISON_MODEL', 'gpt-4o-mini'
-        )
+            settings, 'MISINFO_COMPARISON_MODEL', None
+        ) or getattr(settings, 'OPENROUTER_INTERNAL_MODEL', 'openai/gpt-5-mini')
         self._client = None
 
     @property
@@ -118,14 +120,12 @@ Be thorough but fair. Only flag genuine issues ABOUT {brand_name}, not minor wor
         return self._client
 
     def _get_openai_client(self):
-        """Get OpenAI client."""
-        from llm_monitor.middleware import get_current_org_id
-        from engine.core.services.client_factory import get_client
-        org_id = get_current_org_id()
+        """Internal LLM client — OpenRouter, not OpenAI direct."""
+        from core.openrouter_client import get_internal_client
         try:
-            return get_client('openai', org_id)
+            return get_internal_client()
         except Exception as e:
-            raise Exception(f"Failed to initialize OpenAI client: {e}")
+            raise Exception(f"Failed to initialize internal LLM client: {e}")
 
     def compare(
         self,

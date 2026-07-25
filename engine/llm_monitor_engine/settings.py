@@ -237,6 +237,13 @@ LLM_MAX_OUTPUT_TOKENS = config('LLM_MAX_OUTPUT_TOKENS', default=1500, cast=int)
 # ChatGPT users are told, so cheapening it would change the measurement itself.
 OPENAI_INTERNAL_MODEL = config('OPENAI_INTERNAL_MODEL', default='gpt-4o-mini')
 
+# Internal (non-measured) LLM work runs through OpenRouter. The tracked
+# ChatGPT call deliberately does NOT — it must keep hitting OpenAI directly with
+# OPENAI_CHATGPT_MODEL so the measurement still reflects what a real ChatGPT user
+# is told. Only support work (topics, prompt generation, insights, chat,
+# misinformation comparison) uses the slug below.
+OPENROUTER_INTERNAL_MODEL = config('OPENROUTER_INTERNAL_MODEL', default='openai/gpt-5-mini')
+
 # ==================== GEMINI BACKEND: AI Studio vs Vertex AI ====================
 # 'aistudio' (default) keeps the API-key path via google.generativeai.
 # 'vertex' routes Gemini through Vertex AI on a GCP project so calls bill against

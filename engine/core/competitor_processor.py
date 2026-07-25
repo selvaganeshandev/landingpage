@@ -1091,12 +1091,16 @@ class CompetitorProcessor:
         """
         try:
             if self._openai_client is None:
-                self._openai_client = get_openai_client(org_id)
+                # Insights are internal output, not a measurement of what ChatGPT
+                # tells users, so this runs through OpenRouter rather than the
+                # tracked-ChatGPT client.
+                from .services.client_factory import get_internal_client
+                self._openai_client = get_internal_client(org_id)
         except Exception as client_error:
-            logger.error("OpenAI client not available for insights: %s", client_error)
+            logger.error("Internal LLM client not available for insights: %s", client_error)
             return [], ''
 
-        model_name = getattr(settings, 'OPENAI_INSIGHTS_MODEL', 'gpt-4o-mini')
+        model_name = getattr(settings, 'OPENROUTER_INTERNAL_MODEL', 'openai/gpt-5-mini')
         domain_name = context.get('domain', {}).get('name', 'the brand')
 
         prompt = f"""You are a competitive intelligence analyst providing ACTIONABLE strategic insights to help {domain_name} increase brand visibility in AI search results.

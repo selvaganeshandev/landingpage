@@ -369,9 +369,12 @@ Remember: You're helping users improve their visibility in AI-generated response
             org_id = request.user.organisation.id
 
         try:
-            openai_client = get_client('openai', org_id)
+            # Chat is internal product output, not a measurement of ChatGPT, so
+            # it runs through OpenRouter.
+            from core.openrouter_client import get_internal_client
+            openai_client = get_internal_client()
         except Exception as e:
-            logger.warning(f"Could not load OpenAI client for org {org_id}: {e}")
+            logger.warning(f"Could not load internal LLM client for org {org_id}: {e}")
             return Response(
                 {'error': f'OpenAI client not configured for this organization: {str(e)}.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
@@ -433,7 +436,7 @@ Remember: You're helping users improve their visibility in AI-generated response
         try:
             # Call ChatGPT with function calling
             response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",  # Cost-effective model
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),  # Cost-effective model
                 messages=messages,
                 tools=CHAT_TOOLS,
                 tool_choice="auto",
@@ -487,7 +490,7 @@ Remember: You're helping users improve their visibility in AI-generated response
 
                 # Get final response from ChatGPT
                 final_response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                     messages=messages,
                     temperature=0.7
                 )

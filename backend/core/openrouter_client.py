@@ -206,6 +206,29 @@ class _MessagesAPI:
         return _to_message(response, resolved_model)
 
 
+def get_internal_client(timeout: int = 60) -> Any:
+    """Plain OpenAI-compatible client pointed at OpenRouter, for INTERNAL work.
+
+    Used by the backend's non-measured LLM calls (chat, domain helpers, insight
+    generation, misinformation comparison). The AI Mention Check deliberately
+    does NOT use this — it must keep hitting OpenAI directly so it measures what
+    a real ChatGPT user is told.
+
+    Pair with ``settings.OPENROUTER_INTERNAL_MODEL`` for the model slug.
+    """
+    from django.conf import settings
+    from openai import OpenAI
+
+    api_key = getattr(settings, 'OPENROUTER_API_KEY', None)
+    if not api_key:
+        raise ValueError('OPENROUTER_API_KEY is not configured')
+    return OpenAI(
+        api_key=api_key,
+        base_url=getattr(settings, 'OPENROUTER_BASE_URL', OPENROUTER_BASE_URL),
+        timeout=timeout,
+    )
+
+
 class OpenRouterAnthropicClient:
     """Drop-in replacement for ``anthropic.Anthropic`` backed by OpenRouter.
 

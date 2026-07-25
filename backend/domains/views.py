@@ -30,14 +30,17 @@ logger = logging.getLogger(__name__)
 
 
 def get_openai_client():
-    """Return OpenAI client for the current organization or settings fallback; else raise."""
-    from llm_monitor.middleware import get_current_org_id
-    from engine.core.services.client_factory import get_client
-    org_id = get_current_org_id()
+    """Return the INTERNAL LLM client (OpenRouter) for non-measured work.
+
+    Every caller here is internal analysis, so it runs through OpenRouter on
+    settings.OPENROUTER_INTERNAL_MODEL. The AI Mention Check does NOT use this —
+    it keeps hitting OpenAI directly so it measures real ChatGPT output.
+    """
+    from core.openrouter_client import get_internal_client
     try:
-        return get_client('openai', org_id)
+        return get_internal_client()
     except Exception as e:
-        raise Exception(f"Failed to initialize OpenAI client: {e}")
+        raise Exception(f"Failed to initialize internal LLM client: {e}")
 
 
 def get_google_genai_client():
@@ -548,7 +551,7 @@ Return ONLY a valid JSON object with these fields:
 Provide helpful, realistic information that would be useful for brand monitoring and content creation."""
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
             messages=[
                 {
                     "role": "system",
@@ -650,7 +653,7 @@ Provide the response as a valid JSON array only, no additional text."""
                 used_provider = 'openai'
                 openai_client = get_openai_client()
                 openai_response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                     messages=[
                         {"role": "system", "content": "You are an expert brand/industry analyst. Respond with a JSON array only — no markdown, no commentary."},
                         {"role": "user", "content": prompt},
@@ -828,7 +831,7 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
                 used_provider = 'openai'
                 openai_client = get_openai_client()
                 openai_response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                     messages=[
                         {"role": "system", "content": "You are an expert SEO keyword researcher. Respond with valid JSON only — no markdown, no commentary."},
                         {"role": "user", "content": prompt},
@@ -2555,7 +2558,7 @@ Return ONLY a valid JSON object with these fields:
 }}"""
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                 messages=[
                     {"role": "system", "content": "You are a brand analyst expert. Always respond with valid JSON only."},
                     {"role": "user", "content": prompt}

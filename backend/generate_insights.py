@@ -18,6 +18,7 @@ from analytics.models import ShareOfVoiceAnalytics
 from prompts.models import PromptAnalytics
 from django.db.models import Sum, Avg, Count
 from django.utils import timezone
+from django.conf import settings
 from datetime import timedelta
 import hashlib
 import json
@@ -171,7 +172,7 @@ Return ONLY valid JSON array with 2 insights, no other text:
         try:
             openai_client = get_openai_client()
             response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                 messages=[
                     {"role": "system", "content": "You are a competitive intelligence analyst. Generate strategic insights in JSON format only."},
                     {"role": "user", "content": prompt_text}

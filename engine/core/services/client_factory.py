@@ -117,8 +117,33 @@ def _build_client(provider: str, api_key: str) -> Any:
             timeout=60,
         )
 
+    elif provider == 'openrouter':
+        # Generic OpenRouter client for INTERNAL (non-measured) work. Kept as its
+        # own provider rather than repointing 'openai', because the tracked
+        # ChatGPT call shares that client and must keep hitting OpenAI directly.
+        from django.conf import settings
+        from openai import OpenAI
+        return OpenAI(
+            api_key=api_key,
+            base_url=getattr(settings, 'OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
+            timeout=60,
+        )
+
     else:
         raise ValueError(f"ClientFactory: unknown provider '{provider}'")
+
+
+def get_internal_client(org_id: Optional[int] = None) -> Any:
+    """Client for INTERNAL, non-measured LLM work (topics, prompt generation,
+    insights, chat, misinformation comparison).
+
+    Always OpenRouter. Deliberately separate from ``get_client('openai')``, which
+    the tracked ChatGPT call uses and which must keep hitting OpenAI directly so
+    the measurement still reflects what a real ChatGPT user is told.
+
+    Pair with ``settings.OPENROUTER_INTERNAL_MODEL`` for the model slug.
+    """
+    return get_client('openrouter', org_id=org_id)
 
 
 def invalidate_org_clients(org_id: int) -> None:

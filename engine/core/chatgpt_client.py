@@ -52,12 +52,18 @@ class ChatGPTClient:
             logger.debug("OPENAI_API_KEY not set, client will not be initialized")
             return
         try:
-            from openai import OpenAI
-            self.client = OpenAI(api_key=self.api_key, timeout=60)
-            logger.debug("OpenAI client initialized successfully")
+            # Internal (non-measured) work runs through OpenRouter. The tracked
+            # ChatGPT call does NOT use this class — it keeps hitting OpenAI
+            # directly so the measurement still reflects real ChatGPT output.
+            from .services.client_factory import get_internal_client
+            self.client = get_internal_client(self.org_id)
+            # Keep api_key populated so the "is an LLM usable" guards elsewhere in
+            # this class stay meaningful; it is now the OpenRouter credential.
+            self.api_key = getattr(settings, 'OPENROUTER_API_KEY', None) or self.api_key
+            logger.debug("Internal LLM client (OpenRouter) initialized successfully")
         except Exception as e:
             # Defer to local generation if client cannot be created
-            logger.warning(f"Failed to initialize OpenAI client: {str(e)}")
+            logger.warning(f"Failed to initialize internal LLM client: {str(e)}")
             self.client = None
     
     def generate_prompts_from_keywords(self, keywords: List[str], domain_name: str, country: str = "United States") -> List[Dict[str, Any]]:
@@ -125,7 +131,7 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         try:
             logger.info(f"Generating prompts using ChatGPT (gpt-4o-mini) for {len(keywords)} keywords, domain: {domain_name}")
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",  # Using cheaper mini model
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),  # Using cheaper mini model
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
@@ -376,7 +382,7 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
 
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -418,7 +424,7 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
 
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Extract key terms from: {prompt}"},
@@ -560,7 +566,7 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
         
         try:
             response = self.client.chat.completions.create(
-                model=getattr(settings, "OPENAI_INTERNAL_MODEL", "gpt-4o-mini"),
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}

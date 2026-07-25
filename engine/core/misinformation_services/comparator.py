@@ -106,9 +106,11 @@ Be thorough but fair. Only flag genuine issues ABOUT {brand_name}, not minor wor
             model: OpenAI model to use (default: gpt-4o-mini for cost efficiency)
             org_id: Organisation ID for per-org BYOK key resolution (.env fallback)
         """
+        # Misinformation comparison is internal analysis, not a measurement of
+        # what ChatGPT tells users, so it runs on the OpenRouter internal slug.
         self.model = model or getattr(
-            settings, 'MISINFO_COMPARISON_MODEL', 'gpt-4o-mini'
-        )
+            settings, 'MISINFO_COMPARISON_MODEL', None
+        ) or getattr(settings, 'OPENROUTER_INTERNAL_MODEL', 'openai/gpt-5-mini')
         self.org_id = org_id
         self._client = None
 
@@ -137,15 +139,12 @@ Be thorough but fair. Only flag genuine issues ABOUT {brand_name}, not minor wor
         return getattr(settings, "OPENAI_API_KEY", None)
 
     def _get_openai_client(self):
-        """Get OpenAI client."""
-        api_key = self._resolve_api_key()
-        if not api_key:
-            raise Exception("OpenAI API key not configured")
+        """Internal LLM client — OpenRouter, not OpenAI direct."""
         try:
-            from openai import OpenAI
-            return OpenAI(api_key=api_key, timeout=60)
+            from core.services.client_factory import get_internal_client
+            return get_internal_client(self.org_id)
         except Exception as e:
-            raise Exception(f"Failed to initialize OpenAI client: {e}")
+            raise Exception(f"Failed to initialize internal LLM client: {e}")
 
     def compare(
         self,
