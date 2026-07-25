@@ -24,6 +24,7 @@ raises into the Celery scheduler.
 import json
 import logging
 import os
+import re
 from datetime import timedelta
 
 import requests
@@ -144,6 +145,54 @@ def _probe_gemini(api_key, model):
         return _result("Google Gemini", "gemini", True, "ERROR", str(e))
 
 
+# Perplexity rejects max_tokens below 16 outright. The probe must satisfy the
+# strictest provider it talks to, otherwise the request is refused on its
+# parameters and the key is never actually judged — which reported every valid
+# Perplexity key as INVALID_KEY and made it unsaveable through BYOK settings.
+_PROBE_MAX_TOKENS = 16
+
+# Wording that identifies WHY a call was refused. Matched against the provider's
+# message, so keep these specific: a bare "invalid" also appears in
+# `invalid_request` / `invalid-argument`, which are PARAMETER complaints and say
+# nothing about the key.
+_AUTH_HINTS = ("api key", "authentication", "unauthorized", "forbidden", "invalid_api_key")
+_CREDIT_HINTS = ("insufficient", "credit", "billing", "quota", "balance")
+_MODEL_HINTS = ("model not found", "model_not_found", "unknown model", "does not exist")
+
+
+def _status_code_of(exc):
+    """HTTP status carried by an SDK exception, or parsed from its message."""
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+    match = re.search(r"Error code:\s*(\d{3})", str(exc))
+    return int(match.group(1)) if match else None
+
+
+def _classify_openai_compatible_error(exc):
+    """Map a provider error to a quota state.
+
+    The order is deliberate. A message about billing means the key authenticated
+    fine, so credits are judged before anything else. Only a 401/403 or
+    auth-specific wording may blame the KEY — a 400 is usually a bad *parameter*
+    (max_tokens, an unknown model) and must never be reported as an invalid key,
+    because that sends the operator off rotating a key that was never broken.
+    """
+    message = str(exc)
+    lowered = message.lower()
+    status = _status_code_of(exc)
+
+    if any(hint in lowered for hint in _CREDIT_HINTS):
+        return "OUT_OF_CREDITS"
+    if status == 429 or ("rate" in lowered and "limit" in lowered):
+        return "RATE_LIMIT"
+    if status in (401, 403) or any(hint in lowered for hint in _AUTH_HINTS):
+        return "INVALID_KEY"
+    if status == 404 or any(hint in lowered for hint in _MODEL_HINTS):
+        return "MODEL_UNAVAILABLE"
+    return "ERROR"
+
+
 def _probe_openai_compatible(label, key, api_key, base_url, model):
     """Perplexity / xAI / DeepSeek expose OpenAI-compatible chat endpoints."""
     if not api_key:
@@ -151,21 +200,13 @@ def _probe_openai_compatible(label, key, api_key, base_url, model):
     try:
         from openai import OpenAI
         OpenAI(api_key=api_key, base_url=base_url, timeout=30).chat.completions.create(
-            model=model, messages=[{"role": "user", "content": "ping"}], max_tokens=1
+            model=model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=_PROBE_MAX_TOKENS,
         )
         return _result(label, key, True, "OK")
     except Exception as e:
-        m = str(e)
-        ml = m.lower()
-        if "insufficient" in ml or "credit" in ml or "billing" in ml or "quota" in ml:
-            st = "OUT_OF_CREDITS"
-        elif "rate" in ml and "limit" in ml:
-            st = "RATE_LIMIT"
-        elif "401" in m or "authentication" in ml or "invalid" in ml:
-            st = "INVALID_KEY"
-        else:
-            st = "ERROR"
-        return _result(label, key, True, st, m)
+        return _result(label, key, True, _classify_openai_compatible_error(e), str(e))
 
 
 # Provider slug → (display label, probe callable). Used for both the system
