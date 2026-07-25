@@ -538,7 +538,8 @@ const Topics = () => {
               </div>
 
               <div className="flex gap-2">
-                <Button 
+                {/* Generate Content button hidden as per requirements */}
+                {/* <Button 
                   size="sm" 
                   variant="default" 
                   onClick={() => handleGenerateContent(topic)}
@@ -546,16 +547,17 @@ const Topics = () => {
                 >
                   <Sparkles className="h-3 w-3 mr-1" />
                   Generate Content
-                </Button>
+                </Button> */}
                 <Button size="sm" variant="outline" onClick={() => handleViewDetails(topic)}>View Details</Button>
-                <Button 
+                {/* Optimize button hidden as per requirements */}
+                {/* <Button 
                   size="sm" 
                   variant="outline" 
                   onClick={() => handleOptimize(topic)}
                 >
                   <Target className="h-3 w-3 mr-1" />
                   Optimize
-                </Button>
+                </Button> */}
               </div>
             </div>
           </Card>

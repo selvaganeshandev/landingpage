@@ -236,18 +236,29 @@ class TopicAnalyticsProcessor:
                 'sentiment_score': Decimal('0.00')
             }
         
-        # Count mentions: search for keyword in context_summary
-        keyword_lower = keyword.keyword.lower()
+        # Count mentions in context_summary.
+        # Exact whole-phrase match first; multi-word keywords rarely appear
+        # verbatim in AI answers, so fall back to counting each response where
+        # all significant keyword tokens co-occur (case-insensitive).
+        keyword_lower = keyword.keyword.lower().strip()
+        _STOPWORDS = {"the", "and", "for", "with", "your", "you", "are",
+                      "how", "what", "from", "that", "this"}
+        tokens = [t for t in re.split(r"\W+", keyword_lower)
+                  if len(t) >= 3 and t not in _STOPWORDS]
+        phrase_pattern = r'\b' + re.escape(keyword_lower) + r'\b'
+        token_patterns = [r'\b' + re.escape(t) + r'\b' for t in tokens]
         mentions = 0
-        
+
         for analytics in prompt_analytics:
-            if analytics.context_summary:
-                # Count occurrences of keyword in context_summary (case-insensitive)
-                text_lower = analytics.context_summary.lower()
-                # Use word boundaries to avoid partial matches
-                pattern = r'\b' + re.escape(keyword_lower) + r'\b'
-                matches = len(re.findall(pattern, text_lower))
-                mentions += matches
+            if not analytics.context_summary:
+                continue
+            text_lower = analytics.context_summary.lower()
+            phrase_hits = len(re.findall(phrase_pattern, text_lower))
+            if phrase_hits:
+                mentions += phrase_hits
+            elif token_patterns and all(re.search(p, text_lower) for p in token_patterns):
+                # All significant keyword tokens present in this response
+                mentions += 1
         
         # Calculate average position
         positions = [float(pa.position) for pa in prompt_analytics if pa.position and pa.position > 0]
