@@ -82,13 +82,14 @@ class TeamInvitationSerializer(serializers.ModelSerializer):
     invited_by_name = serializers.SerializerMethodField()
     is_expired = serializers.SerializerMethodField()
     can_be_accepted = serializers.SerializerMethodField()
+    domain_name = serializers.CharField(source='domain.name', read_only=True)
 
     class Meta:
         model = TeamInvitation
         fields = [
             'id', 'email', 'organisation', 'organisation_name', 'invited_by', 'invited_by_name',
-            'role', 'status', 'message', 'expires_at', 'accepted_at', 'created_at', 'modified_at',
-            'is_expired', 'can_be_accepted'
+            'role', 'domain', 'domain_name', 'status', 'message', 'expires_at', 'accepted_at',
+            'created_at', 'modified_at', 'is_expired', 'can_be_accepted'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at', 'accepted_at']
 
@@ -106,11 +107,11 @@ class TeamInvitationSerializer(serializers.ModelSerializer):
 
 class TeamInvitationCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating team invitations"""
-    
+
     class Meta:
         model = TeamInvitation
-        fields = ['email', 'role', 'message']
-    
+        fields = ['email', 'role', 'message', 'domain']
+
     def validate_email(self, value):
         """Check if user is already a member of the organisation"""
         # Get organisation from context (set in the view)
@@ -119,6 +120,21 @@ class TeamInvitationCreateSerializer(serializers.ModelSerializer):
             if Account.objects.filter(email=value, organisation=organisation).exists():
                 raise serializers.ValidationError("User is already a member of this organisation")
         return value
+
+    def validate(self, attrs):
+        """A client invite must target exactly one domain in the org; other
+        roles never carry a domain."""
+        role = attrs.get('role', 'user')
+        domain = attrs.get('domain')
+        organisation = self.context.get('organisation')
+        if role == 'client':
+            if not domain:
+                raise serializers.ValidationError({'domain': 'A domain is required when inviting a client.'})
+            if organisation and domain.organisation_id != organisation.id:
+                raise serializers.ValidationError({'domain': 'Domain does not belong to your organisation.'})
+        else:
+            attrs['domain'] = None
+        return attrs
 
 
 class UserPermissionSerializer(serializers.ModelSerializer):

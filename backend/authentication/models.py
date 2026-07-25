@@ -317,27 +317,36 @@ class TeamInvitation(models.Model):
     ROLE_CHOICES = [
         ('admin', 'Administrator'),
         ('user', 'User'),
+        ('client', 'Client'),
     ]
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(help_text="Email address of the invited user")
     organisation = models.ForeignKey(
-        Organisation, 
-        on_delete=models.CASCADE, 
+        Organisation,
+        on_delete=models.CASCADE,
         related_name='invitations',
         help_text="Organisation the user is being invited to"
     )
     invited_by = models.ForeignKey(
-        Account, 
-        on_delete=models.CASCADE, 
+        Account,
+        on_delete=models.CASCADE,
         related_name='sent_invitations',
         help_text="User who sent the invitation"
     )
     role = models.CharField(
-        max_length=10, 
-        choices=ROLE_CHOICES, 
+        max_length=10,
+        choices=ROLE_CHOICES,
         default='user',
         help_text="Role to be assigned to the invited user"
+    )
+    domain = models.ForeignKey(
+        'domains.Domain',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='client_invitations',
+        help_text="Domain a client invitee is scoped to (client role only)"
     )
     status = models.CharField(
         max_length=10, 

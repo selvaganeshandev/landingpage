@@ -35,8 +35,11 @@ export interface ProfileUpdateData {
 
 export interface InvitationData {
   email: string;
-  role: 'admin' | 'user';
-  organisation: number;
+  role: 'admin' | 'user' | 'client';
+  organisation?: number;
+  /** Required when role is 'client': the single domain the client is scoped to. */
+  domain?: number;
+  message?: string;
 }
 
 export interface Permission {

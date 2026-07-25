@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
-import { Loader2, UserPlus, ShieldCheck } from "lucide-react";
+import { Loader2, UserPlus, ShieldCheck, MailCheck } from "lucide-react";
 
 interface DomainClient {
   id: number;
@@ -25,13 +25,6 @@ const STATUS_STYLES: Record<DomainClient["account_status"], string> = {
   disabled: "bg-muted text-muted-foreground",
 };
 
-function generatePassword(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
-  const bytes = new Uint32Array(14);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
-}
-
 function formatDate(value: string | null): string {
   return value ? new Date(value).toLocaleString() : "Never";
 }
@@ -49,9 +42,6 @@ export function DomainClientAccess({ domainId, domainName }: Props) {
 
   const [showForm, setShowForm] = useState(false);
   const [email, setEmail] = useState("");
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [password, setPassword] = useState(() => generatePassword());
 
   const load = async () => {
     setLoading(true);
@@ -74,23 +64,26 @@ export function DomainClientAccess({ domainId, domainName }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [domainId]);
 
-  const handleCreate = async () => {
-    if (!email.trim() || !password.trim()) return;
+  const handleInvite = async () => {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail) return;
     setSubmitting(true);
     try {
-      await apiClient.createDomainClient(domainId, {
-        email: email.trim().toLowerCase(),
-        password,
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
+      await apiClient.sendInvitation({
+        email: trimmedEmail,
+        role: "client",
+        domain: domainId,
       });
-      toast({ title: "Client access granted", description: `${email} can now sign in to view this domain.` });
+      toast({
+        title: "Invitation sent",
+        description: `We've emailed ${trimmedEmail} a link to set up their read-only login.`,
+      });
       setShowForm(false);
-      setEmail(""); setFirstName(""); setLastName(""); setPassword(generatePassword());
+      setEmail("");
       await load();
     } catch (error) {
       toast({
-        title: "Could not grant access",
+        title: "Could not send invitation",
         description: error instanceof Error ? error.message : "Please try again.",
         variant: "destructive",
       });
@@ -142,8 +135,8 @@ export function DomainClientAccess({ domainId, domainName }: Props) {
           Client access
         </CardTitle>
         <CardDescription>
-          Give this client a read-only login to view {domainName ? <strong>{domainName}</strong> : "this domain"} only.
-          They cannot see other domains or change any data.
+          Invite a client to a read-only login for {domainName ? <strong>{domainName}</strong> : "this domain"} only.
+          They receive an email to set their own password, and cannot see other domains or change any data.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -154,7 +147,7 @@ export function DomainClientAccess({ domainId, domainName }: Props) {
         ) : (
           <>
             {clients.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No client login yet for this domain.</p>
+              <p className="text-sm text-muted-foreground">No client access yet for this domain.</p>
             ) : (
               <div className="space-y-2">
                 {clients.map((client) => (
@@ -199,18 +192,8 @@ export function DomainClientAccess({ domainId, domainName }: Props) {
 
             {showForm ? (
               <div className="space-y-3 rounded-md border p-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="dc-first">First name</Label>
-                    <Input id="dc-first" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="dc-last">Last name</Label>
-                    <Input id="dc-last" value={lastName} onChange={(e) => setLastName(e.target.value)} />
-                  </div>
-                </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="dc-email">Email</Label>
+                  <Label htmlFor="dc-email">Client email</Label>
                   <Input
                     id="dc-email"
                     type="email"
@@ -218,30 +201,28 @@ export function DomainClientAccess({ domainId, domainName }: Props) {
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="client@example.com"
                   />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="dc-pass">Temporary password</Label>
-                  <div className="flex gap-2">
-                    <Input id="dc-pass" value={password} onChange={(e) => setPassword(e.target.value)} />
-                    <Button type="button" variant="outline" onClick={() => setPassword(generatePassword())}>
-                      Regenerate
-                    </Button>
-                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    They'll get an invitation link to create their password and name.
+                  </p>
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setShowForm(false)} disabled={submitting}>
                     Cancel
                   </Button>
-                  <Button onClick={handleCreate} disabled={submitting || !email.trim() || !password.trim()}>
-                    {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                    Grant access
+                  <Button onClick={handleInvite} disabled={submitting || !email.trim()}>
+                    {submitting ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <MailCheck className="h-4 w-4 mr-2" />
+                    )}
+                    Send invitation
                   </Button>
                 </div>
               </div>
             ) : (
               <Button variant="outline" onClick={() => setShowForm(true)}>
                 <UserPlus className="h-4 w-4 mr-2" />
-                Add client login
+                Invite client
               </Button>
             )}
           </>

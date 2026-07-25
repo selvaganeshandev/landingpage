@@ -349,8 +349,17 @@ def accept_invitation(request, invitation_id):
         invitation.accepted_at = timezone.now()
         invitation.save()
         # Grant-everything defaults apply to staff only. Clients are domain-scoped
-        # and are onboarded via the client API, never bulk-granted here.
-        if user.role != 'client':
+        # to exactly the domain their invitation targeted.
+        if user.role == 'client':
+            if invitation.domain_id:
+                DomainAccess.objects.get_or_create(
+                    user=user,
+                    domain=invitation.domain,
+                    defaults={'granted_by': invitation.invited_by, 'is_active': True},
+                )
+                user.active_domain_id = invitation.domain_id
+                user.save(update_fields=['active_domain_id', 'modified_at'])
+        else:
             # Grant all module permissions by default - admin can revoke specific ones later
             all_modules = [m[0] for m in UserPermission.MODULE_CHOICES]
             for module in all_modules:
@@ -1267,5 +1276,7 @@ def check_permissions(request):
 
 # Client accounts are managed per-domain from the domains app
 # (see domains.views.domain_client_access) — the domain is the client.
+# Existing members' per-domain access is managed via the domains app's
+# domain_access endpoints (surfaced in the UI as "Manage Project Access").
 
 
