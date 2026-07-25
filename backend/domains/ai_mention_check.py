@@ -22,14 +22,28 @@ from datetime import date
 from django.conf import settings
 from django.core.cache import cache
 
-from domains.site_audit import normalize_target
-
 try:
     from textblob import TextBlob
 except Exception:  # noqa: BLE001
     TextBlob = None
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_target(name):
+    """('tatamotors.com') -> ('tatamotors.com', 'https://tatamotors.com').
+
+    Inlined rather than imported from ``domains.site_audit``. That module was
+    committed to ``feature/promptmaxx-consolidated`` and never reached ``main``,
+    so the original import raised ModuleNotFoundError and made this entire file
+    unimportable in production. Six lines with no dependencies is a better trade
+    than pulling 1,200 lines and tldextract/trafilatura in behind it; if the
+    consolidated branch ever merges, switch back to the shared helper.
+    """
+    host = (name or '').strip().lower()
+    host = re.sub(r'^https?://', '', host).replace('www.', '', 1).strip('/')
+    host = host.split('/')[0]
+    return host, f'https://{host}'
 
 CACHE_TTL = 60 * 60 * 24  # 24h
 NUM_QUERIES = 3
