@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 # Model logged against content-generation usage events. Mirrors the model the
 # ClaudeContentGenerator actually calls.
-CONTENT_GENERATION_MODEL = 'claude-sonnet-4-5-20250929'
+CONTENT_GENERATION_MODEL = 'anthropic/claude-sonnet-5'
 
 
 def _log_content_usage(org_id, user, feature, *, input_tokens=0, output_tokens=0,

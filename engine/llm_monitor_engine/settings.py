@@ -181,6 +181,19 @@ ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default=None)
 XAI_API_KEY = config('XAI_API_KEY', default=None)
 DEEPSEEK_API_KEY = config('DEEPSEEK_API_KEY', default=None)
 
+# ==================== OPENROUTER (Claude transport) ====================
+# Claude is no longer called through the Anthropic API directly — every Claude
+# call is routed via OpenRouter's OpenAI-compatible endpoint using the adapter in
+# core/services/openrouter_client.py, authenticated with OPENROUTER_API_KEY.
+# ANTHROPIC_API_KEY above is now unused by the Claude path and is retained only
+# so existing deployments keep loading; per-org Anthropic BYOK keys are ignored
+# for Claude until an openrouter_api_key column exists on Organisation.
+OPENROUTER_API_KEY = config('OPENROUTER_API_KEY', default=None)
+OPENROUTER_BASE_URL = config('OPENROUTER_BASE_URL', default='https://openrouter.ai/api/v1')
+# Optional attribution headers shown on OpenRouter's public leaderboards.
+OPENROUTER_SITE_URL = config('OPENROUTER_SITE_URL', default=None)
+OPENROUTER_SITE_TITLE = config('OPENROUTER_SITE_TITLE', default=None)
+
 # LLM web-search grounding — when enabled, each provider's prompt-analytics call
 # uses that provider's live web-search tool so responses reflect the *current*
 # date/year (matching real ChatGPT/Claude/Gemini/Grok UIs). If a provider's
@@ -189,8 +202,12 @@ DEEPSEEK_API_KEY = config('DEEPSEEK_API_KEY', default=None)
 # disable grounding for that provider without changing code.
 OPENAI_CHATGPT_WEB_SEARCH = config('OPENAI_CHATGPT_WEB_SEARCH', default=True, cast=bool)
 OPENAI_CHATGPT_MODEL = config('OPENAI_CHATGPT_MODEL', default='gpt-4o')
+# Claude now runs on OpenRouter, whose `web` plugin replaces Anthropic's native
+# web_search tool. Same on/off switch, different search backend — see
+# core/services/openrouter_client.py. Billed per query on top of token cost.
 ANTHROPIC_WEB_SEARCH = config('ANTHROPIC_WEB_SEARCH', default=True, cast=bool)
-ANTHROPIC_MODEL = config('ANTHROPIC_MODEL', default='claude-sonnet-4-6')
+# OpenRouter model slug, not an Anthropic model id.
+ANTHROPIC_MODEL = config('ANTHROPIC_MODEL', default='anthropic/claude-sonnet-5')
 XAI_WEB_SEARCH = config('XAI_WEB_SEARCH', default=True, cast=bool)
 XAI_MODEL = config('XAI_MODEL', default='grok-2-latest')
 GEMINI_WEB_SEARCH = config('GEMINI_WEB_SEARCH', default=True, cast=bool)
@@ -268,7 +285,7 @@ QUOTA_ALERT_MIN_INTERVAL_MINUTES = config('QUOTA_ALERT_MIN_INTERVAL_MINUTES', de
 QUOTA_ALERT_ON_RECOVERY = config('QUOTA_ALERT_ON_RECOVERY', default=True, cast=bool)
 # Cheap models used only for the health probe (not for analysis).
 QUOTA_PROBE_OPENAI_MODEL = config('QUOTA_PROBE_OPENAI_MODEL', default='gpt-4o-mini')
-QUOTA_PROBE_ANTHROPIC_MODEL = config('QUOTA_PROBE_ANTHROPIC_MODEL', default='claude-haiku-4-5-20251001')
+QUOTA_PROBE_ANTHROPIC_MODEL = config('QUOTA_PROBE_ANTHROPIC_MODEL', default='anthropic/claude-sonnet-5')
 QUOTA_PROBE_PERPLEXITY_MODEL = config('QUOTA_PROBE_PERPLEXITY_MODEL', default='sonar')
 QUOTA_PROBE_XAI_MODEL = config('QUOTA_PROBE_XAI_MODEL', default='grok-2-latest')
 QUOTA_PROBE_DEEPSEEK_MODEL = config('QUOTA_PROBE_DEEPSEEK_MODEL', default='deepseek-chat')

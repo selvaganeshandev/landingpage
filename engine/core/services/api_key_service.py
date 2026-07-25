@@ -28,9 +28,21 @@ ENV_KEY_MAP = {
     'gemini':     ('GEMINI_API_KEY', 'GOOGLE_GEMINI_API_KEY'),
     'perplexity': ('PERPLEXITY_API_KEY',),
     'anthropic':  ('ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'),
+    'openrouter': ('OPENROUTER_API_KEY',),
     'xai':        ('XAI_API_KEY',),
     'deepseek':   ('DEEPSEEK_API_KEY',),
 }
+
+# Providers whose calls are transported over OpenRouter rather than the vendor's
+# own API. The provider slug is unchanged everywhere else (org.anthropic_enabled,
+# the "Claude" platform label, tracked rows) — only the credential and the wire
+# format differ, so historical data stays comparable.
+OPENROUTER_ROUTED = {'anthropic'}
+
+
+def credential_provider(provider: str) -> str:
+    """Return the provider slug whose API key actually authenticates ``provider``."""
+    return 'openrouter' if provider in OPENROUTER_ROUTED else provider
 
 
 def _decrypt_byok(encrypted: str) -> Optional[str]:
