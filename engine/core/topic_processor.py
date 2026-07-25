@@ -418,7 +418,9 @@ Return ONLY the JSON object."""
                     {"role": "user", "content": user_message}
                 ],
                 temperature=0.2,
-                max_tokens=200,
+                # Ceiling covers gpt-5-mini's hidden reasoning tokens; too tight a
+                # budget returns content=None instead of text.
+                max_tokens=1000,
                 timeout=30
             )
             

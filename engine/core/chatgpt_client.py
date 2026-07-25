@@ -388,7 +388,11 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.2,
-                max_tokens=50,
+                # gpt-5-mini is a reasoning model: it spends hidden reasoning
+                # tokens before emitting any text, so a tight ceiling returns
+                # finish_reason='length' with content=None and the .strip() below
+                # raises. This is a ceiling, not a target - short answers stop early.
+                max_tokens=1000,
                 timeout=30,
             )
             title = response.choices[0].message.content.strip()
@@ -430,8 +434,10 @@ Make them like real ChatGPT user queries - short and conversational. Return ONLY
                     {"role": "user", "content": f"Extract key terms from: {prompt}"},
                 ],
                 temperature=0.1,  # Low temperature for consistent extraction
-                max_tokens=20,    # Short response
-                timeout=10,
+                # Ceiling raised for the reasoning model - see note above. The
+                # answer is still short; the budget just has to cover reasoning.
+                max_tokens=1000,
+                timeout=30,
             )
             title = response.choices[0].message.content.strip()
             # Clean up the response
