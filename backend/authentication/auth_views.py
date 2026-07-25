@@ -119,12 +119,25 @@ def _build_api_keys_payload(org):
     return payload
 
 
+# Modules that confer administrative power and must never be handed out by the
+# blanket "grant everything" defaults. They are granted only when an admin
+# deliberately sets them, because team_management gates invitation sending —
+# a read-level row here previously let any user mint new ADMIN accounts.
+PRIVILEGED_MODULES = ('organization_settings', 'team_management')
+
+
 def _has_team_management(user):
-    """Check if a 'user' role has team_management permission."""
+    """Check if a 'user' role has team_management permission.
+
+    Requires the 'admin' level, not merely the presence of a row. Every invited
+    user used to receive a read-level row for every module, so an existence
+    check granted team management — and therefore invitation sending — to the
+    entire organisation.
+    """
     if user.role in ['admin', 'super_admin']:
         return True
     return UserPermission.objects.filter(
-        user=user, module='team_management'
+        user=user, module='team_management', permission_level='admin'
     ).exists()
 
 
@@ -360,8 +373,12 @@ def accept_invitation(request, invitation_id):
                 user.active_domain_id = invitation.domain_id
                 user.save(update_fields=['active_domain_id', 'modified_at'])
         else:
-            # Grant all module permissions by default - admin can revoke specific ones later
-            all_modules = [m[0] for m in UserPermission.MODULE_CHOICES]
+            # Grant all module permissions by default - admin can revoke specific ones later.
+            # PRIVILEGED_MODULES are excluded: granting team_management here (even at
+            # 'read') is what let every invited user send invitations, including for
+            # ADMIN accounts. Admins do not need the row — their role short-circuits
+            # the check — so nothing is lost by withholding it from everyone.
+            all_modules = [m[0] for m in UserPermission.MODULE_CHOICES if m[0] not in PRIVILEGED_MODULES]
             for module in all_modules:
                 UserPermission.objects.create(user=user, module=module, permission_level='read', granted_by=invitation.invited_by)
 
@@ -1244,7 +1261,10 @@ def team_member_management(request, member_id):
                     perm.save()
         else:
             for module_value in module_values:
-                if module_value == 'organization_settings':
+                if module_value in PRIVILEGED_MODULES:
+                    # Demotion must strip administrative modules outright. Leaving a
+                    # read-level team_management row behind kept the demoted user able
+                    # to send invitations.
                     UserPermission.objects.filter(user=member, module=module_value).delete()
                     continue
                 perm, created = UserPermission.objects.get_or_create(
