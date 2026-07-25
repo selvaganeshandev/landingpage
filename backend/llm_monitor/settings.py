@@ -265,6 +265,18 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 # api_key_service .env fallback can resolve Claude in the backend process too.
 ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default=config('CLAUDE_API_KEY', default=None))
 
+# ==================== OPENROUTER (Claude transport) ====================
+# Every Claude call — mention tracking and content generation — is routed through
+# OpenRouter's OpenAI-compatible endpoint via core/openrouter_client.py.
+# ANTHROPIC_API_KEY above is no longer used by those paths. Mirrors the engine's
+# OPENROUTER_* settings; keep the two in sync.
+OPENROUTER_API_KEY = config('OPENROUTER_API_KEY', default=None)
+OPENROUTER_BASE_URL = config('OPENROUTER_BASE_URL', default='https://openrouter.ai/api/v1')
+OPENROUTER_SITE_URL = config('OPENROUTER_SITE_URL', default=None)
+OPENROUTER_SITE_TITLE = config('OPENROUTER_SITE_TITLE', default=None)
+# OpenRouter model slug, not an Anthropic model id.
+ANTHROPIC_MODEL = config('ANTHROPIC_MODEL', default='anthropic/claude-sonnet-5')
+
 # Google Gemini API Configuration (for AI-powered features)
 GOOGLE_GEMINI_API_KEY = config('GOOGLE_GEMINI_API_KEY', default=None)
 # Gemini model name — single source of truth so a model retirement (Google returns
