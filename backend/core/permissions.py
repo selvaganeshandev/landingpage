@@ -8,7 +8,7 @@ of thing at all", not "may they touch this specific domain".
 
 from __future__ import annotations
 
-from rest_framework.permissions import BasePermission, SAFE_METHODS
+from rest_framework.permissions import BasePermission
 
 from core.authorization import (
     CAP_EXECUTE_SCANS,
@@ -49,14 +49,9 @@ class CanExecuteScans(_RequiresCapability):
     message = "You do not have permission to run scans."
 
 
-class IsClientReadOnly(BasePermission):
-    """Allow safe (read) methods for everyone authenticated; block writes for the
-    client role. Attach to endpoints that a client may view but must never mutate.
-    """
-
-    message = "Client accounts have read-only access."
-
-    def has_permission(self, request, view) -> bool:
-        if request.method in SAFE_METHODS:
-            return True
-        return getattr(request.user, "role", None) != "client"
+# Client read-only is NOT enforced here. Because almost every write endpoint sets
+# its own ``permission_classes = [IsAuthenticated]`` (which would override any
+# read-only class we attached individually, and can't be applied to 40+ views
+# without one being missed), the rule is enforced fail-closed at a single
+# chokepoint: ``llm_monitor.middleware_domain_access.DomainAccessMiddleware``
+# rejects every unsafe HTTP method for the client role before the view runs.

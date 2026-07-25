@@ -144,6 +144,38 @@ class RbacSecurityTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
 
+    # -- client read-only write block ------------------------------------------
+
+    def test_client_post_blocked_on_own_domain(self):
+        # A write to a granted domain is still rejected — read-only is by role,
+        # not by domain. The 403 fires in middleware before the serializer runs,
+        # so an empty body is enough to prove the block.
+        resp = self._auth(self.client_user).post(
+            f"/alerts/alerts/?domain_id={self.domain_a.id}", {}, format="json"
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_client_delete_blocked(self):
+        resp = self._auth(self.client_user).delete(f"/domains/{self.domain_a.id}/")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_client_read_still_allowed_on_writable_viewset(self):
+        resp = self._auth(self.client_user).get("/alerts/alerts/")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_client_logout_not_blocked(self):
+        # Exempt session action: the read-only guard must not 403 it.
+        resp = self._auth(self.client_user).post("/auth/logout/", {}, format="json")
+        self.assertNotEqual(resp.status_code, 403)
+
+    def test_admin_write_not_blocked_by_readonly_guard(self):
+        # The guard targets only the client role; an admin write is untouched by
+        # it (any non-403 status proves the middleware let it through).
+        resp = self._auth(self.admin).post(
+            f"/alerts/alerts/?domain_id={self.domain_a.id}", {}, format="json"
+        )
+        self.assertNotEqual(resp.status_code, 403)
+
     # -- suspension ------------------------------------------------------------
 
     def test_suspended_login_rejected(self):

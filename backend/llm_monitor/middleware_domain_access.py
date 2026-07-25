@@ -7,6 +7,14 @@ any authenticated request that carries a domain id it hasn't been granted, it
 returns 404 before the view runs. Views that already check agree with it; views
 that forgot to check are covered anyway.
 
+The same chokepoint enforces the **client read-only** rule. The ``client`` role
+holds only the ``view_reports`` capability, but the vast majority of write
+endpoints (every ``ModelViewSet`` plus the function-based ``@api_view`` writes)
+are guarded solely by ``IsAuthenticated`` — no per-view read-only check was ever
+wired up. Rather than annotate ~40 endpoints by hand (and hope none is missed),
+this middleware rejects every unsafe HTTP method for a client in one place, so a
+client physically cannot mutate anything regardless of which view it reaches.
+
 Design constraints (see plan section 4):
 
 * Reads ``domain_id`` from the **query string and URL kwargs only, never the
@@ -37,6 +45,21 @@ logger = logging.getLogger("security")
 # a domain id.
 _DOMAINS_URL_PREFIX = "/domains/"
 
+# HTTP methods that never mutate state. A client may call these freely; anything
+# else is a write and is rejected for the client role.
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
+
+# Write endpoints a read-only client must still reach to use the app at all:
+# ending their own session, refreshing an expired access token, and pinning
+# which of their granted domains is active (its own view already 403s a foreign
+# domain — see ``update_active_domain`` and ``test_client_can_pin_own_domain``).
+# These are session/UI-state actions, not data mutations.
+_CLIENT_WRITE_EXEMPT_PATHS = frozenset({
+    "/auth/logout/",
+    "/auth/token/refresh/",
+    "/auth/active-domain/",
+})
+
 
 class DomainAccessMiddleware:
     def __init__(self, get_response):
@@ -50,6 +73,10 @@ class DomainAccessMiddleware:
         if user is None or not getattr(user, "is_authenticated", False):
             # Unauthenticated / AllowAny — let DRF handle auth and permissions.
             return None
+
+        write_denied = self._client_write_denied(request, user)
+        if write_denied is not None:
+            return write_denied
 
         candidate_ids = self._candidate_domain_ids(request, view_kwargs)
         if not candidate_ids:
@@ -70,6 +97,31 @@ class DomainAccessMiddleware:
         return None
 
     # -- helpers ---------------------------------------------------------------
+
+    def _client_write_denied(self, request, user):
+        """Return a 403 response when a client attempts a write, else ``None``.
+
+        Read-only is enforced by role here rather than per-view: the client role
+        may only ever issue safe methods, apart from the session/UI-state
+        endpoints in ``_CLIENT_WRITE_EXEMPT_PATHS``.
+        """
+        if getattr(user, "role", None) != "client":
+            return None
+        if request.method in _SAFE_METHODS:
+            return None
+        if request.path in _CLIENT_WRITE_EXEMPT_PATHS:
+            return None
+
+        logger.warning(
+            "[SECURITY_DENIED] client write blocked user=%s org=%s method=%s path=%s",
+            getattr(user, "id", None),
+            getattr(user, "organisation_id", None),
+            request.method,
+            request.path,
+        )
+        return JsonResponse(
+            {"error": "Client accounts have read-only access."}, status=403
+        )
 
     def _resolve_user(self, request):
         """Return the acting user, resolving a JWT bearer token if Django's
