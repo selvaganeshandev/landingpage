@@ -505,6 +505,35 @@ const SeoKeywordDetail = () => {
     );
   }
 
+  // The Google result as it was last crawled: title, URL and description.
+  //
+  // This reads `keyword_snippet`, NOT `snippets_details`. The two are easy to
+  // confuse: `snippets_details` holds only the rank-keyed COMPETITOR results,
+  // and has no title/description of its own — reading it here is why this card
+  // rendered "No snippet detail available" even for keywords that had a full
+  // snippet stored.
+  //
+  // `tdy` is the latest crawl; fall back to `best` (the best-ranking crawl) so
+  // a keyword that briefly dropped out still shows its known result.
+  const snippetSource = kwData.keyword_snippet?.tdy?.title
+    ? kwData.keyword_snippet.tdy
+    : kwData.keyword_snippet?.best?.title
+    ? kwData.keyword_snippet.best
+    : null;
+
+  const serpSnippet = snippetSource
+    ? {
+        title: snippetSource.title as string,
+        // The exact URL that ranked, which can be a deeper page than the
+        // keyword's configured site_url.
+        link: (snippetSource.link || kwData.site_url || kwData.domain_url) as string,
+        description: (snippetSource.snippet || "") as string,
+        rank: snippetSource.rank as number | undefined,
+        // True when we are showing the best-ever crawl rather than the latest.
+        isFallback: !kwData.keyword_snippet?.tdy?.title,
+      }
+    : null;
+
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
       {/* ================================================================ */}
@@ -695,11 +724,38 @@ const SeoKeywordDetail = () => {
                     View SERP <ChevronRight className="h-3.5 w-3.5" />
                   </a>
                 </div>
-                {kwData.snippets_details && kwData.snippets_details.title ? (
-                  <div className="space-y-2 p-3 bg-muted/30 rounded-lg">
-                    <p className="text-sm font-medium text-blue-600">{kwData.snippets_details.title}</p>
-                    <p className="text-xs text-green-700">{kwData.site_url || kwData.domain_url}</p>
-                    <p className="text-xs text-muted-foreground">{kwData.snippets_details.description}</p>
+                {serpSnippet ? (
+                  /* Laid out like an actual Google result: URL above, then the
+                     blue clickable title, then the description. */
+                  <div className="space-y-1 p-3 bg-muted/30 rounded-lg">
+                    <p className="text-xs text-green-700 truncate" title={serpSnippet.link}>
+                      {serpSnippet.link}
+                    </p>
+                    <a
+                      href={serpSnippet.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-base font-medium text-blue-600 hover:underline leading-snug"
+                    >
+                      {serpSnippet.title}
+                    </a>
+                    {serpSnippet.description && (
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {serpSnippet.description}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2 pt-1">
+                      {serpSnippet.rank != null && (
+                        <span className="text-[10px] text-muted-foreground">
+                          Ranked #{serpSnippet.rank}
+                        </span>
+                      )}
+                      {serpSnippet.isFallback && (
+                        <span className="text-[10px] text-muted-foreground italic">
+                          from the best recorded crawl, not the latest
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground italic">No snippet detail available</p>

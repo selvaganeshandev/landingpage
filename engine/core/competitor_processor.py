@@ -18,6 +18,7 @@ import json
 import logging
 import re
 from typing import Dict, Any, List, Tuple
+from .telemetry import observe, trace_metadata
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -103,6 +104,38 @@ def extract_competitor_citations(citation_list: list, competitor_name: str, comp
     return competitor_citations
 
 
+def _upsert_share_of_voice(domain_id, competitor, platform, timestamp, defaults):
+    """Dedup-safe replacement for ShareOfVoiceAnalytics.update_or_create.
+
+    The table's unique index (domain_id, competitor_id, platform, timestamp)
+    does NOT dedupe OWN-BRAND rows (competitor IS NULL), because Postgres treats
+    NULLs as distinct in unique indexes. Concurrent/legacy writes can therefore
+    leave duplicate own-brand rows, and a plain update_or_create then raises
+    MultipleObjectsReturned ("returned more than one"). This collapses any
+    duplicates to a single row (newest wins) and upserts it.
+    """
+    qs = ShareOfVoiceAnalytics.objects.filter(
+        domain_id=domain_id, competitor=competitor,
+        platform=platform, timestamp=timestamp,
+    ).order_by('id')
+    rows = list(qs)
+    if len(rows) > 1:
+        keep = rows[-1]  # newest wins; drop the older duplicates
+        qs.exclude(pk=keep.pk).delete()
+        rows = [keep]
+    if rows:
+        row = rows[0]
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        return row, False
+    row = ShareOfVoiceAnalytics.objects.create(
+        domain_id=domain_id, competitor=competitor,
+        platform=platform, timestamp=timestamp, **defaults,
+    )
+    return row, True
+
+
 class CompetitorProcessor:
     """
     Processes competitors and generates analytics by testing how competitors appear
@@ -122,6 +155,7 @@ class CompetitorProcessor:
         logger.info(f"CompetitorProcessor initialized with max_concurrent_prompts={max_concurrent_prompts}")
         self._openai_client = None
     
+    @observe(name="competitor.process_competitor", ignore_inputs=["self", "competitor"])
     def process_competitor(self, competitor: Competitor) -> Dict[str, Any]:
         """
         Process a specific competitor. This is the main entry point for processing a single competitor.
@@ -133,6 +167,11 @@ class CompetitorProcessor:
             dict: Status information about the processing result
         """
         try:
+            trace_metadata(
+                trace_type="competitor",
+                domain_id=getattr(competitor, "domain_id", None),
+                competitor_id=getattr(competitor, "id", None),
+            )
             # Check if competitor can be processed
             if competitor.track_status not in ['INIT', 'FAIL', 'COMP']:
                 return {
@@ -661,11 +700,14 @@ class CompetitorProcessor:
                 previous_date = timezone.now() - timedelta(days=7)
 
                 from shared_models.models import CompetitorMetricSnapshot, AlertRule, Alert
+                # CompetitorMetricSnapshot has no period_type/start_date (those
+                # are DomainMetricSnapshot fields) — it's keyed by `timestamp`.
+                # The old copy-pasted filter raised FieldError every run (caught
+                # by the surrounding try/except), so surge alerts never fired.
                 previous_snapshot = CompetitorMetricSnapshot.objects.filter(
                     competitor=competitor,
-                    period_type='weekly',
-                    start_date__lte=previous_date
-                ).order_by('-start_date').first()
+                    timestamp__lte=previous_date,
+                ).order_by('-timestamp').first()
 
                 current_mentions = int(competitor.total_mentions or 0)
                 previous_mentions = int(previous_snapshot.total_mentions if previous_snapshot else current_mentions)
@@ -819,8 +861,8 @@ class CompetitorProcessor:
                 logger.warning(f"No mentions found for share of voice calculation (domain={domain_id}), setting share to 0%")
             
             # Update ShareOfVoiceAnalytics for competitor
-            sov_record, created = ShareOfVoiceAnalytics.objects.update_or_create(
-                domain_id=domain_id,  # Use domain_id instead of domain object
+            sov_record, created = _upsert_share_of_voice(
+                domain_id=domain_id,
                 competitor=competitor,
                 platform='ChatGPT',
                 timestamp=today,
@@ -834,8 +876,8 @@ class CompetitorProcessor:
             
             # Update own brand's ShareOfVoiceAnalytics
             own_share = (own_mentions / total_market_mentions) * 100 if total_market_mentions > 0 else 0.0
-            own_sov_record, own_created = ShareOfVoiceAnalytics.objects.update_or_create(
-                domain_id=domain_id,  # Use domain_id instead of domain object
+            own_sov_record, own_created = _upsert_share_of_voice(
+                domain_id=domain_id,
                 competitor=None,  # NULL = own brand
                 platform='ChatGPT',
                 timestamp=today,

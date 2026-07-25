@@ -45,6 +45,11 @@ const Dashboard = () => {
   const [domainId, setDomainId] = useState<string | null>(null);
   const [aiTrafficDaily, setAiTrafficDaily] = useState<any[] | null>(null);
   const [aiTraffic, setAiTraffic] = useState<any | null>(null);
+  // GA connection + fetch-error signals so the trend widget can tell "not
+  // connected" apart from "GA4 rate-limited (429)" apart from "no AI traffic".
+  const [gaConnected, setGaConnected] = useState<boolean | null>(null);
+  const [aiTrafficError, setAiTrafficError] = useState(false);
+  const [aiTrafficDailyError, setAiTrafficDailyError] = useState(false);
   const { toast } = useToast();
   const hasMountedRef = useRef(false);
 
@@ -259,9 +264,11 @@ const Dashboard = () => {
           } else {
             setAiTrafficDaily(null);
           }
+          setAiTrafficDailyError(false);
         })
         .catch(() => {
           setAiTrafficDaily(null);
+          setAiTrafficDailyError(true);
         });
 
       // Fetch AI-referred traffic (GA4 sessionSource filtered) for the AI Traffic
@@ -281,10 +288,22 @@ const Dashboard = () => {
           } else {
             setAiTraffic(null);
           }
+          setAiTrafficError(false);
         })
         .catch(() => {
           setAiTraffic(null);
+          setAiTrafficError(true);
         });
+
+      // Resolve GA connection status independently of the GA data calls above
+      // (which can 429 on GA4's hourly quota). This is the source of truth for
+      // "connected", so a rate-limited data call never reads as "not connected".
+      api.getIntegrationsByDomain(Number(currentDomainId))
+        .then((res: any) => {
+          const list = Array.isArray(res) ? res : (res?.results || res?.integrations || []);
+          setGaConnected(list.some((i: any) => i.type === 'google_analytics' && i.status === 'active'));
+        })
+        .catch(() => setGaConnected(null));
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
       // Only show error for actual errors, not empty data
@@ -455,6 +474,10 @@ const Dashboard = () => {
             aiTrafficDaily={aiTrafficDaily}
             shareOfVoice={summary?.share_of_voice?.your_brand?.share_percentage ?? null}
             aiTraffic={aiTraffic}
+            isPeriodData={summary?.trends_are_period}
+            gaConnected={gaConnected}
+            aiTrafficError={aiTrafficError}
+            aiTrafficDailyError={aiTrafficDailyError}
           />
         </div>
       </div>

@@ -55,6 +55,20 @@ interface TrendChartProps {
   // AI-referred traffic aggregates — feeds the AI Traffic tab. Null when GA isn't
   // connected or there were no AI referrals in the window.
   aiTraffic?: AITraffic | null;
+  /** API's `trends_are_period`: true when `data` holds per-period activity,
+   *  false when it holds running totals. Undefined for callers that don't
+   *  supply it, which suppresses the caption rather than guessing. */
+  isPeriodData?: boolean;
+  /** Whether the domain's Google Analytics integration is connected+active.
+   *  Only `false` means "not connected" — undefined/null = unknown (still
+   *  loading), so we never wrongly prompt a connected user to connect. */
+  gaConnected?: boolean | null;
+  /** The AI-referral (platform breakdown) fetch failed — e.g. GA4 hit its
+   *  per-property hourly quota (429). Distinguishes "rate-limited" from
+   *  "genuinely no AI traffic" in the empty state. */
+  aiTrafficError?: boolean;
+  /** The AI-referral timeseries fetch (correlation) failed, same idea. */
+  aiTrafficDailyError?: boolean;
 }
 
 // Time-range presets wired to the existing `days` query param on the dashboard
@@ -137,11 +151,17 @@ interface PillProps {
   hint: string;
 }
 
+// Above this, a percentage stops informing and starts misleading — a jump from
+// 8 to 3,700 is "+45,562%", which reads as a data error rather than as growth,
+// when the real story is that tracking had barely started. Past this: "New".
+const MAX_MEANINGFUL_CHANGE = 999;
+
 const MetricPill = ({ label, value, displayValue, change, colorVar, hint }: PillProps) => {
   const showTrend = change !== undefined;
   const isNoData = change === null;
   const isUp = typeof change === "number" && change > 0;
   const isFlat = change === 0;
+  const isNew = typeof change === "number" && change > MAX_MEANINGFUL_CHANGE;
 
   return (
     <div className="flex flex-col gap-1">
@@ -168,6 +188,18 @@ const MetricPill = ({ label, value, displayValue, change, colorVar, hint }: Pill
             <span className="text-xs text-muted-foreground">N/A</span>
           ) : isFlat ? (
             <span className="text-xs text-muted-foreground">0%</span>
+          ) : isNew ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-xs font-semibold text-success cursor-default">New</span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs text-xs">
+                  Grew from almost nothing in the previous period, so a percentage
+                  would not be meaningful.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           ) : (
             <span className={`text-xs font-semibold ${isUp ? "text-success" : "text-destructive"}`}>
               {isUp ? "+" : ""}{change}%
@@ -203,7 +235,7 @@ const EmptyState = ({ title, subtitle }: { title: string; subtitle: string }) =>
   </div>
 );
 
-export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, aiTrafficDaily, shareOfVoice, aiTraffic }: TrendChartProps) => {
+export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, aiTrafficDaily, shareOfVoice, aiTraffic, isPeriodData, gaConnected, aiTrafficError, aiTrafficDailyError }: TrendChartProps) => {
   const [chartTab, setChartTab] = useState<ChartTab>("main");
   const hasCitationsSeries = data[0]?.citations !== undefined;
   const hasVisibilitySeries = data[0]?.visibility !== undefined;
@@ -287,6 +319,22 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
     ];
   })();
 
+  // Empty-state copy for the GA-dependent tabs. Critically, only prompt to
+  // "Connect Google Analytics" when we KNOW GA is disconnected (gaConnected ===
+  // false). If GA is connected but the fetch failed, it's almost always GA4's
+  // per-property hourly quota (429) — say so, don't imply it's disconnected.
+  const RATE_LIMIT_SUBTITLE = "Google Analytics is temporarily rate-limited for this property (GA4 caps how many reports a property can run per hour). It usually clears within an hour — try again shortly.";
+  const aiTrafficEmpty = gaConnected === false
+    ? { title: "Connect Google Analytics", subtitle: "Connect GA to see sessions arriving from ChatGPT, Gemini, Perplexity, Claude and more." }
+    : aiTrafficError
+      ? { title: "Couldn't load AI traffic", subtitle: RATE_LIMIT_SUBTITLE }
+      : { title: "No AI-referred traffic in this period", subtitle: "No sessions arrived from AI platforms in the selected window. Try a wider time range." };
+  const correlationEmpty = gaConnected === false
+    ? { title: "Connect Google Analytics", subtitle: "Connect GA so we can chart AI Visibility against AI-referred traffic over time." }
+    : aiTrafficDailyError
+      ? { title: "Couldn't load AI traffic", subtitle: RATE_LIMIT_SUBTITLE }
+      : { title: "Not enough overlapping data", subtitle: "We need AI-referred traffic and visibility on the same dates to chart the correlation. Try a wider time range." };
+
   return (
     <Card className="p-6 h-full flex flex-col border border-border">
       {/* Top row: chart-type tabs (left) + time-range buttons (right) */}
@@ -355,10 +403,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
             </ResponsiveContainer>
           </div>
         ) : (
-          <EmptyState
-            title="No AI-referred traffic yet"
-            subtitle="Connect Google Analytics to see sessions arriving from ChatGPT, Gemini, Perplexity and more."
-          />
+          <EmptyState title={aiTrafficEmpty.title} subtitle={aiTrafficEmpty.subtitle} />
         )
       ) : chartTab === "correlation" ? (
         hasCorrelationSeries ? (
@@ -397,10 +442,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
             </ResponsiveContainer>
           </div>
         ) : (
-          <EmptyState
-            title="Not enough data to compare"
-            subtitle="Connect Google Analytics so we can chart AI Visibility against AI-referred traffic over time."
-          />
+          <EmptyState title={correlationEmpty.title} subtitle={correlationEmpty.subtitle} />
         )
       ) : data.length === 0 ? (
         <EmptyState
@@ -408,7 +450,13 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
           subtitle="This chart fills in once your prompts have been tracked across AI platforms for the selected period."
         />
       ) : (
-        <div className="flex-1 min-h-[300px]">
+        /* Two nested boxes on purpose. ResponsiveContainer sizes itself to its
+           parent, so any sibling in that same parent feeds its own height back
+           into the measurement and the chart grows without bound on every
+           re-measure. The inner `min-h-0` box therefore holds ONLY the chart,
+           and the caption lives outside it. */
+        <div className="flex-1 min-h-[300px] flex flex-col">
+          <div className="flex-1 min-h-0">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -486,6 +534,17 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
               )}
             </LineChart>
           </ResponsiveContainer>
+          </div>
+          {/* Shown only while the API is still serving RUNNING TOTALS — i.e.
+              snapshots written before the engine recorded per-period counts.
+              Those totals can only climb, so a point reads "the total stood at X
+              on this date", not "X happened on this date". Disappears by itself
+              once the engine reprocesses and `trends_are_period` turns true. */}
+          {isPeriodData === false && (
+            <p className="mt-2 shrink-0 text-[11px] text-muted-foreground text-center">
+              Running totals as at each date, not activity within the period.
+            </p>
+          )}
         </div>
       )}
     </Card>

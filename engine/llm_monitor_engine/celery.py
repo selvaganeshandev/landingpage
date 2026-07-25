@@ -1,10 +1,28 @@
 import os
 from celery import Celery
+from celery.signals import worker_process_init, worker_process_shutdown
 
 # Set the default Django settings module for the 'celery' program.
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'llm_monitor_engine.settings')
 
 app = Celery('llm_monitor_engine')
+
+
+# --- Laminar telemetry: prefork-safe lifecycle ---
+# Each Celery prefork child is a separate process, so it must initialize its
+# OWN Laminar/OTel exporter (worker_process_init), and flush on the way out so
+# a recycled/killed child doesn't drop its last batch of spans. No-op unless
+# ENABLE_LAMINAR is set — see core/telemetry.py.
+@worker_process_init.connect
+def _laminar_worker_init(**_kwargs):
+    from core.telemetry import init_laminar
+    init_laminar()
+
+
+@worker_process_shutdown.connect
+def _laminar_worker_shutdown(**_kwargs):
+    from core.telemetry import flush_laminar
+    flush_laminar()
 
 # Using a string here means the worker doesn't have to serialize
 # the configuration object to child processes.

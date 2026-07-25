@@ -18,6 +18,7 @@ from .misinformation_services import (
     LinkValidator,
     ContentComparator,
 )
+from .telemetry import observe, trace_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class MisinformationProcessor:
         self.link_validator = LinkValidator()
         self.comparator = ContentComparator()
 
+    @observe(name="misinformation.process_domain", ignore_inputs=["self"])
     def process_domain(self, domain_id: int, prompt_analytics_ids: List[int] = None):
         """
         Process misinformation scan for a domain.
@@ -59,6 +61,13 @@ class MisinformationProcessor:
         )
 
         domain = Domain.objects.get(id=domain_id)
+
+        # Attach tenant attribution to the Laminar trace (no-op when off).
+        trace_metadata(
+            trace_type="misinformation",
+            organization_id=getattr(domain, 'organisation_id', None),
+            domain_id=domain_id,
+        )
 
         # Bind the comparator to this domain's organisation so it uses the org's
         # BYOK OpenAI key (with .env fallback).
