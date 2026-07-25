@@ -14,6 +14,10 @@ from core.openrouter_client import OpenRouterAnthropicClient
 
 logger = logging.getLogger(__name__)
 
+# Claude is served through OpenRouter, whose keys start with this prefix. Used to
+# reject stale per-org Anthropic keys (sk-ant-...) that would 401 at OpenRouter.
+OPENROUTER_KEY_PREFIX = 'sk-or-'
+
 
 class ClaudeContentGenerator:
     """
@@ -33,6 +37,21 @@ class ClaudeContentGenerator:
         """
         self.org_id = org_id
         api_key = self._resolve_org_content_key(org_id) if org_id else None
+        if api_key and not api_key.startswith(OPENROUTER_KEY_PREFIX):
+            # Organisations configured their Content Generation key before Claude
+            # moved to OpenRouter, so what is stored is an Anthropic key
+            # (sk-ant-...). Sending it to OpenRouter returns 401 and — because a
+            # key WAS present — the fallback below never ran, so content
+            # generation failed outright for exactly the orgs using BYOK.
+            # Ignore a key that clearly is not an OpenRouter one and fall back to
+            # the system key until the org re-enters a valid sk-or- key.
+            logger.warning(
+                "Org %s Content Generation key is not an OpenRouter key "
+                "(starts %r); ignoring it and using the system OPENROUTER_API_KEY. "
+                "Ask the organisation to replace it with an sk-or- key.",
+                org_id, api_key[:7],
+            )
+            api_key = None
         if not api_key:
             api_key = config('OPENROUTER_API_KEY', default=None)
         if not api_key:
