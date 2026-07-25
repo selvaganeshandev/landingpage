@@ -77,11 +77,20 @@ def _probe_openai(api_key, model):
 
 
 def _probe_anthropic(api_key, model):
+    """Probe Claude through OpenRouter — the transport every Claude call now uses.
+
+    The label stays "Anthropic / Claude" so the quota dashboard and alert history
+    remain continuous, but the credential being tested is the OpenRouter key.
+    """
     if not api_key:
         return _result("Anthropic / Claude", "anthropic", False, "NOT_CONFIGURED")
     try:
-        import anthropic
-        anthropic.Anthropic(api_key=api_key, timeout=30).messages.create(
+        from .services.openrouter_client import OpenRouterAnthropicClient
+        OpenRouterAnthropicClient(
+            api_key=api_key,
+            base_url=_cfg("OPENROUTER_BASE_URL", None),
+            timeout=30,
+        ).messages.create(
             model=model, max_tokens=1, messages=[{"role": "user", "content": "ping"}]
         )
         return _result("Anthropic / Claude", "anthropic", True, "OK")
@@ -92,7 +101,7 @@ def _probe_anthropic(api_key, model):
             st = "OUT_OF_CREDITS"
         elif "rate" in ml and "limit" in ml:
             st = "RATE_LIMIT"
-        elif "authentication" in ml or "invalid x-api-key" in ml or "401" in m:
+        elif "authentication" in ml or "invalid x-api-key" in ml or "no auth credentials" in ml or "401" in m:
             st = "INVALID_KEY"
         else:
             st = "ERROR"
@@ -176,7 +185,7 @@ def _probe_provider(provider, api_key):
     if provider == "openai":
         return _probe_openai(api_key, _cfg("QUOTA_PROBE_OPENAI_MODEL", "gpt-4o-mini"))
     if provider == "anthropic":
-        return _probe_anthropic(api_key, _cfg("QUOTA_PROBE_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"))
+        return _probe_anthropic(api_key, _cfg("QUOTA_PROBE_ANTHROPIC_MODEL", "anthropic/claude-sonnet-5"))
     if provider == "gemini":
         return _probe_gemini(api_key, _cfg("GEMINI_MODEL", "gemini-flash-latest"))
     if provider == "perplexity":
@@ -233,6 +242,12 @@ def check_org_quotas():
         for provider, label in _PROVIDER_LABELS.items():
             if not getattr(org, f"{provider}_enabled", True):
                 continue
+            if provider == "anthropic":
+                # Claude runs on OpenRouter now, so a stored per-org Anthropic key
+                # no longer authenticates anything. Probing it would raise a false
+                # INVALID_KEY alert against a credential the pipeline never uses.
+                # The system OpenRouter key is probed in check_all_quotas().
+                continue
             encrypted = getattr(org, f"{provider}_api_key", None)
             if not encrypted:
                 continue  # provider falls back to the system .env probe
@@ -274,7 +289,7 @@ def check_all_quotas():
     """
     results = [
         _probe_openai(_cfg("OPENAI_API_KEY", ""), _cfg("QUOTA_PROBE_OPENAI_MODEL", "gpt-4o-mini")),
-        _probe_anthropic(_cfg("ANTHROPIC_API_KEY", ""), _cfg("QUOTA_PROBE_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")),
+        _probe_anthropic(_cfg("OPENROUTER_API_KEY", ""), _cfg("QUOTA_PROBE_ANTHROPIC_MODEL", "anthropic/claude-sonnet-5")),
         _probe_gemini(_cfg("GEMINI_API_KEY", ""), _cfg("GEMINI_MODEL", "gemini-flash-latest")),
         _probe_openai_compatible("Perplexity", "perplexity", _cfg("PERPLEXITY_API_KEY", ""),
                                  "https://api.perplexity.ai", _cfg("QUOTA_PROBE_PERPLEXITY_MODEL", "sonar")),

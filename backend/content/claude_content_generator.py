@@ -7,9 +7,10 @@ import os
 import re
 import time
 import logging
-from anthropic import Anthropic
 from django.conf import settings
 from decouple import config
+
+from core.openrouter_client import OpenRouterAnthropicClient
 
 logger = logging.getLogger(__name__)
 
@@ -23,20 +24,26 @@ class ClaudeContentGenerator:
         """
         Build a Claude client for content generation.
 
-        When ``org_id`` is provided and that organisation has configured a
-        dedicated Content Generation key (BYOK, Strategy pipeline only), that
-        key is used. Otherwise we fall back to the system-level CLAUDE_API_KEY
-        from the environment. The dedicated key is NEVER used by the background
-        scanning engines.
+        Claude is served through OpenRouter, so every key involved here is an
+        OpenRouter key. When ``org_id`` is provided and that organisation has
+        configured a dedicated Content Generation key (BYOK, Strategy pipeline
+        only), that key is used. Otherwise we fall back to the system-level
+        OPENROUTER_API_KEY from the environment. The dedicated key is NEVER used
+        by the background scanning engines.
         """
         self.org_id = org_id
         api_key = self._resolve_org_content_key(org_id) if org_id else None
         if not api_key:
-            api_key = config('CLAUDE_API_KEY', default=None)
+            api_key = config('OPENROUTER_API_KEY', default=None)
         if not api_key:
-            raise ValueError("CLAUDE_API_KEY not found in environment variables")
-        self.client = Anthropic(api_key=api_key)
-        self.model = "claude-sonnet-4-5-20250929"
+            raise ValueError("OPENROUTER_API_KEY not found in environment variables")
+        self.client = OpenRouterAnthropicClient(
+            api_key=api_key,
+            base_url=getattr(settings, 'OPENROUTER_BASE_URL', None),
+            site_url=getattr(settings, 'OPENROUTER_SITE_URL', None),
+            site_title=getattr(settings, 'OPENROUTER_SITE_TITLE', None),
+        )
+        self.model = getattr(settings, 'ANTHROPIC_MODEL', 'anthropic/claude-sonnet-5')
         # Running token tally across every call made on this instance. Lets
         # callers whose helper methods return only text (e.g. humanisation)
         # still report token usage for the soft usage tracker.

@@ -49,6 +49,8 @@ ANTHROPIC_PRICING = {
     'claude-haiku':      {'input_uncached': 1.00,  'input_cached': 0.10, 'input_cache_creation': 1.25,  'output': 5.00},
     # Sonnet family
     'claude-3-5-sonnet': {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
+    # Sonnet 5 (current tracked model, served via OpenRouter) is cheaper than 4.5.
+    'claude-sonnet-5':   {'input_uncached': 2.00,  'input_cached': 0.20, 'input_cache_creation': 2.50,  'output': 10.00},
     'claude-sonnet-4-5': {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
     'claude-3-sonnet':   {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
     'claude-sonnet':     {'input_uncached': 3.00,  'input_cached': 0.30, 'input_cache_creation': 3.75,  'output': 15.00},
@@ -62,6 +64,11 @@ ANTHROPIC_PRICING = {
 
 def _get_model_rates(model_name):
     model_lower = (model_name or '').lower()
+    # OpenRouter slugs are vendor-prefixed ('anthropic/claude-sonnet-5'). Strip the
+    # prefix so the same rate table serves both transports — without this every
+    # OpenRouter-tagged row silently fell through to the _default sonnet rates.
+    if model_lower.startswith('anthropic/'):
+        model_lower = model_lower[len('anthropic/'):]
     best_key = None
     for key in ANTHROPIC_PRICING:
         if key == '_default':

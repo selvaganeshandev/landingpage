@@ -163,10 +163,18 @@ def _ask_gemini(api_key, user_message):
 
 
 def _ask_anthropic(api_key, user_message):
-    from anthropic import Anthropic
+    # Claude is served through OpenRouter; the adapter keeps the Anthropic
+    # messages.create surface so this call site is unchanged below.
+    from core.openrouter_client import OpenRouterAnthropicClient
 
-    client = Anthropic(api_key=api_key, timeout=90)
-    model = getattr(settings, "ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    client = OpenRouterAnthropicClient(
+        api_key=api_key,
+        base_url=getattr(settings, "OPENROUTER_BASE_URL", None),
+        timeout=90,
+        site_url=getattr(settings, "OPENROUTER_SITE_URL", None),
+        site_title=getattr(settings, "OPENROUTER_SITE_TITLE", None),
+    )
+    model = getattr(settings, "ANTHROPIC_MODEL", "anthropic/claude-sonnet-5")
     resp = client.messages.create(
         model=model,
         max_tokens=2000,
@@ -205,7 +213,10 @@ ENGINES = [
 _KEY_SOURCES = {
     "openai": ("openai_key", "OPENAI_API_KEY"),
     "gemini": ("gemini_key", "GOOGLE_GEMINI_API_KEY"),
-    "anthropic": ("anthropic_key", "ANTHROPIC_API_KEY"),
+    # Claude runs on OpenRouter, so its credential is the OpenRouter key. There is
+    # no openrouter_key column on Organisation yet, so BYOK resolution misses and
+    # this correctly falls through to the system OPENROUTER_API_KEY.
+    "anthropic": ("openrouter_key", "OPENROUTER_API_KEY"),
     "perplexity": ("perplexity_key", "PERPLEXITY_API_KEY"),
     "xai": ("xai_key", "XAI_API_KEY"),
 }

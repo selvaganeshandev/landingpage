@@ -819,21 +819,28 @@ def _resolve_country_text(group: Any) -> str:
 
 def process_prompt_with_claude(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
     try:
-        from anthropic import Anthropic
-        # ClientFactory passes a ready Anthropic instance — use it directly.
-        # Only build one from .env when no client was supplied (calling cfg.get()
-        # on the client object raised TypeError and silently killed Claude tracking).
-        anthropic_client = client if isinstance(client, Anthropic) else Anthropic(
-            api_key=getattr(settings, 'ANTHROPIC_API_KEY', None), timeout=60
+        from .services.openrouter_client import OpenRouterAnthropicClient
+        # ClientFactory passes a ready OpenRouter-backed Claude client — use it
+        # directly. Only build one from .env when no client was supplied (calling
+        # cfg.get() on the client object raised TypeError and silently killed
+        # Claude tracking).
+        anthropic_client = client if isinstance(client, OpenRouterAnthropicClient) else OpenRouterAnthropicClient(
+            api_key=getattr(settings, 'OPENROUTER_API_KEY', None),
+            base_url=getattr(settings, 'OPENROUTER_BASE_URL', None),
+            timeout=60,
+            site_url=getattr(settings, 'OPENROUTER_SITE_URL', None),
+            site_title=getattr(settings, 'OPENROUTER_SITE_TITLE', None),
         )
         country_text = _resolve_country_text(group)
-        model_name = getattr(settings, 'ANTHROPIC_MODEL', 'claude-sonnet-4-6')
+        model_name = getattr(settings, 'ANTHROPIC_MODEL', 'anthropic/claude-sonnet-5')
         user_message = _build_analytics_user_prompt(prompt_text, country_text)
 
         text = ""
-        # Try Claude's server-side web_search tool first so the model browses live
-        # (matches Claude.ai behaviour for time-sensitive queries). Falls back to
-        # the plain messages call below if tools aren't available on this key/model.
+        # Ask for live browsing first so the model answers on current information.
+        # The web_search tool below is Anthropic's spelling; the OpenRouter adapter
+        # translates it into OpenRouter's `web` plugin, which uses a different
+        # search backend than Anthropic's native tool. Falls back to the plain
+        # messages call below if the grounded call fails.
         if getattr(settings, 'ANTHROPIC_WEB_SEARCH', True):
             try:
                 grounded_system = (

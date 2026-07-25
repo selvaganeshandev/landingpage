@@ -14,7 +14,7 @@ import logging
 import hashlib
 from typing import Any, Optional
 
-from .api_key_service import get_org_settings, get_api_key, is_enabled
+from .api_key_service import get_org_settings, get_api_key, is_enabled, credential_provider
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +46,16 @@ def get_client(provider: str, org_id: Optional[int] = None) -> Any:
     if not is_enabled(org, provider):
         raise Exception(f"Provider '{provider}' is disabled for org {org_id}")
 
-    api_key = get_api_key(org, provider)
+    # Some providers (Claude) are transported over OpenRouter, so the credential
+    # that authenticates the call belongs to a different provider slug than the
+    # one the caller asked for.
+    key_provider = credential_provider(provider)
+    api_key = get_api_key(org, key_provider)
     if not api_key:
-        raise Exception(f"No API key configured for provider '{provider}' (org {org_id})")
+        raise Exception(
+            f"No API key configured for provider '{provider}' "
+            f"(credential '{key_provider}', org {org_id})"
+        )
 
     cache_key = (provider, org_id, _key_hash(api_key))
     if cache_key in _client_cache:
@@ -80,8 +87,19 @@ def _build_client(provider: str, api_key: str) -> Any:
         )
 
     elif provider == 'anthropic':
-        import anthropic
-        return anthropic.Anthropic(api_key=api_key)
+        # Claude is served through OpenRouter's OpenAI-compatible endpoint. The
+        # adapter keeps the Anthropic `messages.create` surface so every existing
+        # Claude call site works unchanged.
+        from django.conf import settings
+        from .openrouter_client import OpenRouterAnthropicClient
+        return OpenRouterAnthropicClient(
+            api_key=api_key,
+            model=getattr(settings, 'ANTHROPIC_MODEL', 'anthropic/claude-sonnet-5'),
+            base_url=getattr(settings, 'OPENROUTER_BASE_URL', None),
+            timeout=60,
+            site_url=getattr(settings, 'OPENROUTER_SITE_URL', None),
+            site_title=getattr(settings, 'OPENROUTER_SITE_TITLE', None),
+        )
 
     elif provider == 'xai':
         from openai import OpenAI
