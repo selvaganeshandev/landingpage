@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { MODULES } from "@/types/auth";
 import { apiClient } from "@/services/api";
-import { Plus, Trash2, Globe, Mail, Shield, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search, Activity, Key, Eye, EyeOff, Pencil, Copy, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Globe, Mail, Shield, ShieldCheck, User, Crown, Settings, Link2, CheckCircle2, AlertCircle, Loader2, X, Check, ChevronDown, Upload, Sparkles, ChevronRight, ChevronLeft, Search, Activity, Key, Eye, EyeOff, Pencil, Copy, RefreshCw } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -193,10 +193,12 @@ export default function OrganizationSettings() {
   // Dialog states
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"admin" | "user">("user");
-  const roleMeta: Record<"admin" | "user", { label: string; description: string }> = {
+  const [inviteRole, setInviteRole] = useState<"admin" | "user" | "client">("user");
+  const [inviteDomainId, setInviteDomainId] = useState<string>("");
+  const roleMeta: Record<"admin" | "user" | "client", { label: string; description: string }> = {
     user: { label: "User", description: "Can view and manage brand monitoring" },
     admin: { label: "Admin", description: "Full access including team management" },
+    client: { label: "Client", description: "Read-only access to one assigned domain" },
   };
   const [addDomainDialogOpen, setAddDomainDialogOpen] = useState(false);
   const [addKeywordsDialogOpen, setAddKeywordsDialogOpen] = useState(false);
@@ -1742,15 +1744,25 @@ export default function OrganizationSettings() {
 
   const handleInviteMember = async () => {
     if (!inviteEmail.trim()) return;
+    if (inviteRole === 'client' && !inviteDomainId) {
+      toast({
+        title: "Domain required",
+        description: "Select the domain this client should see.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
       await apiClient.sendInvitation({
         email: inviteEmail.trim(),
         role: inviteRole,
+        ...(inviteRole === 'client' ? { domain: Number(inviteDomainId) } : {}),
       });
 
       setInviteEmail("");
       setInviteRole("user");
+      setInviteDomainId("");
       setInviteDialogOpen(false);
 
       toast({
@@ -2890,7 +2902,7 @@ export default function OrganizationSettings() {
               <Label htmlFor="invite-role">Role</Label>
               <Select
                 value={inviteRole}
-                onValueChange={(value: "admin" | "user") => setInviteRole(value)}
+                onValueChange={(value: "admin" | "user" | "client") => setInviteRole(value)}
               >
                 <SelectTrigger id="invite-role">
                   <SelectValue />
@@ -2908,17 +2920,42 @@ export default function OrganizationSettings() {
                       <span className="font-medium">Admin</span>
                     </div>
                   </SelectItem>
+                  <SelectItem value="client">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4" />
+                      <span className="font-medium">Client</span>
+                    </div>
+                  </SelectItem>
                 </SelectContent>
               </Select>
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
                 {inviteRole === 'admin' ? (
                   <Crown className="h-3 w-3" />
+                ) : inviteRole === 'client' ? (
+                  <ShieldCheck className="h-3 w-3" />
                 ) : (
                   <User className="h-3 w-3" />
                 )}
                 <span>{roleMeta[inviteRole].description}</span>
               </div>
             </div>
+            {inviteRole === 'client' && (
+              <div className="space-y-2">
+                <Label htmlFor="invite-domain">Domain (client sees only this)</Label>
+                <Select value={inviteDomainId} onValueChange={setInviteDomainId}>
+                  <SelectTrigger id="invite-domain">
+                    <SelectValue placeholder="Select a domain" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {domains.map((domain) => (
+                      <SelectItem key={domain.id} value={String(domain.id)}>
+                        {domain.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>
