@@ -145,6 +145,63 @@ except Exception as exc:
     check("a missing stop_reason is not treated as truncation", False, exc)
 
 
+print("\nhumanise_validation — output_ceiling")
+
+check("a small article still gets the 8192 floor",
+      HV.output_ceiling("<p>short</p>") == 8192, HV.output_ceiling("<p>short</p>"))
+# Article 285: 44,227 chars needed ~11k output tokens and got 8192, so it truncated.
+check("article 285's size clears the token count it actually needed",
+      HV.output_ceiling("x" * 44227) >= 11057, HV.output_ceiling("x" * 44227))
+# The largest article in the table, 201,276 chars.
+check("the largest real article stays within the model's 128k ceiling",
+      HV.output_ceiling("x" * 201276) <= 128000, HV.output_ceiling("x" * 201276))
+check("a gigantic input is clamped, not passed through",
+      HV.output_ceiling("x" * 5_000_000) == 128000, HV.output_ceiling("x" * 5_000_000))
+check("the ceiling grows with the article",
+      HV.output_ceiling("x" * 100000) > HV.output_ceiling("x" * 50000))
+
+print("\nhumanise_validation — find_style_violations")
+
+SAMPLE = (
+    "<p>Kerala is lovely.</p>"                                            # 3 words  -> too short
+    "<p>The backwaters near Alleppey stay calm right through the summer months.</p>"  # 11 -> gap zone
+    "<p>Booking a houseboat early saves money.</p>"                       # 6 -> too short + -ing start
+    "<p>Travellers who want hill air head to Munnar, where the tea estates roll "
+    "out across the slopes and the mornings turn cold enough for a jacket.</p>"  # long, fine
+)
+v = HV.find_style_violations(SAMPLE)
+gap_words = [n for n, _ in v['gap_zone']]
+check("an 11-word sentence is caught in the gap zone", 11 in gap_words, v['gap_zone'])
+check("a sentence under 7 words is caught", len(v['too_short']) >= 1, v['too_short'])
+check("an -ing sentence opening is caught",
+      any(s.startswith('Booking') for _, s in v['ing_starts']), v['ing_starts'])
+
+# The blocklist matters: these open with -ing words that are not gerunds, and
+# asking the model to "restructure" them produces "The nothing changed".
+for word in ("Nothing", "Something", "Everything", "Morning", "During"):
+    sample = f"<p>{word} about this sentence should ever be flagged by rule four.</p>"
+    hits = HV.find_style_violations(sample)['ing_starts']
+    check(f"'{word}' is not mistaken for a gerund opening", not hits, hits)
+
+check("a clean article produces no violation block",
+      HV.format_violations_for_prompt(
+          {'gap_zone': [], 'ing_starts': [], 'too_short': [], 'too_long': []}) == "")
+
+block = HV.format_violations_for_prompt(v)
+check("the block quotes the offending sentence verbatim",
+      "backwaters near Alleppey" in block, block[:200])
+check("the block states the rule the model must apply",
+      "8-10 words" in block and "15-25 words" in block, block[:200])
+
+# The whole point is a short actionable list, not a wall of quotes.
+many = {'gap_zone': [(12, f"Sentence number {i} sits in the eleven to fourteen word band here.")
+                     for i in range(40)],
+        'ing_starts': [], 'too_short': [], 'too_long': []}
+big_block = HV.format_violations_for_prompt(many, max_each=12)
+check("long violation lists are capped", big_block.count('[12 words]') == 12,
+      big_block.count('[12 words]'))
+check("the cap says how many were omitted", "and 28 more" in big_block)
+
 print(f"\n{len(_PASS)} passed, {len(_FAIL)} failed")
 if _FAIL:
     for name in _FAIL:

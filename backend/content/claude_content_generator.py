@@ -11,7 +11,12 @@ from django.conf import settings
 from decouple import config
 
 from core.openrouter_client import OpenRouterAnthropicClient
-from .humanise_validation import raise_if_truncated as _raise_if_truncated
+from .humanise_validation import (
+    raise_if_truncated as _raise_if_truncated,
+    output_ceiling as _output_ceiling,
+    find_style_violations as _find_style_violations,
+    format_violations_for_prompt as _format_violations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +45,24 @@ OPENROUTER_KEY_PREFIX = 'sk-or-'
 # excerpt, while a short system prompt succeeds on the full article. Same mechanism
 # already documented for gpt-5-mini in engine/core/analytics_helpers.py.
 NO_REASONING = {'enabled': False}
+
+# Splits HTML into tags and the text between them, keeping the tags in the list
+# so a join round-trips exactly.
+_TAG_SPLIT_RE = re.compile(r'(<[^>]+>)')
+
+
+def _apply_outside_tags(html, transform):
+    """Run ``transform`` over the text nodes only, never inside a tag.
+
+    Pass 3's rewrites are prose rules — sentence breaks, punctuation — and
+    applying them to raw HTML also rewrote attribute values. An em-dash inside
+    ``class="x—y"`` was being turned into ``class="x. y"``, quietly corrupting
+    markup that nothing downstream validated.
+    """
+    return ''.join(
+        part if part.startswith('<') else transform(part)
+        for part in _TAG_SPLIT_RE.split(html or '')
+    )
 
 
 class ClaudeContentGenerator:
@@ -3465,7 +3488,9 @@ Return ONLY the transformed HTML content. Do not add any explanations, comments,
             try:
                 response = self.client.messages.create(
                     model=self.model,
-                    max_tokens=8192,
+                    # Scaled to the article: a rewrite emits roughly what it was
+                    # given, so a flat 8192 truncated everything over ~30k chars.
+                    max_tokens=_output_ceiling(content_html),
                     temperature=0.7,
                     system=system_prompt,
                     reasoning=NO_REASONING,  # see NO_REASONING — without this the reply is empty
@@ -3595,7 +3620,23 @@ Check the LAST sentence of every section/subsection. If it states a fact without
 
 Return ONLY the fixed HTML. No explanations, no markdown code blocks."""
 
+        # Rules 3 and 4 above ask the model to FIND sentences by counting words.
+        # Measured over five months, it does not: the 11-14 word gap zone rises as
+        # often as it falls and -ing openings frequently increase. So count in
+        # Python — which is exact and free — and hand over the offending sentences
+        # verbatim. The model is good at rewriting a named sentence and bad at
+        # locating one, so this plays to the half that works.
+        violations = _find_style_violations(content_html)
+        violation_block = _format_violations(violations)
+        logger.info(
+            "Humanisation Pass 2 violations: %d gap-zone, %d -ing starts, "
+            "%d under 7 words, %d over 25 words",
+            len(violations['gap_zone']), len(violations['ing_starts']),
+            len(violations['too_short']), len(violations['too_long']),
+        )
+
         user_prompt = f"""Review and fix ONLY the 5 specific issues described above in this HTML content. Make minimal changes. Return ONLY the fixed HTML:
+{violation_block}
 
 {content_html}"""
 
@@ -3604,7 +3645,7 @@ Return ONLY the fixed HTML. No explanations, no markdown code blocks."""
             try:
                 response = self.client.messages.create(
                     model=self.model,
-                    max_tokens=8192,
+                    max_tokens=_output_ceiling(content_html),
                     temperature=0.1,
                     system=system_prompt,
                     reasoning=NO_REASONING,  # see NO_REASONING — without this the reply is empty
@@ -3712,29 +3753,31 @@ Return ONLY the fixed HTML. No explanations, no markdown code blocks."""
             str: Content with deterministic fixes applied
         """
         # --- Step 1: Remove em-dashes and en-dashes ---
-        # Replace "word—word" with "word. Word" (new sentence)
-        # Handle cases like "ecosystem—you" → "ecosystem. You"
-        html_content = re.sub(
-            r'(\w)—(\w)',
-            lambda m: m.group(1) + '. ' + m.group(2).upper(),
-            html_content
-        )
-        html_content = re.sub(
-            r'(\w)–(\w)',
-            lambda m: m.group(1) + '. ' + m.group(2).upper(),
-            html_content
-        )
-        # Handle spaced dashes: "word — word" or "word – word"
-        html_content = re.sub(
-            r'\s*—\s*',
-            '. ',
-            html_content
-        )
-        html_content = re.sub(
-            r'\s*–\s*',
-            '. ',
-            html_content
-        )
+        # Rule 1. Two bugs are fixed here versus the original implementation:
+        #
+        # 1. The blanket `\s*—\s*` -> '. ' fired regardless of what preceded the
+        #    dash, so "Backwaters, Hills & — Wildlife" became
+        #    "Backwaters, Hills &. Wildlife". A full stop after a symbol is not a
+        #    sentence break, it is a typo, and it shipped in headings.
+        # 2. It ran over the whole HTML string including tags, so an em-dash
+        #    inside an attribute (class="x—y") was rewritten to class="x. y",
+        #    silently breaking markup.
+        #
+        # Now only text between tags is touched, and a dash becomes a sentence
+        # break ONLY when it actually joins two words. Anywhere else it collapses
+        # to a single space.
+        def _dashes_to_sentences(text):
+            text = re.sub(
+                r'(\w)\s*[—–]\s*(\w)',
+                lambda m: m.group(1) + '. ' + m.group(2).upper(),
+                text,
+            )
+            # Any dash left over sits next to punctuation or a symbol, where a
+            # full stop would be wrong. Drop it and normalise the spacing.
+            text = re.sub(r'\s*[—–]\s*', ' ', text)
+            return re.sub(r'[ \t]{2,}', ' ', text)
+
+        html_content = _apply_outside_tags(html_content, _dashes_to_sentences)
 
         # --- Step 2: Remove semicolons ---
         # Replace "; word" with ". Word" (new sentence)

@@ -11,6 +11,8 @@ import logging
 import requests
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from django.conf import settings
 
 from .models import (
     GeneratedContent, CMSProvider, ScheduledPublication, ContentComment,
@@ -558,6 +560,26 @@ def rewrite_content(request):
 
 # ============= Humanise Feature =============
 
+# Humanisation runs off-request because it takes 1-2 minutes of LLM time. It used
+# to spawn a bare daemon thread per click with no ceiling: N articles humanised at
+# once meant N threads, each holding a database connection and issuing two Claude
+# calls of up to 128k output tokens. Nothing bounded that but how fast a user
+# could click.
+#
+# A small fixed pool bounds it. Work beyond the limit queues instead of spawning,
+# so the articles still process — just not all at once. Deliberately small: this
+# is expensive, slow, network-bound work, and running four at a time is already
+# more concurrency than the feature needs.
+#
+# (Bulk upload is unaffected: _run_bulk_generation_queue runs one thread per batch
+# and walks its items serially, and it does not humanise.)
+_HUMANISE_MAX_WORKERS = getattr(settings, 'HUMANISE_MAX_CONCURRENCY', 4)
+_HUMANISE_POOL = ThreadPoolExecutor(
+    max_workers=_HUMANISE_MAX_WORKERS,
+    thread_name_prefix='humanise',
+)
+
+
 def _run_humanise_in_background(content_id):
     """
     Background thread function that runs a three-pass humanisation process:
@@ -677,14 +699,15 @@ def humanise_content(request, content_id):
             'humanise_error', 'modified_at'
         ])
 
-        thread = threading.Thread(
-            target=_run_humanise_in_background,
-            args=(content.id,),
-            daemon=True
-        )
-        thread.start()
+        # submit() returns immediately; if every worker is busy the job waits in
+        # the pool's queue rather than starting a thread of its own.
+        _HUMANISE_POOL.submit(_run_humanise_in_background, content.id)
 
-        logger.info(f"Humanisation started for content {content_id}")
+        queued = _HUMANISE_POOL._work_queue.qsize()
+        logger.info(
+            "Humanisation queued for content %s (pool=%s, waiting=%s)",
+            content_id, _HUMANISE_MAX_WORKERS, queued,
+        )
 
         return Response({
             'status': 'success',
