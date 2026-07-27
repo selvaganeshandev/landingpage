@@ -18,6 +18,28 @@ logger = logging.getLogger(__name__)
 # reject stale per-org Anthropic keys (sk-ant-...) that would 401 at OpenRouter.
 OPENROUTER_KEY_PREFIX = 'sk-or-'
 
+# Reasoning tokens bill against max_tokens and are spent BEFORE any visible text.
+# The humanisation prompts demand exhaustive counting ("count the words in every
+# sentence you write", "keep a mental tally"), which drives that spend unbounded:
+# the model reasons until the ceiling is hit and returns an EMPTY content field
+# with finish_reason='length' — a total failure shaped exactly like a successful
+# response.
+#
+# Measured on production 2026-07-27, anthropic/claude-sonnet-5, against the real
+# 10,192-char article and the 13,877-char Pass 1 prompt:
+#
+#   ceiling 8192 / 16000 / 32000 -> finish=length, 0 chars out. Raising the
+#                                   ceiling does NOT help; it only wastes more.
+#   {"max_tokens": 1024}         -> still 0 chars. The reasoning cap is not honoured.
+#   {"exclude": True}            -> still 0 chars. It strips reasoning from the
+#                                   RESPONSE while still generating and billing it.
+#   {"enabled": False}           -> finish=stop, 3,937 tokens, 102% of input. ✓
+#
+# The trigger is the prompt, not the article: the bug reproduces on a 1,500-char
+# excerpt, while a short system prompt succeeds on the full article. Same mechanism
+# already documented for gpt-5-mini in engine/core/analytics_helpers.py.
+NO_REASONING = {'enabled': False}
+
 
 class ClaudeContentGenerator:
     """
@@ -3445,6 +3467,7 @@ Return ONLY the transformed HTML content. Do not add any explanations, comments,
                     max_tokens=8192,
                     temperature=0.7,
                     system=system_prompt,
+                    reasoning=NO_REASONING,  # see NO_REASONING — without this the reply is empty
                     messages=[
                         {
                             "role": "user",
@@ -3582,6 +3605,7 @@ Return ONLY the fixed HTML. No explanations, no markdown code blocks."""
                     max_tokens=8192,
                     temperature=0.1,
                     system=system_prompt,
+                    reasoning=NO_REASONING,  # see NO_REASONING — without this the reply is empty
                     messages=[
                         {
                             "role": "user",

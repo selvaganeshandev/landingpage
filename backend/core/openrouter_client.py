@@ -169,6 +169,7 @@ class _MessagesAPI:
         system: Any = None,
         temperature: Optional[float] = None,
         tools: Optional[Sequence[Any]] = None,
+        reasoning: Optional[Dict[str, Any]] = None,
         **unsupported: Any,
     ) -> Message:
         chat_messages: List[Dict[str, str]] = []
@@ -190,8 +191,19 @@ class _MessagesAPI:
             kwargs["temperature"] = temperature
         if passthrough_tools:
             kwargs["tools"] = passthrough_tools
+
+        # `plugins` and `reasoning` share one extra_body, so build it up rather
+        # than assigning — the previous `extra_body = {"plugins": ...}` form would
+        # have silently dropped whichever of the two was set second. Omitted
+        # entirely when neither is used, so callers that pass no reasoning send a
+        # byte-identical request to before this parameter existed.
+        extra_body: Dict[str, Any] = {}
         if plugins:
-            kwargs["extra_body"] = {"plugins": plugins}
+            extra_body["plugins"] = plugins
+        if reasoning is not None:
+            extra_body["reasoning"] = reasoning
+        if extra_body:
+            kwargs["extra_body"] = extra_body
 
         if unsupported:
             # Anthropic-only arguments (e.g. top_k, metadata) have no OpenRouter

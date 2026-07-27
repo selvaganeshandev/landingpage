@@ -557,6 +557,53 @@ def rewrite_content(request):
 
 # ============= Humanise Feature =============
 
+# Below this share of the input, the output is truncated rather than rewritten.
+# Humanisation preserves all HTML, links and keywords, so a pass returns roughly
+# what it was given — measured 102% and 101% on production. Half is a deliberately
+# loose floor that only a broken pass can fall through.
+_MIN_OUTPUT_RATIO = 0.5
+
+
+def _validate_pass_output(stage, source_html, output_html):
+    """Reject a humanisation pass that did not return usable content.
+
+    Without this, a failed pass is written straight over the article and the job
+    is recorded as 'completed'. That is not hypothetical: an empty Pass 1 reply
+    left Pass 2 apologising about the missing input, and 253 characters of apology
+    replaced a 10,192-character article under a green tick.
+
+    The checks are STRUCTURAL on purpose. Matching the apology wording was
+    considered and rejected — three different phrasings appeared across two
+    passes, so any such list starts rotting the moment the model rephrases.
+    What does not change is that a humanised article is non-empty, is HTML, and
+    is about as long as its input.
+
+    Raises so the caller's existing handler marks the job failed and leaves
+    ``content_html`` untouched.
+    """
+    if not output_html or not output_html.strip():
+        raise Exception(
+            f"{stage} returned an empty response for {len(source_html)} chars of input"
+        )
+
+    # The input is HTML and every pass is told to return HTML, so a reply without
+    # a single tag is prose the model wrote *about* the task rather than the
+    # rewritten article. This is the check that catches an apology, whatever it says.
+    if '<' not in output_html:
+        raise Exception(
+            f"{stage} returned {len(output_html)} chars containing no HTML tags "
+            f"(likely a refusal or an error message, not content)"
+        )
+
+    if len(output_html) < len(source_html) * _MIN_OUTPUT_RATIO:
+        raise Exception(
+            f"{stage} returned {len(output_html)} chars from {len(source_html)} "
+            f"(under {_MIN_OUTPUT_RATIO:.0%}) — truncated, refusing to save"
+        )
+
+    return output_html
+
+
 def _run_humanise_in_background(content_id):
     """
     Background thread function that runs a three-pass humanisation process:
@@ -573,19 +620,30 @@ def _run_humanise_in_background(content_id):
         org_id = content_obj.domain.organisation_id
         generator = ClaudeContentGenerator(org_id=org_id)
 
+        source_html = content_obj.pre_humanise_content
+
         # Pass 1: Full humanisation (all 19 rules)
         logger.info(f"Humanisation Pass 1 started for content {content_id}")
-        humanised_html = generator.humanise_content(content_obj.pre_humanise_content)
+        humanised_html = _validate_pass_output(
+            "Pass 1 (humanisation)", source_html,
+            generator.humanise_content(source_html),
+        )
         logger.info(f"Humanisation Pass 1 completed for content {content_id}")
 
         # Pass 2: Focused refinement (fixes structural issues)
         logger.info(f"Humanisation Pass 2 (refinement) started for content {content_id}")
-        refined_html = generator.refine_humanised_content(humanised_html)
+        refined_html = _validate_pass_output(
+            "Pass 2 (refinement)", humanised_html,
+            generator.refine_humanised_content(humanised_html),
+        )
         logger.info(f"Humanisation Pass 2 (refinement) completed for content {content_id}")
 
         # Pass 3: Programmatic post-processing (deterministic fixes)
         logger.info(f"Humanisation Pass 3 (post-processing) started for content {content_id}")
-        final_html = generator.post_process_content(refined_html)
+        final_html = _validate_pass_output(
+            "Pass 3 (post-processing)", refined_html,
+            generator.post_process_content(refined_html),
+        )
         logger.info(f"Humanisation Pass 3 (post-processing) completed for content {content_id}")
 
         content_obj.content_html = final_html
