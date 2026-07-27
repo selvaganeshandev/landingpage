@@ -990,28 +990,56 @@ class CompetitorProcessor:
         Generate and persist AI insights only when all competitors for a domain
         have completed processing and we do not already have insights for the latest snapshot version.
         """
+        # Each early return below is a legitimate skip, but they were silent and
+        # identical from the outside: a domain that produced no insights looked
+        # exactly like one that was never attempted. That is how an AttributeError
+        # on every single domain went unnoticed against 22,932 snapshots. Say
+        # which gate closed, at debug for the routine ones and warning for the
+        # ones that mean something is wrong.
         try:
-            if Competitor.objects.filter(domain=domain, track_status__in=['INIT', 'SCHD', 'PROC']).exists():
+            pending = Competitor.objects.filter(
+                domain=domain, track_status__in=['INIT', 'SCHD', 'PROC']
+            ).count()
+            if pending:
+                logger.debug(
+                    "[insights] domain %s skipped: %d competitor(s) still processing",
+                    domain.id, pending,
+                )
                 return
 
             latest_snapshot = CompetitorMetricSnapshot.objects.filter(domain=domain).order_by('-timestamp').first()
             if not latest_snapshot:
+                logger.debug("[insights] domain %s skipped: no competitor snapshots yet", domain.id)
                 return
 
             snapshot_version = latest_snapshot.timestamp.strftime('%Y%m%d%H%M%S')
             if CompetitiveInsight.objects.filter(domain=domain, snapshot_version=snapshot_version).exists():
+                logger.debug(
+                    "[insights] domain %s skipped: insights already exist for snapshot %s",
+                    domain.id, snapshot_version,
+                )
                 return
 
             context = self._build_insight_context(domain)
             if not context.get('players'):
+                logger.warning(
+                    "[insights] domain %s skipped: context has no players despite %d snapshot(s)",
+                    domain.id, CompetitorMetricSnapshot.objects.filter(domain=domain).count(),
+                )
                 return
 
             insights, model_name = self._generate_ai_insights(
                 context, org_id=getattr(domain, 'organisation_id', None)
             )
             if not insights:
+                logger.warning(
+                    "[insights] domain %s produced NO insights from %d competitor(s) — "
+                    "the model call failed or its reply did not parse (see the error above)",
+                    domain.id, len(context.get('players') or []),
+                )
                 return
 
+            created = 0
             for entry in insights[:2]:
                 try:
                     CompetitiveInsight.objects.create(
@@ -1025,8 +1053,13 @@ class CompetitorProcessor:
                         insight_data=entry,
                         model_name=model_name,
                     )
+                    created += 1
                 except Exception as create_err:
                     logger.error("Failed to persist competitive insight for domain %s: %s", domain.id, create_err, exc_info=True)
+            logger.info(
+                "[insights] domain %s: stored %d insight(s) for snapshot %s using %s",
+                domain.id, created, snapshot_version, model_name,
+            )
         except Exception as e:
             logger.error("Error generating competitive insights for domain %s: %s", domain.id, e, exc_info=True)
 
@@ -1037,7 +1070,15 @@ class CompetitorProcessor:
         competitors = Competitor.objects.filter(domain=domain).order_by('-share_of_voice_percentage')
         players = []
         for comp in competitors:
-            latest_snapshot = comp.metric_snapshots.order_by('-timestamp').first()
+            # `shared_metric_snapshots`, NOT `metric_snapshots`. This code runs in
+            # the engine, where CompetitorMetricSnapshot.competitor carries
+            # related_name='shared_metric_snapshots'; the backend's copy of the
+            # same table calls it 'metric_snapshots'. Written against the backend
+            # name, it raised AttributeError on the first competitor of every
+            # domain — swallowed by the caller's except — so 22,932 snapshots
+            # produced 0 CompetitiveInsight rows. The engine's own file uses the
+            # unprefixed name for three other models, which is how it slipped in.
+            latest_snapshot = comp.shared_metric_snapshots.order_by('-timestamp').first()
             players.append({
                 'name': comp.name,
                 'share_of_voice': float(comp.share_of_voice_percentage or 0),
@@ -1135,14 +1176,37 @@ Return ONLY valid JSON array with 2 insights, no other text."""
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
-                max_tokens=1200,
+                # gpt-5-mini is a reasoning model: it spends 1200-2000 hidden
+                # reasoning tokens against this ceiling BEFORE emitting any text.
+                # At the old 1200 the budget was gone before the first character,
+                # so the reply came back with content=None. Same ceiling already
+                # raised for this model in ai_mention_check and chatgpt_client.
+                max_tokens=8000,
             )
-            content = response.choices[0].message.content.strip()
+            choice = response.choices[0] if response.choices else None
+            content = (getattr(getattr(choice, 'message', None), 'content', None) or '').strip()
+            if not content:
+                # Empty is a FAILURE, not "no insights to offer". Returning []
+                # here is indistinguishable from a domain that legitimately has
+                # nothing to say, which is how this stayed invisible.
+                logger.error(
+                    "Insight generation returned no content (model=%s, finish_reason=%s). "
+                    "A reasoning model exhausting max_tokens before emitting text is the "
+                    "usual cause; raise the ceiling rather than retrying.",
+                    getattr(response, 'model', model_name),
+                    getattr(choice, 'finish_reason', None),
+                )
+                return [], ''
+
             parsed = self._parse_insight_response(content)
             if isinstance(parsed, list):
                 return parsed, getattr(response, 'model', model_name)
             if isinstance(parsed, dict) and 'insights' in parsed:
                 return parsed['insights'], getattr(response, 'model', model_name)
+            logger.error(
+                "Insight response did not parse into insights (model=%s, %d chars). First 200: %r",
+                getattr(response, 'model', model_name), len(content), content[:200],
+            )
         except Exception as e:
             logger.error("Failed to generate AI insights: %s", e, exc_info=True)
         return [], ''
