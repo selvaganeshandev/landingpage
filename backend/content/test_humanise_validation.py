@@ -114,6 +114,23 @@ accepts("a rewrite at 60% is accepted — shrinking is allowed, gutting is not",
 accepts("a short input with a proportional output is accepted",
         "<p>Tiny.</p>", "<p>Tiny rewritten.</p>")
 
+# Article 285's real shape: ~8k of prose inside ~36k of inline Tailwind CSS. A
+# pass that strips the style bloat keeps every word and drops 80% of the BYTES,
+# so a byte-ratio check rejects a perfectly good result. The ratio is measured on
+# visible text for exactly this reason.
+_STYLE = ('style="--tw-ring-offset-shadow: 0 0 #0000; --tw-ring-shadow: 0 0 #0000; '
+          '--tw-numeric-spacing: ; --tw-numeric-fraction: ; --tw-ring-inset: ; '
+          '--tw-ring-offset-width: 0px; --tw-ring-offset-color: #fff;"')
+BLOATED = "<div>" + "".join(
+    f"<p {_STYLE}>Real prose that a reader actually sees on the page.</p>" for _ in range(20)
+) + "</div>"
+CLEANED = "<div>" + ("<p>Real prose that a reader genuinely sees on the page.</p>" * 20) + "</div>"
+check("the bloated fixture is mostly markup",
+      len(CLEANED) < len(BLOATED) * 0.75, (len(BLOATED), len(CLEANED)))
+accepts("stripping inline CSS is not mistaken for truncation", BLOATED, CLEANED)
+rejects("but genuinely losing the prose is still caught",
+        BLOATED, '<div><p>Real prose that a reader actually sees.</p></div>')
+
 print("\nhumanise_validation — raise_if_truncated")
 
 try:

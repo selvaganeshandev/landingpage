@@ -90,6 +90,11 @@ _NOT_GERUNDS = {
 }
 
 
+def _visible_text(html):
+    """The prose a reader sees, with tags and whitespace collapsed away."""
+    return _WS_RE.sub(' ', _TAG_RE.sub(' ', html or '')).strip()
+
+
 def _text_sentences(html):
     """Plain-text sentences from HTML, tags and whitespace stripped."""
     text = _WS_RE.sub(' ', _TAG_RE.sub(' ', html or '')).strip()
@@ -226,10 +231,17 @@ def validate_pass_output(stage, source_html, output_html):
             f"(likely a refusal or an error message, not content)"
         )
 
-    if len(output_html) < len(source_html or '') * MIN_OUTPUT_RATIO:
+    # Compare PROSE, not bytes. Raw HTML length is a bad proxy: article 285 is
+    # ~8k of text wrapped in ~36k of inline Tailwind CSS, so a pass that
+    # legitimately stripped the style bloat came back at 19% of the source and
+    # was rejected as truncated even though every heading and paragraph survived.
+    # Stripping tags first measures what a reader actually loses.
+    source_text = _visible_text(source_html)
+    output_text = _visible_text(output_html)
+    if len(output_text) < len(source_text) * MIN_OUTPUT_RATIO:
         raise Exception(
-            f"{stage} returned {len(output_html)} chars from {len(source_html or '')} "
-            f"(under {MIN_OUTPUT_RATIO:.0%}) — truncated, refusing to save"
+            f"{stage} returned {len(output_text)} chars of text from {len(source_text)} "
+            f"(under {MIN_OUTPUT_RATIO:.0%}) — content was lost, refusing to save"
         )
 
     return output_html
