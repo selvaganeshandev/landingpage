@@ -52,9 +52,10 @@ class ChatGPTClient:
             logger.debug("OPENAI_API_KEY not set, client will not be initialized")
             return
         try:
-            # Internal (non-measured) work runs through OpenRouter. The tracked
-            # ChatGPT call does NOT use this class — it keeps hitting OpenAI
-            # directly so the measurement still reflects real ChatGPT output.
+            # Internal (non-measured) work runs through OpenRouter on the cheap
+            # internal slug. The tracked ChatGPT call does NOT use this class —
+            # it shares the transport but keeps OPENAI_CHATGPT_MODEL so the
+            # measurement still reflects real ChatGPT output.
             from .services.client_factory import get_internal_client
             self.client = get_internal_client(self.org_id)
             # Keep api_key populated so the "is an LLM usable" guards elsewhere in

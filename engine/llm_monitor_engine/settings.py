@@ -181,14 +181,15 @@ ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default=None)
 XAI_API_KEY = config('XAI_API_KEY', default=None)
 DEEPSEEK_API_KEY = config('DEEPSEEK_API_KEY', default=None)
 
-# ============== OPENROUTER (Claude + Perplexity transport) ==============
-# Claude and Perplexity are no longer called through their vendors' APIs
-# directly — every such call is routed via OpenRouter's OpenAI-compatible
+# ============== OPENROUTER (ChatGPT + Claude + Perplexity transport) ==============
+# ChatGPT, Claude and Perplexity are no longer called through their vendors'
+# APIs directly — every such call is routed via OpenRouter's OpenAI-compatible
 # endpoint (Claude through the adapter in core/services/openrouter_client.py),
-# authenticated with OPENROUTER_API_KEY. ANTHROPIC_API_KEY and
+# authenticated with OPENROUTER_API_KEY. OPENAI_API_KEY, ANTHROPIC_API_KEY and
 # PERPLEXITY_API_KEY above are now unused by those paths and are retained only
-# so existing deployments keep loading; per-org Anthropic/Perplexity BYOK keys
-# are ignored for them until an openrouter_api_key column exists on Organisation.
+# so existing deployments keep loading; per-org OpenAI/Anthropic/Perplexity BYOK
+# keys are ignored for them until an openrouter_api_key column exists on
+# Organisation. See OPENROUTER_ROUTED in core/services/api_key_service.py.
 OPENROUTER_API_KEY = config('OPENROUTER_API_KEY', default=None)
 OPENROUTER_BASE_URL = config('OPENROUTER_BASE_URL', default='https://openrouter.ai/api/v1')
 # Optional attribution headers shown on OpenRouter's public leaderboards.
@@ -201,8 +202,19 @@ OPENROUTER_SITE_TITLE = config('OPENROUTER_SITE_TITLE', default=None)
 # Responses/Search API errors out or isn't available, the code falls back to the
 # pre-existing chat-completions path automatically — set any of these to False to
 # disable grounding for that provider without changing code.
+# ChatGPT now runs on OpenRouter, whose `web` plugin answers the web_search tool
+# request in place of OpenAI's native one. Same on/off switch, different search
+# backend, billed per query on top of token cost.
 OPENAI_CHATGPT_WEB_SEARCH = config('OPENAI_CHATGPT_WEB_SEARCH', default=True, cast=bool)
-OPENAI_CHATGPT_MODEL = config('OPENAI_CHATGPT_MODEL', default='gpt-4o')
+# OpenRouter model slug, NOT the bare 'gpt-4o' the direct OpenAI API takes.
+# Deliberately the SAME slug as OPENROUTER_INTERNAL_MODEL below: the platform
+# runs one model for every call, measured and internal alike. Kept as its own
+# setting so the two can be split again from .env without a deploy.
+#
+# NOTE: gpt-5-mini is a reasoning model — see LLM_MAX_OUTPUT_TOKENS, whose
+# ceiling has to cover the hidden reasoning tokens this model spends before it
+# emits any text.
+OPENAI_CHATGPT_MODEL = config('OPENAI_CHATGPT_MODEL', default='openai/gpt-5-mini')
 # Claude now runs on OpenRouter, whose `web` plugin replaces Anthropic's native
 # web_search tool. Same on/off switch, different search backend — see
 # core/services/openrouter_client.py. Billed per query on top of token cost.
@@ -229,24 +241,33 @@ DEEPSEEK_MODEL = config('DEEPSEEK_MODEL', default='deepseek-chat')
 # You are billed for tokens actually generated, so lowering the cap saves
 # nothing here; the cost driver is the NUMBER of calls, not their length.
 #
-# 1500 leaves ~2.3x headroom over the observed median so nothing gets truncated
-# (a truncated answer loses the citations models list at the end, which the
-# Citations page counts), while still bounding a pathological runaway response.
+# RAISED 1500 -> 3000 when the tracked call moved to gpt-5-mini. That is a
+# REASONING model: it spends hidden reasoning tokens against this same ceiling
+# before emitting a single character of the answer. Measured against OpenRouter
+# on 2026-07-27 with a real analytics prompt:
+#   max_tokens=1500 -> 1024 reasoning tokens, finish_reason='length' (TRUNCATED)
+#   max_tokens=3000 ->  832 reasoning tokens, finish_reason='stop'   (complete)
+# At 1500 every tracked answer truncates mid-response, which drops the citation
+# list models put at the end — silently deflating the Citations page rather than
+# erroring. The cap is a ceiling, not a target, so non-reasoning providers
+# (Perplexity, Claude, Grok, DeepSeek) still stop early and cost nothing extra.
 # Tunable from .env without a deploy.
-LLM_MAX_OUTPUT_TOKENS = config('LLM_MAX_OUTPUT_TOKENS', default=1500, cast=int)
+LLM_MAX_OUTPUT_TOKENS = config('LLM_MAX_OUTPUT_TOKENS', default=3000, cast=int)
 
 # Model for INTERNAL LLM work (topic extraction, prompt generation, competitor
 # insight summaries) — output nobody reads as "what ChatGPT says about my
 # brand", so it does not need the flagship model. The mention-tracking call
 # deliberately keeps OPENAI_CHATGPT_MODEL: that one exists to measure what real
 # ChatGPT users are told, so cheapening it would change the measurement itself.
+# Superseded by OPENROUTER_INTERNAL_MODEL below; retained so deployments that
+# still set it keep loading.
 OPENAI_INTERNAL_MODEL = config('OPENAI_INTERNAL_MODEL', default='gpt-4o-mini')
 
-# Internal (non-measured) LLM work runs through OpenRouter. The tracked
-# ChatGPT call deliberately does NOT — it must keep hitting OpenAI directly with
-# OPENAI_CHATGPT_MODEL so the measurement still reflects what a real ChatGPT user
-# is told. Only support work (topics, prompt generation, insights, chat,
-# misinformation comparison) uses the slug below.
+# Every LLM call in the platform — internal support work AND the tracked ChatGPT
+# measurement — runs through OpenRouter on this one slug. OPENAI_CHATGPT_MODEL
+# above defaults to the same value; they stay separate settings only so the
+# measured call can be pointed at a different model from .env if the measurement
+# ever needs to diverge from the internal one again.
 OPENROUTER_INTERNAL_MODEL = config('OPENROUTER_INTERNAL_MODEL', default='openai/gpt-5-mini')
 
 # ==================== GEMINI BACKEND: AI Studio vs Vertex AI ====================
@@ -295,8 +316,10 @@ QUOTA_ALERT_CONFIRM_RUNS = config('QUOTA_ALERT_CONFIRM_RUNS', default=2, cast=in
 QUOTA_ALERT_MIN_INTERVAL_MINUTES = config('QUOTA_ALERT_MIN_INTERVAL_MINUTES', default=60, cast=int)
 # Also email a one-time "credits restored" note when a depleted provider recovers.
 QUOTA_ALERT_ON_RECOVERY = config('QUOTA_ALERT_ON_RECOVERY', default=True, cast=bool)
-# Cheap models used only for the health probe (not for analysis).
-QUOTA_PROBE_OPENAI_MODEL = config('QUOTA_PROBE_OPENAI_MODEL', default='gpt-4o-mini')
+# Cheap models used only for the health probe (not for analysis). All are
+# OpenRouter slugs where that provider is routed through OpenRouter — a bare
+# vendor model id 404s there and would report a healthy key as MODEL_UNAVAILABLE.
+QUOTA_PROBE_OPENAI_MODEL = config('QUOTA_PROBE_OPENAI_MODEL', default='openai/gpt-4o-mini')
 QUOTA_PROBE_ANTHROPIC_MODEL = config('QUOTA_PROBE_ANTHROPIC_MODEL', default='anthropic/claude-sonnet-5')
 QUOTA_PROBE_PERPLEXITY_MODEL = config('QUOTA_PROBE_PERPLEXITY_MODEL', default='perplexity/sonar')
 QUOTA_PROBE_XAI_MODEL = config('QUOTA_PROBE_XAI_MODEL', default='grok-2-latest')

@@ -265,12 +265,13 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 # api_key_service .env fallback can resolve Claude in the backend process too.
 ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default=config('CLAUDE_API_KEY', default=None))
 
-# ============== OPENROUTER (Claude + Perplexity transport) ==============
+# ============== OPENROUTER (ChatGPT + Claude + Perplexity transport) ==============
 # Every Claude call — mention tracking and content generation — and every
-# Perplexity call is routed through OpenRouter's OpenAI-compatible endpoint
-# (Claude via core/openrouter_client.py). ANTHROPIC_API_KEY above is no longer
-# used by those paths, and no PERPLEXITY_API_KEY is needed. Mirrors the engine's
-# OPENROUTER_* settings; keep the two in sync.
+# ChatGPT and Perplexity call is routed through OpenRouter's OpenAI-compatible
+# endpoint (Claude via core/openrouter_client.py). OPENAI_API_KEY and
+# ANTHROPIC_API_KEY above are no longer used by those paths, and no
+# PERPLEXITY_API_KEY is needed. Mirrors the engine's OPENROUTER_* settings;
+# keep the two in sync.
 OPENROUTER_API_KEY = config('OPENROUTER_API_KEY', default=None)
 OPENROUTER_BASE_URL = config('OPENROUTER_BASE_URL', default='https://openrouter.ai/api/v1')
 OPENROUTER_SITE_URL = config('OPENROUTER_SITE_URL', default=None)
@@ -280,9 +281,19 @@ ANTHROPIC_MODEL = config('ANTHROPIC_MODEL', default='anthropic/claude-sonnet-5')
 # Likewise an OpenRouter slug, NOT the bare 'sonar' the direct Perplexity API
 # takes. Mirrors the engine's PERPLEXITY_MODEL; keep the two in sync.
 PERPLEXITY_MODEL = config('PERPLEXITY_MODEL', default='perplexity/sonar')
-# Internal (non-measured) LLM work runs through OpenRouter on this slug. The AI
-# Mention Check deliberately does NOT — it keeps hitting OpenAI directly so it
-# measures what a real ChatGPT user is told.
+# Likewise an OpenRouter slug, NOT the bare 'gpt-4o' the direct OpenAI API takes.
+# Used by the AI Mention Check's ChatGPT engine. Deliberately the SAME slug as
+# OPENROUTER_INTERNAL_MODEL below — one model for every call — and kept as its
+# own setting only so the two can be split again from .env. gpt-5-mini is a
+# REASONING model: any call site that caps max_tokens must leave room for the
+# ~800-1000 hidden reasoning tokens it spends before emitting text.
+# Mirrors the engine's OPENAI_CHATGPT_MODEL.
+OPENAI_CHATGPT_MODEL = config('OPENAI_CHATGPT_MODEL', default='openai/gpt-5-mini')
+# Web search for that call is answered by OpenRouter's `web` plugin rather than
+# OpenAI's native tool. Same on/off switch, different search backend.
+OPENAI_CHATGPT_WEB_SEARCH = config('OPENAI_CHATGPT_WEB_SEARCH', default=True, cast=bool)
+# Every LLM call — internal support work and the AI Mention Check alike — runs
+# through OpenRouter on this one slug.
 OPENROUTER_INTERNAL_MODEL = config('OPENROUTER_INTERNAL_MODEL', default='openai/gpt-5-mini')
 
 # Google Gemini API Configuration (for AI-powered features)

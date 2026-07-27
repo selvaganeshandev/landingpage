@@ -127,10 +127,11 @@ def test_perplexity_authenticates_with_the_openrouter_key():
         "Perplexity must authenticate with the OpenRouter key; resolving to "
         "'perplexity' sends the dead api.perplexity.ai credential and 401s."
     )
-    # Claude's existing routing must not have been disturbed.
+    # Claude's and ChatGPT's routing must not have been disturbed.
     assert AKS.credential_provider('anthropic') == 'openrouter'
+    assert AKS.credential_provider('openai') == 'openrouter'
     # Everything else still uses its own vendor key.
-    for provider in ('openai', 'gemini', 'xai', 'deepseek'):
+    for provider in ('gemini', 'xai', 'deepseek'):
         assert AKS.credential_provider(provider) == provider, provider
 
 

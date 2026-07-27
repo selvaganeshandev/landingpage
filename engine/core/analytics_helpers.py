@@ -25,10 +25,11 @@ def process_prompt_with_perplexity(prompt_text: str, user_domain: str, client: A
 
 def get_openai_client(org_id: Optional[int] = None):
 	"""
-	Return an OpenAI client. Delegates to ClientFactory which applies:
-	  1. Organisation DB key (BYOK)
-	  2. .env OPENAI_API_KEY fallback
-	Accepts optional org_id for per-organisation key resolution.
+	Return an OpenAI-compatible client pointed at OpenRouter, which now
+	transports every ChatGPT call. Delegates to ClientFactory, which resolves the
+	credential via OPENROUTER_ROUTED: per-org OpenAI BYOK keys are no longer
+	consulted, so this resolves to the system .env OPENROUTER_API_KEY.
+	Accepts optional org_id, still used for the provider-enabled check.
 	"""
 	try:
 		from .services.client_factory import get_client
@@ -398,7 +399,9 @@ def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
 def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any, group: Any = None) -> Dict[str, Any]:
     try:
         country_text = _resolve_country_text(group)
-        model_name = getattr(settings, 'OPENAI_CHATGPT_MODEL', 'gpt-4o')
+        # OpenRouter slug — a bare OpenAI model id is not valid on OpenRouter and
+        # 404s, so the fallback carries the prefix.
+        model_name = getattr(settings, 'OPENAI_CHATGPT_MODEL', 'openai/gpt-5-mini')
         user_message = _build_analytics_user_prompt(prompt_text, country_text)
 
         text = ""
@@ -451,10 +454,18 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.7,
-                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
+                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 3000),
                 timeout=60,
             )
-            text = response.choices[0].message.content
+            text = response.choices[0].message.content or ""
+
+        # A reasoning model returns content=None when the token ceiling is eaten
+        # by hidden reasoning before any text is emitted. Fail loudly instead of
+        # letting an empty answer be recorded as a genuine "brand not mentioned"
+        # result, which would silently deflate the score rather than surface the
+        # problem. Mirrors the Perplexity path's empty-response guard.
+        if not text:
+            raise Exception("ChatGPT returned an empty response")
 
         domain_clean = _get_domain_from_url(user_domain)
         sld = domain_clean.split('.') [0] if domain_clean else ""
@@ -619,7 +630,7 @@ def _process_prompt_with_gemini_vertex(prompt_text: str, user_domain: str, group
             'temperature': 0.7,
             'top_k': 40,
             'top_p': 0.95,
-            'max_output_tokens': getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
+            'max_output_tokens': getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 3000),
             'tools': tools,
         }
         if thinking_budget >= 0:
@@ -673,7 +684,7 @@ def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, clien
             temperature=0.7,
             top_k=40,
             top_p=0.95,
-            max_output_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
+            max_output_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 3000),
         )
 
         text = ""
@@ -781,7 +792,7 @@ def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, c
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.7,
-                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
+                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 3000),
                 timeout=90,
             )
             text = response.choices[0].message.content if response.choices else ""
@@ -886,7 +897,7 @@ def process_prompt_with_claude(prompt_text: str, user_domain: str, client: Any =
                 )
                 grounded = anthropic_client.messages.create(
                     model=model_name,
-                    max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
+                    max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 3000),
                     temperature=0.7,
                     system=grounded_system,
                     tools=[{
@@ -911,7 +922,7 @@ def process_prompt_with_claude(prompt_text: str, user_domain: str, client: Any =
             )
             response = anthropic_client.messages.create(
                 model=model_name,
-                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
+                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 3000),
                 temperature=0.7,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
@@ -957,7 +968,7 @@ def process_prompt_with_grok(prompt_text: str, user_domain: str, client: Any = N
                         {"role": "user", "content": user_message},
                     ],
                     temperature=0.7,
-                    max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
+                    max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 3000),
                     timeout=90,
                     extra_body={"search_parameters": {"mode": "auto"}},
                 )
@@ -980,7 +991,7 @@ def process_prompt_with_grok(prompt_text: str, user_domain: str, client: Any = N
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.7,
-                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
+                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 3000),
                 timeout=60,
             )
             text = response.choices[0].message.content if response.choices else ""
@@ -1014,7 +1025,7 @@ def process_prompt_with_deepseek(prompt_text: str, user_domain: str, client: Any
                 {"role": "user", "content": _build_analytics_user_prompt(prompt_text, country_text)},
             ],
             temperature=0.7,
-            max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
+            max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 3000),
             timeout=60,
         )
         text = response.choices[0].message.content if response.choices else ""

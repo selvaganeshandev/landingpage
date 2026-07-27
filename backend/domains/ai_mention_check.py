@@ -8,7 +8,8 @@ domains) and needs no Domain/Prompt rows.
 
 Cost + latency: each check spends real LLM credits and can take tens of seconds, so it
 is button-triggered on the frontend and cached 24h here. Requires an LLM API key
-(``OPENAI_API_KEY`` or ``GOOGLE_GEMINI_API_KEY``); returns ``available: False`` otherwise.
+(``OPENROUTER_API_KEY`` — which serves ChatGPT, Claude and Perplexity — or
+``GOOGLE_GEMINI_API_KEY``); returns ``available: False`` otherwise.
 
 Query-build + mention/citation/sentiment parsing mirror the engine's proven logic in
 ``engine/core/analytics_helpers.py`` (kept self-contained so the backend needs no
@@ -132,10 +133,21 @@ def _parse(text, host, sld):
 # Providers
 # --------------------------------------------------------------------------- #
 def _ask_openai(api_key, user_message):
+    # ChatGPT is served through OpenRouter, same as Claude and Perplexity, so one
+    # balance covers every engine. OpenRouter implements both surfaces used below
+    # — /responses with the web_search tool and chat.completions — so the call
+    # shape is unchanged; only the base_url, the credential (OPENROUTER_API_KEY)
+    # and the model slug (`openai/gpt-4o` instead of `gpt-4o`) differ. Web search
+    # is answered by OpenRouter's own `web` plugin rather than OpenAI's native
+    # tool, so grounded answers cite different sources than before the cutover.
     from openai import OpenAI
 
-    client = OpenAI(api_key=api_key, timeout=90)
-    model = getattr(settings, "OPENAI_CHATGPT_MODEL", "gpt-4o")
+    client = OpenAI(
+        api_key=api_key,
+        base_url=getattr(settings, "OPENROUTER_BASE_URL", None) or "https://openrouter.ai/api/v1",
+        timeout=90,
+    )
+    model = getattr(settings, "OPENAI_CHATGPT_MODEL", "openai/gpt-5-mini")
     # Prefer the Responses API with web_search so the model browses before answering.
     if getattr(settings, "OPENAI_CHATGPT_WEB_SEARCH", True):
         try:
@@ -161,8 +173,13 @@ def _ask_openai(api_key, user_message):
             {"role": "user", "content": user_message},
         ],
         temperature=0.7,
-        max_tokens=2000,
-        timeout=60,
+        # gpt-5-mini is a reasoning model and spends ~800-1000 hidden reasoning
+        # tokens against this ceiling before emitting text. Measured on OpenRouter
+        # 2026-07-27: 1500 truncates mid-answer (finish_reason='length'), 3000
+        # completes. A truncated answer loses the trailing source list this check
+        # counts citations from. Ceiling, not a target — short answers stop early.
+        max_tokens=3000,
+        timeout=90,
     )
     return resp.choices[0].message.content or ""
 
@@ -232,12 +249,14 @@ ENGINES = [
 ]
 
 _KEY_SOURCES = {
-    "openai": ("openai_key", "OPENAI_API_KEY"),
+    # ChatGPT, Claude and Perplexity all run on OpenRouter, so their credential is
+    # the OpenRouter key. There is no openrouter_key column on Organisation yet,
+    # so BYOK resolution misses and this correctly falls through to the system
+    # OPENROUTER_API_KEY — including for OpenAI, whose per-org openai_key is
+    # deliberately no longer consulted (see OPENROUTER_ROUTED in the engine's
+    # core/services/api_key_service.py).
+    "openai": ("openrouter_key", "OPENROUTER_API_KEY"),
     "gemini": ("gemini_key", "GOOGLE_GEMINI_API_KEY"),
-    # Claude and Perplexity run on OpenRouter, so their credential is the
-    # OpenRouter key. There is no openrouter_key column on Organisation yet, so
-    # BYOK resolution misses and this correctly falls through to the system
-    # OPENROUTER_API_KEY.
     "anthropic": ("openrouter_key", "OPENROUTER_API_KEY"),
     "perplexity": ("openrouter_key", "OPENROUTER_API_KEY"),
     "xai": ("xai_key", "XAI_API_KEY"),
@@ -584,7 +603,7 @@ def run_avi(name, context="", org=None):
             "available": False,
             "domain_name": host,
             "error": "No LLM API key available. Add your keys in Organisation settings (BYOK), "
-                     "or set OPENAI_API_KEY / GOOGLE_GEMINI_API_KEY on the server.",
+                     "or set OPENROUTER_API_KEY / GOOGLE_GEMINI_API_KEY on the server.",
         }
 
     cache_key = f"domov:avi:{host}:{'-'.join(e['provider'] for e in engines)}"
@@ -752,7 +771,7 @@ def run_ai_mention_check(name, org=None):
         return {
             "available": False,
             "domain_name": host,
-            "error": "No LLM API key available. Add your OpenAI or Gemini key in Organisation settings (BYOK), or set OPENAI_API_KEY / GOOGLE_GEMINI_API_KEY on the server.",
+            "error": "No LLM API key available. Add your Gemini key in Organisation settings (BYOK), or set OPENROUTER_API_KEY / GOOGLE_GEMINI_API_KEY on the server.",
         }
 
     cache_key = f"domov:aicheck:{provider}:{host}"

@@ -1230,22 +1230,19 @@ def get_openai_client():
         try:
             from serp.models import Settings
             settings_obj = Settings.objects.first()
-            if settings_obj and hasattr(settings_obj, 'chatgpt_enabled') and hasattr(settings_obj, 'chatgpt_api_key'):
+            if settings_obj and hasattr(settings_obj, 'chatgpt_enabled'):
                 if not settings_obj.chatgpt_enabled:
                     raise Exception("ChatGPT is disabled in settings")
-                if not settings_obj.chatgpt_api_key:
-                    raise Exception("ChatGPT API key is not configured in settings")
-                return openai.OpenAI(
-                    api_key=settings_obj.chatgpt_api_key,
-                    timeout=60,
-                )
         except (ImportError, Exception) as db_err:
             logger.info(f"DB settings unavailable for OpenAI, trying env: {db_err}")
 
-        # Every caller of this helper is internal (non-measured) work, so it runs
-        # through OpenRouter. The tracked ChatGPT measurement does not come
-        # through here — it uses core.analytics_helpers.get_openai_client, which
-        # still hits OpenAI directly.
+        # Every OpenAI call — this helper's internal work and the tracked ChatGPT
+        # measurement in core.analytics_helpers alike — runs through OpenRouter.
+        # A stored serp.Settings.chatgpt_api_key no longer authenticates anything
+        # (see OPENROUTER_ROUTED in core/services/api_key_service.py), so the only
+        # key consulted here is the OpenRouter one. NOTE: the chatgpt_enabled
+        # raise above lands in this function's own `except Exception`, so it has
+        # never actually blocked a call — behaviour left as-is, not a new bug.
         from django.conf import settings as django_settings
         api_key = getattr(django_settings, 'OPENROUTER_API_KEY', None) or os.environ.get('OPENROUTER_API_KEY')
         if not api_key:

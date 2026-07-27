@@ -210,9 +210,10 @@ def get_internal_client(timeout: int = 60) -> Any:
     """Plain OpenAI-compatible client pointed at OpenRouter, for INTERNAL work.
 
     Used by the backend's non-measured LLM calls (chat, domain helpers, insight
-    generation, misinformation comparison). The AI Mention Check deliberately
-    does NOT use this — it must keep hitting OpenAI directly so it measures what
-    a real ChatGPT user is told.
+    generation, misinformation comparison). The AI Mention Check builds its own
+    OpenRouter client instead of using this one — same transport, but it keeps
+    the flagship ``OPENAI_CHATGPT_MODEL`` so it still measures what a real
+    ChatGPT user is told, rather than the cheap internal slug below.
 
     Pair with ``settings.OPENROUTER_INTERNAL_MODEL`` for the model slug.
     """

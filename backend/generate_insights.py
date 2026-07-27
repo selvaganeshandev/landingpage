@@ -28,28 +28,31 @@ engine_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'engine')
 if engine_path not in sys.path:
     sys.path.insert(0, engine_path)
 
-# Read OpenAI API key from engine/.env
+# Read the OpenRouter key from engine/.env — every OpenAI call is transported
+# over OpenRouter, so that is the credential this script needs.
 from decouple import config as decouple_config
 engine_env_path = os.path.join(engine_path, '.env')
 if os.path.exists(engine_env_path):
     # Temporarily change directory to engine to read .env
     original_cwd = os.getcwd()
     os.chdir(engine_path)
-    openai_api_key = decouple_config('OPENAI_API_KEY', default=None)
+    openrouter_api_key = decouple_config('OPENROUTER_API_KEY', default=None)
+    openrouter_base_url = decouple_config('OPENROUTER_BASE_URL', default='https://openrouter.ai/api/v1')
     os.chdir(original_cwd)
 else:
-    openai_api_key = None
+    openrouter_api_key = None
+    openrouter_base_url = 'https://openrouter.ai/api/v1'
 
 # Import OpenAI client function
 try:
     from core.analytics_helpers import get_openai_client
 except:
-    # Fallback: create OpenAI client directly if import fails
+    # Fallback: build the OpenRouter-pointed client directly if the import fails
     def get_openai_client():
-        if not openai_api_key:
-            raise Exception("OpenAI API key not found in engine/.env file")
+        if not openrouter_api_key:
+            raise Exception("OPENROUTER_API_KEY not found in engine/.env file")
         from openai import OpenAI
-        return OpenAI(api_key=openai_api_key, timeout=60)
+        return OpenAI(api_key=openrouter_api_key, base_url=openrouter_base_url, timeout=60)
 
 def generate_snapshot_version(domain_id):
     """Generate a unique snapshot version based on latest snapshots"""

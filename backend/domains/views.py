@@ -34,7 +34,8 @@ def get_openai_client():
 
     Every caller here is internal analysis, so it runs through OpenRouter on
     settings.OPENROUTER_INTERNAL_MODEL. The AI Mention Check does NOT use this —
-    it keeps hitting OpenAI directly so it measures real ChatGPT output.
+    it runs on the same transport but keeps the flagship OPENAI_CHATGPT_MODEL so
+    it still measures real ChatGPT output.
     """
     from core.openrouter_client import get_internal_client
     try:

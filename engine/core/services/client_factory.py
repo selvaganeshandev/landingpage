@@ -87,8 +87,19 @@ def _openrouter_headers() -> Optional[dict]:
 def _build_client(provider: str, api_key: str) -> Any:
     """Instantiate a new SDK client for the given provider and API key."""
     if provider == 'openai':
+        # ChatGPT is served through OpenRouter, same as Claude and Perplexity, so
+        # every LLM call in the platform bills one balance. OpenRouter speaks both
+        # SDK surfaces this provider uses — chat.completions AND /responses with
+        # the web_search tool — so process_prompt_with_chatgpt is unchanged; only
+        # the model slug gains its `openai/` prefix (see OPENAI_CHATGPT_MODEL).
+        from django.conf import settings
         from openai import OpenAI
-        return OpenAI(api_key=api_key, timeout=60)
+        return OpenAI(
+            api_key=api_key,
+            base_url=getattr(settings, 'OPENROUTER_BASE_URL', None) or 'https://openrouter.ai/api/v1',
+            timeout=60,
+            default_headers=_openrouter_headers(),
+        )
 
     elif provider == 'gemini':
         # Return a config dict; Gemini is invoked via REST/genai SDK
@@ -160,9 +171,11 @@ def get_internal_client(org_id: Optional[int] = None) -> Any:
     """Client for INTERNAL, non-measured LLM work (topics, prompt generation,
     insights, chat, misinformation comparison).
 
-    Always OpenRouter. Deliberately separate from ``get_client('openai')``, which
-    the tracked ChatGPT call uses and which must keep hitting OpenAI directly so
-    the measurement still reflects what a real ChatGPT user is told.
+    Always OpenRouter — as is ``get_client('openai')`` now. The two remain
+    separate because they differ in MODEL, not transport: this one runs the cheap
+    ``OPENROUTER_INTERNAL_MODEL``, while the tracked ChatGPT call keeps the
+    flagship ``OPENAI_CHATGPT_MODEL`` so the measurement still reflects what a
+    real ChatGPT user is told.
 
     Pair with ``settings.OPENROUTER_INTERNAL_MODEL`` for the model slug.
     """

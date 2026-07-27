@@ -55,11 +55,20 @@ def _result(label, key, key_set, state, detail=""):
 # Per-provider probes (tiny, cheap calls)
 # ---------------------------------------------------------------------------
 def _probe_openai(api_key, model):
+    """Probe ChatGPT through OpenRouter — the transport every OpenAI call now uses.
+
+    The label stays "OpenAI / ChatGPT" so the quota dashboard and alert history
+    remain continuous, but the credential being tested is the OpenRouter key.
+    """
     if not api_key:
         return _result("OpenAI / ChatGPT", "openai", False, "NOT_CONFIGURED")
     try:
         from openai import OpenAI
-        OpenAI(api_key=api_key, timeout=30).chat.completions.create(
+        OpenAI(
+            api_key=api_key,
+            base_url=_cfg("OPENROUTER_BASE_URL", None) or "https://openrouter.ai/api/v1",
+            timeout=30,
+        ).chat.completions.create(
             model=model, messages=[{"role": "user", "content": "ping"}], max_tokens=1
         )
         return _result("OpenAI / ChatGPT", "openai", True, "OK")
@@ -224,7 +233,7 @@ _PROVIDER_LABELS = {
 def _probe_provider(provider, api_key):
     """Dispatch to the right provider probe with the configured probe model."""
     if provider == "openai":
-        return _probe_openai(api_key, _cfg("QUOTA_PROBE_OPENAI_MODEL", "gpt-4o-mini"))
+        return _probe_openai(api_key, _cfg("QUOTA_PROBE_OPENAI_MODEL", "openai/gpt-4o-mini"))
     if provider == "anthropic":
         return _probe_anthropic(api_key, _cfg("QUOTA_PROBE_ANTHROPIC_MODEL", "anthropic/claude-sonnet-5"))
     if provider == "gemini":
@@ -287,12 +296,16 @@ def check_org_quotas():
         for provider, label in _PROVIDER_LABELS.items():
             if not getattr(org, f"{provider}_enabled", True):
                 continue
-            if provider in ("anthropic", "perplexity"):
-                # Claude and Perplexity run on OpenRouter now, so a stored per-org
-                # Anthropic/Perplexity key no longer authenticates anything. Probing
-                # it would raise a false INVALID_KEY alert against a credential the
-                # pipeline never uses. The system OpenRouter key is probed in
-                # check_all_quotas().
+            if provider in ("anthropic", "perplexity", "openai"):
+                # ChatGPT, Claude and Perplexity all run on OpenRouter now, so a
+                # stored per-org OpenAI/Anthropic/Perplexity key no longer
+                # authenticates anything. Probing it would raise a false
+                # INVALID_KEY alert against a credential the pipeline never uses —
+                # and for a stored OpenAI key the probe fails in a particularly
+                # misleading way: OpenRouter cannot parse an sk-proj- credential
+                # and answers 401 "Missing Authentication header", which reads as
+                # a missing key rather than an unused one. The system OpenRouter
+                # key is probed in check_all_quotas().
                 continue
             encrypted = getattr(org, f"{provider}_api_key", None)
             if not encrypted:
@@ -334,7 +347,7 @@ def check_all_quotas():
     Includes the system (.env) keys plus every organisation's BYOK keys.
     """
     results = [
-        _probe_openai(_cfg("OPENAI_API_KEY", ""), _cfg("QUOTA_PROBE_OPENAI_MODEL", "gpt-4o-mini")),
+        _probe_openai(_cfg("OPENROUTER_API_KEY", ""), _cfg("QUOTA_PROBE_OPENAI_MODEL", "openai/gpt-4o-mini")),
         _probe_anthropic(_cfg("OPENROUTER_API_KEY", ""), _cfg("QUOTA_PROBE_ANTHROPIC_MODEL", "anthropic/claude-sonnet-5")),
         _probe_gemini(_cfg("GEMINI_API_KEY", ""), _cfg("GEMINI_MODEL", "gemini-flash-latest")),
         _probe_provider("perplexity", _cfg("OPENROUTER_API_KEY", "")),

@@ -45,7 +45,20 @@ ENV_KEY_MAP = {
 # same single balance as Claude and the internal model, so one top-up covers all
 # of them. `perplexity/sonar` on OpenRouter is the same Sonar model with the same
 # built-in web search — only the billing path changes.
-OPENROUTER_ROUTED = {'anthropic', 'perplexity'}
+#
+# OpenAI joined last. The tracked ChatGPT call was deliberately held back so it
+# would keep measuring what a real ChatGPT user is told, but that rationale was
+# about the MODEL (don't cheapen gpt-4o to a mini), not the transport: OpenRouter
+# forwards to the same OpenAI model. Verified on 2026-07-27 that OpenRouter
+# serves `openai/gpt-4o`, implements the /responses API, and honours
+# tools=[{"type": "web_search"}] — the two SDK surfaces process_prompt_with_chatgpt
+# depends on. One consequence is real: web search is answered by OpenRouter's own
+# `web` plugin rather than OpenAI's native tool, so grounded answers cite
+# different sources from the cutover onward (same caveat as Claude — see
+# services/openrouter_client.py). Per-org `openai_api_key` BYOK no longer
+# authenticates anything, exactly like Anthropic's and Perplexity's; every
+# ChatGPT call now bills the single OpenRouter balance.
+OPENROUTER_ROUTED = {'anthropic', 'perplexity', 'openai'}
 
 
 def credential_provider(provider: str) -> str:
