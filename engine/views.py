@@ -431,87 +431,51 @@ def process_prompt_with_gemini(prompt_text: str, user_domain: str, client, group
 
 def process_prompt_with_perplexity(prompt_text: str, user_domain: str, client, group=None) -> dict:
     """
-    Process a single prompt with Perplexity using Python library for better SSL and connection handling.
+    Process a single prompt with Perplexity Sonar, served over OpenRouter.
+
+    Previously this used the standalone `perplexity` SDK's Search API against
+    api.perplexity.ai. That transport is gone (see get_perplexity_client), so the
+    call is now an OpenAI-compatible chat completion — which also means the old
+    256-character query cap no longer applies and prompts are sent whole.
     """
     try:
-        # Try to use Python library first (better for live environments)
         try:
-            from perplexity import Perplexity
-            
-            # Initialize Perplexity client with API key
-            perplexity_client = Perplexity(api_key=client['api_key'])
-            
+            from openai import OpenAI
+
+            perplexity_client = OpenAI(
+                api_key=client['api_key'],
+                base_url=client.get('base_url') or 'https://openrouter.ai/api/v1',
+                timeout=client.get('timeout', 60),
+            )
+
             # Get country-specific text if group is provided
             country_suffix = ""
             if group:
                 country_name = get_country_from_group(group)
                 if country_name:
                     country_suffix = f" Answer in the context of {country_name} unless otherwise specified."
-            
-            # Add country context to the prompt text
-            prompt_with_context = prompt_text + country_suffix
-            
-            # Perplexity has a 256 character limit per query
-            # Keep the prompt concise and under the limit
-            max_length = 250  # Leave some buffer
-            if len(prompt_with_context) > max_length:
-                # Truncate at last complete word before limit
-                user_message = prompt_with_context[:max_length].rsplit(' ', 1)[0] + "..."
-                logger.info(f"Truncated prompt for Perplexity from {len(prompt_with_context)} to {len(user_message)} characters")
-            else:
-                user_message = prompt_with_context
-            
-            # Make API call using Python library
-            # The search method returns a SearchResource object, use create() method
-            search_response = perplexity_client.search.create(query=user_message)
-            
-            # Extract text from the search response
-            # The response has a 'results' array with Result objects containing 'snippet' field
-            if hasattr(search_response, 'results') and search_response.results:
-                # Join all snippets from the results
-                text_parts = []
-                for result in search_response.results:
-                    if hasattr(result, 'snippet') and result.snippet:
-                        text_parts.append(result.snippet)
-                    elif hasattr(result, 'text') and result.text:
-                        text_parts.append(result.text)
-                    elif hasattr(result, 'content') and result.content:
-                        text_parts.append(result.content)
-                
-                if text_parts:
-                    text = "\n\n".join(text_parts)
-                else:
-                    text = "No content found in search results"
-            elif hasattr(search_response, 'text'):
-                text = search_response.text
-            elif hasattr(search_response, 'content'):
-                text = search_response.content
-            elif hasattr(search_response, 'response'):
-                text = search_response.response
-            elif hasattr(search_response, 'answer'):
-                text = search_response.answer
-            else:
-                # Try to convert to string
-                text = str(search_response)
-                
-            logger.info("Perplexity API call successful using Python library")
-            
-            # Close the connection properly
-            try:
-                perplexity_client.close()
-            except:
-                pass  # Ignore close errors
-            
+
+            user_message = prompt_text + country_suffix
+
+            response = perplexity_client.chat.completions.create(
+                model=getattr(settings, 'PERPLEXITY_MODEL', 'perplexity/sonar'),
+                messages=[{"role": "user", "content": user_message}],
+                max_tokens=getattr(settings, 'LLM_MAX_OUTPUT_TOKENS', 1500),
+            )
+            text = (response.choices[0].message.content or "") if response.choices else ""
+            if not text:
+                raise Exception("Perplexity returned an empty response")
+
+            logger.info("Perplexity API call successful via OpenRouter")
+
         except ImportError:
-            # Library not available - skip processing
-            logger.error("Perplexity Python library not installed, skipping Perplexity processing")
-            raise Exception("Perplexity Python library not installed")
-            
+            logger.error("openai package not installed, skipping Perplexity processing")
+            raise Exception("openai package not installed")
+
         except Exception as lib_error:
-            # Library failed - skip processing
-            logger.error(f"Perplexity library failed: {str(lib_error)}")
+            logger.error(f"Perplexity call failed: {str(lib_error)}")
             raise Exception(f"Perplexity processing failed: {str(lib_error)}")
-        
+
         print("\n\n")
         print(f"Perplexity Response: {text}")
 
@@ -1332,34 +1296,21 @@ def get_gemini_client():
 
 
 def get_perplexity_client():
-    """Initialize and return Perplexity client using settings from database or environment."""
-    try:
-        # Try database settings first
-        try:
-            from serp.models import Settings
-            settings_obj = Settings.objects.first()
-            if settings_obj and hasattr(settings_obj, 'perplexity_enabled') and hasattr(settings_obj, 'perplexity_api_key'):
-                if not settings_obj.perplexity_enabled:
-                    raise Exception("Perplexity is disabled in settings")
-                if not settings_obj.perplexity_api_key:
-                    raise Exception("Perplexity API key is not configured in settings")
-                return {
-                    'api_key': settings_obj.perplexity_api_key,
-                    'base_url': 'https://api.perplexity.ai/chat/completions',
-                    'timeout': 60,
-                }
-        except (ImportError, Exception) as db_err:
-            logger.info(f"DB settings unavailable for Perplexity, trying env: {db_err}")
+    """Return the credential/endpoint for Perplexity, which runs on OpenRouter.
 
-        # Fallback to environment variable
+    A stored per-org or .env PERPLEXITY_API_KEY no longer authenticates anything
+    (see OPENROUTER_ROUTED in core/services/api_key_service.py), so the only key
+    consulted here is the OpenRouter one.
+    """
+    try:
         from django.conf import settings as django_settings
-        api_key = getattr(django_settings, 'PERPLEXITY_API_KEY', None) or os.environ.get('PERPLEXITY_API_KEY')
+        api_key = getattr(django_settings, 'OPENROUTER_API_KEY', None) or os.environ.get('OPENROUTER_API_KEY')
         if not api_key:
-            raise Exception("Perplexity API key not found in database or environment")
+            raise Exception("OPENROUTER_API_KEY not found in database or environment")
 
         return {
             'api_key': api_key,
-            'base_url': 'https://api.perplexity.ai/chat/completions',
+            'base_url': getattr(django_settings, 'OPENROUTER_BASE_URL', None) or 'https://openrouter.ai/api/v1',
             'timeout': 60,
         }
     except Exception as e:

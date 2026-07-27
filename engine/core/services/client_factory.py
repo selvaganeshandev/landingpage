@@ -46,9 +46,9 @@ def get_client(provider: str, org_id: Optional[int] = None) -> Any:
     if not is_enabled(org, provider):
         raise Exception(f"Provider '{provider}' is disabled for org {org_id}")
 
-    # Some providers (Claude) are transported over OpenRouter, so the credential
-    # that authenticates the call belongs to a different provider slug than the
-    # one the caller asked for.
+    # Some providers (Claude, Perplexity) are transported over OpenRouter, so the
+    # credential that authenticates the call belongs to a different provider slug
+    # than the one the caller asked for.
     key_provider = credential_provider(provider)
     api_key = get_api_key(org, key_provider)
     if not api_key:
@@ -67,6 +67,23 @@ def get_client(provider: str, org_id: Optional[int] = None) -> Any:
     return client
 
 
+def _openrouter_headers() -> Optional[dict]:
+    """Optional OpenRouter attribution headers, matching OpenRouterAnthropicClient.
+
+    Returns None (not an empty dict) when neither is configured, so the SDK is
+    given no ``default_headers`` at all rather than an empty mapping.
+    """
+    from django.conf import settings
+    headers = {}
+    site_url = getattr(settings, 'OPENROUTER_SITE_URL', None)
+    site_title = getattr(settings, 'OPENROUTER_SITE_TITLE', None)
+    if site_url:
+        headers['HTTP-Referer'] = site_url
+    if site_title:
+        headers['X-Title'] = site_title
+    return headers or None
+
+
 def _build_client(provider: str, api_key: str) -> Any:
     """Instantiate a new SDK client for the given provider and API key."""
     if provider == 'openai':
@@ -78,12 +95,18 @@ def _build_client(provider: str, api_key: str) -> Any:
         return {'api_key': api_key, 'timeout': 60}
 
     elif provider == 'perplexity':
-        # Perplexity uses OpenAI-compatible client with custom base_url
+        # Perplexity is served through OpenRouter, not api.perplexity.ai. Both
+        # speak the OpenAI chat-completions wire format, so only the base_url,
+        # the credential (OPENROUTER_API_KEY) and the model slug
+        # (`perplexity/sonar` instead of `sonar`) change — every call site is
+        # unchanged. See OPENROUTER_ROUTED in api_key_service.py for why.
+        from django.conf import settings
         from openai import OpenAI
         return OpenAI(
             api_key=api_key,
-            base_url='https://api.perplexity.ai',
+            base_url=getattr(settings, 'OPENROUTER_BASE_URL', None) or 'https://openrouter.ai/api/v1',
             timeout=60,
+            default_headers=_openrouter_headers(),
         )
 
     elif provider == 'anthropic':

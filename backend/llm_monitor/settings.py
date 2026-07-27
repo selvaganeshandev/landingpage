@@ -265,10 +265,11 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 # api_key_service .env fallback can resolve Claude in the backend process too.
 ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default=config('CLAUDE_API_KEY', default=None))
 
-# ==================== OPENROUTER (Claude transport) ====================
-# Every Claude call — mention tracking and content generation — is routed through
-# OpenRouter's OpenAI-compatible endpoint via core/openrouter_client.py.
-# ANTHROPIC_API_KEY above is no longer used by those paths. Mirrors the engine's
+# ============== OPENROUTER (Claude + Perplexity transport) ==============
+# Every Claude call — mention tracking and content generation — and every
+# Perplexity call is routed through OpenRouter's OpenAI-compatible endpoint
+# (Claude via core/openrouter_client.py). ANTHROPIC_API_KEY above is no longer
+# used by those paths, and no PERPLEXITY_API_KEY is needed. Mirrors the engine's
 # OPENROUTER_* settings; keep the two in sync.
 OPENROUTER_API_KEY = config('OPENROUTER_API_KEY', default=None)
 OPENROUTER_BASE_URL = config('OPENROUTER_BASE_URL', default='https://openrouter.ai/api/v1')
@@ -276,6 +277,9 @@ OPENROUTER_SITE_URL = config('OPENROUTER_SITE_URL', default=None)
 OPENROUTER_SITE_TITLE = config('OPENROUTER_SITE_TITLE', default=None)
 # OpenRouter model slug, not an Anthropic model id.
 ANTHROPIC_MODEL = config('ANTHROPIC_MODEL', default='anthropic/claude-sonnet-5')
+# Likewise an OpenRouter slug, NOT the bare 'sonar' the direct Perplexity API
+# takes. Mirrors the engine's PERPLEXITY_MODEL; keep the two in sync.
+PERPLEXITY_MODEL = config('PERPLEXITY_MODEL', default='perplexity/sonar')
 # Internal (non-measured) LLM work runs through OpenRouter on this slug. The AI
 # Mention Check deliberately does NOT — it keeps hitting OpenAI directly so it
 # measures what a real ChatGPT user is told.

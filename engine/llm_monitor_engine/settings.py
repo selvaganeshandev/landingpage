@@ -181,13 +181,14 @@ ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default=None)
 XAI_API_KEY = config('XAI_API_KEY', default=None)
 DEEPSEEK_API_KEY = config('DEEPSEEK_API_KEY', default=None)
 
-# ==================== OPENROUTER (Claude transport) ====================
-# Claude is no longer called through the Anthropic API directly — every Claude
-# call is routed via OpenRouter's OpenAI-compatible endpoint using the adapter in
-# core/services/openrouter_client.py, authenticated with OPENROUTER_API_KEY.
-# ANTHROPIC_API_KEY above is now unused by the Claude path and is retained only
-# so existing deployments keep loading; per-org Anthropic BYOK keys are ignored
-# for Claude until an openrouter_api_key column exists on Organisation.
+# ============== OPENROUTER (Claude + Perplexity transport) ==============
+# Claude and Perplexity are no longer called through their vendors' APIs
+# directly — every such call is routed via OpenRouter's OpenAI-compatible
+# endpoint (Claude through the adapter in core/services/openrouter_client.py),
+# authenticated with OPENROUTER_API_KEY. ANTHROPIC_API_KEY and
+# PERPLEXITY_API_KEY above are now unused by those paths and are retained only
+# so existing deployments keep loading; per-org Anthropic/Perplexity BYOK keys
+# are ignored for them until an openrouter_api_key column exists on Organisation.
 OPENROUTER_API_KEY = config('OPENROUTER_API_KEY', default=None)
 OPENROUTER_BASE_URL = config('OPENROUTER_BASE_URL', default='https://openrouter.ai/api/v1')
 # Optional attribution headers shown on OpenRouter's public leaderboards.
@@ -208,6 +209,10 @@ OPENAI_CHATGPT_MODEL = config('OPENAI_CHATGPT_MODEL', default='gpt-4o')
 ANTHROPIC_WEB_SEARCH = config('ANTHROPIC_WEB_SEARCH', default=True, cast=bool)
 # OpenRouter model slug, not an Anthropic model id.
 ANTHROPIC_MODEL = config('ANTHROPIC_MODEL', default='anthropic/claude-sonnet-5')
+# Perplexity also runs on OpenRouter now, so this is an OpenRouter model slug
+# ("perplexity/sonar"), NOT the bare "sonar" the direct Perplexity API takes.
+# Web search is built into Sonar itself, so there is no separate search toggle.
+PERPLEXITY_MODEL = config('PERPLEXITY_MODEL', default='perplexity/sonar')
 XAI_WEB_SEARCH = config('XAI_WEB_SEARCH', default=True, cast=bool)
 XAI_MODEL = config('XAI_MODEL', default='grok-2-latest')
 GEMINI_WEB_SEARCH = config('GEMINI_WEB_SEARCH', default=True, cast=bool)
@@ -293,7 +298,7 @@ QUOTA_ALERT_ON_RECOVERY = config('QUOTA_ALERT_ON_RECOVERY', default=True, cast=b
 # Cheap models used only for the health probe (not for analysis).
 QUOTA_PROBE_OPENAI_MODEL = config('QUOTA_PROBE_OPENAI_MODEL', default='gpt-4o-mini')
 QUOTA_PROBE_ANTHROPIC_MODEL = config('QUOTA_PROBE_ANTHROPIC_MODEL', default='anthropic/claude-sonnet-5')
-QUOTA_PROBE_PERPLEXITY_MODEL = config('QUOTA_PROBE_PERPLEXITY_MODEL', default='sonar')
+QUOTA_PROBE_PERPLEXITY_MODEL = config('QUOTA_PROBE_PERPLEXITY_MODEL', default='perplexity/sonar')
 QUOTA_PROBE_XAI_MODEL = config('QUOTA_PROBE_XAI_MODEL', default='grok-2-latest')
 QUOTA_PROBE_DEEPSEEK_MODEL = config('QUOTA_PROBE_DEEPSEEK_MODEL', default='deepseek-chat')
 

@@ -35,9 +35,17 @@ ENV_KEY_MAP = {
 
 # Providers whose calls are transported over OpenRouter rather than the vendor's
 # own API. The provider slug is unchanged everywhere else (org.anthropic_enabled,
-# the "Claude" platform label, tracked rows) — only the credential and the wire
-# format differ, so historical data stays comparable.
-OPENROUTER_ROUTED = {'anthropic'}
+# org.perplexity_enabled, the "Claude"/"Perplexity" platform labels, tracked
+# rows) — only the credential and the wire format differ, so historical data
+# stays comparable.
+#
+# Perplexity joined this set after the direct api.perplexity.ai key ran out of
+# credit and every Perplexity call died on a 401 insufficient_quota, silently
+# zeroing that platform's tracking. Routing it through OpenRouter puts it on the
+# same single balance as Claude and the internal model, so one top-up covers all
+# of them. `perplexity/sonar` on OpenRouter is the same Sonar model with the same
+# built-in web search — only the billing path changes.
+OPENROUTER_ROUTED = {'anthropic', 'perplexity'}
 
 
 def credential_provider(provider: str) -> str:

@@ -714,23 +714,60 @@ def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, clien
         raise
 
 
+def _extract_sonar_citations(response: Any) -> list:
+    """Collect Sonar's source URLs from a chat-completions response.
+
+    Two shapes have to be handled because the transport changed: the direct
+    Perplexity API puts them in a top-level ``citations`` list, while OpenRouter
+    normalises web-search sources into per-message ``annotations`` of type
+    ``url_citation``. OpenRouter currently passes ``citations`` through as well,
+    but reading both means the Citations page keeps working whichever one a
+    given response carries. Order is preserved and duplicates dropped.
+    """
+    urls = []
+    seen = set()
+
+    def _add(url: Any) -> None:
+        if isinstance(url, str) and url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+
+    for citation in getattr(response, 'citations', None) or []:
+        # Legacy shape is a bare URL string; newer payloads use {"url": ...}.
+        _add(citation.get('url') if isinstance(citation, dict) else citation)
+
+    for choice in getattr(response, 'choices', None) or []:
+        message = getattr(choice, 'message', None)
+        for annotation in getattr(message, 'annotations', None) or []:
+            if isinstance(annotation, dict):
+                citation = annotation.get('url_citation') or {}
+            else:
+                citation = getattr(annotation, 'url_citation', None) or {}
+            _add(citation.get('url') if isinstance(citation, dict) else getattr(citation, 'url', None))
+
+    return urls
+
+
 def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
     """Process a prompt with Perplexity using the OpenAI-compatible API.
 
     The ``client`` parameter is an OpenAI client instance created by
-    ``client_factory.py`` with ``base_url='https://api.perplexity.ai'``.
-    We call the chat completions endpoint with the ``sonar`` model which
-    has built-in web search and returns citations inline in the response.
+    ``client_factory.py``, pointed at OpenRouter rather than api.perplexity.ai
+    (see OPENROUTER_ROUTED in api_key_service.py). We call the chat completions
+    endpoint with the Sonar model, which has built-in web search and returns
+    citations alongside the response.
     """
     try:
         country_text = _resolve_country_text(group)
-        model_name = getattr(settings, 'PERPLEXITY_MODEL', 'sonar')
+        # OpenRouter slug — `perplexity/sonar`, not the bare `sonar` the direct
+        # Perplexity API expects.
+        model_name = getattr(settings, 'PERPLEXITY_MODEL', 'perplexity/sonar')
         user_message = _build_analytics_user_prompt(prompt_text, country_text)
 
         text = ""
         try:
             # client is an OpenAI-compatible client from client_factory
-            # (base_url already set to https://api.perplexity.ai)
+            # (base_url already set to OpenRouter)
             response = client.chat.completions.create(
                 model=model_name,
                 messages=[
@@ -749,14 +786,12 @@ def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, c
             )
             text = response.choices[0].message.content if response.choices else ""
 
-            # Perplexity may also return citations in the response metadata
-            if hasattr(response, 'citations') and response.citations:
-                # Append citation URLs to the text so _basic_text_metrics can extract them
-                citation_urls = "\n".join(
-                    f"Source: {url}" for url in response.citations if url
-                )
-                if citation_urls:
-                    text = f"{text}\n\nCitations:\n{citation_urls}"
+            # Sonar returns its sources out-of-band rather than in the prose, so
+            # they are appended to the text for _basic_text_metrics to extract.
+            citation_urls = _extract_sonar_citations(response)
+            if citation_urls:
+                sources = "\n".join(f"Source: {url}" for url in citation_urls)
+                text = f"{text}\n\nCitations:\n{sources}"
 
             if text:
                 logger.info(f"Perplexity API returned response of length {len(text)} for query: {prompt_text[:50]}...")

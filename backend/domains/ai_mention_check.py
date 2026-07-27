@@ -200,11 +200,18 @@ def _ask_anthropic(api_key, user_message):
 
 
 def _ask_perplexity(api_key, user_message):
-    # Perplexity exposes an OpenAI-compatible API; `sonar` has built-in web search.
+    # Perplexity is served through OpenRouter, same as Claude — one balance to
+    # top up instead of a separate Perplexity one that silently 401s when it
+    # empties. Sonar has built-in web search either way; only the base_url, the
+    # credential and the model slug (`perplexity/sonar`) differ.
     from openai import OpenAI
 
-    client = OpenAI(api_key=api_key, base_url="https://api.perplexity.ai", timeout=90)
-    model = getattr(settings, "PERPLEXITY_MODEL", "sonar")
+    client = OpenAI(
+        api_key=api_key,
+        base_url=getattr(settings, "OPENROUTER_BASE_URL", None) or "https://openrouter.ai/api/v1",
+        timeout=90,
+    )
+    model = getattr(settings, "PERPLEXITY_MODEL", "perplexity/sonar")
     resp = client.chat.completions.create(
         model=model,
         messages=[
@@ -227,11 +234,12 @@ ENGINES = [
 _KEY_SOURCES = {
     "openai": ("openai_key", "OPENAI_API_KEY"),
     "gemini": ("gemini_key", "GOOGLE_GEMINI_API_KEY"),
-    # Claude runs on OpenRouter, so its credential is the OpenRouter key. There is
-    # no openrouter_key column on Organisation yet, so BYOK resolution misses and
-    # this correctly falls through to the system OPENROUTER_API_KEY.
+    # Claude and Perplexity run on OpenRouter, so their credential is the
+    # OpenRouter key. There is no openrouter_key column on Organisation yet, so
+    # BYOK resolution misses and this correctly falls through to the system
+    # OPENROUTER_API_KEY.
     "anthropic": ("openrouter_key", "OPENROUTER_API_KEY"),
-    "perplexity": ("perplexity_key", "PERPLEXITY_API_KEY"),
+    "perplexity": ("openrouter_key", "OPENROUTER_API_KEY"),
     "xai": ("xai_key", "XAI_API_KEY"),
 }
 

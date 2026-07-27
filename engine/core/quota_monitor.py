@@ -230,8 +230,12 @@ def _probe_provider(provider, api_key):
     if provider == "gemini":
         return _probe_gemini(api_key, _cfg("GEMINI_MODEL", "gemini-flash-latest"))
     if provider == "perplexity":
+        # Perplexity runs on OpenRouter now, so the credential under test is the
+        # OpenRouter key and the endpoint is OpenRouter's. The label and slug are
+        # unchanged so the quota dashboard and alert history stay continuous.
         return _probe_openai_compatible("Perplexity", "perplexity", api_key,
-                                        "https://api.perplexity.ai", _cfg("QUOTA_PROBE_PERPLEXITY_MODEL", "sonar"))
+                                        _cfg("OPENROUTER_BASE_URL", None) or "https://openrouter.ai/api/v1",
+                                        _cfg("QUOTA_PROBE_PERPLEXITY_MODEL", "perplexity/sonar"))
     if provider == "xai":
         return _probe_openai_compatible("xAI / Grok", "xai", api_key,
                                         "https://api.x.ai/v1", _cfg("QUOTA_PROBE_XAI_MODEL", "grok-2-latest"))
@@ -283,11 +287,12 @@ def check_org_quotas():
         for provider, label in _PROVIDER_LABELS.items():
             if not getattr(org, f"{provider}_enabled", True):
                 continue
-            if provider == "anthropic":
-                # Claude runs on OpenRouter now, so a stored per-org Anthropic key
-                # no longer authenticates anything. Probing it would raise a false
-                # INVALID_KEY alert against a credential the pipeline never uses.
-                # The system OpenRouter key is probed in check_all_quotas().
+            if provider in ("anthropic", "perplexity"):
+                # Claude and Perplexity run on OpenRouter now, so a stored per-org
+                # Anthropic/Perplexity key no longer authenticates anything. Probing
+                # it would raise a false INVALID_KEY alert against a credential the
+                # pipeline never uses. The system OpenRouter key is probed in
+                # check_all_quotas().
                 continue
             encrypted = getattr(org, f"{provider}_api_key", None)
             if not encrypted:
@@ -332,8 +337,7 @@ def check_all_quotas():
         _probe_openai(_cfg("OPENAI_API_KEY", ""), _cfg("QUOTA_PROBE_OPENAI_MODEL", "gpt-4o-mini")),
         _probe_anthropic(_cfg("OPENROUTER_API_KEY", ""), _cfg("QUOTA_PROBE_ANTHROPIC_MODEL", "anthropic/claude-sonnet-5")),
         _probe_gemini(_cfg("GEMINI_API_KEY", ""), _cfg("GEMINI_MODEL", "gemini-flash-latest")),
-        _probe_openai_compatible("Perplexity", "perplexity", _cfg("PERPLEXITY_API_KEY", ""),
-                                 "https://api.perplexity.ai", _cfg("QUOTA_PROBE_PERPLEXITY_MODEL", "sonar")),
+        _probe_provider("perplexity", _cfg("OPENROUTER_API_KEY", "")),
         _probe_openai_compatible("xAI / Grok", "xai", _cfg("XAI_API_KEY", ""),
                                  "https://api.x.ai/v1", _cfg("QUOTA_PROBE_XAI_MODEL", "grok-2-latest")),
         _probe_openai_compatible("DeepSeek", "deepseek", _cfg("DEEPSEEK_API_KEY", ""),
