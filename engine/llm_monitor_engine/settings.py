@@ -241,18 +241,23 @@ DEEPSEEK_MODEL = config('DEEPSEEK_MODEL', default='deepseek-chat')
 # You are billed for tokens actually generated, so lowering the cap saves
 # nothing here; the cost driver is the NUMBER of calls, not their length.
 #
-# RAISED 1500 -> 3000 when the tracked call moved to gpt-5-mini. That is a
+# RAISED 1500 -> 8000 when the tracked call moved to gpt-5-mini. That is a
 # REASONING model: it spends hidden reasoning tokens against this same ceiling
-# before emitting a single character of the answer. Measured against OpenRouter
-# on 2026-07-27 with a real analytics prompt:
-#   max_tokens=1500 -> 1024 reasoning tokens, finish_reason='length' (TRUNCATED)
-#   max_tokens=3000 ->  832 reasoning tokens, finish_reason='stop'   (complete)
-# At 1500 every tracked answer truncates mid-response, which drops the citation
-# list models put at the end — silently deflating the Citations page rather than
-# erroring. The cap is a ceiling, not a target, so non-reasoning providers
-# (Perplexity, Claude, Grok, DeepSeek) still stop early and cost nothing extra.
+# before emitting a single character of the answer, AND it writes far longer
+# answers than gpt-4o did. Measured on prod against OpenRouter 2026-07-27 using
+# the REAL analytics prompt (_build_analytics_user_prompt), not a toy one:
+#   max_tokens=3000 -> 1792 reasoning, finish_reason='length' (TRUNCATED)
+#   max_tokens=5000 -> 1984 reasoning, finish_reason='length' (TRUNCATED)
+#   max_tokens=8000 -> 1216 reasoning, finish_reason='stop', 4228 total (OK)
+# Reasoning alone varies 1200-2000 tokens run to run, so the headroom is not
+# optional. Below ~6000 the answer truncates mid-sentence, dropping the source
+# list at the end — silently deflating the Citations page rather than erroring.
+#
+# This is a CEILING, not a target: billing follows tokens actually generated
+# (4228 above, not 8000), and the non-reasoning providers (Perplexity, Claude,
+# Grok, DeepSeek) still stop early and cost nothing extra for the higher cap.
 # Tunable from .env without a deploy.
-LLM_MAX_OUTPUT_TOKENS = config('LLM_MAX_OUTPUT_TOKENS', default=3000, cast=int)
+LLM_MAX_OUTPUT_TOKENS = config('LLM_MAX_OUTPUT_TOKENS', default=8000, cast=int)
 
 # Model for INTERNAL LLM work (topic extraction, prompt generation, competitor
 # insight summaries) — output nobody reads as "what ChatGPT says about my

@@ -204,11 +204,12 @@ def test_token_ceiling_leaves_room_for_hidden_reasoning():
     client = _RecordingClient()
     AH.process_prompt_with_chatgpt("best crm for startups", "example.com", client)
     max_tokens = client.calls[-1]['max_tokens']
-    # Measured on OpenRouter 2026-07-27 with a real analytics prompt: gpt-5-mini
-    # burned 1024 reasoning tokens and returned finish_reason='length' at 1500,
-    # completing cleanly only at 3000. Below ~2000 every answer truncates and
-    # drops the trailing citation list the Citations page counts.
-    assert max_tokens >= 2000, (
+    # Measured on prod against OpenRouter 2026-07-27 with the REAL analytics
+    # prompt: gpt-5-mini truncated (finish_reason='length') at both 3000 and
+    # 5000, burning 1792 and 1984 reasoning tokens respectively, and completed
+    # only at 8000 (1216 reasoning, 4228 total). Below ~6000 every answer
+    # truncates and drops the trailing citation list the Citations page counts.
+    assert max_tokens >= 6000, (
         f"ceiling {max_tokens} is too tight for a reasoning model — hidden "
         f"reasoning eats it before any text is emitted, truncating the answer "
         f"and silently deflating citation counts."

@@ -173,12 +173,14 @@ def _ask_openai(api_key, user_message):
             {"role": "user", "content": user_message},
         ],
         temperature=0.7,
-        # gpt-5-mini is a reasoning model and spends ~800-1000 hidden reasoning
-        # tokens against this ceiling before emitting text. Measured on OpenRouter
-        # 2026-07-27: 1500 truncates mid-answer (finish_reason='length'), 3000
-        # completes. A truncated answer loses the trailing source list this check
-        # counts citations from. Ceiling, not a target — short answers stop early.
-        max_tokens=3000,
+        # gpt-5-mini is a reasoning model and spends 1200-2000 hidden reasoning
+        # tokens against this ceiling before emitting text, on top of a longer
+        # answer than gpt-4o wrote. Measured on prod against OpenRouter
+        # 2026-07-27 with the real prompt: 3000 and 5000 both truncate
+        # (finish_reason='length'); 8000 completes using 4228. A truncated answer
+        # loses the trailing source list this check counts citations from.
+        # Ceiling, not a target — billing follows tokens actually generated.
+        max_tokens=8000,
         timeout=90,
     )
     return resp.choices[0].message.content or ""
