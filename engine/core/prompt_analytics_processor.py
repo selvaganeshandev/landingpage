@@ -286,31 +286,19 @@ class PromptAnalyticsProcessor:
             self._get_xai_client = get_xai_client
             self._get_deepseek_client = get_deepseek_client
 
-            # Initialize clients
-            try:
-                self.openai_client = self._get_openai_client()
-            except Exception as e:
-                logger.warning(f"ChatGPT client unavailable: {str(e)}")
-            try:
-                self.gemini_client = self._get_gemini_client()
-            except Exception as e:
-                logger.warning(f"Gemini client unavailable: {str(e)}")
-            try:
-                self.perplexity_client = self._get_perplexity_client()
-            except Exception as e:
-                logger.warning(f"Perplexity client unavailable: {str(e)}")
-            try:
-                self.anthropic_client = self._get_anthropic_client()
-            except Exception as e:
-                logger.warning(f"Claude (Anthropic) client unavailable: {str(e)}")
-            try:
-                self.xai_client = self._get_xai_client()
-            except Exception as e:
-                logger.warning(f"Grok (xAI) client unavailable: {str(e)}")
-            try:
-                self.deepseek_client = self._get_deepseek_client()
-            except Exception as e:
-                logger.warning(f"DeepSeek client unavailable: {str(e)}")
+            # NOTE: the six self.*_client attributes above are deliberately left
+            # as None. They used to be eagerly constructed here, but nothing ever
+            # read them — process_single_prompt resolves clients per prompt
+            # through _resolve_client so that each organisation's own BYOK key is
+            # used, which a client built once at construction time with
+            # org_id=None cannot do.
+            #
+            # Building them was harmless when one processor served a whole group.
+            # Now that each prompt runs as its own Celery task, a processor is
+            # constructed per prompt, so the six "client unavailable" warnings
+            # this emitted became ~1,400 log lines per group on any deployment
+            # missing a provider key — drowning the real errors. The clients were
+            # unused, so the construction is simply gone.
             self._helpers_loaded = True
         except Exception as e:
             logger.warning(f"Analytics helpers not available; using fallback processing: {str(e)}")
@@ -331,7 +319,11 @@ class PromptAnalyticsProcessor:
             # their stuck PROC/SCHD prompts back to INIT so the next tick can
             # pick them up. Same threshold as the domain reaper.
             from datetime import timedelta
-            stale_minutes = int(getattr(settings, 'STALE_SCHD_MINUTES', 15))
+            # Now a real setting (see STALE_SCHD_MINUTES in settings.py) — the
+            # literal here is only a fallback and must match the settings default,
+            # or a missing setting would silently reap on the old 15m timer that
+            # this fan-out invalidated.
+            stale_minutes = int(getattr(settings, 'STALE_SCHD_MINUTES', 60))
             cutoff = timezone.now() - timedelta(minutes=stale_minutes)
 
             stale_groups = list(
@@ -431,13 +423,32 @@ class PromptAnalyticsProcessor:
                 group.prompts.filter(track_status='INIT').select_related('group__domain')
             )
 
-            processed = 0
+            # Fan each prompt out to its own Celery task instead of running them
+            # inline. Processing inline made this one task the whole pipeline: 235
+            # prompts x every enabled platform ran strictly end to end on a single
+            # worker process, so a group cost hours of wall-clock even though each
+            # LLM call only takes ~10s and none of them depend on each other.
+            # Enqueuing lets the worker pool run them concurrently and finishes a
+            # group in minutes.
+            #
+            # Nothing downstream needed to change for this: process_single_prompt
+            # already ends by calling _check_and_aggregate_group (so whichever task
+            # happens to finish last closes the group out), analytics rows are
+            # written with update_or_create keyed on (prompt, platform), and every
+            # snapshot writer is keyed by date. This is also exactly how
+            # schedule_weekly_prompt_batches has always dispatched prompts, so the
+            # regular path now matches the sweep path rather than diverging from it.
+            from .processing_tasks import process_prompt_analytics_task
+
+            enqueued = 0
             failed = 0
-            
+
             try:
                 for prompt in init_prompts:
                     try:
-                        # Mark prompt as scheduled then process
+                        # Claim the prompt before enqueuing. The select_for_update
+                        # keeps two concurrent ticks from queueing the same prompt
+                        # twice, which would pay for the same LLM calls twice.
                         with transaction.atomic():
                             p = Prompt.objects.select_for_update().get(id=prompt.id)
                             if p.track_status != 'INIT':
@@ -445,29 +456,38 @@ class PromptAnalyticsProcessor:
                             p.track_status = 'SCHD'
                             p.tracked_at = timezone.now()
                             p.save(update_fields=['track_status', 'tracked_at', 'modified_at'])
-                        
-                        self.process_single_prompt(prompt.id)
-                        processed += 1
+
+                        process_prompt_analytics_task.delay(prompt.id)
+                        enqueued += 1
                     except Exception as prompt_error:
-                        logger.error(f"Error processing prompt {prompt.id}: {str(prompt_error)}")
+                        # Reaching here means the claim or the enqueue failed (a
+                        # broker outage, say) — NOT that the prompt was processed
+                        # and failed. No LLM call was made and no cost was
+                        # incurred, so the prompt is marked FAIL rather than left
+                        # SCHD: FAIL counts as "done" for aggregation, which keeps
+                        # the group from hanging in SCHD until the reaper. The next
+                        # weekly sweep resets it to INIT and retries it.
+                        logger.error(f"Error scheduling prompt {prompt.id}: {str(prompt_error)}")
                         failed += 1
-                        # Mark prompt as failed so it doesn't block the group
                         try:
                             prompt.track_status = 'FAIL'
-                            prompt.track_message = f'Processing error: {str(prompt_error)[:200]}'
+                            prompt.track_message = f'Scheduling error: {str(prompt_error)[:200]}'
                             prompt.tracked_at = timezone.now()
                             prompt.save(update_fields=['track_status', 'track_message', 'tracked_at', 'modified_at'])
                         except:
                             pass
             finally:
-                # ALWAYS check and aggregate, even if there were errors
-                # This ensures the group doesn't stay stuck in SCHD
+                # Covers the case where nothing was left to enqueue (every prompt
+                # already COMP/FAIL): without this the group would sit in SCHD
+                # until the reaper. When prompts WERE enqueued this is a no-op —
+                # they are all SCHD, so the call returns early on the remaining
+                # count and the last finishing task does the real aggregation.
                 self._check_and_aggregate_group(group)
 
             return {
                 'scheduled': True,
                 'group_id': group.id,
-                'processed_prompts': processed,
+                'enqueued_prompts': enqueued,
                 'failed_prompts': failed
             }
         except Exception as e:
@@ -481,6 +501,137 @@ class PromptAnalyticsProcessor:
             except:
                 pass
             return {'error': str(e)}
+
+    # Provider slug and handler method name for each supported platform. This
+    # replaces the if/elif chain process_single_prompt used to carry, so the
+    # dispatch is stated once and the concurrent runner below can drive it.
+    PLATFORM_PROVIDERS = {
+        'chatgpt': 'openai',
+        'gemini': 'gemini',
+        'perplexity': 'perplexity',
+        'claude': 'anthropic',
+        'grok': 'xai',
+        'deepseek': 'deepseek',
+    }
+
+    def _resolve_client(self, provider: str, org_id):
+        """Get a cached client via ClientFactory, or return None on failure.
+
+        Always called on the calling thread, never from a pool thread — see
+        _run_platforms for why that matters.
+        """
+        try:
+            from .services.client_factory import get_client
+        except ImportError:
+            return None
+        try:
+            return get_client(provider, org_id=org_id)
+        except Exception as ce:
+            logger.warning(f"Client unavailable for {provider} (org {org_id}): {ce}")
+            return None
+
+    def _platform_handler(self, platform: str):
+        """Return the bound handler for a platform, or None if unsupported."""
+        return {
+            'chatgpt': self._process_prompt_with_chatgpt,
+            'gemini': self._process_prompt_with_gemini,
+            'perplexity': self._process_prompt_with_perplexity,
+            'claude': self._process_prompt_with_claude,
+            'grok': self._process_prompt_with_grok,
+            'deepseek': self._process_prompt_with_deepseek,
+        }.get(platform)
+
+    def _run_platforms(
+        self,
+        platforms: List[str],
+        prompt_text: str,
+        user_domain: str,
+        group: Any,
+        org_id: Any,
+        label: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Ask every enabled platform the same question and return {platform: result}.
+
+        Each platform is a different provider answering independently, so these
+        are unrelated ~10s network waits with nothing to share. Run serially, one
+        prompt cost the SUM of its providers; run concurrently it costs the
+        slowest one. Bounded by MAX_CONCURRENT_PROMPT_PLATFORMS — set it to 1 to
+        restore the old strictly-serial behaviour.
+
+        A failing platform is isolated exactly as it was in the serial loop: it
+        falls back to a stub and the others' real results are untouched.
+        """
+        results: Dict[str, Any] = {}
+        if not platforms:
+            return results
+
+        # Resolve every client HERE, on the calling thread, before any worker
+        # thread starts. get_client() reads org settings through Redis with a
+        # database fallback and writes a module-level cache dict; doing that from
+        # pool threads would open a Django connection per thread that nothing
+        # closes. Resolving up front keeps the workers purely network-bound,
+        # touching no ORM and no cache.
+        #
+        # group.domain.country is read for the same reason: _resolve_country_text
+        # in analytics_helpers walks that relation, and while the caller loads the
+        # prompt with select_related('group__domain__organisation') so it is
+        # already populated, touching it here makes the guarantee explicit rather
+        # than dependent on a select_related three call-frames away.
+        if group is not None and getattr(group, 'domain', None) is not None:
+            getattr(group.domain, 'country', None)
+
+        resolved = {
+            platform: (
+                self._resolve_client(self.PLATFORM_PROVIDERS[platform], org_id)
+                if platform in self.PLATFORM_PROVIDERS else None
+            )
+            for platform in platforms
+        }
+
+        def _run_one(platform: str) -> Dict[str, Any]:
+            """Run one platform's LLM call. Executed on a pool thread, so it must
+            never touch the ORM — see the client pre-resolution above."""
+            handler = self._platform_handler(platform)
+            client = resolved.get(platform)
+            if handler is None or client is None:
+                # Unknown platform, or the provider is disabled / has no usable
+                # key. The fallback stub is inert: _create_analytics_record skips
+                # writing it, so a provider outage can never blank the client's
+                # dashboard with zeros.
+                return self._get_fallback_analytics(prompt_text, user_domain, platform)
+            return handler(prompt_text, user_domain, client, group)
+
+        def _collect(platform: str, produce) -> None:
+            try:
+                results[platform] = produce()
+                logger.info(f"Completed {platform} processing for {label}")
+            except Exception as e:
+                logger.error(f"Error processing {platform} for {label}: {str(e)}")
+                results[platform] = self._get_fallback_analytics(prompt_text, user_domain, platform)
+
+        max_workers = max(1, int(getattr(settings, 'MAX_CONCURRENT_PROMPT_PLATFORMS', 3)))
+
+        if len(platforms) == 1 or max_workers == 1:
+            for platform in platforms:
+                logger.info(f"Processing {platform} for {label}")
+                _collect(platform, lambda p=platform: _run_one(p))
+            return results
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        logger.info(
+            f"Processing {len(platforms)} platforms concurrently for {label}: {', '.join(platforms)}"
+        )
+        with ThreadPoolExecutor(
+            max_workers=min(max_workers, len(platforms)),
+            thread_name_prefix='platform',
+        ) as pool:
+            futures = {platform: pool.submit(_run_one, platform) for platform in platforms}
+            for platform, future in futures.items():
+                _collect(platform, future.result)
+
+        return results
 
     @observe(name="prompt_analytics.process_single_prompt", ignore_inputs=["self"])
     def process_single_prompt(self, prompt_id: int) -> Dict[str, Any]:
@@ -519,87 +670,16 @@ class PromptAnalyticsProcessor:
                 prompt_id=prompt_id,
             )
 
-            # Lazy import ClientFactory
-            try:
-                from .services.client_factory import get_client as _get_client
-            except ImportError:
-                _get_client = None
-
-            def _resolve_client(provider: str):
-                """Get a cached client via ClientFactory, or return None on failure."""
-                if _get_client is None:
-                    return None
-                try:
-                    return _get_client(provider, org_id=org_id)
-                except Exception as ce:
-                    logger.warning(f"Client unavailable for {provider} (org {org_id}): {ce}")
-                    return None
-
             # Process with each platform
             platforms = getattr(settings, 'ENABLED_PLATFORMS', ['chatgpt'])
-            results = {}
-            
-            for platform in platforms:
-                try:
-                    logger.info(f"Processing {platform} for prompt {prompt_id}")
-                    
-                    if platform == 'chatgpt':
-                        client = _resolve_client('openai')
-                        if client is not None:
-                            result = self._process_prompt_with_chatgpt(
-                                prompt.prompt, user_domain, client, group
-                            )
-                        else:
-                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
-                    elif platform == 'gemini':
-                        client = _resolve_client('gemini')
-                        if client is not None:
-                            result = self._process_prompt_with_gemini(
-                                prompt.prompt, user_domain, client, group
-                            )
-                        else:
-                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
-                    elif platform == 'perplexity':
-                        client = _resolve_client('perplexity')
-                        if client is not None:
-                            result = self._process_prompt_with_perplexity(
-                                prompt.prompt, user_domain, client, group
-                            )
-                        else:
-                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
-                    elif platform == 'claude':
-                        client = _resolve_client('anthropic')
-                        if client is not None:
-                            result = self._process_prompt_with_claude(
-                                prompt.prompt, user_domain, client, group
-                            )
-                        else:
-                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
-                    elif platform == 'grok':
-                        client = _resolve_client('xai')
-                        if client is not None:
-                            result = self._process_prompt_with_grok(
-                                prompt.prompt, user_domain, client, group
-                            )
-                        else:
-                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
-                    elif platform == 'deepseek':
-                        client = _resolve_client('deepseek')
-                        if client is not None:
-                            result = self._process_prompt_with_deepseek(
-                                prompt.prompt, user_domain, client, group
-                            )
-                        else:
-                            result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
-                    else:
-                        result = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
-                    
-                    results[platform] = result
-                    logger.info(f"Completed {platform} processing for prompt {prompt_id}")
-                    
-                except Exception as e:
-                    logger.error(f"Error processing {platform} for prompt {prompt_id}: {str(e)}")
-                    results[platform] = self._get_fallback_analytics(prompt.prompt, user_domain, platform)
+            results = self._run_platforms(
+                platforms=platforms,
+                prompt_text=prompt.prompt,
+                user_domain=user_domain,
+                group=group,
+                org_id=org_id,
+                label=f"prompt {prompt_id}",
+            )
 
             # Create analytics record
             analytics = self._create_analytics_record(prompt, results)
@@ -751,56 +831,115 @@ class PromptAnalyticsProcessor:
                 logger.info(f"Group {group.id} not ready for aggregation: {remaining_prompts}/{total_prompts} prompts remaining")
                 return
 
-            logger.info(f"Aggregating results for group {group.id}")
-            
             # Aggregate analytics for this group
             # Use prompt__track_status because PromptAnalytics.track_status is never updated
             analytics = PromptAnalytics.objects.filter(
                 prompt__group=group,
                 prompt__track_status='COMP'
             )
-            
+
             if not analytics.exists():
                 logger.warning(f"No completed analytics found for group {group.id}")
                 return
 
-            # Calculate group totals
-            group_totals = analytics.aggregate(
-                total_citations=Sum('total_citations'),
-                total_mentions=Sum('total_mentions'),
-                avg_position=Avg('position'),
-                avg_sentiment=Avg('sentiment_score'),
-            )
+            # ---- Claim this aggregation -------------------------------------
+            # Prompts now run as concurrent Celery tasks, so the last few finish
+            # within milliseconds of each other and several workers can all see
+            # "no prompts remaining" above and all fall through to here. Most of
+            # what follows is idempotent (every snapshot writer is keyed
+            # update_or_create; _check_and_complete_domain re-checks under its own
+            # lock), but the alert evaluation at the end is NOT: it does a bare
+            # Alert.objects.create and emails the org's admins. Running it twice
+            # sends clients duplicate alert emails.
+            #
+            # The claim canNOT simply be "skip if the group is already COMP". The
+            # weekly sweep resets PROMPTS to INIT and never touches the GROUP, so
+            # a group is permanently COMP after its first cycle and that guard
+            # would silently stop every weekly refresh from ever re-aggregating.
+            #
+            # The real question is "has anything finished since the last
+            # aggregation", so that is what gets asked: compare the group's
+            # tracked_at against the newest prompt completion. Fresh work always
+            # re-aggregates; a duplicate call for work already folded in does not.
+            with transaction.atomic():
+                locked = PromptGroup.objects.select_for_update().get(id=group.id)
 
-            # Calculate visibility score and sentiment score
-            avg_pos = float(group_totals['avg_position'] or 0)
-            total_mentions = group_totals['total_mentions'] or 0
-            total_citations = group_totals['total_citations'] or 0
-            avg_sentiment = float(group_totals['avg_sentiment'] or 0)
-            group_visibility_score = self._calculate_visibility_score(
-                mentions=total_mentions,
-                citations=total_citations,
-                sentiment_score=avg_sentiment,
-                average_position=avg_pos,
-                scope='group'
-            )
-            group_sentiment_score = avg_sentiment
+                # Re-check under the lock — a prompt can have been re-queued
+                # between the unlocked count above and acquiring the row.
+                remaining_locked = Prompt.objects.filter(
+                    group_id=locked.id,
+                    track_status__in=['INIT', 'SCHD', 'PROC'],
+                ).count()
+                if remaining_locked > 0:
+                    logger.info(
+                        f"Group {locked.id} not ready for aggregation (re-checked under lock): "
+                        f"{remaining_locked} prompt(s) remaining"
+                    )
+                    return
 
-            # Update group record
-            group.total_citations = group_totals['total_citations'] or 0
-            group.total_mentions = group_totals['total_mentions'] or 0
-            group.average_position = avg_pos
-            group.visibility_score = group_visibility_score
-            group.sentiment_score = group_sentiment_score
-            group.track_status = 'COMP'
-            group.tracked_at = timezone.now()
-            group.is_published = True  # Mark as published when completed
-            group.save(update_fields=[
-                'total_citations', 'total_mentions', 'average_position',
-                'visibility_score', 'sentiment_score',
-                'track_status', 'tracked_at', 'is_published', 'modified_at'
-            ])
-            
+                last_prompt_at = Prompt.objects.filter(group_id=locked.id).aggregate(
+                    latest=Max('tracked_at')
+                )['latest']
+
+                if (
+                    locked.track_status == 'COMP'
+                    and locked.tracked_at is not None
+                    and last_prompt_at is not None
+                    and locked.tracked_at >= last_prompt_at
+                ):
+                    logger.info(
+                        f"Group {locked.id} already aggregated at {locked.tracked_at.isoformat()} "
+                        f"(newest prompt finished {last_prompt_at.isoformat()}) — skipping duplicate "
+                        f"aggregation"
+                    )
+                    return
+
+                logger.info(f"Aggregating results for group {locked.id}")
+
+                # Calculate group totals
+                group_totals = analytics.aggregate(
+                    total_citations=Sum('total_citations'),
+                    total_mentions=Sum('total_mentions'),
+                    avg_position=Avg('position'),
+                    avg_sentiment=Avg('sentiment_score'),
+                )
+
+                # Calculate visibility score and sentiment score
+                avg_pos = float(group_totals['avg_position'] or 0)
+                total_mentions = group_totals['total_mentions'] or 0
+                total_citations = group_totals['total_citations'] or 0
+                avg_sentiment = float(group_totals['avg_sentiment'] or 0)
+                group_visibility_score = self._calculate_visibility_score(
+                    mentions=total_mentions,
+                    citations=total_citations,
+                    sentiment_score=avg_sentiment,
+                    average_position=avg_pos,
+                    scope='group'
+                )
+                group_sentiment_score = avg_sentiment
+
+                # Update group record. Stamping tracked_at here is what claims the
+                # aggregation: it lands after every prompt's tracked_at, so a
+                # concurrent caller hits the skip above and only one worker runs
+                # the alert evaluation below.
+                locked.total_citations = group_totals['total_citations'] or 0
+                locked.total_mentions = group_totals['total_mentions'] or 0
+                locked.average_position = avg_pos
+                locked.visibility_score = group_visibility_score
+                locked.sentiment_score = group_sentiment_score
+                locked.track_status = 'COMP'
+                locked.tracked_at = timezone.now()
+                locked.is_published = True  # Mark as published when completed
+                locked.save(update_fields=[
+                    'total_citations', 'total_mentions', 'average_position',
+                    'visibility_score', 'sentiment_score',
+                    'track_status', 'tracked_at', 'is_published', 'modified_at'
+                ])
+
+            # Work with the locked/claimed instance from here on so the rest of the
+            # method sees the values just written rather than the caller's stale copy.
+            group = locked
+
             # Create metric snapshots for group (daily by default)
             today = date.today()
             self._create_group_metric_snapshots(group, analytics, today, period_type='daily')

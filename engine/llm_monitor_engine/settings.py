@@ -171,6 +171,28 @@ MAX_CONCURRENT_DOMAINS = config('MAX_CONCURRENT_DOMAINS', default=10, cast=int)
 MAX_CONCURRENT_PROMPT_ANALYTICS = config('MAX_CONCURRENT_PROMPT_ANALYTICS', default=10, cast=int)
 MAX_CONCURRENT_COMPETITOR_PROMPTS = config('MAX_CONCURRENT_COMPETITOR_PROMPTS', default=10, cast=int)
 
+# How many of a prompt's platform calls run at once inside process_single_prompt.
+# Every enabled platform asks the SAME question of a DIFFERENT provider, so the
+# calls are independent network I/O and fan out cleanly. A grounded call costs
+# ~10s, so three serial platforms cost ~30s per prompt where three concurrent
+# ones cost ~10s. Clients are resolved on the calling thread before the pool
+# starts, so no worker thread ever touches Redis or the database.
+# Set to 1 to restore the old strictly-serial behaviour.
+MAX_CONCURRENT_PROMPT_PLATFORMS = config('MAX_CONCURRENT_PROMPT_PLATFORMS', default=3, cast=int)
+
+# A PromptGroup left in SCHD longer than this is assumed dead (deploy, kill -9,
+# OOM) and reaped back to INIT by the prompt scheduler's reaper.
+#
+# This used to be a hardcoded 15 that nothing could override, which was WRONG in
+# both directions once prompts fan out to Celery: the group is stamped SCHD when
+# its prompts are ENQUEUED, then sits in SCHD while the queue drains. Reaping on
+# that timer resets prompts to INIT while their tasks are still queued or
+# running — re-running paid LLM calls and racing the in-flight worker. The
+# window must therefore comfortably exceed the worst-case queue drain, not the
+# time to process one prompt. 60m covers a large group behind a busy queue while
+# still catching a genuinely dead worker within the hour.
+STALE_SCHD_MINUTES = config('STALE_SCHD_MINUTES', default=60, cast=int)
+
 # Prompt engine knobs
 # Number of prompts to generate per keyword
 PROMPT_MIN_COUNT = config('PROMPT_MIN_COUNT', default=2, cast=int)
@@ -408,6 +430,14 @@ CELERY_TASK_ROUTES = {
     'core.processing_tasks.process_seo_keyword_task': {'queue': 'seo'},
     'core.processing_tasks.seo_rankings_daily_scheduler': {'queue': 'seo'},
 }
+
+# Prompt analytics fans one Celery task out per prompt, and each task is a long
+# (~10s+) network-bound LLM call rather than a quick burst of CPU. Celery's
+# default prefetch of 4 makes a worker process reserve four such tasks up front,
+# so a handful of processes hoard the queue while their siblings idle — the
+# opposite of what the fan-out is for. 1 hands each process exactly the task it
+# is about to run, which is the documented setting for long-running tasks.
+CELERY_WORKER_PREFETCH_MULTIPLIER = config('CELERY_WORKER_PREFETCH_MULTIPLIER', default=1, cast=int)
 
 # Auto-expire task results after 1 day (reduce Redis usage); set to None if not needed
 from datetime import timedelta
