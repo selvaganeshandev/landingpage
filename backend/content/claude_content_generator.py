@@ -11,6 +11,7 @@ from django.conf import settings
 from decouple import config
 
 from core.openrouter_client import OpenRouterAnthropicClient
+from .humanise_validation import raise_if_truncated as _raise_if_truncated
 
 logger = logging.getLogger(__name__)
 
@@ -3476,6 +3477,7 @@ Return ONLY the transformed HTML content. Do not add any explanations, comments,
                     ]
                 )
 
+                _raise_if_truncated("Humanisation", response, content_html)
                 humanised_content = response.content[0].text.strip()
                 self._accumulate_usage(response)
 
@@ -3614,6 +3616,7 @@ Return ONLY the fixed HTML. No explanations, no markdown code blocks."""
                     ]
                 )
 
+                _raise_if_truncated("Refinement", response, content_html)
                 refined_content = response.content[0].text.strip()
                 self._accumulate_usage(response)
 

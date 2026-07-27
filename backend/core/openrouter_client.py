@@ -3,10 +3,20 @@ backend/core/openrouter_client.py
 
 Anthropic-shaped adapter over OpenRouter's OpenAI-compatible Chat Completions API.
 
-Byte-identical twin of engine/core/services/openrouter_client.py. The backend and
-engine are separate Django projects with separate virtualenvs and no shared import
-path, so the adapter is duplicated the same way api_key_service already duplicates
-BYOK decryption across the two trees. Change both files together.
+Near-copy of engine/core/services/openrouter_client.py. The backend and engine are
+separate Django projects with separate virtualenvs and no shared import path, so
+the adapter is duplicated the same way api_key_service already duplicates BYOK
+decryption across the two trees.
+
+The two files are NOT identical and never have been: this copy carries an extra
+``get_internal_client`` that the engine provides from its own client_factory
+instead. What MUST stay in sync is the request/response translation — everything
+in ``_MessagesAPI`` and its helpers. A fix applied to one copy and not the other
+means a call site in the other tree keeps the bug.
+
+``engine/core/test_openrouter_client.py`` loads BOTH files and asserts the
+translation matches, so that divergence fails a test rather than reaching
+production. Change both files together and run it.
 
 OpenRouter exposes only ``POST /api/v1/chat/completions`` — there is no Anthropic
 ``/v1/messages`` endpoint. Every Claude call site in this codebase was written

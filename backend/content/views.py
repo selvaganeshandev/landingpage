@@ -24,6 +24,7 @@ from .serializers import (
     BulkUploadBatchSerializer, BulkUploadBatchListSerializer, BulkUploadItemSerializer
 )
 from .claude_content_generator import ClaudeContentGenerator
+from .humanise_validation import validate_pass_output as _validate_pass_output
 from domains.models import Domain, ReferenceDocument
 from django.db import transaction, connection
 from django.db.models import Count, Q
@@ -556,53 +557,6 @@ def rewrite_content(request):
 
 
 # ============= Humanise Feature =============
-
-# Below this share of the input, the output is truncated rather than rewritten.
-# Humanisation preserves all HTML, links and keywords, so a pass returns roughly
-# what it was given — measured 102% and 101% on production. Half is a deliberately
-# loose floor that only a broken pass can fall through.
-_MIN_OUTPUT_RATIO = 0.5
-
-
-def _validate_pass_output(stage, source_html, output_html):
-    """Reject a humanisation pass that did not return usable content.
-
-    Without this, a failed pass is written straight over the article and the job
-    is recorded as 'completed'. That is not hypothetical: an empty Pass 1 reply
-    left Pass 2 apologising about the missing input, and 253 characters of apology
-    replaced a 10,192-character article under a green tick.
-
-    The checks are STRUCTURAL on purpose. Matching the apology wording was
-    considered and rejected — three different phrasings appeared across two
-    passes, so any such list starts rotting the moment the model rephrases.
-    What does not change is that a humanised article is non-empty, is HTML, and
-    is about as long as its input.
-
-    Raises so the caller's existing handler marks the job failed and leaves
-    ``content_html`` untouched.
-    """
-    if not output_html or not output_html.strip():
-        raise Exception(
-            f"{stage} returned an empty response for {len(source_html)} chars of input"
-        )
-
-    # The input is HTML and every pass is told to return HTML, so a reply without
-    # a single tag is prose the model wrote *about* the task rather than the
-    # rewritten article. This is the check that catches an apology, whatever it says.
-    if '<' not in output_html:
-        raise Exception(
-            f"{stage} returned {len(output_html)} chars containing no HTML tags "
-            f"(likely a refusal or an error message, not content)"
-        )
-
-    if len(output_html) < len(source_html) * _MIN_OUTPUT_RATIO:
-        raise Exception(
-            f"{stage} returned {len(output_html)} chars from {len(source_html)} "
-            f"(under {_MIN_OUTPUT_RATIO:.0%}) — truncated, refusing to save"
-        )
-
-    return output_html
-
 
 def _run_humanise_in_background(content_id):
     """

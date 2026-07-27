@@ -162,6 +162,46 @@ req = _last_request()
 check("Anthropic-only kwargs are dropped, not forwarded",
       'top_k' not in req and 'metadata' not in req, req)
 
+# --- reasoning control -----------------------------------------------------
+# A reasoning model spends tokens against max_tokens BEFORE emitting text, so a
+# long or counting-heavy prompt can exhaust the ceiling and return empty content
+# with finish_reason='length'. `reasoning={"enabled": False}` is the only setting
+# measured to prevent it. These guard the plumbing that carries it.
+client = _client(model='anthropic/claude-sonnet-5')
+client.messages.create(messages=[{"role": "user", "content": "ping"}])
+req = _last_request()
+check("a caller that passes no reasoning sends no extra_body at all",
+      'extra_body' not in req, req)
+
+client = _client(model='anthropic/claude-sonnet-5')
+client.messages.create(
+    messages=[{"role": "user", "content": "ping"}],
+    reasoning={"enabled": False},
+)
+req = _last_request()
+check("reasoning is forwarded in extra_body",
+      req.get('extra_body') == {"reasoning": {"enabled": False}}, req)
+
+# The regression the old `extra_body = {"plugins": ...}` assignment would cause:
+# whichever of the two was set second silently won, so a grounded Claude call
+# that also disabled reasoning would have lost one of them.
+client = _client(model='anthropic/claude-sonnet-5')
+client.messages.create(
+    messages=[{"role": "user", "content": "ping"}],
+    tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+    reasoning={"enabled": False},
+)
+req = _last_request()
+check("plugins and reasoning coexist in one extra_body",
+      req.get('extra_body') == {"plugins": [{"id": "web", "max_results": 3}],
+                                "reasoning": {"enabled": False}}, req)
+
+client = _client(model='anthropic/claude-sonnet-5')
+client.messages.create(messages=[{"role": "user", "content": "ping"}], reasoning=None)
+req = _last_request()
+check("an explicit reasoning=None is treated as unset",
+      'extra_body' not in req, req)
+
 print("\nopenrouter_client — response translation")
 
 client = _client(model='anthropic/claude-sonnet-5')
@@ -199,6 +239,49 @@ try:
     check("a call with no model anywhere raises", False, "no exception raised")
 except ValueError:
     check("a call with no model anywhere raises", True)
+
+print("\nopenrouter_client — the backend twin behaves identically")
+
+# backend/core/openrouter_client.py is a near-copy of this module: the backend and
+# engine are separate Django projects with no shared import path. The copies are
+# NOT byte-identical (the backend carries an extra get_internal_client), but the
+# request translation MUST match, or a fix lands in one tree and not the other —
+# which is exactly how the humanise path could have kept sending reasoning-enabled
+# requests after the engine copy was fixed. Re-run the reasoning assertions
+# against the backend file so the two cannot diverge unnoticed.
+_backend_path = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    'backend', 'core', 'openrouter_client.py',
+)
+if not os.path.exists(_backend_path):
+    check("backend twin is present", False, _backend_path)
+else:
+    _spec = importlib.util.spec_from_file_location('openrouter_client_backend_undertest', _backend_path)
+    _backend = importlib.util.module_from_spec(_spec)
+    sys.modules['openrouter_client_backend_undertest'] = _backend
+    _spec.loader.exec_module(_backend)
+
+    def _backend_request(**create_kwargs):
+        _CAPTURED.clear()
+        c = _backend.OpenRouterAnthropicClient(api_key='sk-or-test',
+                                               model='anthropic/claude-sonnet-5')
+        c.messages.create(messages=[{"role": "user", "content": "ping"}], **create_kwargs)
+        return [x for x in _CAPTURED if '__init__' not in x][-1]
+
+    check("twin: no reasoning sends no extra_body",
+          'extra_body' not in _backend_request(), _backend_request())
+    check("twin: reasoning is forwarded in extra_body",
+          _backend_request(reasoning={"enabled": False}).get('extra_body')
+          == {"reasoning": {"enabled": False}})
+    check("twin: plugins and reasoning coexist",
+          _backend_request(
+              tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+              reasoning={"enabled": False},
+          ).get('extra_body') == {"plugins": [{"id": "web", "max_results": 3}],
+                                  "reasoning": {"enabled": False}})
+    check("twin: system prompt becomes a leading system message",
+          _backend_request(system="Answer in the context of India.")['messages'][0]
+          == {"role": "system", "content": "Answer in the context of India."})
 
 print(f"\n{len(_PASS)} passed, {len(_FAIL)} failed")
 if _FAIL:
