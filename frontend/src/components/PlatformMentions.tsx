@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Info } from "lucide-react";
 
 interface Mention {
   platform: string;
@@ -48,9 +50,15 @@ const defaultPlatforms: Mention[] = [
 
 export interface PlatformMentionsProps {
   data?: Array<{ platform: string; count: number; avg_position?: number; citations?: number }>;
+  /** The domain's DISTINCT cited-page total. Cited pages are a distinct count,
+   *  so the per-platform figures overlap and must not be added: on CoinDCX the
+   *  platforms cited 12, 11 and 3 pages, but four of those pages were cited by
+   *  more than one platform, so the domain's real total is 20, not 26. Shares
+   *  are taken against this total, which is why they can exceed 100% combined. */
+  totalCitedPages?: number;
 }
 
-export const PlatformMentions = ({ data }: PlatformMentionsProps) => {
+export const PlatformMentions = ({ data, totalCitedPages }: PlatformMentionsProps) => {
   const [activeTab, setActiveTab] = useState<MetricTab>("mentions");
 
   const platforms: Mention[] = (data && data.length)
@@ -67,7 +75,16 @@ export const PlatformMentions = ({ data }: PlatformMentionsProps) => {
     : defaultPlatforms;
 
   const valueOf = (p: Mention) => (activeTab === "citations" ? p.citations : p.count);
-  const totalValue = platforms.reduce((s, p) => s + valueOf(p), 0) || 1;
+  // Mentions ARE additive, so their share is of the summed total. Cited pages
+  // are not: the same page cited by three platforms is one page for the domain
+  // but appears in all three platform counts. Sharing those against their own
+  // sum produced a denominator that described nothing — it read as though the
+  // platforms partitioned a whole they do not partition. Share is taken against
+  // the domain's distinct total instead, so "Claude 12 of your 20 pages" is the
+  // claim being made, and the column can legitimately sum past 100%.
+  const isCitedPages = activeTab === "citations";
+  const summed = platforms.reduce((s, p) => s + valueOf(p), 0);
+  const denominator = (isCitedPages && totalCitedPages ? totalCitedPages : summed) || 1;
   const maxValue   = Math.max(1, ...platforms.map(valueOf));
 
   const PlatformIcon = ({ platform, hexColor }: { platform: string; hexColor: string }) => {
@@ -100,7 +117,37 @@ export const PlatformMentions = ({ data }: PlatformMentionsProps) => {
     <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80 h-full flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
-        <h3 className="text-base font-semibold font-inter">Distribution by LLM</h3>
+        <div className="flex items-center gap-1.5">
+          <h3 className="text-base font-semibold font-inter">Distribution by LLM</h3>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="inline-flex cursor-pointer text-muted-foreground opacity-50 hover:opacity-100 transition-opacity">
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-xs text-xs">
+                {activeTab === "mentions" ? (
+                  <>
+                    <p className="font-medium mb-1">Mentions by platform</p>
+                    <p>How this period's mentions split across AI platforms. These add up to your Total Mentions.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium mb-1">Cited pages by platform</p>
+                    <p className="mb-1.5">Distinct pages on your domain that each platform cited this period.</p>
+                    <p>
+                      These do <strong>not</strong> add up to your Cited Pages total. A page cited by three
+                      platforms counts once for you but once in each platform's row, so the percentages —
+                      each platform's share of your {totalCitedPages ?? "total"} cited pages — can exceed
+                      100% combined.
+                    </p>
+                  </>
+                )}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
         <div className="flex items-center gap-0.5 rounded-lg bg-muted/60 p-0.5 border border-border/50">
           {tabButton("mentions", "Mentions")}
           {tabButton("citations", "Cited Pages")}
@@ -111,7 +158,7 @@ export const PlatformMentions = ({ data }: PlatformMentionsProps) => {
       <div className="flex flex-col gap-5 flex-1 justify-center">
         {platforms.map((platform) => {
           const val = valueOf(platform);
-          const pct = totalValue > 0 ? ((val / totalValue) * 100).toFixed(1) : "0.0";
+          const pct = ((val / denominator) * 100).toFixed(1);
           const barWidth = (val / maxValue) * 100;
 
           return (

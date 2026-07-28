@@ -529,7 +529,7 @@ const Dashboard = () => {
                 avg_position: p.avg_position ?? 0,
               }))
             : undefined
-        } />
+        } totalCitedPages={summary?.metrics?.total_cited_pages} />
         <MentionsByCountry data={summary?.countries} />
       </div>
 
