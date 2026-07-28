@@ -1125,6 +1125,75 @@ class CompetitiveInsight(models.Model):
         return f"{self.domain.name} insight: {self.title}"
 
 
+class PromptAnalyticsRun(models.Model):
+    """
+    Append-only history: one immutable row per completed run of a prompt on a
+    platform. Mirrors `prompts.PromptAnalyticsRun` in the backend tree, which
+    owns the table — see the docstring there for why it exists.
+
+    In short: `PromptAnalytics` is update_or_create'd per (prompt, platform,
+    region), so each run overwrites the last and no per-run history survives.
+    This table keeps the measurements, so Insights windows that end before the
+    latest run can be answered from what was observed instead of falling back to
+    aggregate snapshots.
+    """
+    prompt = models.ForeignKey(
+        Prompt,
+        on_delete=models.CASCADE,
+        related_name='analytics_runs',
+        help_text="Prompt this run belongs to"
+    )
+    platform = models.CharField(max_length=100, help_text="Canonical platform label for this run")
+    region = models.CharField(
+        max_length=8,
+        default='GLOBAL',
+        db_index=True,
+        help_text="Geographic region: ISO 3166-1 alpha-2 country code, or 'GLOBAL' for unattributed.",
+    )
+    tracked_at = models.DateTimeField(db_index=True, help_text="When this run completed")
+
+    is_mention = models.BooleanField(default=False, help_text="Whether the brand was mentioned in this run")
+    total_mentions = models.PositiveIntegerField(default=0, help_text="Mentions recorded by this run")
+    total_citations = models.PositiveIntegerField(default=0, help_text="Domain-specific citations recorded by this run")
+    position = models.DecimalField(
+        max_digits=8, decimal_places=2, default=0.00,
+        help_text="Position of the brand in this run's answer"
+    )
+    sentiment_category = models.CharField(
+        max_length=10,
+        choices=PromptAnalytics.SENTIMENT_CHOICES,
+        default='neutral',
+        help_text="Sentiment category for this run"
+    )
+    sentiment_score = models.DecimalField(
+        max_digits=3, decimal_places=2, default=0.00,
+        help_text="Sentiment score (-1.00 to 1.00) for this run"
+    )
+    citation_list = models.JSONField(
+        default=list, blank=True,
+        help_text="Every URL cited in this run's answer"
+    )
+    competitor_mention_list = models.JSONField(
+        default=list, blank=True,
+        help_text="Competitors mentioned in this run's answer"
+    )
+    context_summary = models.TextField(blank=True, help_text="Summary of this run's answer")
+
+    created_at = models.DateTimeField(auto_now_add=True, help_text="When this history row was written")
+
+    class Meta:
+        app_label = 'shared_models'
+        db_table = 'prompt_analytics_runs'
+        managed = True  # Let backend manage this table
+        verbose_name = 'Prompt Analytics Run'
+        verbose_name_plural = 'Prompt Analytics Runs'
+        ordering = ['-tracked_at']
+        unique_together = ['prompt', 'platform', 'region', 'tracked_at']
+
+    def __str__(self):
+        return f"Run {self.tracked_at:%Y-%m-%d %H:%M} - {self.platform} (prompt {self.prompt_id})"
+
+
 class PromptMetricSnapshot(models.Model):
     """
     Time-series snapshot of metrics for individual prompts.

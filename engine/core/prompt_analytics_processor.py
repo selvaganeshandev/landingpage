@@ -4,9 +4,9 @@ from django.db import transaction
 from django.utils import timezone
 from django.db.models import Sum, Avg, Count, Max, Q
 from shared_models.models import (
-    Domain, Prompt, PromptAnalytics, PromptGroup, SentimentAnalytics,
-    PromptMetricSnapshot, PromptGroupMetricSnapshot, DomainMetricSnapshot,
-    Competitor
+    Domain, Prompt, PromptAnalytics, PromptAnalyticsRun, PromptGroup,
+    SentimentAnalytics, PromptMetricSnapshot, PromptGroupMetricSnapshot,
+    DomainMetricSnapshot, Competitor
 )
 from django.db.models.functions import Coalesce
 from decimal import Decimal
@@ -787,7 +787,12 @@ class PromptAnalyticsProcessor:
                     except Exception:
                         extracted_position = None
 
-                # Create or update analytics row per platform
+                # Create or update analytics row per platform.
+                #
+                # This row is CURRENT STATE: keyed on (prompt, platform, region),
+                # so each run replaces the last and no history survives here.
+                # The immutable per-run copy is appended below.
+                run_tracked_at = timezone.now()
                 analytics_obj, _ = PromptAnalytics.objects.update_or_create(
                     prompt=prompt,
                     platform=platform_label,
@@ -803,10 +808,39 @@ class PromptAnalyticsProcessor:
                         'citation_list': result.get('all_urls') or [],
                         'competitor_mention_list': result.get('competitor_mention_list') or [],  # Save extracted competitors
                         'track_status': 'COMP',  # Mark as completed
-                        'tracked_at': timezone.now(),
+                        'tracked_at': run_tracked_at,
                         'is_published': True,  # Mark as published when completed
                     }
                 )
+
+                # Append the immutable per-run copy. Deliberately best-effort:
+                # this is a history record, and losing one must never cost a
+                # completed LLM call or fail a prompt that has already been paid
+                # for. It also lets the code ship before the table exists.
+                try:
+                    PromptAnalyticsRun.objects.update_or_create(
+                        prompt=prompt,
+                        platform=platform_label,
+                        region=analytics_obj.region,
+                        tracked_at=run_tracked_at,
+                        defaults={
+                            'is_mention': analytics_obj.is_mention,
+                            'total_mentions': analytics_obj.total_mentions,
+                            'total_citations': analytics_obj.total_citations,
+                            'position': analytics_obj.position,
+                            'sentiment_category': analytics_obj.sentiment_category,
+                            'sentiment_score': analytics_obj.sentiment_score,
+                            'citation_list': analytics_obj.citation_list,
+                            'competitor_mention_list': analytics_obj.competitor_mention_list,
+                            'context_summary': analytics_obj.context_summary,
+                        },
+                    )
+                except Exception as history_error:
+                    logger.warning(
+                        f"Could not append run history for prompt {prompt.id} "
+                        f"({platform_label}): {history_error}"
+                    )
+
                 last_created = analytics_obj
 
             return last_created
