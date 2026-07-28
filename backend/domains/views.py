@@ -44,6 +44,33 @@ def get_openai_client():
         raise Exception(f"Failed to initialize internal LLM client: {e}")
 
 
+def _gemini_should_fall_back(err_str: str) -> bool:
+    """True when a Gemini failure should fall back to the internal LLM.
+
+    Auth failures were NOT in this set, which is what broke domain creation:
+    after BYOK moved to OpenRouter the stored Gemini key stopped being a Google
+    key (org 1's was left as the placeholder "aaaa"), Google answered 400
+    API_KEY_INVALID, and because that is neither a quota, a timeout nor a 404
+    the request hard-failed instead of falling back. Onboarding stalled between
+    "analyzing niches" and "finding topics" with no way forward.
+    """
+    low = (err_str or '').lower()
+    is_quota = '429' in low or 'quota' in low or 'spend cap' in low
+    is_transient = any(x in low for x in (
+        'timed out', 'timeout', 'deadline', 'connection', 'connectionpool',
+        'unavailable', '503', '500', '502', '504',
+    ))
+    is_model_unavailable = any(x in low for x in (
+        '404', 'not found', 'is not supported', 'not available',
+    ))
+    is_auth = any(x in low for x in (
+        'api key not valid', 'api_key_invalid', 'invalid api key',
+        'permission denied', 'permission_denied', 'unauthenticated',
+        'api key not configured', 'invalid_argument', '401', '403',
+    ))
+    return is_quota or is_transient or is_model_unavailable or is_auth
+
+
 def get_google_genai_client():
     """Return Google GenerativeAI client configured with organization key or settings; else raise."""
     from llm_monitor.middleware import get_current_org_id
@@ -561,10 +588,11 @@ Provide helpful, realistic information that would be useful for brand monitoring
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=1000
+            max_tokens=3000,
+            extra_body={"reasoning": {"effort": "low"}},
         )
 
-        result_text = response.choices[0].message.content.strip()
+        result_text = (response.choices[0].message.content or '').strip()
 
         # Try to parse the JSON response
         try:
@@ -648,9 +676,11 @@ Provide the response as a valid JSON array only, no additional text."""
             result_text = response.text.strip()
         except Exception as gemini_err:
             err_str = str(gemini_err)
-            # Fall back to OpenAI ONLY for quota/429 errors. Other failures bubble up.
-            if '429' in err_str or 'quota' in err_str.lower() or 'spend cap' in err_str.lower():
-                logger.warning(f"Gemini quota/429 hit, falling back to OpenAI: {err_str}")
+            # Falls back for quota, transient, model-unavailable AND auth errors.
+            # This used to be quota-only, so an invalid Gemini key killed the
+            # request outright rather than using the internal model beside it.
+            if _gemini_should_fall_back(err_str):
+                logger.warning(f"Gemini unavailable, falling back to internal LLM: {err_str}")
                 used_provider = 'openai'
                 openai_client = get_openai_client()
                 openai_response = openai_client.chat.completions.create(
@@ -660,9 +690,12 @@ Provide the response as a valid JSON array only, no additional text."""
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.7,
-                    max_tokens=500,
+                    # gpt-5-mini reasons before answering; at 500 tokens it spent
+                    # 448 on reasoning and emitted two characters.
+                    max_tokens=2500,
+                    extra_body={"reasoning": {"effort": "low"}},
                 )
-                result_text = openai_response.choices[0].message.content.strip()
+                result_text = (openai_response.choices[0].message.content or '').strip()
             else:
                 raise
 
@@ -822,7 +855,9 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
                 or 'is not supported' in err_lower
                 or 'not available' in err_lower
             )
-            if is_quota or is_transient or is_model_unavailable:
+            # Auth failures count too — see _gemini_should_fall_back. An
+            # invalid key is exactly as unusable as a 404 model.
+            if _gemini_should_fall_back(err_str) or is_quota or is_transient or is_model_unavailable:
                 reason = (
                     'quota/429' if is_quota
                     else 'model unavailable/404' if is_model_unavailable
@@ -840,8 +875,12 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
                     temperature=0.7,
                     # 50 keywords × 9 fields ≈ 7-9k tokens; 8000 is enough and
                     # cuts ~20-40s off gpt-4o-mini's generation time vs 16000.
-                    max_tokens=8000,
+                    max_tokens=12000,
                     response_format={"type": "json_object"},
+                    # gpt-5-mini reasons before answering, and that reasoning is
+                    # charged against max_tokens. At 8000 the 50-keyword payload
+                    # could be truncated to nothing (finish_reason=length).
+                    extra_body={"reasoning": {"effort": "low"}},
                     # Hard cap so a stalled OpenAI request can't hold the
                     # connection beyond the frontend's 5-min window.
                     timeout=180,
@@ -2451,7 +2490,12 @@ Provide the response as a valid JSON array only, no additional text."""
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.7,
-                    max_tokens=500
+                    # gpt-5-mini is a REASONING model: with a 500-token cap it
+                    # spent 448 on reasoning and emitted two characters of JSON
+                    # (finish_reason=length). Low effort + headroom returns the
+                    # answer instead of the thinking.
+                    max_tokens=2500,
+                    extra_body={"reasoning": {"effort": "low"}},
                 )
                 result_text = (response.choices[0].message.content or '').strip()
 
@@ -2538,7 +2582,11 @@ Return ONLY a valid JSON object with this structure:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=8000
+                max_tokens=12000,
+                # Low effort matters twice here: it stops reasoning from eating
+                # the 50-keyword JSON's budget, and it is what keeps this
+                # synchronous onboarding call fast instead of minutes-long.
+                extra_body={"reasoning": {"effort": "low"}},
             )
             result_text = (response.choices[0].message.content or '').strip()
 
@@ -2588,7 +2636,8 @@ Return ONLY a valid JSON object with these fields:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=1000
+                max_tokens=3000,
+                extra_body={"reasoning": {"effort": "low"}},
             )
 
             result_text = response.choices[0].message.content.strip()
