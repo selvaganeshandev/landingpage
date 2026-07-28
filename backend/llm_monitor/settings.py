@@ -315,6 +315,17 @@ GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-flash-latest')
 # Same variable names as engine/llm_monitor_engine/settings.py, so one .env
 # entry per tree configures both identically.
 # ---------------------------------------------------------------------------
+# Transport for the BACKEND's Gemini helper calls only (brand niches, semantic
+# keywords). Deliberately a SEPARATE name from the engine's GEMINI_BACKEND:
+# the engine's setting governs MEASURED calls, where the transport determines
+# whether we are really observing what a Gemini user is told. These helpers are
+# internal analysis, so the transport is purely an operational choice.
+#   openrouter -> OPENROUTER_GEMINI_MODEL through the internal client (default)
+#   vertex     -> service account, bills VERTEX_PROJECT
+#   aistudio   -> google.generativeai with a BYOK/.env API key
+GEMINI_HELPER_BACKEND = config('GEMINI_HELPER_BACKEND', default='openrouter')
+OPENROUTER_GEMINI_MODEL = config('OPENROUTER_GEMINI_MODEL', default='google/gemini-2.5-flash')
+
 GEMINI_BACKEND = config('GEMINI_BACKEND', default='aistudio')
 VERTEX_PROJECT = config('VERTEX_PROJECT', default=None)
 VERTEX_LOCATION = config('VERTEX_LOCATION', default='us-central1')

@@ -131,7 +131,27 @@ def generate_gemini_text(prompt: str, timeout: int = 60) -> str:
     the backend was never migrated with the engine and stayed stuck on a dead
     API key. Callers go through here so the choice is made in one place.
     """
-    if str(getattr(settings, 'GEMINI_BACKEND', 'aistudio')).lower() == 'vertex':
+    backend = str(getattr(settings, 'GEMINI_HELPER_BACKEND', 'openrouter')).lower()
+
+    if backend == 'openrouter':
+        # Gemini reached through OpenRouter. Keeps these helpers on one
+        # credential and one transport, and sidesteps both the depleted AI
+        # Studio project and the Vertex service account.
+        client = get_openai_client()
+        response = client.chat.completions.create(
+            model=getattr(settings, 'OPENROUTER_GEMINI_MODEL', 'google/gemini-2.5-flash'),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            # gemini-2.5-flash reasons before answering and that reasoning is
+            # charged against the budget; unbounded it returned JSON truncated
+            # mid-element. Effort low, with room for the answer itself.
+            max_tokens=4096,
+            extra_body={"reasoning": {"effort": "low"}},
+            timeout=timeout,
+        )
+        return (response.choices[0].message.content or '').strip()
+
+    if backend == 'vertex':
         from google.genai import types as genai_types
         client = _gemini_vertex_client()
         response = client.models.generate_content(
