@@ -44,6 +44,56 @@ def get_openai_client():
         raise Exception(f"Failed to initialize internal LLM client: {e}")
 
 
+def _extract_json(text: str, opener: str = '['):
+    """Pull the JSON value out of an LLM reply, tolerating the usual damage.
+
+    Models wrap answers in markdown fences, prepend commentary, and — when the
+    output budget runs out mid-answer — return a structurally invalid fragment.
+    A bare json.loads on that raises, which is what turned a slightly truncated
+    niche list into a 500 and stopped domain creation at step 1.
+
+    Truncated arrays are repaired by trimming back to the last complete element.
+    Returns None when nothing usable is present.
+    """
+    if not text:
+        return None
+    body = text.strip()
+    if body.startswith('```'):
+        parts = body.split('```')
+        body = parts[1] if len(parts) > 1 else body
+        if body.lstrip().lower().startswith('json'):
+            body = body.lstrip()[4:]
+        body = body.strip()
+
+    start = body.find(opener)
+    if start == -1:
+        return None
+    body = body[start:]
+
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        pass
+
+    closer = ']' if opener == '[' else '}'
+    end = body.rfind(closer)
+    if end != -1:
+        try:
+            return json.loads(body[:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    # Truncated mid-element: keep everything up to the last separator that
+    # closed an element, and shut the container ourselves.
+    cut = max(body.rfind('",'), body.rfind('},'))
+    if cut != -1:
+        try:
+            return json.loads(body[:cut + 1].rstrip(',') + closer)
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
 _VERTEX_CLIENT = None
 
 
@@ -82,10 +132,20 @@ def generate_gemini_text(prompt: str, timeout: int = 60) -> str:
     API key. Callers go through here so the choice is made in one place.
     """
     if str(getattr(settings, 'GEMINI_BACKEND', 'aistudio')).lower() == 'vertex':
+        from google.genai import types as genai_types
         client = _gemini_vertex_client()
         response = client.models.generate_content(
             model=getattr(settings, 'VERTEX_GEMINI_MODEL', 'gemini-2.5-flash'),
             contents=prompt,
+            # gemini-2.5-flash THINKS before answering and that reasoning is
+            # charged against the output budget. Left at defaults it returned a
+            # JSON array cut off mid-element, which failed to parse and 500'd the
+            # niche step. No thinking, and enough room for the answer itself.
+            config=genai_types.GenerateContentConfig(
+                max_output_tokens=4096,
+                temperature=0.7,
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+            ),
         )
         return (getattr(response, 'text', '') or '').strip()
 
@@ -748,42 +808,26 @@ Provide the response as a valid JSON array only, no additional text."""
 
         logger.info(f"brand_niches served by: {used_provider}")
 
-        # Try to parse the JSON response
-        try:
-            # Remove markdown code blocks if present
-            if result_text.startswith('```'):
-                result_text = result_text.split('```')[1]
-                if result_text.startswith('json'):
-                    result_text = result_text[4:]
-                result_text = result_text.strip()
+        parsed = _extract_json(result_text, '[')
+        niches = [str(n).strip() for n in parsed if n][:10] if isinstance(parsed, list) else []
 
-            niches = json.loads(result_text)
+        if not niches:
+            # Deliberately NOT a 500. Niches are optional — the onboarding flow
+            # continues without them and the domain is still created. Returning
+            # an error here stopped the modal dead at step 1, which is how an
+            # unparseable reply became "cannot add a domain".
+            logger.warning(f"Could not parse niches from {used_provider} reply: {result_text[:400]}")
 
-            # Validate it's a list
-            if not isinstance(niches, list):
-                raise ValueError("Response is not a list")
-
-            # Filter to ensure all items are strings and limit to 10
-            niches = [str(n).strip() for n in niches if n][:10]
-
-            return Response({
-                'success': True,
-                'niches': niches
-            })
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Failed to parse Google GenAI response as JSON: {result_text}")
-            return Response({
-                'success': False,
-                'error': 'Failed to parse AI response',
-                'raw_response': result_text
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({
+            'success': True,
+            'niches': niches,
+            'provider': used_provider,
+        })
 
     except Exception as e:
-        logger.error(f"Error fetching brand niches from Google GenAI: {str(e)}")
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Same reasoning: never block onboarding on this optional step.
+        logger.error(f"Error fetching brand niches: {str(e)}")
+        return Response({'success': True, 'niches': [], 'provider': 'none', 'warning': str(e)})
 
 
 @api_view(['POST'])
@@ -2637,12 +2681,9 @@ Return ONLY a valid JSON object with this structure:
                     result_text = result_text[4:]
                 result_text = result_text.strip()
 
-            if not result_text.startswith('{'):
-                start = result_text.find('{')
-                if start != -1:
-                    result_text = result_text[start:]
-
-            data = json.loads(result_text)
+            # Tolerant of fences, prose and budget-truncated output — see
+            # _extract_json. A hand-rolled trim raised on anything unusual.
+            data = _extract_json(result_text, '{') or {}
             if 'keywords' in data and isinstance(data['keywords'], list):
                 generated_keywords = data['keywords']
 
