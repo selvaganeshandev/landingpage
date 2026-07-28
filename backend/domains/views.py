@@ -2626,8 +2626,26 @@ Provide the response as a valid JSON array only, no additional text."""
                 niches = []  # Continue with empty niches
 
         # Step 2: Generate semantic keywords (Progress: Finding the best topics)
+        #
+        # The onboarding modal has ALREADY generated these via
+        # /domains/generate-semantic-keywords/ before calling this endpoint. It
+        # just had no way to hand them over, so this regenerated all 50 from
+        # scratch — the same ~25-30s call and the same spend, twice per domain,
+        # and the second set (a different sample) was the one actually saved.
         generated_keywords = []
+        supplied = request.data.get('keywords')
+        if isinstance(supplied, list) and supplied:
+            generated_keywords = [
+                k for k in supplied if isinstance(k, dict) and (k.get('keyword') or '').strip()
+            ]
+            logger.info(
+                f"Using {len(generated_keywords)} keywords supplied by the client; "
+                f"skipping regeneration"
+            )
+
         try:
+            if generated_keywords:
+                raise StopIteration  # handled below: nothing to generate
             # Same reasoning as the niche step above: internal analysis belongs on
             # OpenRouter. This was the call that actually blocked domain creation,
             # because unlike the niche step it does not degrade gracefully.
@@ -2713,6 +2731,8 @@ Return ONLY a valid JSON object with this structure:
             if 'keywords' in data and isinstance(data['keywords'], list):
                 generated_keywords = data['keywords']
 
+        except StopIteration:
+            pass  # keywords were supplied by the client
         except Exception as e:
             logger.error(f"Error generating keywords: {str(e)}")
             # Continue with empty keywords - domain will still be created

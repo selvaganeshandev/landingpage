@@ -558,7 +558,7 @@ export const apiClient = {
       timeout: 300000, // 5 minutes - Gemini LLM keyword generation can exceed the 2-min default in production
     }),
 
-  automatedDomainOnboard: (data: { domain_name: string; brand_name: string; country: string; niches?: string[] }) =>
+  automatedDomainOnboard: (data: { domain_name: string; brand_name: string; country: string; niches?: string[]; keywords?: any[] }) =>
     apiRequest('/domains/automated-onboard/', {
       method: 'POST',
       body: JSON.stringify(data),

@@ -518,6 +518,10 @@ export function OnboardingModal({ onComplete, user }: OnboardingModalProps) {
         brand_name: newBrandName.trim(),
         country: newDomainCountry,
         niches: selectedNiches.length > 0 ? selectedNiches : undefined,
+        // Hand over the keywords step 2 already generated. Without this the
+        // backend regenerated all 50 from scratch — the same ~25-30s call and
+        // the same spend, twice per domain.
+        keywords: generatedKeywords.length > 0 ? generatedKeywords : undefined,
       });
 
       if (response.success && response.domain) {
