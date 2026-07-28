@@ -154,6 +154,18 @@ export const PlatformMentions = ({ data, totalCitedPages }: PlatformMentionsProp
         </div>
       </div>
 
+      {/* Reconciliation line. The rows below are distinct-page counts per
+          platform, so a page cited by three platforms appears in three rows
+          while counting once for the domain. Without stating that arithmetic
+          the reader adds the rows up, gets 26 against a headline of 20, and
+          reasonably concludes one of them is wrong. */}
+      {isCitedPages && totalCitedPages !== undefined && summed > totalCitedPages && (
+        <p className="text-xs text-muted-foreground -mt-3 mb-4">
+          {summed} listings of <span className="font-medium text-foreground">{totalCitedPages} distinct pages</span> —
+          {" "}{summed - totalCitedPages} are repeats, cited by more than one platform.
+        </p>
+      )}
+
       {/* Platform rows - Horizontal Bar Chart Layout */}
       <div className="flex flex-col gap-5 flex-1 justify-center">
         {platforms.map((platform) => {

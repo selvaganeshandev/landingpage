@@ -197,3 +197,71 @@ class GSCTrafficInsight(models.Model):
     
     def __str__(self):
         return f"GSC Insight for {self.domain.name} ({self.start_date} to {self.end_date})"
+
+
+class GAAITrafficDaily(models.Model):
+    """One row per domain, day and AI platform: sessions that arrived from AI.
+
+    The Insights page used to call GA4 on every page load and keep the answer
+    only in a 15-minute cache, so none of its traffic figures existed anywhere
+    in the database. Disconnecting the integration, switching GA4 property or
+    simply passing GA4's retention window erased that history permanently, and
+    the request path burned the property's hourly report quota (the traffic tabs
+    429 under ordinary use).
+
+    A nightly sync writes here instead and the page reads only from this table.
+
+    `platform` uses the sentinel ``ALL_PLATFORMS`` for the combined row rather
+    than NULL: in Postgres NULL never equals NULL in a unique constraint, so a
+    NULL platform would never conflict and the nightly UPSERT would insert a
+    duplicate combined row every single night.
+
+    ``property_id`` is recorded because a domain can be repointed at a different
+    GA4 property; without it, old rows would silently blend with new ones.
+    ``property_timezone`` is recorded because GA4 buckets days in the property's
+    own timezone, which need not match the server's — the correlation chart
+    joins these dates against snapshot dates, so the boundary has to be known
+    rather than assumed.
+    """
+
+    ALL_PLATFORMS = '__all__'
+
+    domain = models.ForeignKey(
+        Domain, on_delete=models.CASCADE, related_name='ai_traffic_daily'
+    )
+    date = models.DateField(db_index=True, help_text="Day in the GA4 property's timezone")
+    platform = models.CharField(
+        max_length=64,
+        default=ALL_PLATFORMS,
+        help_text="AI source label, or '__all__' for the combined row",
+    )
+
+    sessions = models.PositiveIntegerField(default=0)
+    users = models.PositiveIntegerField(default=0)
+    page_views = models.PositiveIntegerField(default=0)
+    conversions = models.PositiveIntegerField(default=0)
+    avg_duration = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0.00, help_text="Mean session duration, seconds"
+    )
+
+    property_id = models.CharField(max_length=64, blank=True, default='')
+    property_timezone = models.CharField(max_length=64, blank=True, default='')
+    synced_at = models.DateTimeField(
+        help_text="When this row was last refreshed from GA4. GA restates recent "
+                  "days, so a row is rewritten while it stays inside the rolling window."
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'integrations'
+        db_table = 'ga_ai_traffic_daily'
+        unique_together = [['domain', 'date', 'platform']]
+        indexes = [
+            models.Index(fields=['domain', 'date']),
+            models.Index(fields=['domain', 'platform', 'date']),
+        ]
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"{self.domain_id} {self.date} {self.platform}: {self.sessions} sessions"
