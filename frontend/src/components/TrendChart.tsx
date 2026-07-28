@@ -291,10 +291,12 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
     .map((d) => [d.visibility as number, d.sessions as number] as [number, number]);
   const correlationR = pearson(correlationPairs);
   const hasCorrelationSeries = correlationData.some((d) => d.sessions != null) && hasVisibilitySeries;
-  const visibilityValues = correlationData.map((d) => d.visibility).filter((v): v is number => typeof v === "number");
-  const avgVisibility = visibilityValues.length
-    ? visibilityValues.reduce((a, b) => a + b, 0) / visibilityValues.length
-    : undefined;
+  // NOTE: there is deliberately no "average of the plotted points" here.
+  // Visibility is a rate, so the unweighted mean of per-period rates is not the
+  // rate over the whole window: a period with one answer would count as much as
+  // a period with 155. This pill previously did exactly that and reported ~17
+  // beside the same metric's true 29.18 on the tab next door. The window figure
+  // comes from the API, which pools the periods' own inputs.
   const totalAiSessions = (aiTrafficDaily ?? []).reduce((a, r) => a + r.sessions, 0) || undefined;
 
   // Pills double as the chart's legend/summary, so they track the active tab:
@@ -311,7 +313,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
     }
     if (chartTab === "visibility") {
       return [
-        { label: "Visibility Score", value: metrics?.visibility_score, change: periodChange(metrics?.visibility_change), colorVar: "secondary", hint: "Your AI Visibility score (0-100) for this period — how prominently your brand appears in AI answers. The percentage compares it with the previous period; N/A means no previous-period data." },
+        { label: "Visibility Score", value: metrics?.visibility_score, change: periodChange(metrics?.visibility_change), colorVar: "secondary", hint: "Your AI Visibility score (0-100) for this window — how prominently your brand appears in AI answers. Each point on the line scores its own period; this figure scores the whole window at once, so a period with more answers counts for more. It will not equal a plain average of the points. The percentage compares it with the previous period; N/A means no previous-period data." },
         // Avg Position: lower is better, so a signed +-% would read backwards
         // against the pill's up=good coloring — show the value without a delta.
         { label: "Avg Position", value: metrics?.avg_position, change: null, colorVar: "chart-2", hint: "Average rank of your brand when it appears in AI answers, across this period. Lower is better." },
@@ -320,7 +322,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
     }
     if (chartTab === "correlation") {
       return [
-        { label: "Avg Visibility", displayValue: avgVisibility !== undefined ? avgVisibility.toFixed(1) : "-", colorVar: "secondary", hint: "Average AI Visibility score across the period." },
+        { label: "Visibility Score", value: metrics?.visibility_score, colorVar: "secondary", hint: "Your AI Visibility score (0-100) for this window — the same figure shown on the AI Visibility tab and on the gauge. Scored over every answer in the window at once, so periods with more answers count for more. It is not the average of the plotted points." },
         { label: "AI Sessions", value: totalAiSessions, colorVar: "primary", hint: "Total sessions arriving from AI platforms (ChatGPT, Gemini, Perplexity, Claude, Copilot…) over the period, from Google Analytics." },
         { label: "Correlation", displayValue: correlationR !== null ? `${correlationR.toFixed(2)} · ${describeCorrelation(correlationR)}` : "N/A", colorVar: "chart-3", hint: "Pearson correlation between the AI Visibility score and AI-referred sessions over matching dates. Ranges -1 to +1; a positive value means AI presence and AI-referred traffic tend to rise and fall together. Needs at least 3 overlapping dates." },
       ];
