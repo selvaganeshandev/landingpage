@@ -304,6 +304,29 @@ GOOGLE_GEMINI_API_KEY = config('GOOGLE_GEMINI_API_KEY', default=None)
 # per-environment via the GEMINI_MODEL env var if a key only supports a specific model.
 GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-flash-latest')
 
+# ---------------------------------------------------------------------------
+# Gemini transport for the BACKEND's helper calls (brand niches, semantic
+# keywords). The ENGINE was migrated to Vertex; these helpers were left on the
+# AI Studio API-key path, which is why adding a domain broke once BYOK moved off
+# Google — the per-org key was a placeholder and the AI Studio project's prepaid
+# credits are depleted. Vertex authenticates with a service account instead, so
+# no API key is involved at all.
+#
+# Same variable names as engine/llm_monitor_engine/settings.py, so one .env
+# entry per tree configures both identically.
+# ---------------------------------------------------------------------------
+GEMINI_BACKEND = config('GEMINI_BACKEND', default='aistudio')
+VERTEX_PROJECT = config('VERTEX_PROJECT', default=None)
+VERTEX_LOCATION = config('VERTEX_LOCATION', default='us-central1')
+VERTEX_GEMINI_MODEL = config('VERTEX_GEMINI_MODEL', default='gemini-2.5-flash')
+
+# Application Default Credentials are read from the PROCESS environment, not
+# from Django settings, so a .env entry has to be exported explicitly.
+import os as _os
+_VERTEX_CREDENTIALS = config('GOOGLE_APPLICATION_CREDENTIALS', default=None)
+if _VERTEX_CREDENTIALS:
+    _os.environ.setdefault('GOOGLE_APPLICATION_CREDENTIALS', _VERTEX_CREDENTIALS)
+
 # ScrapingDog API Configuration (still used by misinformation crawler & domains/views.py — /scrape endpoint)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
 

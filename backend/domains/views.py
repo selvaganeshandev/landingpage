@@ -44,6 +44,57 @@ def get_openai_client():
         raise Exception(f"Failed to initialize internal LLM client: {e}")
 
 
+_VERTEX_CLIENT = None
+
+
+def _gemini_vertex_client():
+    """Cached google-genai client bound to Vertex AI.
+
+    Mirrors engine/core/analytics_helpers.py::_gemini_vertex_client. Vertex
+    authenticates with Application Default Credentials, so no API key — and
+    therefore no BYOK key — is involved.
+    """
+    global _VERTEX_CLIENT
+    if _VERTEX_CLIENT is None:
+        from google import genai as genai_sdk
+        project = getattr(settings, 'VERTEX_PROJECT', None)
+        if not project:
+            raise RuntimeError(
+                "GEMINI_BACKEND=vertex requires VERTEX_PROJECT to be set "
+                "(and GOOGLE_APPLICATION_CREDENTIALS pointing at a service-account JSON)."
+            )
+        _VERTEX_CLIENT = genai_sdk.Client(
+            vertexai=True,
+            project=project,
+            location=getattr(settings, 'VERTEX_LOCATION', 'us-central1'),
+        )
+    return _VERTEX_CLIENT
+
+
+def generate_gemini_text(prompt: str, timeout: int = 60) -> str:
+    """Run `prompt` through Gemini on whichever transport is configured.
+
+    GEMINI_BACKEND=vertex uses a service account and bills VERTEX_PROJECT;
+    anything else uses the AI Studio API key resolved from BYOK/.env.
+
+    The two transports have different SDKs and call shapes, which is exactly why
+    the backend was never migrated with the engine and stayed stuck on a dead
+    API key. Callers go through here so the choice is made in one place.
+    """
+    if str(getattr(settings, 'GEMINI_BACKEND', 'aistudio')).lower() == 'vertex':
+        client = _gemini_vertex_client()
+        response = client.models.generate_content(
+            model=getattr(settings, 'VERTEX_GEMINI_MODEL', 'gemini-2.5-flash'),
+            contents=prompt,
+        )
+        return (getattr(response, 'text', '') or '').strip()
+
+    genai = get_google_genai_client()
+    model = genai.GenerativeModel(settings.GEMINI_MODEL)
+    response = model.generate_content(prompt, request_options={'timeout': timeout})
+    return (response.text or '').strip()
+
+
 def _gemini_should_fall_back(err_str: str) -> bool:
     """True when a Gemini failure should fall back to the internal LLM.
 
@@ -655,9 +706,6 @@ def fetch_brand_niches(request):
         brand_name = domain_name.replace('.com', '').replace('.io', '').replace('.org', '').replace('.net', '').replace('-', ' ').replace('_', ' ').title()
 
     try:
-        genai = get_google_genai_client()
-        model = genai.GenerativeModel(settings.GEMINI_MODEL)
-
         prompt = f"""Analyze the brand "{brand_name}" (website: {domain_name}) and suggest relevant industry niches or categories.
 
 Return ONLY a JSON array of 5-8 specific industry niches/categories that best describe this brand's market positioning. Each niche should be:
@@ -672,8 +720,7 @@ Provide the response as a valid JSON array only, no additional text."""
 
         used_provider = 'gemini'
         try:
-            response = model.generate_content(prompt)
-            result_text = response.text.strip()
+            result_text = generate_gemini_text(prompt)
         except Exception as gemini_err:
             err_str = str(gemini_err)
             # Falls back for quota, transient, model-unavailable AND auth errors.
@@ -759,9 +806,6 @@ def generate_semantic_keywords(request):
         )
 
     try:
-        genai = get_google_genai_client()
-        model = genai.GenerativeModel(settings.GEMINI_MODEL)
-
         # Build niche description
         niche_text = ", ".join(niches) if niches else "general business"
 
@@ -827,11 +871,7 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
             # — e.g. 50 keywords × 9 fields — room to finish on Gemini before we
             # fall back; combined with the 180s OpenAI cap it stays under the
             # frontend's 5-min window.
-            response = model.generate_content(
-                prompt,
-                request_options={'timeout': 30},
-            )
-            result_text = response.text.strip()
+            result_text = generate_gemini_text(prompt, timeout=30)
         except Exception as gemini_err:
             err_str = str(gemini_err)
             err_lower = err_str.lower()
