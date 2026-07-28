@@ -149,7 +149,7 @@ def main():
         print("To start Celery:")
         print("  1. Worker: python -m celery -A llm_monitor_engine worker --loglevel=info")
         print("  2. Beat:   python -m celery -A llm_monitor_engine beat --loglevel=info")
-        print("  Or use: ./start-celery.sh")
+        print("  The former root launcher is archived at archive/legacy-scripts/start-celery.sh")
     else:
         print("✗ Some checks failed. Please fix the issues above.")
     print("=" * 60)

@@ -14,7 +14,7 @@ instead. What MUST stay in sync is the request/response translation — everythi
 in ``_MessagesAPI`` and its helpers. A fix applied to one copy and not the other
 means a call site in the other tree keeps the bug.
 
-``engine/core/test_openrouter_client.py`` loads BOTH files and asserts the
+``tests/standalone/engine/core/test_openrouter_client.py`` loads BOTH files and asserts the
 translation matches, so that divergence fails a test rather than reaching
 production. Change both files together and run it.
 

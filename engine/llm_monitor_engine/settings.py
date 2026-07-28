@@ -424,7 +424,7 @@ CELERY_TIMEZONE = TIME_ZONE
 # default queue (which can pile up to thousands of tasks during scheduler
 # bursts). Other tasks keep their existing routing — the default 'celery'
 # queue. A dedicated worker must be running with `-Q seo` for SEO tasks to
-# be processed; see start-celery.sh.
+# be processed; see archive/legacy-scripts/start-celery.sh for the retired launcher.
 CELERY_TASK_ROUTES = {
     'core.processing_tasks.process_seo_domain_task': {'queue': 'seo'},
     'core.processing_tasks.process_seo_keyword_task': {'queue': 'seo'},

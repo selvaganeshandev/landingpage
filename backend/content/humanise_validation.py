@@ -17,7 +17,7 @@ The two guards catch different things and are both worth having:
                            failures that report a clean stop, such as a model
                            replying in prose about the task instead of doing it.
 
-Run the tests:  python content/test_humanise_validation.py   (from backend/)
+Run the tests:  python tests/standalone/backend/content/test_humanise_validation.py
 """
 import re
 

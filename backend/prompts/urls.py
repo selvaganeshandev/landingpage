@@ -1,11 +1,11 @@
 from django.urls import path
 from . import views
-from . import test_views
+from . import diagnostic_views
 from .views_prompt_export import prompts_export, prompts_export_data
 
 urlpatterns = [
     # Test endpoint
-    path('test/', test_views.test_view, name='test_view'),
+    path('test/', diagnostic_views.test_view, name='test_view'),
 
     # AI Prompt Data Export (xlsx)
     path('export/', prompts_export, name='prompts_export'),
