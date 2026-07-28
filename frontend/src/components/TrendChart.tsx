@@ -40,7 +40,7 @@ interface AITraffic {
 }
 
 interface TrendChartProps {
-  data?: Array<{ date: string; value?: number; mentions?: number; citations?: number; visibility?: number; [key: string]: number | string | undefined }>;
+  data?: Array<{ date: string; date_iso?: string; period_start_iso?: string; value?: number; mentions?: number; citations?: number; visibility?: number; [key: string]: number | string | undefined }>;
   metrics?: TrendMetrics;
   // Currently-selected window as a `days` string ("30" | "180" | "3650"), or
   // undefined when a custom date range is active (no button highlighted).
@@ -48,7 +48,7 @@ interface TrendChartProps {
   onTimeRangeChange?: (days: string) => void;
   // Daily AI-referred traffic (sessions/users by date) — feeds the Visibility
   // vs Traffic correlation tab.
-  aiTrafficDaily?: Array<{ date: string; sessions: number; users: number }> | null;
+  aiTrafficDaily?: Array<{ date: string; dateIso?: string; sessions: number; users: number }> | null;
   // Your brand's share-of-voice percentage for the current window — feeds the
   // AI Visibility tab's third pill. Null when there's no share-of-voice reading.
   shareOfVoice?: number | null;
@@ -102,24 +102,9 @@ const formatDuration = (seconds?: number): string => {
 };
 
 // ---- Correlation helpers (Visibility vs Traffic tab) ----
-const MONTH_INDEX: Record<string, number> = {
-  Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6,
-  Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12,
-};
-
-// The visibility series ("Oct 1") and the GA audience series ("1 Oct") format
-// the same day in a different token order, so join on a normalized month-day
-// key rather than the raw label.
-const toDateKey = (label?: string): string | null => {
-  if (!label) return null;
-  let month: number | undefined;
-  let day: number | undefined;
-  for (const token of label.trim().split(/\s+/)) {
-    if (MONTH_INDEX[token] !== undefined) month = MONTH_INDEX[token];
-    else if (/^\d+$/.test(token)) day = parseInt(token, 10);
-  }
-  return month && day ? `${month}-${day}` : null;
-};
+// The two series are joined on ISO dates supplied by the API, not on the
+// year-less display labels ("Jul 28") they used to be matched on — those
+// collided across years on any window longer than twelve months.
 
 const pearson = (pairs: Array<[number, number]>): number | null => {
   const n = pairs.length;
@@ -276,15 +261,33 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
   })();
 
   // ---- Visibility vs Traffic (correlation) tab derived values ----
-  const aiSessionsByDate = new Map<string, number>();
-  for (const row of aiTrafficDaily ?? []) {
-    const key = toDateKey(row.date);
-    if (key) aiSessionsByDate.set(key, (aiSessionsByDate.get(key) ?? 0) + row.sessions);
-  }
-  const correlationData = data.map((d) => {
-    const key = toDateKey(typeof d.date === "string" ? d.date : undefined);
-    const sessions = key != null ? aiSessionsByDate.get(key) : undefined;
-    return { date: d.date, visibility: d.visibility, sessions: sessions ?? null };
+  //
+  // Each trend point closes a PERIOD, not a day. Matching GA sessions on the
+  // closing day alone threw away every other day's traffic: on one domain the
+  // chart drew 3,089 sessions while the period totals were 16,388. So every GA
+  // day is attributed to the period that contains it — the same way the backend
+  // buckets analytics rows — and a point's sessions then cover exactly the span
+  // its visibility describes.
+  //
+  // Matching is on ISO dates. The display labels carry no year, so "Jul 28"
+  // from two different years used to collide on a window longer than a year.
+  const correlationData = data.map((d, i) => {
+    const periodEnd = typeof d.date_iso === "string" ? d.date_iso : undefined;
+    const periodStart = typeof d.period_start_iso === "string" ? d.period_start_iso : undefined;
+    let sessions: number | null = null;
+    if (periodEnd && periodStart && aiTrafficDaily?.length) {
+      let sum = 0;
+      let matched = false;
+      for (const row of aiTrafficDaily) {
+        if (!row.dateIso) continue;
+        if (row.dateIso >= periodStart && row.dateIso <= periodEnd) {
+          sum += row.sessions;
+          matched = true;
+        }
+      }
+      if (matched) sessions = sum;
+    }
+    return { date: d.date, visibility: d.visibility, sessions };
   });
   const correlationPairs = correlationData
     .filter((d) => typeof d.visibility === "number" && typeof d.sessions === "number")
@@ -324,7 +327,14 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
       return [
         { label: "Visibility Score", value: metrics?.visibility_score, colorVar: "secondary", hint: "Your AI Visibility score (0-100) for this window — the same figure shown on the AI Visibility tab and on the gauge. Scored over every answer in the window at once, so periods with more answers count for more. It is not the average of the plotted points." },
         { label: "AI Sessions", value: totalAiSessions, colorVar: "primary", hint: "Total sessions arriving from AI platforms (ChatGPT, Gemini, Perplexity, Claude, Copilot…) over the period, from Google Analytics." },
-        { label: "Correlation", displayValue: correlationR !== null ? `${correlationR.toFixed(2)} · ${describeCorrelation(correlationR)}` : "N/A", colorVar: "chart-3", hint: "Pearson correlation between the AI Visibility score and AI-referred sessions over matching dates. Ranges -1 to +1; a positive value means AI presence and AI-referred traffic tend to rise and fall together. Needs at least 3 overlapping dates." },
+        {
+          label: "Correlation",
+          displayValue: correlationR !== null ? `${correlationR.toFixed(2)} · ${describeCorrelation(correlationR)}` : "N/A",
+          colorVar: "chart-3",
+          hint: correlationR !== null
+            ? `Does your AI visibility move together with the traffic AI sends you? Each point below is one period: its visibility score, paired with every Google Analytics session that arrived from an AI platform during that same period. We run a Pearson correlation across those ${correlationPairs.length} pairs. The result runs from -1 to +1 — near +1 they rise and fall together, near 0 there is no relationship, near -1 one rises as the other falls. It shows association, not cause: traffic can move for reasons that have nothing to do with AI answers.`
+            : `Not enough paired periods yet. This compares each period's visibility score against the AI-referred sessions Google Analytics recorded in that same period, and needs at least 3 periods that have both. Right now ${correlationPairs.length} qualify — periods whose visibility could not be scored on the current formula, or where no GA data exists, are left out.`,
+        },
       ];
     }
     return [

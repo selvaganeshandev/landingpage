@@ -1397,6 +1397,17 @@ def dashboard_summary(request):
         domain_id, start_date, end_date, ordered_dates, platform_filter, domain_host,
     )
 
+    # Each point closes a period that begins the day after the previous point
+    # (the first begins at the window start). Published so consumers can line
+    # daily series up with the span a point actually describes — the correlation
+    # tab previously matched only the closing day, so it compared one day of
+    # traffic against a whole period's visibility and discarded the rest.
+    period_start_by_date = {}
+    _prev = start_date
+    for _d in ordered_dates:
+        period_start_by_date[_d] = _prev
+        _prev = _d + timedelta(days=1)
+
     # Every visibility number on this page now comes from compute_visibility_score.
     # Order of preference per point:
     #   1. the period's own RECORDED INPUTS (formula version >= 1)
@@ -1427,6 +1438,15 @@ def dashboard_summary(request):
 
         point = {
             'date': format_date_for_chart(snapshot_date),
+            # Unambiguous date for anything that needs to JOIN on it. The
+            # display label carries no year, so a window spanning more than
+            # twelve months collapsed "Jul 28" from different years onto one
+            # another — the correlation tab silently summed them.
+            'date_iso': snapshot_date.isoformat(),
+            # First day this point covers, so a consumer can attribute daily
+            # data (GA sessions) to the same span the point's own figures
+            # describe rather than to its closing day alone.
+            'period_start_iso': period_start_by_date[snapshot_date].isoformat(),
         }
         if day_visibility is not None:
             point['visibility'] = round(day_visibility, 2)

@@ -27,6 +27,12 @@ import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
+/** GA4's YYYYMMDD -> ISO YYYY-MM-DD, or "" when the input isn't a GA date. */
+function isoFromGADate(yyyymmdd: string): string {
+  if (!yyyymmdd || yyyymmdd.length !== 8) return "";
+  return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
+}
+
 function formatGADate(yyyymmdd: string): string {
   if (!yyyymmdd || yyyymmdd.length !== 8) return yyyymmdd;
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -344,6 +350,11 @@ const Dashboard = () => {
         setAiTrafficDaily(daily.length > 0
           ? daily.map((row: any) => ({
               date: formatGADate(row.date),
+              // GA returns YYYYMMDD. Keep it as an unambiguous ISO date beside
+              // the display label so the correlation can attribute each day to
+              // the right trend period instead of matching on a year-less
+              // "28 Jul" string.
+              dateIso: isoFromGADate(row.date),
               sessions: Number(row.sessions || 0),
               users: Number(row.totalUsers || 0),
             }))
