@@ -22,7 +22,7 @@ from .serializers import (
 )
 from authentication.serializers import AccountSerializer
 from authentication.models import Account
-from keywords.models import SecondaryKeyword
+from keywords.models import Keyword, SecondaryKeyword
 import json
 import logging
 
@@ -2758,25 +2758,48 @@ Return ONLY a valid JSON object with these fields:
                 topics_to_avoid=brand_info.get('topics_to_avoid', ''),
             )
 
-            # Save all generated keywords to secondary_keywords table
+            # Persist the generated keywords.
+            #
+            # They used to go ONLY into secondary_keywords, which nothing reads:
+            # the Keywords UI lists `Keyword`, and there is no list endpoint for
+            # secondary keywords at all (only a bulk-create). So a domain added
+            # through the onboarding modal showed no keywords anywhere and had an
+            # empty primary keyword set — domain 94 landed with 0 Keyword rows
+            # against 53 secondary ones, and got 18 prompts where a
+            # properly-seeded domain gets around 100.
+            #
+            # Both tables are written now: `Keyword` is the set the product uses,
+            # `SecondaryKeyword` is kept so anything already reading it is
+            # unaffected. bulk_create replaces the per-row INSERT loop, which was
+            # 50 round-trips inside the transaction.
             if generated_keywords:
-                try:
-                    from keywords.models import SecondaryKeyword
-                    for kw_data in generated_keywords:
-                        SecondaryKeyword.objects.create(
-                            domain=domain,
-                            keyword=kw_data.get('keyword', ''),
-                            volume_level=kw_data.get('volume_level', 'medium'),
-                            intent=kw_data.get('intent', 'informational'),
-                            entity=kw_data.get('entity', ''),
-                            attribute=kw_data.get('attribute', ''),
-                            variable=kw_data.get('variable', ''),
-                            source='ai-generated',
-                            topic=kw_data.get('topic', ''),
-                            cluster_id=kw_data.get('cluster_id', ''),
-                        )
-                except Exception as e:
-                    logger.error(f"Error creating secondary keywords: {str(e)}")
+                seen = set()
+                keyword_rows, secondary_rows = [], []
+                for kw_data in generated_keywords:
+                    text = (kw_data.get('keyword') or '').strip()
+                    if not text or text.lower() in seen:
+                        continue
+                    seen.add(text.lower())
+                    shared = dict(
+                        keyword=text,
+                        volume_level=kw_data.get('volume_level', 'medium'),
+                        intent=kw_data.get('intent', 'informational'),
+                        entity=kw_data.get('entity', ''),
+                        attribute=kw_data.get('attribute', ''),
+                        variable=kw_data.get('variable', ''),
+                        source='ai-generated',
+                        topic=kw_data.get('topic', ''),
+                        cluster_id=kw_data.get('cluster_id', ''),
+                    )
+                    keyword_rows.append(Keyword(domain=domain, **shared))
+                    secondary_rows.append(SecondaryKeyword(domain=domain, **shared))
+
+                # Outside no try/except: a keyword set is not optional. Letting
+                # this fail quietly is what produced a domain that looked created
+                # but could never be tracked. A failure now rolls the whole
+                # creation back rather than leaving a half-built domain.
+                Keyword.objects.bulk_create(keyword_rows, ignore_conflicts=True)
+                SecondaryKeyword.objects.bulk_create(secondary_rows, ignore_conflicts=True)
 
             # Grant access to the creating admin
             try:
