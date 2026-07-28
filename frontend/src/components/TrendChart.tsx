@@ -69,6 +69,11 @@ interface TrendChartProps {
   aiTrafficError?: boolean;
   /** The AI-referral timeseries fetch (correlation) failed, same idea. */
   aiTrafficDailyError?: boolean;
+  /** API's `window.is_all_time`: the window was widened to cover the domain's
+   *  entire history, so no previous period exists to compare against. The pills
+   *  then hide the change outright instead of printing N/A for a comparison
+   *  that could never have been made. */
+  isAllTime?: boolean;
 }
 
 // Time-range presets wired to the existing `days` query param on the dashboard
@@ -235,8 +240,12 @@ const EmptyState = ({ title, subtitle }: { title: string; subtitle: string }) =>
   </div>
 );
 
-export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, aiTrafficDaily, shareOfVoice, aiTraffic, isPeriodData, gaConnected, aiTrafficError, aiTrafficDailyError }: TrendChartProps) => {
+export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, aiTrafficDaily, shareOfVoice, aiTraffic, isPeriodData, gaConnected, aiTrafficError, aiTrafficDailyError, isAllTime }: TrendChartProps) => {
   const [chartTab, setChartTab] = useState<ChartTab>("main");
+
+  // "Period before all time" is not a thing. Passing undefined (rather than
+  // null) hides the comparison entirely — see PillProps for the semantics.
+  const periodChange = (value?: number | null) => (isAllTime ? undefined : value);
   const hasCitationsSeries = data[0]?.citations !== undefined;
   const hasVisibilitySeries = data[0]?.visibility !== undefined;
 
@@ -298,7 +307,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
     }
     if (chartTab === "visibility") {
       return [
-        { label: "Visibility Score", value: metrics?.visibility_score, change: metrics?.visibility_change, colorVar: "secondary", hint: "Your AI Visibility score (0-100) for this period — how prominently your brand appears in AI answers. The percentage compares it with the previous period; N/A means no previous-period data." },
+        { label: "Visibility Score", value: metrics?.visibility_score, change: periodChange(metrics?.visibility_change), colorVar: "secondary", hint: "Your AI Visibility score (0-100) for this period — how prominently your brand appears in AI answers. The percentage compares it with the previous period; N/A means no previous-period data." },
         // Avg Position: lower is better, so a signed +-% would read backwards
         // against the pill's up=good coloring — show the value without a delta.
         { label: "Avg Position", value: metrics?.avg_position, change: null, colorVar: "chart-2", hint: "Average rank of your brand when it appears in AI answers, across this period. Lower is better." },
@@ -313,9 +322,9 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
       ];
     }
     return [
-      { label: "Mentions", value: metrics?.total_mentions, change: metrics?.mentions_change, colorVar: "primary", hint: "How many times your brand was mentioned in AI answers across your tracked prompts in this period. The percentage compares it with the previous period; N/A means there is no previous-period data to compare against." },
-      { label: "Citations", value: metrics?.total_citations, change: metrics?.citations_change, colorVar: "chart-2", hint: "Every URL the AI cited in its answers during this period — the same total shown on the Citations page. Counts each citation, so one page cited several times counts more than once." },
-      { label: "Cited Pages", value: metrics?.total_cited_pages, change: metrics?.cited_pages_change, colorVar: "chart-3", hint: "Distinct pages on your own domain that the AI cited in this period. Unlike Citations, each page is counted once no matter how often it was cited." },
+      { label: "Mentions", value: metrics?.total_mentions, change: periodChange(metrics?.mentions_change), colorVar: "primary", hint: "How many times your brand was mentioned in AI answers across your tracked prompts in this period. The percentage compares it with the previous period; N/A means there is no previous-period data to compare against." },
+      { label: "Citations", value: metrics?.total_citations, change: periodChange(metrics?.citations_change), colorVar: "chart-2", hint: "Every URL the AI cited in its answers during this period — the same total shown on the Citations page. Counts each citation, so one page cited several times counts more than once." },
+      { label: "Cited Pages", value: metrics?.total_cited_pages, change: periodChange(metrics?.cited_pages_change), colorVar: "chart-3", hint: "Distinct pages on your own domain that the AI cited in this period. Unlike Citations, each page is counted once no matter how often it was cited." },
     ];
   })();
 

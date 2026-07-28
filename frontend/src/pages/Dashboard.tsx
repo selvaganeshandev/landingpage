@@ -502,6 +502,7 @@ const Dashboard = () => {
             gaConnected={gaConnected}
             aiTrafficError={aiTrafficError}
             aiTrafficDailyError={aiTrafficDailyError}
+            isAllTime={chartSource?.window?.is_all_time}
           />
         </div>
       </div>

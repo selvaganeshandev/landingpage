@@ -784,6 +784,30 @@ def _calculate_visibility_score(
     return Decimal(str(visibility_score))
 
 
+def domain_data_start(domain_id):
+    """Earliest date this domain has any Insights data for.
+
+    Snapshots are the surviving history, but a freshly processed domain can have
+    live analytics rows before its first snapshot is written, so take whichever
+    is earlier. Returns None when the domain has no data at all.
+    """
+    earliest_snapshot = DomainMetricSnapshot.objects.filter(
+        domain_id=domain_id
+    ).aggregate(d=Min('snapshot_date'))['d']
+
+    earliest_live = PromptAnalytics.objects.annotate(
+        _window_dt=Coalesce('tracked_at', 'created_at'),
+    ).filter(
+        prompt__group__domain_id=domain_id,
+        track_status='COMP',
+    ).aggregate(d=Min('_window_dt'))['d']
+    if earliest_live is not None:
+        earliest_live = timezone.localtime(earliest_live).date()
+
+    candidates = [d for d in (earliest_snapshot, earliest_live) if d is not None]
+    return min(candidates) if candidates else None
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_summary(request):
@@ -863,6 +887,25 @@ def dashboard_summary(request):
         # Keep `days` consistent with the explicit range so previous-period
         # comparison + period_type fallback behave sensibly.
         days = (end_date - start_date).days + 1
+
+    # A preset window wider than the domain's history (notably "All time",
+    # which the UI sends as a flat 3650 days) is clamped to the first date we
+    # actually hold data for. Two things were wrong without this: the chart
+    # claimed a decade of history that never existed, and the previous-period
+    # comparison was computed against the decade BEFORE that — always empty, so
+    # every change on the card read "N/A".
+    #
+    # `is_all_time` tells the frontend the window covers everything we have, so
+    # it can drop the comparison entirely rather than print N/A against a period
+    # that could not have existed. Explicit start/end ranges are honored exactly
+    # and never clamped.
+    is_all_time = False
+    if not (start_param or end_param):
+        data_start = domain_data_start(domain_id)
+        if data_start and start_date < data_start:
+            start_date = data_start
+            days = (end_date - start_date).days + 1
+            is_all_time = True
 
     # Debug: Log calculated dates
     logger.info(f"Dashboard API: Calculated date range for {days} days - start_date: {start_date}, end_date: {end_date}")
@@ -1401,6 +1444,14 @@ def dashboard_summary(request):
     
     return Response({
         'period_days': days,
+        # The window actually served. `is_all_time` means it was widened to
+        # cover the domain's entire history, so there is no previous period to
+        # compare against and the UI hides the change rather than showing N/A.
+        'window': {
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'is_all_time': is_all_time,
+        },
         'domain_name': domain.name,
         'domain_url': domain.url,
         'metrics': metrics,
