@@ -1498,6 +1498,10 @@ def dashboard_summary(request):
     ).filter(
         prompt__group__domain_id=domain_id,
         track_status='COMP',
+        # The card is titled "Recent Mentions". Without this it listed every
+        # completed answer, including ones that never mentioned the brand, which
+        # rendered as a mention at position #0 — a rank that does not exist.
+        is_mention=True,
         _window_dt__gte=start_datetime,
         _window_dt__lte=end_datetime
     )

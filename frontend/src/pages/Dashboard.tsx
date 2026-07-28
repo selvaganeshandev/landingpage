@@ -574,13 +574,18 @@ const Dashboard = () => {
       </div>
 
       {/* ROW 4 — Competitive context (moved below, full width) */}
+      {/* `brands` includes YOUR OWN row; `competitors` does not. Feeding the
+          latter left the Share of Voice card showing everyone except the brand
+          whose share it is supposed to report. */}
       <CompetitorComparison competitors={
-        summary?.share_of_voice?.competitors?.map((c: any) => ({
-          name: c.name || `Competitor ${c.competitor_id}`,
+        summary?.share_of_voice?.brands?.map((c: any) => ({
+          name: c.is_you ? domainName : (c.name || `Competitor ${c.competitor_id}`),
           url: c.url || '',
           mentions: c.mention_count ?? 0,
           shareOfVoice: c.share_percentage ?? 0,
-          trend: c.trend ?? 0,
+          // null means "no earlier reading", which is not a trend of zero.
+          trend: c.trend ?? null,
+          isYou: Boolean(c.is_you),
         }))
       } />
 

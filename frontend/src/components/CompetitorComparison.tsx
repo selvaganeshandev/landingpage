@@ -10,14 +10,19 @@ interface Competitor {
    *  null when the brand has no earlier reading — no trend is not the same as
    *  a trend of zero, so it renders as nothing rather than "0%". */
   trend: number | null;
+  /** This row is the viewing brand, not a competitor. */
+  isYou: boolean;
 }
 
 export interface CompetitorComparisonProps {
-  competitors?: Array<{ name?: string; url?: string; mentions?: number; shareOfVoice?: number; trend?: number | null; }>;
+  /** Every brand in the market — YOURS INCLUDED. The card is titled Share of
+   *  Voice, so omitting your own row (as it did when it was fed the API's
+   *  `competitors` list) left out the only figure the user came for. */
+  competitors?: Array<{ name?: string; url?: string; mentions?: number; shareOfVoice?: number; trend?: number | null; isYou?: boolean; }>;
 }
 
 export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonProps) => {
-  const list: Competitor[] = competitors && competitors.length > 0 ? competitors.map((c, i) => ({
+  const list: Competitor[] = (competitors && competitors.length > 0 ? competitors.map((c, i) => ({
     name: c.name || `Competitor ${i+1}`,
     url: c.url || '',
     mentions: c.mentions ?? 0,
@@ -25,7 +30,11 @@ export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonP
     // Keep null distinct from 0 — `?? 0` here is what used to turn "unknown"
     // into a confident-looking 0%.
     trend: c.trend ?? null,
-  })) : [];
+    isYou: Boolean(c.isYou),
+  })) : [])
+    // Ranked by share, so the badge is a real market position. It used to be the
+    // array index, which numbered whatever order the API happened to return.
+    .sort((a, b) => b.shareOfVoice - a.shareOfVoice);
   return (
     <Card className="p-6 h-full flex flex-col border border-border">
       <h3 className="text-lg font-semibold mb-4">Share of Voice</h3>
@@ -36,14 +45,21 @@ export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonP
           </div>
         ) : (
           list.map((competitor, index) => (
-          <div key={competitor.name} className="space-y-2">
+          <div key={`${competitor.name}-${index}`} className={competitor.isYou ? "space-y-2 rounded-lg bg-primary/5 -mx-2 px-2 py-2" : "space-y-2"}>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-3 min-w-0 flex-1">
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary text-primary-foreground flex items-center justify-center font-bold text-sm flex-shrink-0">
                   {index + 1}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="font-medium truncate">{competitor.name}</p>
+                  <p className="font-medium truncate">
+                    {competitor.name}
+                    {competitor.isYou && (
+                      <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground align-middle">
+                        You
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs text-muted-foreground truncate">{competitor.url}</p>
                 </div>
               </div>
