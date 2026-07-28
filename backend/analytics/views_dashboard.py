@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 # Backend models
 from domains.models import Domain
+from core.queryset_scoping import user_can_access_domain
 from prompts.models import PromptAnalytics, DomainMetricSnapshot, PromptGroupMetricSnapshot, PromptGroup, Prompt
 from competitors.models import Competitor
 from .models import ShareOfVoiceAnalytics, SentimentAnalytics
@@ -848,10 +849,23 @@ def dashboard_summary(request):
     
     if not domain_id:
         return Response(
-            {'error': 'domain_id is required'}, 
+            {'error': 'domain_id is required'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
+    # Tenant isolation. Without this the endpoint took any domain_id from the
+    # query string and answered it, so any authenticated user could read another
+    # organisation's mentions, competitors, share of voice and prompts by
+    # changing one number in the URL. `user_can_access_domain` is the same rule
+    # the rest of the codebase uses: org-scoped always, plus an active
+    # DomainAccess grant for non-admin roles. 404 rather than 403 so the response
+    # does not confirm that a domain belonging to someone else exists.
+    if not user_can_access_domain(request.user, domain_id, request):
+        return Response(
+            {'error': 'Domain not found or not in your organization'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
     # Get domain
     domain = get_object_or_404(Domain, id=domain_id)
     

@@ -36,6 +36,7 @@ from rest_framework import status
 from analytics.models import ShareOfVoiceAnalytics
 from competitors.models import Competitor
 from domains.models import Domain
+from core.queryset_scoping import user_can_access_domain
 from prompts.models import PromptGroupMetricSnapshot
 
 logger = logging.getLogger(__name__)
@@ -716,6 +717,14 @@ def dashboard_export(request):
     if not domain_id:
         return Response({"error": "domain_id is required"},
                         status=status.HTTP_400_BAD_REQUEST)
+
+    # Tenant isolation — same rule as dashboard_summary. This endpoint takes the
+    # same parameters and had the same hole: any authenticated user could export
+    # another organisation's report by changing domain_id. 404, not 403, so the
+    # response never confirms that someone else's domain exists.
+    if not user_can_access_domain(request.user, domain_id, request):
+        return Response({"error": "Domain not found or not in your organization"},
+                        status=status.HTTP_404_NOT_FOUND)
 
     try:
         days = int(request.query_params.get("days", 30))
