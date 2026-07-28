@@ -166,6 +166,41 @@ def extract_position_from_response(response: str, user_domain: str, citation_url
 	return None
 
 
+# Two-part public suffixes seen in this product's markets. Without these,
+# "example.co.in" yields a registrable domain of "co.in" and every Indian site
+# collapses to the same bogus brand.
+_TWO_PART_SUFFIXES = {
+	'co.in', 'co.uk', 'com.au', 'co.nz', 'co.za', 'com.br', 'com.sg',
+	'com.my', 'co.jp', 'or.jp', 'ne.jp', 'com.mx', 'co.id', 'com.tr',
+}
+
+
+def _registrable_domain(host: str) -> str:
+	"""eTLD+1 for a hostname, e.g. kite.zerodha.com -> zerodha.com.
+
+	Splitting on the FIRST label instead (the old behaviour) turned a brand's
+	own subdomains into competitors: kite.zerodha.com became "Kite", and
+	support./coin.zerodha.com became "Support" and "Coin" — Zerodha's own
+	products, recorded as its rivals.
+	"""
+	host = (host or '').lower().strip().rstrip('.')
+	if not host:
+		return ''
+	parts = host.split('.')
+	if len(parts) < 2:
+		return host
+	if len(parts) >= 3 and '.'.join(parts[-2:]) in _TWO_PART_SUFFIXES:
+		return '.'.join(parts[-3:])
+	return '.'.join(parts[-2:])
+
+
+def _is_same_or_subdomain(host: str, own_host: str) -> bool:
+	"""True when `host` belongs to the brand itself, including subdomains."""
+	if not host or not own_host:
+		return False
+	return _registrable_domain(host) == _registrable_domain(own_host)
+
+
 def _extract_competitor_mentions(text: str, user_domain: str, all_urls: List[str] = None) -> List[str]:
 	"""
 	Extract competitor brand/company names from LLM response text.
@@ -190,20 +225,33 @@ def _extract_competitor_mentions(text: str, user_domain: str, all_urls: List[str
 	# This is the most accurate source - if they have a URL, they're a real company
 	if all_urls:
 		# Common domains to exclude (not competitors)
+		# Reference and community sites that get cited constantly and are not
+		# anybody's competitor. Reddit's absence is why it was recorded as a
+		# rival of a Kerala tourism brand.
 		excluded_domains = {
 			'google', 'facebook', 'twitter', 'linkedin', 'instagram', 'youtube',
 			'github', 'stackoverflow', 'wikipedia', 'medium', 'amazon', 'aws',
 			'microsoft', 'apple', 'w3', 'mozilla', 'chrome', 'example', 'test',
-			'localhost', 'schema', 'json', 'xml'
+			'localhost', 'schema', 'json', 'xml',
+			'reddit', 'quora', 'wikimedia', 'wiktionary', 'britannica',
+			'tripadvisor', 'yelp', 'glassdoor', 'crunchbase', 'bloomberg',
+			'forbes', 'reuters', 'bbc', 'cnn', 'nytimes', 'wsj', 'economictimes',
+			'timesofindia', 'hindustantimes', 'livemint', 'moneycontrol',
+			'investopedia', 'yahoo', 'bing', 'duckduckgo', 'archive',
+			'x', 'threads', 'tiktok', 'pinterest', 'substack', 'blogspot',
+			'wordpress', 'wix', 'squarespace', 'shopify', 'gov', 'nic',
 		}
 
 		for url in all_urls:
 			domain = _get_domain_from_url(url)
-			if not domain or domain == user_domain_clean:
+			# Skip the brand's own site AND its subdomains. Matching only the
+			# exact host let kite./support./coin.zerodha.com through as rivals.
+			if not domain or _is_same_or_subdomain(domain, user_domain_clean):
 				continue
 
-			# Extract SLD (second-level domain) as potential competitor name
-			sld = domain.split('.')[0] if domain else ""
+			# Brand label from the REGISTRABLE domain, not the first hostname
+			# label — otherwise every subdomain becomes its own "company".
+			sld = _registrable_domain(domain).split('.')[0]
 
 			# Skip if it's an excluded common domain or matches user's domain
 			if sld.lower() in excluded_domains or sld.lower() == user_sld.lower():
@@ -225,10 +273,22 @@ def _extract_competitor_mentions(text: str, user_domain: str, all_urls: List[str
 	domain_mention_pattern = r'([A-Z][a-zA-Z]+)\.(com|io|net|org|co)\b'
 	domain_matches = re.findall(domain_mention_pattern, text, re.IGNORECASE)
 
+	# NOTE: `excluded_domains` is defined inside the URL strategy above, so it is
+	# re-stated here rather than reached into; the text strategy previously
+	# applied no exclusions at all, which is how "Wikipedia.org" in prose became
+	# a tracked competitor.
+	_text_excluded = {
+		'google', 'facebook', 'twitter', 'linkedin', 'instagram', 'youtube',
+		'github', 'stackoverflow', 'wikipedia', 'medium', 'amazon', 'reddit',
+		'quora', 'tripadvisor', 'yelp', 'forbes', 'bloomberg', 'investopedia',
+	}
 	for match in domain_matches:
 		brand_name = match[0].strip()
-		if brand_name and len(brand_name) >= 3 and brand_name.lower() != user_sld.lower():
-			competitors.add(brand_name)
+		if not brand_name or len(brand_name) < 3:
+			continue
+		if brand_name.lower() in {user_sld.lower()} | _text_excluded:
+			continue
+		competitors.add(brand_name)
 
 	# Pattern 2: Single-word compound brands in numbered lists
 	# Must be CamelCase or mixed case (e.g., FlyNax, OxyClassifieds, ClassiPress)

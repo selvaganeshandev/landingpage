@@ -237,9 +237,16 @@ def extract_competitors_for_domain(domain_id: int) -> Tuple[int, List[str]]:
     created_competitors = []
     created_count = 0
 
+    # Real cited hosts for this domain, keyed by brand label. The URL was
+    # previously GUESSED as https://www.<name>.com and never checked, which is
+    # why 98% of competitor records pointed at a fabricated address —
+    # wikipedia.org was stored as wikipedia.com, and Zerodha's own
+    # kite.zerodha.com became an unrelated business at kite.com. The real URL
+    # is already in citation_list; use it.
+    real_urls = _cited_urls_by_brand(domain)
+
     for competitor_name, mention_count in top_competitors:
-        # Try to extract/guess URL
-        competitor_url = _guess_competitor_url(competitor_name)
+        competitor_url = real_urls.get(competitor_name.lower()) or _guess_competitor_url(competitor_name)
 
         # Create or update competitor
         competitor, created = Competitor.objects.get_or_create(
@@ -301,6 +308,47 @@ def _clean_competitor_name(name: str) -> str:
         name = name.title()
 
     return name
+
+
+def _cited_urls_by_brand(domain):
+    """{brand label -> real https://<registrable domain>} from cited URLs.
+
+    Built from the citation lists the engine already stores, so a competitor's
+    address is something an AI actually linked to rather than a guess. Where a
+    brand was never cited by URL we fall back to guessing, and the caller marks
+    nothing — but at least the guess is no longer the default.
+    """
+    from collections import Counter
+    from core.analytics_helpers import _get_domain_from_url, _registrable_domain
+
+    hosts = Counter()
+    qs = PromptAnalytics.objects.filter(
+        prompt__group__domain=domain
+    ).values_list('citation_list', flat=True)
+    for citation_list in qs:
+        if not isinstance(citation_list, list):
+            continue
+        for entry in citation_list:
+            url = None
+            if isinstance(entry, dict):
+                for field in ('url', 'source', 'link', 'href', 'uri'):
+                    value = entry.get(field)
+                    if value and isinstance(value, str):
+                        url = value
+                        break
+            elif isinstance(entry, str):
+                url = entry
+            if not url:
+                continue
+            registrable = _registrable_domain(_get_domain_from_url(url))
+            if registrable:
+                hosts[registrable] += 1
+
+    out = {}
+    for registrable, _count in hosts.most_common():
+        label = registrable.split('.')[0]
+        out.setdefault(label.lower(), f"https://{registrable}")
+    return out
 
 
 def _guess_competitor_url(competitor_name: str) -> str:
