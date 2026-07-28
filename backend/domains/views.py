@@ -121,7 +121,7 @@ def _gemini_vertex_client():
     return _VERTEX_CLIENT
 
 
-def generate_gemini_text(prompt: str, timeout: int = 60) -> str:
+def generate_gemini_text(prompt: str, timeout: int = 60, max_tokens: int = 4096) -> str:
     """Run `prompt` through Gemini on whichever transport is configured.
 
     GEMINI_BACKEND=vertex uses a service account and bills VERTEX_PROJECT;
@@ -142,11 +142,14 @@ def generate_gemini_text(prompt: str, timeout: int = 60) -> str:
             model=getattr(settings, 'OPENROUTER_GEMINI_MODEL', 'google/gemini-2.5-flash'),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            # gemini-2.5-flash reasons before answering and that reasoning is
-            # charged against the budget; unbounded it returned JSON truncated
-            # mid-element. Effort low, with room for the answer itself.
-            max_tokens=4096,
-            extra_body={"reasoning": {"effort": "low"}},
+            max_tokens=max_tokens,
+            # Deliberately NO reasoning parameter. For Gemini on OpenRouter,
+            # sending one TURNS REASONING ON: measured on the same prompt,
+            # {"effort": "low"} produced 634 reasoning tokens and a truncated
+            # answer, while omitting it produced 0 reasoning tokens and a
+            # complete one. That is the opposite of gpt-5-mini, where reasoning
+            # is on by default and "low" reduces it — so this cannot be shared
+            # with the OpenRouter calls elsewhere in this module.
             timeout=timeout,
         )
         return (response.choices[0].message.content or '').strip()
@@ -935,7 +938,9 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
             # — e.g. 50 keywords × 9 fields — room to finish on Gemini before we
             # fall back; combined with the 180s OpenAI cap it stays under the
             # frontend's 5-min window.
-            result_text = generate_gemini_text(prompt, timeout=30)
+            # 50 keywords x 9 fields is ~8-12k tokens of JSON; at the 4096
+            # default the reply was cut off mid-string at 10,697 characters.
+            result_text = generate_gemini_text(prompt, timeout=120, max_tokens=16000)
         except Exception as gemini_err:
             err_str = str(gemini_err)
             err_lower = err_str.lower()
