@@ -50,8 +50,18 @@ const Dashboard = () => {
   const [gaConnected, setGaConnected] = useState<boolean | null>(null);
   const [aiTrafficError, setAiTrafficError] = useState(false);
   const [aiTrafficDailyError, setAiTrafficDailyError] = useState(false);
+  // The trend chart owns its own time range (1M / 6M / All time). It is
+  // deliberately INDEPENDENT of the page window: clicking a chart preset must
+  // move only that widget, never the gauge, cards, distribution, share of
+  // voice or the mentions table. The page window is driven solely by the
+  // From/To pickers in the header (defaulting to `timePeriod`).
+  const [chartDays, setChartDays] = useState("30");
+  const [chartSummary, setChartSummary] = useState<any>(null);
   const { toast } = useToast();
   const hasMountedRef = useRef(false);
+  // Guards the chart's own fetches: the newest request wins, so a slow earlier
+  // response can never repaint the chart after a later one has landed.
+  const chartRequestRef = useRef(0);
 
   // Use refs to track the current filters to prevent unnecessary re-fetches
   const currentDomainIdRef = useRef<string>("");
@@ -178,13 +188,12 @@ const Dashboard = () => {
     void fetchSummary(true);
   };
 
-  // Time-range presets (1M / 6M / All time) drive the existing `days` window.
-  // Selecting one clears any custom date range so the preset actually applies
-  // (a complete range otherwise overrides `days` in fetchSummary).
+  // Time-range presets (1M / 6M / All time) belong to the trend chart alone.
+  // They no longer clear the page's date range or move `timePeriod` — doing so
+  // silently refetched the whole dashboard, so a click inside one card changed
+  // every other widget on the page.
   const handleTimeRangeChange = (days: string) => {
-    setExportStartDate(undefined);
-    setExportEndDate(undefined);
-    setTimePeriod(days);
+    setChartDays(days);
   };
 
   async function fetchSummary(forceRefresh = false) {
@@ -245,55 +254,9 @@ const Dashboard = () => {
       });
       setSummary(data);
 
-      // Fetch the daily AI-referred traffic series (GA4 sessionSource filtered,
-      // dimensioned by date) for the Visibility vs Traffic correlation chart.
-      api.getAIReferralTimeseries(
-        Number(currentDomainId),
-        startStr || undefined,
-        endStr || undefined,
-        useRange ? undefined : Number(timePeriod),
-      )
-        .then((res: any) => {
-          const daily = res?.data?.daily || [];
-          if (daily.length > 0) {
-            setAiTrafficDaily(daily.map((row: any) => ({
-              date: formatGADate(row.date),
-              sessions: Number(row.sessions || 0),
-              users: Number(row.totalUsers || 0),
-            })));
-          } else {
-            setAiTrafficDaily(null);
-          }
-          setAiTrafficDailyError(false);
-        })
-        .catch(() => {
-          setAiTrafficDaily(null);
-          setAiTrafficDailyError(true);
-        });
-
-      // Fetch AI-referred traffic (GA4 sessionSource filtered) for the AI Traffic
-      // tab. Falls back to the selected `days` window when no explicit range.
-      api.getAIReferralData(
-        Number(currentDomainId),
-        startStr || undefined,
-        endStr || undefined,
-        useRange ? undefined : Number(timePeriod),
-      )
-        .then((res: any) => {
-          if (res?.totals || res?.platform_breakdown) {
-            setAiTraffic({
-              totals: res.totals ?? {},
-              platform_breakdown: res.platform_breakdown ?? {},
-            });
-          } else {
-            setAiTraffic(null);
-          }
-          setAiTrafficError(false);
-        })
-        .catch(() => {
-          setAiTraffic(null);
-          setAiTrafficError(true);
-        });
+      // The two GA-backed series (AI Traffic tab, Visibility vs Traffic tab)
+      // are fetched by the chart's own effect below: both tabs live inside the
+      // trend widget, so they follow ITS window, not the page's.
 
       // Resolve GA connection status independently of the GA data calls above
       // (which can 429 on GA4's hourly quota). This is the source of truth for
@@ -347,6 +310,67 @@ const Dashboard = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, domainId, timePeriod, selectedLLM, exportStartDate, exportEndDate]);
+
+  // The chart reuses the page's payload whenever both describe the same window,
+  // so the common case (page on its default, chart on 1M) still costs a single
+  // request. Only a chart range that diverges from the page triggers a second
+  // fetch.
+  const pageUsesRange = Boolean(exportStartDate && exportEndDate);
+  const chartMatchesPage = !pageUsesRange && chartDays === timePeriod;
+  const chartSource = chartMatchesPage ? summary : chartSummary;
+
+  // Trend widget data. Owns its own window (`chartDays`) for BOTH the series
+  // and the pills above it — a 6-month line printed over the page's 30-day
+  // totals would make the card contradict itself.
+  useEffect(() => {
+    if (!user || !domainId) return;
+    const requestId = ++chartRequestRef.current;
+    const isCurrent = () => requestId === chartRequestRef.current;
+    const days = Number(chartDays);
+    const llm = selectedLLM !== 'all' ? selectedLLM : undefined;
+
+    if (!chartMatchesPage) {
+      api.getDashboardSummary({ domain_id: domainId, days, llm_model: llm })
+        .then((data: any) => { if (isCurrent()) setChartSummary(data); })
+        .catch(() => { if (isCurrent()) setChartSummary(null); });
+    }
+
+    // Daily AI-referred traffic (GA4 sessionSource filtered, dimensioned by
+    // date) for the Visibility vs Traffic correlation chart.
+    api.getAIReferralTimeseries(Number(domainId), undefined, undefined, days)
+      .then((res: any) => {
+        if (!isCurrent()) return;
+        const daily = res?.data?.daily || [];
+        setAiTrafficDaily(daily.length > 0
+          ? daily.map((row: any) => ({
+              date: formatGADate(row.date),
+              sessions: Number(row.sessions || 0),
+              users: Number(row.totalUsers || 0),
+            }))
+          : null);
+        setAiTrafficDailyError(false);
+      })
+      .catch(() => {
+        if (!isCurrent()) return;
+        setAiTrafficDaily(null);
+        setAiTrafficDailyError(true);
+      });
+
+    // AI-referred traffic totals + platform breakdown for the AI Traffic tab.
+    api.getAIReferralData(Number(domainId), undefined, undefined, days)
+      .then((res: any) => {
+        if (!isCurrent()) return;
+        setAiTraffic(res?.totals || res?.platform_breakdown
+          ? { totals: res.totals ?? {}, platform_breakdown: res.platform_breakdown ?? {} }
+          : null);
+        setAiTrafficError(false);
+      })
+      .catch(() => {
+        if (!isCurrent()) return;
+        setAiTraffic(null);
+        setAiTrafficError(true);
+      });
+  }, [user, domainId, chartDays, selectedLLM, chartMatchesPage]);
 
   // Show loading state whenever we're fetching data
   if (loading || !summary) {
@@ -467,14 +491,14 @@ const Dashboard = () => {
         </div>
         <div className="lg:col-span-2">
           <TrendChart
-            data={summary?.trends}
-            metrics={summary?.metrics}
-            timeRange={exportStartDate && exportEndDate ? undefined : timePeriod}
+            data={chartSource?.trends}
+            metrics={chartSource?.metrics}
+            timeRange={chartDays}
             onTimeRangeChange={handleTimeRangeChange}
             aiTrafficDaily={aiTrafficDaily}
-            shareOfVoice={summary?.share_of_voice?.your_brand?.share_percentage ?? null}
+            shareOfVoice={chartSource?.share_of_voice?.your_brand?.share_percentage ?? null}
             aiTraffic={aiTraffic}
-            isPeriodData={summary?.trends_are_period}
+            isPeriodData={chartSource?.trends_are_period}
             gaConnected={gaConnected}
             aiTrafficError={aiTrafficError}
             aiTrafficDailyError={aiTrafficDailyError}
