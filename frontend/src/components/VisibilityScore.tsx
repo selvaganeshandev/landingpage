@@ -41,6 +41,23 @@ const SCORE_BANDS = [
 const getBand = (score: number) =>
   SCORE_BANDS.find((band) => score >= band.min) ?? SCORE_BANDS[SCORE_BANDS.length - 1];
 
+/** The card's shared info affordance, so every figure on it can explain what it
+ *  counts and over what window without repeating the tooltip scaffolding. */
+const InfoHint = ({ side = "top", children }: { side?: "top" | "right"; children: React.ReactNode }) => (
+  <TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" className="inline-flex cursor-pointer text-muted-foreground opacity-50 hover:opacity-100 transition-opacity">
+          <Info className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side={side} className="max-w-xs text-xs">
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
+
 // Semicircle arc geometry: path from (20,100) to (180,100) with radius 80.
 const ARC_RADIUS = 80;
 const ARC_LENGTH = Math.PI * ARC_RADIUS;
@@ -56,31 +73,22 @@ export const VisibilityScore = ({ brand, score, mentions, avgPosition = 0, senti
       <div className="space-y-4 h-full flex flex-col">
         <div className="flex items-center gap-1.5">
           <h3 className="text-lg font-semibold">AI Visibility</h3>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button type="button" className="inline-flex cursor-pointer text-muted-foreground opacity-50 hover:opacity-100 transition-opacity">
-                  <Info className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              {/* Names all four components and their weights. The previous text
-                  described only mentions and position, leaving half the score
-                  (citations + sentiment) unexplained — so a user whose score
-                  moved could not tell what had actually changed. */}
-              <TooltipContent side="right" className="max-w-xs text-xs">
-                <p className="font-medium mb-1">How your brand shows up in AI answers (0–100)</p>
-                <p className="mb-1.5 text-muted-foreground">
-                  Measured across the prompts you track, as a share of the answers we checked.
-                </p>
-                <ul className="space-y-0.5">
-                  <li>• <strong>40%</strong> how often you're mentioned</li>
-                  <li>• <strong>30%</strong> how often your site is cited</li>
-                  <li>• <strong>20%</strong> how positively you're described</li>
-                  <li>• <strong>10%</strong> how early you appear in the answer</li>
-                </ul>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          {/* Names all four components and their weights. The previous text
+              described only mentions and position, leaving half the score
+              (citations + sentiment) unexplained — so a user whose score
+              moved could not tell what had actually changed. */}
+          <InfoHint side="right">
+            <p className="font-medium mb-1">How your brand shows up in AI answers (0–100)</p>
+            <p className="mb-1.5 text-muted-foreground">
+              Measured across the prompts you track, as a share of the answers we checked.
+            </p>
+            <ul className="space-y-0.5">
+              <li>• <strong>40%</strong> how often you're mentioned</li>
+              <li>• <strong>30%</strong> how often your site is cited</li>
+              <li>• <strong>20%</strong> how positively you're described</li>
+              <li>• <strong>10%</strong> how early you appear in the answer</li>
+            </ul>
+          </InfoHint>
         </div>
 
         {/* AI Visibility Score gauge (semicircular arc) */}
@@ -135,11 +143,21 @@ export const VisibilityScore = ({ brand, score, mentions, avgPosition = 0, senti
 
         <div className="grid grid-cols-2 gap-4 pt-2">
           <div>
-            <p className="text-sm text-muted-foreground">Total Mentions</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm text-muted-foreground">Total Mentions</p>
+              <InfoHint>
+                Times your brand was named in AI answers across your tracked prompts in this period.
+              </InfoHint>
+            </div>
             <p className="text-2xl font-bold">{mentions}</p>
           </div>
           <div>
-            <p className="text-sm text-muted-foreground">Avg Position</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm text-muted-foreground">Avg Position</p>
+              <InfoHint>
+                Average rank of your brand where it appears in an AI answer. Lower is better — position 1 means it was named first.
+              </InfoHint>
+            </div>
             <p className="text-2xl font-bold">{avgPosition > 0 ? avgPosition.toFixed(1) : '0'}</p>
           </div>
         </div>
