@@ -2429,8 +2429,13 @@ def automated_domain_onboard(request):
         # Step 1: Fetch niches if not provided (Progress: Analyzing your top niches)
         if not niches or len(niches) == 0:
             try:
-                genai = get_google_genai_client()
-                model = genai.GenerativeModel(settings.GEMINI_MODEL)
+                # Internal analysis, so it runs on OpenRouter like the brand-info
+                # step below — not on Google's Generative Language API. Calling
+                # Google directly here meant domain creation depended on a valid
+                # per-org Gemini BYOK key, which stopped existing when BYOK moved
+                # to OpenRouter: org 1's key was left as the placeholder "aaaa"
+                # and Google answered API_KEY_INVALID.
+                client = get_openai_client()
 
                 prompt = f"""Analyze the brand "{brand_name}" (website: {domain_name}) and suggest relevant industry niches or categories.
 
@@ -2439,8 +2444,16 @@ Example format: ["Enterprise SaaS", "Cloud Infrastructure", "DevOps Tools"]
 
 Provide the response as a valid JSON array only, no additional text."""
 
-                response = model.generate_content(prompt)
-                result_text = response.text.strip()
+                response = client.chat.completions.create(
+                    model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
+                    messages=[
+                        {"role": "system", "content": "You are a market analyst. Always respond with a valid JSON array only."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=500
+                )
+                result_text = (response.choices[0].message.content or '').strip()
 
                 # Parse niches
                 if result_text.startswith('```'):
@@ -2461,8 +2474,10 @@ Provide the response as a valid JSON array only, no additional text."""
         # Step 2: Generate semantic keywords (Progress: Finding the best topics)
         generated_keywords = []
         try:
-            genai = get_google_genai_client()
-            model = genai.GenerativeModel(settings.GEMINI_MODEL)
+            # Same reasoning as the niche step above: internal analysis belongs on
+            # OpenRouter. This was the call that actually blocked domain creation,
+            # because unlike the niche step it does not degrade gracefully.
+            client = get_openai_client()
 
             niche_text = ", ".join(niches) if niches else "general business"
             max_keywords = 50
@@ -2516,8 +2531,16 @@ Return ONLY a valid JSON object with this structure:
   ]
 }}"""
 
-            response = model.generate_content(prompt)
-            result_text = response.text.strip()
+            response = client.chat.completions.create(
+                model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
+                messages=[
+                    {"role": "system", "content": "You are an expert SEO keyword researcher. Always respond with valid JSON only."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=8000
+            )
+            result_text = (response.choices[0].message.content or '').strip()
 
             # Parse keywords
             if result_text.startswith('```'):
