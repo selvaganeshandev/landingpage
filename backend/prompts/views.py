@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.db.models import Q, Count, Avg, F, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.conf import settings
 from datetime import timedelta, datetime
 from .models import PromptGroup, Prompt, PromptAnalytics, PromptGroupMetricSnapshot, PromptMetricSnapshot, DomainMetricSnapshot
 from domains.models import Domain, DomainAccess
