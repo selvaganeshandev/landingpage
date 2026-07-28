@@ -142,7 +142,7 @@ class Command(BaseCommand):
             }
         ).execute()
 
-        property_timezone = self._property_timezone(service, property_id)
+        property_timezone = self._property_timezone(credentials, property_id)
         rows = self._parse(response)
         if options['dry_run']:
             self.stdout.write(f"  domain {domain.id} ({domain.name}): {start}..{end} -> {len(rows)} rows (dry run)")
@@ -170,14 +170,21 @@ class Command(BaseCommand):
         return written
 
     @staticmethod
-    def _property_timezone(service, property_id):
+    def _property_timezone(credentials, property_id):
         """GA4 buckets days in the property's timezone, which need not match the
         server's. The correlation chart joins these dates against snapshot dates,
-        so the boundary is recorded rather than assumed."""
+        so the boundary is recorded rather than assumed.
+
+        This is an ADMIN API field. The Data API's getMetadata returns the
+        property's dimensions and metrics, not its settings, which is why an
+        earlier attempt against it always came back empty.
+        """
         try:
-            meta = service.properties().getMetadata(name=f'{property_id}/metadata').execute()
-            return meta.get('timeZone', '') or ''
-        except Exception:
+            admin = build('analyticsadmin', 'v1beta', credentials=credentials)
+            prop = admin.properties().get(name=property_id).execute()
+            return prop.get('timeZone', '') or ''
+        except Exception as exc:
+            logger.info("Could not read GA4 property timezone for %s: %s", property_id, exc)
             return ''
 
     @staticmethod

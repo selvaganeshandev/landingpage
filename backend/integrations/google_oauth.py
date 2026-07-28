@@ -895,6 +895,17 @@ def get_ai_referral_data(request):
             status='active'
         )
 
+        # Served from ga_ai_traffic_daily, not from GA4. The nightly
+        # sync_ai_traffic command owns the fetching; keeping it off the request
+        # path is what stops the traffic tabs 429-ing on GA4's hourly quota and
+        # what makes the figures survive a disconnected integration.
+        _ensure_traffic_synced(domain_id, days)
+        _start = datetime.strptime(start_date, '%Y-%m-%d').date()
+        _end = datetime.strptime(end_date, '%Y-%m-%d').date()
+        body = _build_ai_traffic_body(domain_id, _start, _end, days)
+        cache.set(cache_key, {'body': body}, AI_REFERRAL_CACHE_TTL)
+        return Response(body)
+
         if not integration.provider_id or integration.provider_id == '':
             return Response({
                 'error': 'Please select a GA4 property first',
@@ -1048,6 +1059,14 @@ def get_ai_referral_timeseries(request):
             type='google_analytics',
             status='active'
         )
+
+        # Served from ga_ai_traffic_daily — see the note in get_ai_referral_data.
+        _ensure_traffic_synced(domain_id, days)
+        _start = datetime.strptime(start_date, '%Y-%m-%d').date()
+        _end = datetime.strptime(end_date, '%Y-%m-%d').date()
+        body = _build_ai_timeseries_body(domain_id, _start, _end, days)
+        cache.set(cache_key, {'body': body}, AI_REFERRAL_CACHE_TTL)
+        return Response(body)
 
         if not integration.provider_id or integration.provider_id == '':
             return Response({
@@ -1286,4 +1305,131 @@ def parse_ai_referral_response(response):
         'by_platform': by_platform,
         'platform_breakdown': platform_breakdown,
         'totals': totals,
+    }
+
+
+# ---------------------------------------------------------------------------
+# DB-backed readers for AI-referred traffic.
+#
+# These endpoints used to call GA4 on every request and keep the answer only in
+# a 15-minute cache, which meant the numbers existed nowhere durable, the
+# traffic tabs 429'd on GA4's hourly quota under ordinary use, and disconnecting
+# the integration erased the history. `ga_ai_traffic_daily` now holds it, filled
+# by the nightly `sync_ai_traffic` command.
+#
+# Response shapes are unchanged — the frontend is untouched.
+# ---------------------------------------------------------------------------
+
+def _stored_ai_traffic_rows(domain_id, start_date, end_date):
+    """Per-platform rows for the window, excluding the combined sentinel."""
+    from .models import GAAITrafficDaily
+    return GAAITrafficDaily.objects.filter(
+        domain_id=domain_id,
+        date__gte=start_date,
+        date__lte=end_date,
+    ).exclude(platform=GAAITrafficDaily.ALL_PLATFORMS)
+
+
+def _ensure_traffic_synced(domain_id, days):
+    """Backfill on first use so a newly connected property is not blank until
+    the nightly job runs. Only ever fires when the domain has NO stored rows at
+    all; steady state never touches GA4 from the request path."""
+    from .models import GAAITrafficDaily
+    if GAAITrafficDaily.objects.filter(domain_id=domain_id).exists():
+        return
+    try:
+        from django.core.management import call_command
+        call_command('sync_ai_traffic', domain_id=int(domain_id), days=max(int(days or 28), 90), verbosity=0)
+    except Exception as exc:
+        logger.warning("On-demand AI traffic sync failed for domain %s: %s", domain_id, exc)
+
+
+def _build_ai_traffic_body(domain_id, start_date, end_date, days):
+    """`get_ai_referral_data`'s body, assembled from stored rows."""
+    from .models import GAAITrafficDaily
+
+    totals = {'visits': 0, 'conversions': 0, 'revenue': 0.0, 'users': 0, 'pageViews': 0}
+    platform_breakdown = {}
+    by_platform = {}
+    duration_weight = {}
+
+    for r in _stored_ai_traffic_rows(domain_id, start_date, end_date):
+        name = r.platform
+        pb = platform_breakdown.setdefault(name, {
+            'visits': 0, 'conversions': 0, 'revenue': 0,
+            'bounceRate': 0, 'avgDuration': 0, 'conversionRate': 0,
+            'users': 0, 'pageViews': 0,
+        })
+        bp = by_platform.setdefault(name, {'sessions': 0, 'users': 0, 'pageviews': 0, 'sources': []})
+
+        pb['visits'] += r.sessions
+        pb['users'] += r.users
+        pb['pageViews'] += r.page_views
+        pb['conversions'] += r.conversions
+        bp['sessions'] += r.sessions
+        bp['users'] += r.users
+        bp['pageviews'] += r.page_views
+        # Session-weighted, so the window's average duration is a real mean and
+        # not an average of daily averages.
+        duration_weight[name] = duration_weight.get(name, 0.0) + float(r.avg_duration or 0) * r.sessions
+
+        totals['visits'] += r.sessions
+        totals['users'] += r.users
+        totals['pageViews'] += r.page_views
+        totals['conversions'] += r.conversions
+
+    for name, pb in platform_breakdown.items():
+        if pb['visits']:
+            pb['avgDuration'] = round(duration_weight.get(name, 0.0) / pb['visits'], 2)
+            pb['conversionRate'] = round(pb['conversions'] / pb['visits'], 4)
+
+    synced_at = (GAAITrafficDaily.objects
+                 .filter(domain_id=domain_id)
+                 .order_by('-synced_at')
+                 .values_list('synced_at', flat=True)
+                 .first())
+
+    return {
+        'success': True,
+        'ai_traffic': {'by_platform': by_platform, 'platform_breakdown': platform_breakdown, 'totals': totals},
+        'platform_breakdown': platform_breakdown,
+        'totals': totals,
+        'currency_code': 'USD',
+        # Stored rows come from the Data API, which is unsampled.
+        'sampling': {'is_sampled': False},
+        'date_range': {'start': str(start_date), 'end': str(end_date), 'days': days},
+        'source': 'db',
+        'synced_at': synced_at.isoformat() if synced_at else None,
+    }
+
+
+def _build_ai_timeseries_body(domain_id, start_date, end_date, days):
+    """`get_ai_referral_timeseries`'s body, assembled from the combined rows."""
+    from .models import GAAITrafficDaily
+
+    rows = GAAITrafficDaily.objects.filter(
+        domain_id=domain_id,
+        date__gte=start_date,
+        date__lte=end_date,
+        platform=GAAITrafficDaily.ALL_PLATFORMS,
+    ).order_by('date')
+
+    daily = [{
+        'date': r.date.strftime('%Y%m%d'),
+        'sessions': r.sessions,
+        'totalUsers': r.users,
+    } for r in rows]
+
+    return {
+        'success': True,
+        'data': {
+            'daily': daily,
+            'totals': {
+                'sessions': sum(d['sessions'] for d in daily),
+                'totalUsers': sum(d['totalUsers'] for d in daily),
+            },
+        },
+        'date_range': {'start': str(start_date), 'end': str(end_date), 'days': days},
+        'sampling': {'is_sampled': False},
+        'source': 'db',
     }
