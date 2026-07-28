@@ -1286,7 +1286,19 @@ def dashboard_summary(request):
                 'period_citations': 0,
                 'period_cited_pages': 0,
                 'visibility_sum': 0,
-                'visibility_weight': 0
+                'visibility_weight': 0,
+                # Recorded inputs to the visibility formula, summed across the
+                # platform rows for this date. Present only on snapshots written
+                # at formula version >= 1; version 0 rows carry a score whose
+                # inputs were never stored and which therefore cannot be
+                # recomputed or compared. See `_period_visibility` below.
+                'responses': 0,
+                'mentioned': 0,
+                'own_cited': 0,
+                'sent_sum': 0.0,
+                'pos_sum': 0.0,
+                'pos_n': 0,
+                'has_inputs': False,
             }
 
         snapshot_by_date[snapshot_date]['mentions'] += snapshot.mentions
@@ -1306,6 +1318,20 @@ def dashboard_summary(request):
         if snapshot.visibility_score and snapshot.mentions > 0:
             snapshot_by_date[snapshot_date]['visibility_sum'] += float(snapshot.visibility_score) * snapshot.mentions
             snapshot_by_date[snapshot_date]['visibility_weight'] += snapshot.mentions
+
+        # Visibility INPUTS, pooled across this date's platform rows. Counts are
+        # additive; the two averages are re-derived from their own totals rather
+        # than averaged, so a platform with more answers weighs more.
+        if getattr(snapshot, 'visibility_formula_version', 0) >= 1 and snapshot.period_responses:
+            bucket = snapshot_by_date[snapshot_date]
+            bucket['has_inputs'] = True
+            bucket['responses'] += snapshot.period_responses
+            bucket['mentioned'] += snapshot.period_mentioned_responses
+            bucket['own_cited'] += snapshot.period_own_cited_responses
+            bucket['sent_sum'] += float(snapshot.period_avg_sentiment or 0) * snapshot.period_mentioned_responses
+            if snapshot.period_avg_position and float(snapshot.period_avg_position) > 0:
+                bucket['pos_sum'] += float(snapshot.period_avg_position) * snapshot.period_mentioned_responses
+                bucket['pos_n'] += snapshot.period_mentioned_responses
     
     # Build trends array.
     #
@@ -1357,18 +1383,39 @@ def dashboard_summary(request):
         domain_id, start_date, end_date, ordered_dates, platform_filter, domain_host,
     )
 
+    # Every visibility number on this page now comes from compute_visibility_score.
+    # Order of preference per point:
+    #   1. the period's own RECORDED INPUTS (formula version >= 1)
+    #   2. a live recompute, where the underlying rows still exist
+    #   3. nothing — the point carries no visibility at all
+    #
+    # (3) is deliberate. Older snapshots hold a score produced by the previous
+    # MAX-normalised formula, and the inputs needed to rescore them were never
+    # stored, so they cannot be put on the current scale. Plotting them anyway
+    # drew two different scoring systems as one line: a domain could show 40.1
+    # next to 86.58 and read as a collapse in visibility that never happened.
+    # A gap is honest; a mixed scale is not.
+    def _period_visibility(data):
+        if data['has_inputs'] and data['responses'] > 0:
+            mentioned = data['mentioned']
+            avg_sentiment = (data['sent_sum'] / mentioned) if mentioned else 0.0
+            avg_position = (data['pos_sum'] / data['pos_n']) if data['pos_n'] else 0.0
+            return compute_visibility_score(
+                data['responses'], mentioned, data['own_cited'], avg_sentiment, avg_position
+            )
+        return None
+
     for snapshot_date in ordered_dates:
         data = snapshot_by_date[snapshot_date]
-        stored_visibility = (
-            data['visibility_sum'] / data['visibility_weight']
-            if data['visibility_weight'] > 0 else 0
-        )
-        day_visibility = live_vis_map.get(snapshot_date, stored_visibility)
+        day_visibility = _period_visibility(data)
+        if day_visibility is None:
+            day_visibility = live_vis_map.get(snapshot_date)
 
         point = {
             'date': format_date_for_chart(snapshot_date),
-            'visibility': round(day_visibility, 2),
         }
+        if day_visibility is not None:
+            point['visibility'] = round(day_visibility, 2)
         if trends_are_period:
             point['mentions'] = data['period_mentions']
             point['citations'] = data['period_citations']

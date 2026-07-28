@@ -246,8 +246,12 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
   // "Period before all time" is not a thing. Passing undefined (rather than
   // null) hides the comparison entirely — see PillProps for the semantics.
   const periodChange = (value?: number | null) => (isAllTime ? undefined : value);
-  const hasCitationsSeries = data[0]?.citations !== undefined;
-  const hasVisibilitySeries = data[0]?.visibility !== undefined;
+  // Check every point, not just the first. A period whose visibility could not
+  // be put on the current scale carries no `visibility` key at all, so testing
+  // data[0] alone would hide the whole series whenever the earliest point
+  // happened to be one of those.
+  const hasCitationsSeries = data.some((d) => d.citations !== undefined);
+  const hasVisibilitySeries = data.some((d) => d.visibility !== undefined);
 
   // ---- AI Traffic tab derived values ----
   const aiPlatformData = aiTraffic?.platform_breakdown

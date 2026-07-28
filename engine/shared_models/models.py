@@ -1429,6 +1429,39 @@ class DomainMetricSnapshot(models.Model):
         help_text="Geographic region: ISO 3166-1 alpha-2 country code, or 'GLOBAL' for unattributed. See docs/GEO_AI_MENTION_TRACKING_DESIGN.md.",
     )
 
+    # ---- Visibility inputs (period-scoped) ---------------------------------
+    # Mirrors prompts.DomainMetricSnapshot in the backend tree, which owns the
+    # table. The visibility formula needs a denominator (answers checked) and
+    # per-response counts; storing only the finished score meant a snapshot
+    # could never be rescored when the formula changed, so the Insights trend
+    # line mixed two scales. The engine writes these inputs on every snapshot.
+    period_responses = models.PositiveIntegerField(
+        default=0, help_text="AI answers checked in this period (visibility denominator)"
+    )
+    period_mentioned_responses = models.PositiveIntegerField(
+        default=0, help_text="Answers in this period that mentioned the brand"
+    )
+    period_own_cited_responses = models.PositiveIntegerField(
+        default=0, help_text="Answers in this period that cited the brand's own domain"
+    )
+    period_avg_sentiment = models.DecimalField(
+        max_digits=4, decimal_places=3, default=0.000,
+        help_text="Mean sentiment (-1..1) over this period's mention rows"
+    )
+    period_avg_position = models.DecimalField(
+        max_digits=8, decimal_places=2, default=0.00,
+        help_text="Mean position over this period's mention rows (0 = unknown)"
+    )
+    visibility_formula_version = models.PositiveSmallIntegerField(
+        default=0,
+        db_index=True,
+        help_text=(
+            "Which formula produced visibility_score. 0 = legacy MAX-normalised "
+            "score with no recorded inputs; 1 = rate-based score with the "
+            "period_* inputs above. Readers must never compare across versions."
+        ),
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
 

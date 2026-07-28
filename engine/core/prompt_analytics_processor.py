@@ -1832,6 +1832,62 @@ class PromptAnalyticsProcessor:
                     pages.add(h + (parsed.path or '').rstrip('/').lower())
         return url_count, len(pages)
 
+    @classmethod
+    def _visibility_inputs(cls, queryset, domain_host: str):
+        """The five inputs the visibility formula needs, over `queryset`.
+
+        Mirrors `live_visibility_score` in the backend's analytics/views_dashboard
+        exactly — same fields, same own-domain match, same averaging over mention
+        rows only. Stored on the snapshot so the Insights gauge and trend line can
+        both be computed from one set of numbers with one function, instead of the
+        line replaying a stored score written under whatever formula was current
+        at the time.
+        """
+        responses = 0
+        mentioned = 0
+        own_cited = 0
+        sent_sum = 0.0
+        pos_sum = 0.0
+        pos_n = 0
+
+        for is_mention, position, sentiment, citation_list in queryset.values_list(
+            'is_mention', 'position', 'sentiment_score', 'citation_list',
+        ):
+            responses += 1
+
+            if domain_host and isinstance(citation_list, list):
+                for entry in citation_list:
+                    url = None
+                    if isinstance(entry, dict):
+                        for field in ('url', 'source', 'link', 'href', 'uri'):
+                            val = entry.get(field)
+                            if val and isinstance(val, str):
+                                url = val
+                                break
+                    elif isinstance(entry, str):
+                        url = entry
+                    if not url:
+                        continue
+                    host = cls._domain_host(url)
+                    if host and (host == domain_host or host.endswith('.' + domain_host)):
+                        own_cited += 1
+                        break
+
+            if is_mention:
+                mentioned += 1
+                sent_sum += float(sentiment or 0)
+                if position and float(position) > 0:
+                    pos_sum += float(position)
+                    pos_n += 1
+
+        return {
+            'period_responses': responses,
+            'period_mentioned_responses': mentioned,
+            'period_own_cited_responses': own_cited,
+            'period_avg_sentiment': round(sent_sum / mentioned, 3) if mentioned else 0.0,
+            'period_avg_position': round(pos_sum / pos_n, 2) if pos_n else 0.0,
+        }
+
     def _create_domain_metric_snapshots(
         self,
         domain: Domain,
@@ -1956,6 +2012,14 @@ class PromptAnalyticsProcessor:
                 period_mentions = period_totals['total_mentions'] or 0
                 period_citations, _ = self._cited_page_stats(period_qs, domain_host)
 
+                # The visibility formula's own inputs, scoped to this period.
+                # Stored so the Insights gauge and trend line can be computed
+                # from the same numbers by the same function — previously the
+                # line replayed `visibility_score` as written here, which left
+                # old rows stranded on whatever formula was current at the time
+                # and made the two widgets impossible to reconcile.
+                visibility_inputs = self._visibility_inputs(period_qs, domain_host)
+
                 try:
                     snapshot, created = DomainMetricSnapshot.objects.update_or_create(
                         domain=domain,
@@ -1972,6 +2036,11 @@ class PromptAnalyticsProcessor:
                             'visibility_score': platform_visibility_score,
                             'sentiment_score': platform_avg_sentiment,
                             'average_position': platform_avg_pos,
+                            # Version 1 = the rate-based formula whose inputs are
+                            # recorded alongside it. Readers must not compare a
+                            # version-1 score with a version-0 one.
+                            'visibility_formula_version': 1,
+                            **visibility_inputs,
                         }
                     )
                     
