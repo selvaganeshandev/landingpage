@@ -1000,29 +1000,30 @@ Return ONLY a valid JSON object with this structure (no markdown, no commentary)
 
         logger.info(f"semantic_keywords served by: {used_provider}")
 
-        # Parse JSON response
+        # Parse JSON response.
+        #
+        # This was a bare json.loads behind some hand-rolled trimming, so a reply
+        # cut off mid-string threw the whole payload away and returned zero
+        # keywords — even when 40 complete entries were sitting in front of the
+        # break. _extract_json repairs the truncation by closing the structure
+        # after the last complete element, so a short reply degrades to fewer
+        # keywords instead of none.
         try:
-            # Remove markdown code blocks if present
-            if result_text.startswith('```'):
-                result_text = result_text.split('```')[1]
-                if result_text.startswith('json'):
-                    result_text = result_text[4:]
-                result_text = result_text.strip()
+            data = _extract_json(result_text, '{')
+            keywords = (data or {}).get('keywords')
 
-            # Try to find and extract just the JSON content
-            if not result_text.startswith('{'):
-                # Find the first { and last }
-                start = result_text.find('{')
-                if start != -1:
-                    result_text = result_text[start:]
+            if not isinstance(keywords, list) or not keywords:
+                # Last resort: the object was cut before "keywords" closed, but
+                # the array itself may still be recoverable on its own.
+                array_start = result_text.find('[')
+                salvaged = _extract_json(result_text[array_start:], '[') if array_start != -1 else None
+                keywords = salvaged if isinstance(salvaged, list) else []
 
-            data = json.loads(result_text)
+            keywords = [k for k in keywords if isinstance(k, dict) and k.get('keyword')]
+            if not keywords:
+                raise ValueError("No usable keywords in response")
 
-            # Validate structure
-            if 'keywords' not in data or not isinstance(data['keywords'], list):
-                raise ValueError("Invalid response structure")
-
-            keywords = data['keywords']  # Use all returned keywords
+            data = data or {}
 
             return Response({
                 'success': True,
