@@ -145,8 +145,11 @@ export const VisibilityScore = ({ brand, score, mentions, avgPosition = 0, senti
           <div>
             <div className="flex items-center gap-1.5">
               <p className="text-sm text-muted-foreground">Total Mentions</p>
+              {/* This card has no time control of its own, so "this period"
+                  meant nothing here — name the control that actually sets the
+                  window instead. */}
               <InfoHint>
-                Times your brand was named in AI answers across your tracked prompts in this period.
+                Times your brand was named in AI answers across your tracked prompts. Covers the date range set at the top of the page — the last 30 days if you haven't chosen one.
               </InfoHint>
             </div>
             <p className="text-2xl font-bold">{mentions}</p>
@@ -155,7 +158,7 @@ export const VisibilityScore = ({ brand, score, mentions, avgPosition = 0, senti
             <div className="flex items-center gap-1.5">
               <p className="text-sm text-muted-foreground">Avg Position</p>
               <InfoHint>
-                Average rank of your brand where it appears in an AI answer. Lower is better — position 1 means it was named first.
+                Average rank of your brand where it appears in an AI answer, over the same date range. Lower is better — position 1 means it was named first.
               </InfoHint>
             </div>
             <p className="text-2xl font-bold">{avgPosition > 0 ? avgPosition.toFixed(1) : '0'}</p>
