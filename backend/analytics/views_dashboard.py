@@ -1225,44 +1225,77 @@ def dashboard_summary(request):
     share_of_voice = None
     if sov_qs.exists():
         latest_day = sov_qs.order_by('-timestamp').first().timestamp
-        latest_rows = sov_qs.filter(timestamp=latest_day)
-        
-        your_brand = latest_rows.filter(competitor__isnull=True).first()
-        competitors_rows = latest_rows.filter(
-            competitor__isnull=False
-        ).order_by('market_position')
-        
+        latest_rows_all = sov_qs.filter(timestamp=latest_day)
+
+        # A domain can carry BOTH an overall row (platform IS NULL) and one row
+        # per platform for the same day. Reading them together double-counted:
+        # every competitor appeared once per platform, and "you" was whichever
+        # row .first() happened to return under the model's default ordering.
+        #
+        # With no platform filter, prefer the overall rows. Some domains only
+        # ever got per-platform rows written (Paradise Kerala has ChatGPT rows
+        # and nothing else), so fall back to those and aggregate across
+        # platforms rather than silently reporting one platform as the market.
+        if platform_filter:
+            latest_rows = latest_rows_all
+        else:
+            overall_rows = latest_rows_all.filter(platform__isnull=True)
+            latest_rows = overall_rows if overall_rows.exists() else latest_rows_all
+
+        # Aggregate by brand, so a fallback across several platforms yields one
+        # entry per competitor instead of one per platform.
+        agg = {}
+        for row in latest_rows:
+            entry = agg.setdefault(row.competitor_id, {'mentions': 0, 'position': row.market_position})
+            entry['mentions'] += row.mention_count or 0
+            if row.market_position is not None:
+                entry['position'] = min(entry['position'] or row.market_position, row.market_position)
+
+        # Share is recomputed from the aggregated mention counts rather than
+        # read from a stored per-platform percentage, which is a share WITHIN
+        # that platform and cannot be compared across them. This also keeps the
+        # card summing to 100%.
+        total_mentions_all = sum(e['mentions'] for e in agg.values())
+
+        def _share_of(mentions):
+            return round(mentions / total_mentions_all * 100, 2) if total_mentions_all else 0.0
+
+        your_entry = agg.get(None)
+
         competitors_list = []
-        for comp_row in competitors_rows:
+        for competitor_id, entry in agg.items():
+            if competitor_id is None:
+                continue
             try:
-                competitor = Competitor.objects.get(id=comp_row.competitor_id)
-                competitors_list.append({
-                    'competitor_id': comp_row.competitor_id,
-                    'name': competitor.name,
-                    'url': competitor.url,
-                    'share_percentage': float(comp_row.share_percentage),
-                    'mention_count': comp_row.mention_count,
-                    'market_position': comp_row.market_position,
-                    'trend': _share_trend(
-                        comp_row.competitor_id, float(comp_row.share_percentage)
-                    ),
-                })
+                competitor = Competitor.objects.get(id=competitor_id)
             except Competitor.DoesNotExist:
                 continue
+            share = _share_of(entry['mentions'])
+            competitors_list.append({
+                'competitor_id': competitor_id,
+                'name': competitor.name,
+                'url': competitor.url,
+                'share_percentage': share,
+                'mention_count': entry['mentions'],
+                'market_position': entry['position'],
+                'trend': _share_trend(competitor_id, share),
+            })
+        competitors_list.sort(key=lambda c: c['share_percentage'], reverse=True)
         
         # Build unified list with "You" first
         all_brands = []
-        if your_brand:
+        your_share = _share_of(your_entry['mentions']) if your_entry else 0.0
+        if your_entry:
             all_brands.append({
                 'competitor_id': None,
                 'name': 'You',  # Label as "You"
                 'url': '',  # Domain URL can be added if needed
-                'share_percentage': float(your_brand.share_percentage),
-                'mention_count': your_brand.mention_count,
+                'share_percentage': your_share,
+                'mention_count': your_entry['mentions'],
                 'market_position': 1,
                 # competitor_id is None for your own brand — the baseline map is
                 # keyed the same way, so this looks up your own earlier reading.
-                'trend': _share_trend(None, float(your_brand.share_percentage)),
+                'trend': _share_trend(None, your_share),
                 'is_you': True
             })
         
@@ -1275,10 +1308,10 @@ def dashboard_summary(request):
             'brands': all_brands,  # Unified list with "You" first
             # Keep backward compatibility
             'your_brand': {
-                'share_percentage': float(your_brand.share_percentage) if your_brand else 0,
-                'mention_count': your_brand.mention_count if your_brand else 0,
+                'share_percentage': your_share,
+                'mention_count': your_entry['mentions'],
                 'market_position': 1
-            } if your_brand else None,
+            } if your_entry else None,
             'competitors': competitors_list
         }
     
