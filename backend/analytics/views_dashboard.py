@@ -1033,9 +1033,26 @@ def dashboard_summary(request):
     # Total Citations = count of every URL the AI cited (matches the Citations page)
     total_citations = live['cited_urls']
     prev_total_citations = live_prev['cited_urls']
+    # Your Citations = times THIS domain was cited, not the total number of
+    # sources the AI cited. `total_citations` above counts every URL in every
+    # answer — competitors, blogs, news — so on a brand dashboard it reads as
+    # the brand's own figure while measuring something ~1000x larger. Both are
+    # kept: this one is the headline, `total_citations` is its denominator.
+    total_brand_citations = live['domain_citations']
+    prev_total_brand_citations = live_prev['domain_citations']
     # Cited Pages = distinct domain-owned pages cited by AI in the window.
     total_cited_pages = live['cited_pages']
     prev_total_cited_pages = live_prev['cited_pages']
+    # Share of everything the AI cited that was this domain. The single number
+    # that answers "how much of what AI cites is me?" — 2 out of 4,600 is a very
+    # different story from a bare "2".
+    citation_share = (
+        (total_brand_citations / total_citations * 100) if total_citations else 0.0
+    )
+    prev_citation_share = (
+        (prev_total_brand_citations / prev_total_citations * 100)
+        if prev_total_citations else 0.0
+    )
     avg_position = live['avg_position']
     prev_avg_position = live_prev['avg_position']
     # Visibility score: keep the engine-computed snapshot value (its 0-100
@@ -1112,7 +1129,15 @@ def dashboard_summary(request):
     
     mentions_change = calculate_change(total_mentions, prev_total_mentions)
     citations_change = calculate_change(total_citations, prev_total_citations)
+    brand_citations_change = calculate_change(total_brand_citations, prev_total_brand_citations)
     cited_pages_change = calculate_change(total_cited_pages, prev_total_cited_pages)
+    # Share is already a percentage, so a percent-change of a percent would be
+    # unreadable ("share rose 400%"). Report the plain point difference instead,
+    # matching how Share of Voice reports its own delta.
+    citation_share_change = (
+        round(citation_share - prev_citation_share, 2)
+        if (total_citations and prev_total_citations) else None
+    )
     visibility_change = calculate_change(visibility_score, prev_visibility_score)
     position_change = calculate_change(avg_position, prev_avg_position)
     
@@ -1136,7 +1161,12 @@ def dashboard_summary(request):
     
     metrics = {
         'total_mentions': int(total_mentions),
+        # Unchanged on purpose: the Citations page, exports and count_cited_urls
+        # all read this as "every cited URL". The brand-scoped figure is the new
+        # key below rather than a redefinition of this one.
         'total_citations': int(total_citations),
+        'total_brand_citations': int(total_brand_citations),
+        'citation_share': round(citation_share, 2),
         'total_cited_pages': int(total_cited_pages),
         'total_prompts': int(total_prompts),
         'visibility_score': round(visibility_score, 2),
@@ -1144,6 +1174,8 @@ def dashboard_summary(request):
         'active_alerts': active_alerts,
         'mentions_change': mentions_change,
         'citations_change': citations_change,
+        'brand_citations_change': brand_citations_change,
+        'citation_share_change': citation_share_change,
         'cited_pages_change': cited_pages_change,
         'visibility_change': visibility_change,
         'position_change': position_change,
@@ -1501,7 +1533,19 @@ def dashboard_summary(request):
             # of the citations line rather than a measurement.
         trends.append(point)
 
-    # If no snapshots, create empty trend points for the date range
+    # If no snapshots, create empty trend points for the date range.
+    #
+    # `cited_pages` is deliberately absent here, matching the running-totals
+    # branch above. The frontend keys the Cited Pages line off the presence of
+    # this field, so emitting a hard 0 for a domain with NO snapshot history
+    # drew the line for exactly the domains that have nothing to say, while a
+    # domain with real history but no per-period columns had it hidden — the
+    # rule ran backwards. Absent here means the same thing it means above: we
+    # have no cited-pages history to chart.
+    #
+    # `mentions` and `citations` stay at 0: those are charted from running
+    # totals in the fallback branch too, so a flat zero line is the honest
+    # reading of "no snapshots".
     if not trends:
         current_date = start_date
         while current_date <= end_date:
@@ -1509,7 +1553,6 @@ def dashboard_summary(request):
                 'date': format_date_for_chart(current_date),
                 'mentions': 0,
                 'citations': 0,
-                'cited_pages': 0,
                 'visibility': 0
             })
             if period_type == 'daily':

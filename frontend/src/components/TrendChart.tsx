@@ -7,8 +7,18 @@ import { InfoHint } from "@/components/InfoHint";
 interface TrendMetrics {
   total_mentions?: number;
   mentions_change?: number | null;
+  // Every URL the AI cited, whoever owns it. Kept for the Citations page and
+  // as the denominator of citation_share — no longer a headline pill here,
+  // because on a brand dashboard it read as the brand's own number.
   total_citations?: number;
   citations_change?: number | null;
+  // Times THIS domain was cited. The brand-scoped figure, and the same measure
+  // the trend line has always plotted.
+  total_brand_citations?: number;
+  brand_citations_change?: number | null;
+  // Percent of all cited URLs that were this domain's. Delta is in points.
+  citation_share?: number;
+  citation_share_change?: number | null;
   total_cited_pages?: number;
   cited_pages_change?: number | null;
   visibility_score?: number;
@@ -136,6 +146,12 @@ interface PillProps {
   //   null                → "N/A" (metric has no prior-period comparison)
   //   number              → colored +-%
   change?: number | null;
+  /**
+   * Unit for `change`. Defaults to "%". Metrics that are THEMSELVES a
+   * percentage pass " pts": a share going 0.04 -> 0.20 is "+0.16 pts", whereas
+   * rendering it as a percent-of-a-percent would print "+400%".
+   */
+  changeUnit?: string;
   colorVar: string;
   /** Explanation shown on hover via styled UI Tooltip. */
   hint: string;
@@ -146,7 +162,7 @@ interface PillProps {
 // when the real story is that tracking had barely started. Past this: "New".
 const MAX_MEANINGFUL_CHANGE = 999;
 
-const MetricPill = ({ label, value, displayValue, change, colorVar, hint }: PillProps) => {
+const MetricPill = ({ label, value, displayValue, change, changeUnit = "%", colorVar, hint }: PillProps) => {
   const showTrend = change !== undefined;
   const isNoData = change === null;
   const isUp = typeof change === "number" && change > 0;
@@ -166,7 +182,7 @@ const MetricPill = ({ label, value, displayValue, change, colorVar, hint }: Pill
           isNoData ? (
             <span className="text-xs text-muted-foreground">N/A</span>
           ) : isFlat ? (
-            <span className="text-xs text-muted-foreground">0%</span>
+            <span className="text-xs text-muted-foreground">0{changeUnit}</span>
           ) : isNew ? (
             <TooltipProvider>
               <Tooltip>
@@ -181,7 +197,7 @@ const MetricPill = ({ label, value, displayValue, change, colorVar, hint }: Pill
             </TooltipProvider>
           ) : (
             <span className={`text-xs font-semibold ${isUp ? "text-success" : "text-destructive"}`}>
-              {isUp ? "+" : ""}{change}%
+              {isUp ? "+" : ""}{change}{changeUnit}
             </span>
           )
         )}
@@ -225,6 +241,10 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
   // data[0] alone would hide the whole series whenever the earliest point
   // happened to be one of those.
   const hasCitationsSeries = data.some((d) => d.citations !== undefined);
+  // Same rule as citations above, deliberately. This used to test data[0]
+  // alone, so a series whose first point lacked the field hid a line that
+  // every later point could have drawn.
+  const hasCitedPagesSeries = data.some((d) => d.cited_pages !== undefined);
   const hasVisibilitySeries = data.some((d) => d.visibility !== undefined);
 
   // ---- AI Traffic tab derived values ----
@@ -299,8 +319,12 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
       return [
         { label: "AI Sessions", value: aiTotals?.visits, colorVar: "primary", hint: "Website sessions that arrived from AI platforms (ChatGPT, Gemini, Perplexity, Claude, Copilot…) in this period, from Google Analytics." },
         { label: "AI Users", value: aiTotals?.users, colorVar: "chart-2", hint: "Distinct users who reached your site from AI platforms in this period." },
+        // The raw numerator behind AI Conv. Rate. Shown next to it so a
+        // surprising rate can be read against the count it came from — a high
+        // percentage off 3 conversions means something different from the same
+        // percentage off 300.
+        { label: "AI Conversions", value: aiTotals?.conversions, colorVar: "chart-4", hint: "Key events (conversions) completed during AI-referred sessions in this period, straight from Google Analytics. Which events count is set by the key events you marked in your GA4 property, so a low-bar event like a page view will inflate this. GA4 counts events, not sessions, so one session firing two key events counts twice." },
         { label: "AI Conv. Rate", displayValue: aiConvRate !== undefined ? `${aiConvRate.toFixed(1)}%` : "-", colorVar: "chart-3", hint: "Share of AI-referred sessions that completed a conversion (conversions ÷ AI sessions) in this period." },
-        { label: "Avg Engagement", displayValue: formatDuration(aiEngagement), colorVar: "secondary", hint: "Average session duration for AI-referred visits, weighted by sessions across AI platforms." },
       ];
     }
     if (chartTab === "visibility") {
@@ -309,6 +333,11 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
         // Avg Position: lower is better, so a signed +-% would read backwards
         // against the pill's up=good coloring — show the value without a delta.
         { label: "Avg Position", value: metrics?.avg_position, change: null, colorVar: "chart-2", hint: "Average rank of your brand when it appears in AI answers, across this period. Lower is better." },
+        // Google Analytics, unlike the three pills beside it — it measures what
+        // AI-referred visitors did on the site, not how the AI answers read. It
+        // shows "-" whenever GA is not connected, since nothing else on this tab
+        // depends on GA.
+        { label: "Avg Engagement", displayValue: formatDuration(aiEngagement), colorVar: "chart-4", hint: "Average session duration for visits that arrived from AI platforms, weighted by sessions across those platforms. From Google Analytics — shows '-' when GA is not connected." },
         { label: "Share of Voice", value: shareOfVoice != null ? Math.round(shareOfVoice * 10) / 10 : undefined, change: null, colorVar: "chart-3", hint: "Your share of all brand mentions (yours plus tracked competitors') in AI answers for this period." },
       ];
     }
@@ -328,8 +357,27 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
     }
     return [
       { label: "Mentions", value: metrics?.total_mentions, change: periodChange(metrics?.mentions_change), colorVar: "primary", hint: "How many times your brand was mentioned in AI answers across your tracked prompts in this period. The percentage compares it with the previous period; N/A means there is no previous-period data to compare against." },
-      { label: "Citations", value: metrics?.total_citations, change: periodChange(metrics?.citations_change), colorVar: "chart-2", hint: "Every URL the AI cited in its answers during this period — the same total shown on the Citations page. Counts each citation, so one page cited several times counts more than once." },
-      { label: "Cited Pages", value: metrics?.total_cited_pages, change: periodChange(metrics?.cited_pages_change), colorVar: "chart-3", hint: "Distinct pages on your own domain that the AI cited in this period. Unlike Citations, each page is counted once no matter how often it was cited." },
+      // Was "Citations" showing total_citations — every URL in every answer,
+      // overwhelmingly other people's sites. It sat beside a trend line plotting
+      // this domain's own citations, so the card showed two numbers orders of
+      // magnitude apart under one word. This is now the brand-scoped figure the
+      // line has always drawn, and the old total moved into Citation Share.
+      { label: "Your Citations", value: metrics?.total_brand_citations, change: periodChange(metrics?.brand_citations_change), colorVar: "chart-2", hint: "How many times AI answers cited your own domain in this period. Counts each citation, so one page cited several times counts more than once. This is the figure the Your Citations line plots below." },
+      { label: "Cited Pages", value: metrics?.total_cited_pages, change: periodChange(metrics?.cited_pages_change), colorVar: "chart-3", hint: "Distinct pages on your own domain that the AI cited in this period. Unlike Your Citations, each page is counted once no matter how often it was cited." },
+      {
+        label: "Citation Share",
+        displayValue: metrics?.citation_share !== undefined ? `${metrics.citation_share.toFixed(2)}%` : "-",
+        // Points, not percent-of-percent: a share moving 0.04 -> 0.20 is
+        // "+0.16 pts", never "+400%".
+        change: periodChange(metrics?.citation_share_change),
+        changeUnit: " pts",
+        colorVar: "chart-4",
+        hint: `Of every source AI cited in this period, the share that was your domain${
+          metrics?.total_brand_citations !== undefined && metrics?.total_citations !== undefined
+            ? ` — your domain was cited ${metrics.total_brand_citations.toLocaleString()} time(s) out of ${metrics.total_citations.toLocaleString()} sources cited across all answers`
+            : ""
+        }. This is the number that says whether AI treats you as a source worth quoting.`,
+      },
     ];
   })();
 
@@ -526,14 +574,18 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
                     <Line
                       type="monotone"
                       dataKey="citations"
-                      name="Citations"
+                      // Renamed, not re-pointed: this series has always plotted
+                      // the domain's OWN citations. It was labelled "Citations"
+                      // next to a pill showing every cited URL, which is why the
+                      // two disagreed by orders of magnitude.
+                      name="Your Citations"
                       stroke="hsl(var(--chart-2))"
                       strokeWidth={3}
                       dot={{ fill: "hsl(var(--chart-2))", r: 4 }}
                       activeDot={{ r: 6 }}
                     />
                   )}
-                  {data[0]?.cited_pages !== undefined && (
+                  {hasCitedPagesSeries && (
                     <Line
                       type="monotone"
                       dataKey="cited_pages"
