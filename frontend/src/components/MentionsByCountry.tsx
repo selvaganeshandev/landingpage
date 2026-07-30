@@ -13,6 +13,17 @@ interface MentionsByCountryProps {
   data?: CountryShare[];
 }
 
+// The API sends colours as Tailwind arbitrary-value CLASSES ("bg-[#7C3AED]").
+// Tailwind's JIT only emits classes it can see in the source at build time, so
+// a class that arrives at runtime is never generated and the element ends up
+// with no background at all — which is why the share bar rendered as an empty
+// grey track. Pull the hex out and set it as an inline style instead, the way
+// the percentage dot below already did.
+const hexOf = (color: string): string => {
+  const match = /#[0-9a-fA-F]{3,8}/.exec(color ?? "");
+  return match ? match[0] : "hsl(var(--primary))";
+};
+
 const fmt = (n: number): string => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
   if (n >= 1_000)     return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
@@ -140,8 +151,8 @@ export const MentionsByCountry = ({ data }: MentionsByCountryProps) => {
           return (
             <div
               key={c.code}
-              className={`${c.color} h-full transition-all`}
-              style={{ width: `${c.percentage}%` }}
+              className="h-full transition-all"
+              style={{ width: `${c.percentage}%`, backgroundColor: hexOf(c.color) }}
               title={`${c.name}: ${c.percentage}% (${fmt(c.count)} mentions)`}
             />
           );
@@ -167,7 +178,7 @@ export const MentionsByCountry = ({ data }: MentionsByCountryProps) => {
             </div>
             <div className="flex items-center gap-6">
               <span className="text-sm text-muted-foreground w-12 text-right tabular-nums flex items-center justify-end gap-1.5 font-medium">
-                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: c.color.replace('bg-[', '').replace(']', '') }} />
+                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: hexOf(c.color) }} />
                 {c.percentage.toFixed(1)}%
               </span>
               <span className="text-sm font-semibold w-16 text-right text-primary tabular-nums">
