@@ -141,6 +141,13 @@ interface PillProps {
   value?: number;
   /** Pre-formatted value (%, duration, correlation) — overrides formatCompact(value). */
   displayValue?: string;
+  /**
+   * Qualifier shown beside the value in small muted type — a word that
+   * INTERPRETS the number ("strong positive") rather than being part of it.
+   * Kept out of displayValue so it does not inherit the 2xl bold metric style,
+   * where it reads as data competing with the figure instead of labelling it.
+   */
+  valueNote?: string;
   // Trend semantics:
   //   omitted (undefined) → no trend shown at all
   //   null                → "N/A" (metric has no prior-period comparison)
@@ -162,7 +169,7 @@ interface PillProps {
 // when the real story is that tracking had barely started. Past this: "New".
 const MAX_MEANINGFUL_CHANGE = 999;
 
-const MetricPill = ({ label, value, displayValue, change, changeUnit = "%", colorVar, hint }: PillProps) => {
+const MetricPill = ({ label, value, displayValue, valueNote, change, changeUnit = "%", colorVar, hint }: PillProps) => {
   const showTrend = change !== undefined;
   const isNoData = change === null;
   const isUp = typeof change === "number" && change > 0;
@@ -178,6 +185,9 @@ const MetricPill = ({ label, value, displayValue, change, changeUnit = "%", colo
       </div>
       <div className="flex items-baseline gap-1.5 flex-wrap">
         <span className="text-2xl font-bold tracking-tight text-foreground">{displayValue ?? formatCompact(value)}</span>
+        {valueNote && (
+          <span className="text-xs font-medium text-muted-foreground">{valueNote}</span>
+        )}
         {showTrend && (
           isNoData ? (
             <span className="text-xs text-muted-foreground">N/A</span>
@@ -347,7 +357,8 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
         { label: "AI Sessions", value: totalAiSessions, colorVar: "primary", hint: "Total sessions arriving from AI platforms (ChatGPT, Gemini, Perplexity, Claude, Copilot…) over the period, from Google Analytics." },
         {
           label: "Correlation",
-          displayValue: correlationR !== null ? `${correlationR.toFixed(2)} · ${describeCorrelation(correlationR)}` : "N/A",
+          displayValue: correlationR !== null ? correlationR.toFixed(2) : "N/A",
+          valueNote: correlationR !== null ? describeCorrelation(correlationR) : undefined,
           colorVar: "chart-3",
           hint: correlationR !== null
             ? `Does your AI visibility move together with the traffic AI sends you? Each point below is one period: its visibility score, paired with every Google Analytics session that arrived from an AI platform during that same period. We run a Pearson correlation across those ${correlationPairs.length} pairs. The result runs from -1 to +1 — near +1 they rise and fall together, near 0 there is no relationship, near -1 one rises as the other falls. It shows association, not cause: traffic can move for reasons that have nothing to do with AI answers.`
