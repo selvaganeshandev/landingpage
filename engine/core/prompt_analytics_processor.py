@@ -652,8 +652,17 @@ class PromptAnalyticsProcessor:
             prompt.tracked_at = timezone.now()
             prompt.save(update_fields=['track_status', 'tracked_at', 'modified_at'])
 
-            # Get domain and group info
-            user_domain = prompt.group.domain.name
+            # Get domain and group info.
+            #
+            # The URL is the canonical half of the brand's identity and every
+            # downstream matcher expects a hostname here. Passing the display
+            # name instead — which is what this did — meant a brand whose name
+            # carries a word its URL does not ('CanaraHSBCLife Insurance' vs
+            # canarahsbclife.com) matched nothing the model wrote: 972 completed
+            # rows, 87 containing the brand, all recorded as is_mention=False.
+            # The name still matters for prose, and travels via `group`.
+            domain = prompt.group.domain
+            user_domain = (domain.url or '').strip() or domain.name
             group = prompt.group
 
             # Resolve org_id for per-organisation key lookup
@@ -780,9 +789,10 @@ class PromptAnalyticsProcessor:
                     try:
                         extracted_position = self._extract_position(
                             result.get('context_summary') or '',
-                            prompt.group.domain.name,
+                            (prompt.group.domain.url or '').strip() or prompt.group.domain.name,
                             result.get('citations') or [],
                             result.get('is_mention') or False,
+                            prompt.group.domain.name,
                         )
                     except Exception:
                         extracted_position = None

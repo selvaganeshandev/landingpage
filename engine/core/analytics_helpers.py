@@ -7,11 +7,55 @@ from typing import Any, Dict, List, Optional
 from django.conf import settings
 
 try:
+	from .brand_identity import (
+		TWO_PART_SUFFIXES as _TWO_PART_SUFFIXES,
+		build_brand_identity,
+		registrable_domain as _registrable_domain,
+	)
+except ImportError:  # pragma: no cover
+	# Several standalone tests exec this file straight off disk with no parent
+	# package, which makes the relative import above impossible — every other
+	# sibling import in this module is function-local for exactly that reason.
+	# These names are needed at module scope (competitor_extractor imports two
+	# of them from here), so load the sibling by path instead.
+	import importlib.util as _importlib_util
+	import sys as _sys
+	from pathlib import Path as _Path
+
+	_bi_spec = _importlib_util.spec_from_file_location(
+		'core_brand_identity',
+		_Path(__file__).resolve().with_name('brand_identity.py'),
+	)
+	_brand_identity = _importlib_util.module_from_spec(_bi_spec)
+	# Registered BEFORE exec: @dataclass resolves its own module out of
+	# sys.modules while the class body is being processed, and blows up on None.
+	_sys.modules['core_brand_identity'] = _brand_identity
+	_bi_spec.loader.exec_module(_brand_identity)
+	_TWO_PART_SUFFIXES = _brand_identity.TWO_PART_SUFFIXES
+	build_brand_identity = _brand_identity.build_brand_identity
+	_registrable_domain = _brand_identity.registrable_domain
+
+try:
 	from textblob import TextBlob
 except Exception:  # pragma: no cover
 	TextBlob = None  # type: ignore
 
+
 logger = logging.getLogger(__name__)
+
+
+def _brand_name_of(group: Any) -> str:
+	"""The domain's display name, when the caller handed us its prompt group.
+
+	Every platform handler already receives `group`, and `group.domain` is
+	select_related at the call site, so this costs no query. It is the second
+	half of the brand's identity — the half that recognises 'Canara HSBC Life
+	Insurance' in prose, which the URL alone cannot.
+	"""
+	try:
+		return getattr(getattr(group, 'domain', None), 'name', '') or ''
+	except Exception:
+		return ''
 
 
 def process_prompt_with_gemini(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
@@ -103,22 +147,12 @@ def _get_domain_from_url(value: str) -> str:
 		return v[4:] if v.startswith("www.") else v
 
 
-def extract_position_from_response(response: str, user_domain: str, citation_urls: Optional[List[str]] = None, has_mention: bool = False) -> Optional[int]:
+def extract_position_from_response(response: str, user_domain: str, citation_urls: Optional[List[str]] = None, has_mention: bool = False, brand_name: str = "") -> Optional[int]:
 	if not response:
 		return None
-	clean = _get_domain_from_url(user_domain)
-	if not clean:
+	identity = build_brand_identity(user_domain or "", brand_name or "")
+	if not identity.is_resolvable:
 		return None
-	sld = clean.split(".")[0] if clean else ""
-	brand_variations = [
-		clean.lower(),
-		sld.lower(),
-		clean.replace(".com", "").replace(".org", "").replace(".net", "").replace(".io", "").lower(),
-		sld.replace(" ", "").lower(),
-		sld.replace(" ", "-").lower(),
-		sld.replace(" ", "_").lower(),
-	]
-	brand_variations = [v for v in brand_variations if v and len(v) >= 3]
 	lines = response.split("\n")
 	found_position = None
 	# Index the numbered items first so each item's search window ends where the NEXT item
@@ -139,8 +173,8 @@ def extract_position_from_response(response: str, user_domain: str, citation_url
 
 	for idx, (line_no, position) in enumerate(numbered_items):
 		end = numbered_items[idx + 1][0] if idx + 1 < len(numbered_items) else min(line_no + 5, len(lines))
-		search_window = ' '.join(lines[line_no:end]).lower()
-		if any(variant in search_window for variant in brand_variations):
+		search_window = ' '.join(lines[line_no:end])
+		if identity.appears_in(search_window):
 			found_position = position
 			break
 	if found_position is not None:
@@ -151,8 +185,8 @@ def extract_position_from_response(response: str, user_domain: str, citation_url
 			idx = full_text_lower.find(url.lower())
 			if idx == -1:
 				continue
-			context = full_text_lower[max(0, idx - 500): idx + 500]
-			if any(variant in context for variant in brand_variations):
+			context = response[max(0, idx - 500): idx + 500]
+			if identity.appears_in(context):
 				m = re.search(r'(\d+)[\.\)\:]', context)
 				if m:
 					position = int(m.group(1))
@@ -161,37 +195,15 @@ def extract_position_from_response(response: str, user_domain: str, citation_url
 						return position
 				# If no valid position found but brand + citation exists, default to 1
 				return 1
-	if has_mention and any(v in response.lower() for v in brand_variations):
+	if has_mention and identity.appears_in(response):
 		return 1
 	return None
 
 
-# Two-part public suffixes seen in this product's markets. Without these,
-# "example.co.in" yields a registrable domain of "co.in" and every Indian site
-# collapses to the same bogus brand.
-_TWO_PART_SUFFIXES = {
-	'co.in', 'co.uk', 'com.au', 'co.nz', 'co.za', 'com.br', 'com.sg',
-	'com.my', 'co.jp', 'or.jp', 'ne.jp', 'com.mx', 'co.id', 'com.tr',
-}
-
-
-def _registrable_domain(host: str) -> str:
-	"""eTLD+1 for a hostname, e.g. kite.zerodha.com -> zerodha.com.
-
-	Splitting on the FIRST label instead (the old behaviour) turned a brand's
-	own subdomains into competitors: kite.zerodha.com became "Kite", and
-	support./coin.zerodha.com became "Support" and "Coin" — Zerodha's own
-	products, recorded as its rivals.
-	"""
-	host = (host or '').lower().strip().rstrip('.')
-	if not host:
-		return ''
-	parts = host.split('.')
-	if len(parts) < 2:
-		return host
-	if len(parts) >= 3 and '.'.join(parts[-2:]) in _TWO_PART_SUFFIXES:
-		return '.'.join(parts[-3:])
-	return '.'.join(parts[-2:])
+# `_TWO_PART_SUFFIXES` and `_registrable_domain` now live in brand_identity.py
+# and are imported at the top of this module — one copy, shared with the mention
+# matching that needs the same notion of "the brand's own domain".
+# competitor_extractor.py imports both from here, so the names stay exported.
 
 
 def _is_same_or_subdomain(host: str, own_host: str) -> bool:
@@ -343,84 +355,23 @@ def _extract_competitor_mentions(text: str, user_domain: str, all_urls: List[str
 	return competitor_list
 
 
-def _count_mentions_with_word_boundaries(text: str, mention_patterns: List[str]) -> int:
-	"""
-	Count mentions using regex with word boundaries to avoid overlaps.
-	Deduplicates by matched span ranges to prevent double-counting.
-
-	Args:
-		text: Text to search in
-		mention_patterns: List of patterns to search for
-
-	Returns:
-		Count of unique mentions (non-overlapping matches)
-	"""
-	if not text or not mention_patterns:
-		return 0
-	
-	# Track matched spans to avoid overlaps
-	matched_spans = []
-	text_lower = text.lower()
-	
-	for pattern in mention_patterns:
-		if not pattern or len(pattern) < 3:
-			continue
-		
-		# Escape special regex characters in pattern
-		escaped_pattern = re.escape(pattern.lower())
-		# Use word boundaries to match whole words only
-		# \b matches word boundaries (between word and non-word characters)
-		pattern_regex = r'\b' + escaped_pattern + r'\b'
-		
-		try:
-			# Find all non-overlapping matches
-			for match in re.finditer(pattern_regex, text_lower, flags=re.IGNORECASE):
-				span = match.span()  # (start, end) tuple
-				
-				# Check if this span overlaps with any existing match
-				overlaps = False
-				for existing_span in matched_spans:
-					# Check for overlap: spans overlap if one starts before the other ends
-					if not (span[1] <= existing_span[0] or span[0] >= existing_span[1]):
-						overlaps = True
-						break
-				
-				# Only add if no overlap
-				if not overlaps:
-					matched_spans.append(span)
-		except re.error as e:
-			logger.warning(f"Regex error for pattern '{pattern}': {e}")
-			continue
-	
-	return len(matched_spans)
+# `_count_mentions_with_word_boundaries` was removed with the pattern lists it
+# served: span-deduplicated counting now lives in BrandIdentity.mention_count,
+# which counts regex word-groups rather than pre-escaped literal strings.
 
 
-def _basic_text_metrics(text: str, user_domain: str) -> Dict[str, Any]:
-	clean = _get_domain_from_url(user_domain)
-	sld = clean.split(".")[0] if clean else ""
-	escaped_domain = re.escape(clean.replace('.', r'\.'))
-	direct_citation_pattern = r"https?://[^\s\)\]]*" + escaped_domain + r"[^\s\)\]]*"
-	direct_citation_matches = re.findall(direct_citation_pattern, text, flags=re.IGNORECASE)
-	escaped_sld = re.escape(sld.replace(' ', '[-_]?'))
-	brand_in_url_pattern = r"https?://[^\s\)\]]*" + escaped_sld + r"[^\s\)\]]*"
-	brand_url_matches = re.findall(brand_in_url_pattern, text, flags=re.IGNORECASE)
-	all_citation_matches = list(set(direct_citation_matches + brand_url_matches))
+def _basic_text_metrics(text: str, user_domain: str, brand_name: str = "") -> Dict[str, Any]:
+	# One identity, derived from the URL the brand owns AND the name people
+	# write it as. Deriving it from the name alone — and treating that name as a
+	# hostname — is what recorded 87 real mentions of CanaraHSBC as zero.
+	identity = build_brand_identity(user_domain or "", brand_name or "")
+
+	all_citation_matches = identity.citation_urls(text)
 	has_citation = len(all_citation_matches) > 0
-	
-	# Build mention patterns list
-	mention_patterns = [p for p in [
-		clean, 
-		sld, 
-		clean.replace('.com','').replace('.org','').replace('.net','').replace('.io',''), 
-		sld.replace(' ',''), 
-		sld.replace(' ','-'), 
-		sld.replace(' ','_')
-	] if p and len(p) >= 3]
-	
-	# Count mentions using regex with word boundaries and deduplication
-	mention_count = _count_mentions_with_word_boundaries(text, mention_patterns)
+
+	mention_count = identity.mention_count(text)
 	has_mention = mention_count > 0
-	
+
 	# FIXED: Use only domain-specific URLs for citation_count (Option B)
 	# Citations should only count URLs that reference the brand/domain
 	citation_count = len(all_citation_matches)  # Only domain URLs
@@ -527,36 +478,21 @@ def process_prompt_with_chatgpt(prompt_text: str, user_domain: str, client: Any,
         if not text:
             raise Exception("ChatGPT returned an empty response")
 
-        domain_clean = _get_domain_from_url(user_domain)
-        sld = domain_clean.split('.') [0] if domain_clean else ""
+        # Same identity rules as every other platform — this block used to be a
+        # second, drifting copy of the pattern list in _basic_text_metrics.
+        identity = build_brand_identity(user_domain or "", _brand_name_of(group))
 
-        escaped_domain = re.escape(domain_clean.replace('.', r'\.'))
-        direct_citation_pattern = r"https?://[^\s\)\]]*" + escaped_domain + r"[^\s\)\]]*"
-        direct_citation_matches = re.findall(direct_citation_pattern, text, flags=re.IGNORECASE)
-
-        escaped_sld = re.escape(sld.replace(' ', '[-_]?'))
-        brand_in_url_pattern = r"https?://[^\s\)\]]*" + escaped_sld + r"[^\s\)\]]*"
-        brand_url_matches = re.findall(brand_in_url_pattern, text, flags=re.IGNORECASE)
-
-        all_citation_matches = list(set(direct_citation_matches + brand_url_matches))
+        all_citation_matches = identity.citation_urls(text)
         has_citation = len(all_citation_matches) > 0
-
-        mention_patterns = [p for p in [
-            domain_clean,
-            sld,
-            domain_clean.replace('.com','').replace('.org','').replace('.net','').replace('.io',''),
-            sld.replace(' ', ''), sld.replace(' ', '-'), sld.replace(' ', '_')
-        ] if p and len(p) >= 3]
 
         # FIXED: Use only domain-specific URLs for citation_count (Option B)
         # Citations should only count URLs that reference the brand/domain
         citation_count = len(all_citation_matches)  # Only domain URLs
-        
+
         # Keep all_urls for reference but don't use for citation_count
         all_urls = re.findall(r"https?://[^\s\)\]]+", text, flags=re.IGNORECASE)
-        
-        # FIXED: Count mentions using regex with word boundaries and deduplication
-        mention_count = _count_mentions_with_word_boundaries(text, mention_patterns)
+
+        mention_count = identity.mention_count(text)
 
         polarity = 0.0
         sentiment = "neutral"
@@ -725,7 +661,7 @@ def _process_prompt_with_gemini_vertex(prompt_text: str, user_domain: str, group
 
     if not text:
         text = getattr(_call(None), 'text', '') or ""
-    return _basic_text_metrics(text, user_domain)
+    return _basic_text_metrics(text, user_domain, _brand_name_of(group))
 
 
 def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, client: Any = None, group: Any = None) -> Dict[str, Any]:
@@ -779,7 +715,7 @@ def process_prompt_with_gemini_wrapper(prompt_text: str, user_domain: str, clien
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt, generation_config=gen_config)
             text = response.text if getattr(response, 'text', None) else ""
-        return _basic_text_metrics(text, user_domain)
+        return _basic_text_metrics(text, user_domain, _brand_name_of(group))
     except Exception as e:
         logger.error(f"Gemini processing failed: {e}")
         raise
@@ -873,7 +809,7 @@ def process_prompt_with_perplexity_wrapper(prompt_text: str, user_domain: str, c
             logger.error(f"Perplexity API call failed: {str(lib_error)}")
             text = ""
 
-        return _basic_text_metrics(text or "", user_domain)
+        return _basic_text_metrics(text or "", user_domain, _brand_name_of(group))
     except Exception as e:
         logger.error(f"Perplexity processing failed: {e}")
         raise
@@ -990,7 +926,7 @@ def process_prompt_with_claude(prompt_text: str, user_domain: str, client: Any =
             for block in getattr(response, 'content', []) or []:
                 if getattr(block, 'type', None) == 'text':
                     text += getattr(block, 'text', '') or ''
-        return _basic_text_metrics(text, user_domain)
+        return _basic_text_metrics(text, user_domain, _brand_name_of(group))
     except Exception as e:
         logger.error(f"Claude processing failed: {e}")
         raise
@@ -1055,7 +991,7 @@ def process_prompt_with_grok(prompt_text: str, user_domain: str, client: Any = N
                 timeout=60,
             )
             text = response.choices[0].message.content if response.choices else ""
-        return _basic_text_metrics(text or "", user_domain)
+        return _basic_text_metrics(text or "", user_domain, _brand_name_of(group))
     except Exception as e:
         logger.error(f"Grok processing failed: {e}")
         raise
@@ -1089,7 +1025,7 @@ def process_prompt_with_deepseek(prompt_text: str, user_domain: str, client: Any
             timeout=60,
         )
         text = response.choices[0].message.content if response.choices else ""
-        return _basic_text_metrics(text or "", user_domain)
+        return _basic_text_metrics(text or "", user_domain, _brand_name_of(group))
     except Exception as e:
         logger.error(f"DeepSeek processing failed: {e}")
         raise
