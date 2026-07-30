@@ -16,6 +16,7 @@ from core.queryset_scoping import user_can_access_domain
 from prompts.models import PromptAnalytics, DomainMetricSnapshot, PromptGroupMetricSnapshot, PromptGroup, Prompt
 from competitors.models import Competitor
 from .models import ShareOfVoiceAnalytics, SentimentAnalytics
+from .window_utils import InvalidWindow, parse_days, previous_window
 
 # 'Mentions by Country' (Insights). Prompts are run for the India market and the
 # engine stamps every analytics row region='GLOBAL' until a domain opts into
@@ -824,7 +825,10 @@ def dashboard_summary(request):
     logger = logging.getLogger(__name__)
     
     domain_id = request.query_params.get('domain_id')
-    days = int(request.query_params.get('days', 30))
+    try:
+        days = parse_days(request.query_params.get('days'))
+    except InvalidWindow as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     llm_model = request.query_params.get('llm_model')
     
     # Normalize platform name if provided (e.g., 'chatgpt' -> 'ChatGPT')
@@ -924,9 +928,9 @@ def dashboard_summary(request):
     # Debug: Log calculated dates
     logger.info(f"Dashboard API: Calculated date range for {days} days - start_date: {start_date}, end_date: {end_date}")
 
-    # Calculate previous period for change comparison
-    prev_end_date = start_date - timedelta(days=1)
-    prev_start_date = prev_end_date - timedelta(days=days)
+    # Calculate previous period for change comparison. Both windows are
+    # inclusive of both ends and must be the SAME length — see previous_window.
+    prev_start_date, prev_end_date = previous_window(start_date, days)
 
     # Determine period type based on days (for display/trends)
     period_type = get_period_type(days)
