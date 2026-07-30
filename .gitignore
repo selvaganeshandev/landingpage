@@ -34,6 +34,13 @@ wheels/
 .installed.cfg
 *.egg
 
+# The Python "lib/" and "dist/" rules above are meant for build output, but they
+# also swallow the frontend's own source directories. That is how
+# frontend/src/lib/platform-marks.ts came to be committed-against but absent
+# from the repo, breaking the build everywhere except the machine that wrote it.
+!frontend/src/lib/
+!frontend/src/lib/**
+
 # Virtual environments
 venv/
 env/
