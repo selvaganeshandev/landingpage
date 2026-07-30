@@ -8,9 +8,11 @@ Produces an .xlsx matching the "AI Visibility" reference template:
            breakdown fetched live from DataForSEO (primary) / Moz (fallback) for
            your brand and each competitor URL.
 
-This module is intentionally standalone — it reuses the same models/querysets
-as dashboard_summary but does not import or call it, so existing behavior is
-untouched.
+Sheets 2..n ("Summary", "Trend", "By Platform", "Cited Pages", "Mentions",
+"By Country", "AI Traffic", "Definitions") cover the domain's own performance,
+which the competitor grid above says nothing about. Those are built from
+dashboard_summary's response rather than from re-derived queries, so the
+workbook cannot drift from the page it was exported from.
 """
 
 import base64
@@ -33,11 +35,21 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
+from django.db.models.functions import Coalesce
+
 from analytics.models import ShareOfVoiceAnalytics
+from analytics.views_dashboard import (
+    _canonical_page,
+    _citation_entry_url,
+    _dashboard_datetime_window,
+    _url_host,
+    dashboard_summary,
+)
 from competitors.models import Competitor
 from domains.models import Domain
 from core.queryset_scoping import user_can_access_domain
-from prompts.models import PromptGroupMetricSnapshot
+from integrations.models import GAAITrafficDaily
+from prompts.models import PromptAnalytics, PromptGroupMetricSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -705,6 +717,313 @@ def _build_workbook(domain, brands, platforms, mention_matrix, brand_totals,
     return wb
 
 
+# ---------------------------------------------------------------------------
+# Insight sheets (tabs 1-9)
+#
+# The original workbook was a single competitor-comparison grid, so an export
+# carried almost nothing about the domain's OWN performance — the thing the
+# Insights page spends most of its area showing. These sheets add it.
+#
+# Their figures come from dashboard_summary's own response rather than from
+# re-derived queries. A report that disagrees with the page it was exported
+# from is worse than no report, and the trend/visibility logic in particular
+# (period vs running totals, window sizing, brand matching) is too easy to
+# reimplement subtly differently.
+# ---------------------------------------------------------------------------
+
+_TABLE_HEADER_FILL = "E8E8FF"
+
+
+def _write_table(ws, headers, rows, widths=None, note=None):
+    """Write a simple header + rows table, starting at A1 (or A2 with a note)."""
+    top = 1
+    if note:
+        cell = ws.cell(row=1, column=1, value=note)
+        cell.font = Font(italic=True, color="555555")
+        ws.row_dimensions[1].height = 18
+        top = 3
+
+    for i, header in enumerate(headers, start=1):
+        cell = ws.cell(row=top, column=i, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor=_TABLE_HEADER_FILL)
+        cell.alignment = Alignment(vertical="center")
+
+    for r, row in enumerate(rows, start=top + 1):
+        for c, value in enumerate(row, start=1):
+            ws.cell(row=r, column=c, value=value)
+
+    for i, width in enumerate(widths or [], start=1):
+        ws.column_dimensions[ws.cell(row=top, column=i).column_letter].width = width
+
+    ws.freeze_panes = ws.cell(row=top + 1, column=1)
+
+
+def _pct(value):
+    return None if value is None else round(float(value), 2)
+
+
+def _cited_page_rows(domain_id, start_date, end_date, platform_filter, domain_host):
+    """Every page on the domain that AI cited, with how often and by whom.
+
+    live_domain_window_metrics computes this set to size the Cited Pages metric
+    and then throws the URLs away, keeping only len(). The report is the one
+    place the actual pages are worth naming, so the walk is repeated here with
+    the identical host-matching rule.
+    """
+    if not domain_host:
+        return []
+
+    start_dt, end_dt = _dashboard_datetime_window(start_date, end_date)
+    qs = PromptAnalytics.objects.annotate(
+        _window_dt=Coalesce('tracked_at', 'created_at'),
+    ).filter(
+        prompt__group__domain_id=domain_id,
+        track_status='COMP',
+        _window_dt__gte=start_dt,
+        _window_dt__lte=end_dt,
+    )
+    if platform_filter:
+        qs = qs.filter(platform=platform_filter)
+
+    pages = {}
+    for platform, clist in qs.values_list('platform', 'citation_list'):
+        if not isinstance(clist, list):
+            continue
+        for entry in clist:
+            url = _citation_entry_url(entry)
+            if not url:
+                continue
+            host = _url_host(url)
+            if not host:
+                continue
+            if host == domain_host or host.endswith('.' + domain_host):
+                page = pages.setdefault(
+                    _canonical_page(url), {'count': 0, 'platforms': set()}
+                )
+                page['count'] += 1
+                page['platforms'].add(platform)
+
+    return [
+        [url, data['count'], ", ".join(sorted(data['platforms']))]
+        for url, data in sorted(
+            pages.items(), key=lambda kv: kv[1]['count'], reverse=True
+        )
+    ]
+
+
+# Written once here rather than left to the reader. Nearly every metric on this
+# page has a near-namesake that counts something else — "Your Citations" against
+# "Sources Cited" being the pair that caused the most confusion — and a
+# spreadsheet travels further from its context than the page does.
+_DEFINITIONS = [
+    ["Mentions", "Times AI answers named your brand, summed over the window."],
+    ["Your Citations", "Times AI answers linked to a page on YOUR domain. "
+                       "Counts each link, so one page cited twice counts twice."],
+    ["Sources Cited", "Every URL cited in the answers, yours and everyone "
+                      "else's. The denominator of Citation Share, not a figure "
+                      "about your brand."],
+    ["Cited Pages", "Distinct pages on your domain that were cited. The same "
+                    "links as Your Citations, counted once per page."],
+    ["Citation Share", "Your Citations divided by Sources Cited, as a percent. "
+                       "How much of what AI cites is you."],
+    ["Visibility Score", "0-100 score over every answer in the window, pooled. "
+                         "Not the average of the per-period points."],
+    ["Avg Position", "Average rank of your brand where it appears. Lower is "
+                     "better."],
+    ["Share of Voice", "Your share of mentions across you plus your TRACKED "
+                       "competitors. Moves when the competitor list is edited. "
+                       "Read from the latest available day, not the window."],
+    ["AI Sessions", "Google Analytics sessions that arrived from an AI "
+                    "platform, from the nightly sync."],
+    ["Periods", "Trend rows close a period, not a day. Period length follows "
+                "the engine's run cadence, so rows are not evenly spaced."],
+]
+
+
+def _add_insight_sheets(wb, request, domain, start_date, end_date, platform_filter):
+    """Append tabs 1-9 to the workbook, sourced from dashboard_summary."""
+    # Re-entering the view guarantees the report and the page agree. It is a
+    # plain authenticated GET against the same params, so the only cost is
+    # repeating its queries.
+    summary = dashboard_summary(request._request)
+    if summary.status_code != 200:
+        logger.warning(
+            "dashboard_export: summary returned %s for domain %s; "
+            "insight sheets skipped",
+            summary.status_code, domain.id,
+        )
+        return
+    data = summary.data or {}
+    metrics = data.get("metrics") or {}
+    window_note = (
+        f"{_domain_display_name(domain)} · "
+        f"{start_date.isoformat()} → {end_date.isoformat()}"
+        + (f" · {platform_filter}" if platform_filter else " · all platforms")
+    )
+
+    # ---- 1. Summary ----
+    def _delta(key):
+        value = metrics.get(key)
+        return "N/A" if value is None else value
+
+    _write_table(
+        wb.create_sheet("Summary"),
+        ["Metric", "Value", "Change vs previous period"],
+        [
+            ["Total Prompts", metrics.get("total_prompts"), ""],
+            ["Mentions", metrics.get("total_mentions"), _delta("mentions_change")],
+            ["Your Citations", metrics.get("total_brand_citations"),
+             _delta("brand_citations_change")],
+            ["Cited Pages", metrics.get("total_cited_pages"),
+             _delta("cited_pages_change")],
+            ["Citation Share (%)", _pct(metrics.get("citation_share")),
+             _delta("citation_share_change")],
+            ["Sources Cited (all URLs)", metrics.get("total_citations"),
+             _delta("citations_change")],
+            ["Visibility Score", metrics.get("visibility_score"),
+             _delta("visibility_change")],
+            ["Avg Position", metrics.get("avg_position"), _delta("position_change")],
+            ["Active Alerts", metrics.get("active_alerts"), ""],
+        ],
+        widths=[30, 18, 28],
+        note=window_note,
+    )
+
+    # ---- 2. Trend ----
+    trends = data.get("trends") or []
+    trend_note = (
+        "Per-period activity."
+        if data.get("trends_are_period")
+        else "RUNNING TOTALS as at each date, not activity within the period — "
+             "the engine has not yet written per-period counts for this domain."
+    )
+    _write_table(
+        wb.create_sheet("Trend"),
+        ["Period start", "Period end", "Label", "Mentions", "Citations",
+         "Cited Pages", "Visibility Score"],
+        [
+            [t.get("period_start_iso"), t.get("date_iso"), t.get("date"),
+             t.get("mentions"), t.get("citations"), t.get("cited_pages"),
+             t.get("visibility")]
+            for t in trends
+        ],
+        widths=[14, 14, 12, 12, 12, 13, 16],
+        note=f"{window_note} · {trend_note}",
+    )
+
+    # ---- 3. By Platform ----
+    platform_rows = data.get("platforms") or []
+    total_mentions = sum((p.get("mention_count") or 0) for p in platform_rows)
+    _write_table(
+        wb.create_sheet("By Platform"),
+        ["Platform", "Mentions", "Share of mentions (%)", "Avg Position",
+         "Your Citations", "Cited Pages"],
+        [
+            [
+                p.get("platform"),
+                p.get("mention_count"),
+                _pct((p.get("mention_count") or 0) / total_mentions * 100)
+                if total_mentions else 0.0,
+                p.get("avg_position"),
+                p.get("citations"),
+                p.get("cited_pages"),
+            ]
+            for p in platform_rows
+        ],
+        widths=[18, 12, 22, 14, 16, 13],
+        note=window_note + " · A platform with 0 mentions still ran; it simply "
+                           "did not name the brand.",
+    )
+
+    # ---- 4. Cited Pages ----
+    domain_host = _url_host(domain.url) if domain.url else None
+    page_rows = _cited_page_rows(
+        domain.id, start_date, end_date, platform_filter, domain_host
+    )
+    _write_table(
+        wb.create_sheet("Cited Pages"),
+        ["Page URL", "Times cited", "Cited by"],
+        page_rows,
+        widths=[80, 14, 32],
+        note=window_note + " · Distinct pages on your own domain. Times cited "
+                           "sums to Your Citations; the row count is Cited Pages.",
+    )
+
+    # ---- 5. Mentions ----
+    mentions = data.get("recent_mentions") or []
+    _write_table(
+        wb.create_sheet("Mentions"),
+        ["Date", "Platform", "Prompt", "Position", "Sentiment",
+         "Sentiment score", "Citations"],
+        [
+            [
+                m.get("created_at"),
+                m.get("platform"),
+                m.get("prompt"),
+                m.get("position"),
+                m.get("sentiment"),
+                m.get("sentiment_score"),
+                m.get("citations"),
+            ]
+            for m in mentions
+        ],
+        widths=[28, 16, 60, 10, 12, 16, 12],
+        # Said plainly rather than left to be discovered: the page shows a
+        # "Recent Mentions" list capped at 10 and the export carries the same
+        # list, so this sheet is a sample. A reader who assumes it is every
+        # mention in the window would badly undercount — Mentions on the
+        # Summary sheet is the real total.
+        note=window_note + " · MOST RECENT 10 ONLY — this is the page's Recent "
+                           "Mentions list, not every mention in the window. "
+                           "See Summary for the full count.",
+    )
+
+    # ---- 7. By Country ----
+    _write_table(
+        wb.create_sheet("By Country"),
+        ["Country", "Code", "Mentions", "Share (%)"],
+        [
+            [c.get("name"), c.get("code"), c.get("count"), _pct(c.get("percentage"))]
+            for c in (data.get("countries") or [])
+        ],
+        widths=[24, 10, 12, 12],
+        note=window_note + " · Reflects where each prompt was asked from, not "
+                           "where the reader is.",
+    )
+
+    # ---- 8. AI Traffic ----
+    # Read straight from the nightly GA sync rather than GA4: the same table the
+    # page reads, so an export never burns the property's report quota.
+    traffic = (
+        GAAITrafficDaily.objects
+        .filter(domain_id=domain.id, date__gte=start_date, date__lte=end_date)
+        .exclude(platform=GAAITrafficDaily.ALL_PLATFORMS)
+        .order_by("date", "platform")
+    )
+    _write_table(
+        wb.create_sheet("AI Traffic"),
+        ["Date", "Platform", "Sessions", "Users", "Page Views", "Conversions",
+         "Avg Duration (s)"],
+        [
+            [r.date, r.platform, r.sessions, r.users, r.page_views,
+             r.conversions, float(r.avg_duration or 0)]
+            for r in traffic
+        ],
+        widths=[14, 20, 12, 12, 14, 14, 18],
+        note=window_note + " · From the nightly Google Analytics sync. Empty "
+                           "when GA is not connected.",
+    )
+
+    # ---- 9. Definitions ----
+    _write_table(
+        wb.create_sheet("Definitions"),
+        ["Term", "What it counts"],
+        _DEFINITIONS,
+        widths=[24, 110],
+    )
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def dashboard_export(request):
@@ -800,6 +1119,18 @@ def dashboard_export(request):
     wb = _build_workbook(domain, brands, platforms, matrix, totals, visibility,
                          your_citations, backlinks_map=backlinks_map,
                          period_label=period_label)
+
+    # The competitor grid is worth keeping but is not the report on its own, so
+    # the domain's own numbers follow it. Failing to build them must not cost
+    # the user the sheet that already worked.
+    try:
+        _add_insight_sheets(wb, request, domain, start_date, end_date,
+                            platform_filter)
+    except Exception:
+        logger.exception(
+            "dashboard_export: insight sheets failed for domain %s; "
+            "returning the AI Visibility sheet alone", domain_id,
+        )
 
     buf = BytesIO()
     wb.save(buf)
