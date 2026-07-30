@@ -59,9 +59,6 @@ interface TrendChartProps {
   // Daily AI-referred traffic (sessions/users by date) — feeds the Visibility
   // vs Traffic correlation tab.
   aiTrafficDaily?: Array<{ date: string; dateIso?: string; sessions: number; users: number }> | null;
-  // Your brand's share-of-voice percentage for the current window — feeds the
-  // AI Visibility tab's third pill. Null when there's no share-of-voice reading.
-  shareOfVoice?: number | null;
   // AI-referred traffic aggregates — feeds the AI Traffic tab. Null when GA isn't
   // connected or there were no AI referrals in the window.
   aiTraffic?: AITraffic | null;
@@ -264,7 +261,7 @@ const EmptyState = ({ title, subtitle }: { title: string; subtitle: string }) =>
   </div>
 );
 
-export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, aiTrafficDaily, shareOfVoice, aiTraffic, isPeriodData, gaConnected, aiTrafficError, aiTrafficDailyError, isAllTime }: TrendChartProps) => {
+export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, aiTrafficDaily, aiTraffic, isPeriodData, gaConnected, aiTrafficError, aiTrafficDailyError, isAllTime }: TrendChartProps) => {
   const [chartTab, setChartTab] = useState<ChartTab>("main");
 
   // "Period before all time" is not a thing. Passing undefined (rather than
@@ -386,7 +383,15 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
         // shows "-" whenever GA is not connected, since nothing else on this tab
         // depends on GA.
         { label: "Avg Engagement", displayValue: formatDuration(aiEngagement), colorVar: "chart-4", hint: "Average session duration for visits that arrived from AI platforms, weighted by sessions across those platforms. From Google Analytics — shows '-' when GA is not connected." },
-        { label: "Share of Voice", value: shareOfVoice != null ? Math.round(shareOfVoice * 10) / 10 : undefined, change: null, colorVar: "chart-3", hint: "Your share of all brand mentions (yours plus tracked competitors') in AI answers for this period." },
+        // Share of Voice deliberately omitted. Every other pill on this row
+        // describes the SELECTED WINDOW, but share of voice is read from the
+        // single most recent ShareOfVoiceAnalytics day inside it, so switching
+        // 1M -> 6M left it unchanged while its neighbours moved. It is also a
+        // share of you plus your TRACKED competitors only, which moves when the
+        // competitor list is edited and nothing in AI answers has changed.
+        // The dedicated Share of Voice card on this page (CompetitorComparison)
+        // shows the same figure with every brand and its bar, so nothing is
+        // lost by not repeating a bare number here.
       ];
     }
     if (chartTab === "correlation") {

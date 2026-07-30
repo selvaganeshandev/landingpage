@@ -508,7 +508,6 @@ const Dashboard = () => {
             timeRange={chartDays}
             onTimeRangeChange={handleTimeRangeChange}
             aiTrafficDaily={aiTrafficDaily}
-            shareOfVoice={chartSource?.share_of_voice?.your_brand?.share_percentage ?? null}
             aiTraffic={aiTraffic}
             isPeriodData={chartSource?.trends_are_period}
             gaConnected={gaConnected}
