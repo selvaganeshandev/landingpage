@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown } from "lucide-react";
+import { InfoHint, MetricHint } from "@/components/InfoHint";
 
 interface Competitor {
   name: string;
@@ -37,7 +38,24 @@ export const CompetitorComparison = ({ competitors = [] }: CompetitorComparisonP
     .sort((a, b) => b.shareOfVoice - a.shareOfVoice);
   return (
     <Card className="p-6 h-full flex flex-col border border-border">
-      <h3 className="text-lg font-semibold mb-4">Share of Voice</h3>
+      <div className="flex items-center gap-1.5 mb-4">
+        <h3 className="text-lg font-semibold">Share of Voice</h3>
+        <InfoHint side="right">
+          <MetricHint
+            title="Your slice of the AI conversation"
+            plain="Of all the brand mentions in your tracked answers — yours plus the competitors you track — how many are yours."
+            formula={
+              <>
+                Each brand's mentions ÷ the mentions of every tracked brand combined, over the date
+                range at the top of the page. Only competitors you have added are counted, so
+                adding or removing one moves everybody's share. The <strong>pts</strong> figure is
+                the change in percentage points against the last reading taken before this window,
+                and is blank for a brand with no earlier reading.
+              </>
+            }
+          />
+        </InfoHint>
+      </div>
       <div className="space-y-4 flex-1">
         {list.length === 0 ? (
           <div className="flex items-center justify-center h-full">

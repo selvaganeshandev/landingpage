@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ExternalLink } from "lucide-react";
+import { InfoHint, MetricHint } from "@/components/InfoHint";
 
 interface Mention {
   id: number;
@@ -26,6 +27,27 @@ interface Mention {
 interface MentionTableProps {
   mentions?: Mention[];
 }
+
+/** Card title + its explanation, shared by the empty and populated states so the
+ *  header cannot explain itself in one and stay silent in the other. */
+const TableHeading = () => (
+  <div className="flex items-center gap-1.5 mb-6">
+    <h3 className="text-lg font-semibold font-inter">Recent Mentions</h3>
+    <InfoHint side="right">
+      <MetricHint
+        title="The latest AI answers that named your brand"
+        plain="A sample of the individual answers behind the totals above — which platform gave it, which of your prompts triggered it, and how your brand came across."
+        formula={
+          <>
+            The most recent answers in the date range where your brand was detected, newest first.
+            Answers that did not mention you are not listed here, and this is a preview rather than
+            the full set — open the Mentions page for everything in the window.
+          </>
+        }
+      />
+    </InfoHint>
+  </div>
+);
 
 const getSentimentColor = (sentiment: string) => {
   switch (sentiment) {
@@ -50,7 +72,7 @@ export const MentionTable = ({ mentions = [] }: MentionTableProps) => {
   if (mentions.length === 0) {
     return (
       <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-        <h3 className="text-lg font-semibold mb-6 font-inter">Recent Mentions</h3>
+        <TableHeading />
         <p className="text-muted-foreground text-center py-8">No mentions found</p>
       </Card>
     );
@@ -58,14 +80,31 @@ export const MentionTable = ({ mentions = [] }: MentionTableProps) => {
 
   return (
     <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-      <h3 className="text-lg font-semibold mb-6 font-inter">Recent Mentions</h3>
+      <TableHeading />
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Platform</TableHead>
             <TableHead>Prompt</TableHead>
-            <TableHead className="text-center">Position</TableHead>
-            <TableHead className="text-center">Sentiment</TableHead>
+            <TableHead className="text-center">
+              <span className="inline-flex items-center gap-1.5">
+                Position
+                <InfoHint label="What Position means">
+                  Where your brand was named inside that answer. #1 means it was the first brand
+                  mentioned; a higher number means other brands came first. Lower is better.
+                </InfoHint>
+              </span>
+            </TableHead>
+            <TableHead className="text-center">
+              <span className="inline-flex items-center gap-1.5">
+                Sentiment
+                <InfoHint label="What Sentiment means">
+                  How the answer described your brand — positive, neutral or negative — judged from
+                  the wording around the mention. This is the per-answer verdict that feeds the
+                  sentiment split on the AI Visibility card.
+                </InfoHint>
+              </span>
+            </TableHead>
             <TableHead>Time</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>

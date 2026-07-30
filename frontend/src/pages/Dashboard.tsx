@@ -26,6 +26,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { METRIC_HINTS } from "@/components/MetricHints";
 
 /** GA4's YYYYMMDD -> ISO YYYY-MM-DD, or "" when the input isn't a GA date. */
 function isoFromGADate(yyyymmdd: string): string {
@@ -540,6 +541,7 @@ const Dashboard = () => {
           value={summary?.metrics?.total_prompts ?? "-"}
           icon={<FileText className="h-4 w-4" />}
           href="/prompts"
+          tooltip={METRIC_HINTS.totalPrompts}
         />
         <MetricCard
           title="Total Citations"
@@ -548,6 +550,7 @@ const Dashboard = () => {
           trend={summary?.metrics?.citations_change && summary.metrics.citations_change > 0 ? "up" : "down"}
           icon={<Link2 className="h-4 w-4" />}
           href="/citations"
+          tooltip={METRIC_HINTS.totalCitations}
         />
         <MetricCard
           title="Total Mentions"
@@ -556,6 +559,7 @@ const Dashboard = () => {
           trend={summary?.metrics?.mentions_change && summary.metrics.mentions_change > 0 ? "up" : "down"}
           icon={<Eye className="h-4 w-4" />}
           href="/mentions"
+          tooltip={METRIC_HINTS.totalMentions}
         />
         <MetricCard
           title="Visibility Score"
@@ -563,6 +567,7 @@ const Dashboard = () => {
           change={summary?.metrics?.visibility_change ?? undefined}
           trend={summary?.metrics?.visibility_change && summary.metrics.visibility_change > 0 ? "up" : "down"}
           icon={<Target className="h-4 w-4" />}
+          tooltip={METRIC_HINTS.visibilityScore}
         />
         <MetricCard
           title="Avg Position"
@@ -570,6 +575,7 @@ const Dashboard = () => {
           change={summary?.metrics?.position_change ?? undefined}
           trend={summary?.metrics?.position_change && summary.metrics.position_change < 0 ? "up" : "down"}
           icon={<TrendingUp className="h-4 w-4" />}
+          tooltip={METRIC_HINTS.avgPosition}
         />
       </div>
 

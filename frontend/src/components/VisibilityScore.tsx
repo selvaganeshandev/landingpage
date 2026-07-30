@@ -1,6 +1,5 @@
 import { Card } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Info } from "lucide-react";
+import { InfoHint } from "@/components/InfoHint";
 
 interface VisibilityScoreProps {
   brand: string;
@@ -41,23 +40,6 @@ const SCORE_BANDS = [
 const getBand = (score: number) =>
   SCORE_BANDS.find((band) => score >= band.min) ?? SCORE_BANDS[SCORE_BANDS.length - 1];
 
-/** The card's shared info affordance, so every figure on it can explain what it
- *  counts and over what window without repeating the tooltip scaffolding. */
-const InfoHint = ({ side = "top", children }: { side?: "top" | "right"; children: React.ReactNode }) => (
-  <TooltipProvider>
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button type="button" className="inline-flex cursor-pointer text-muted-foreground opacity-50 hover:opacity-100 transition-opacity">
-          <Info className="h-3.5 w-3.5" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side={side} className="max-w-xs text-xs">
-        {children}
-      </TooltipContent>
-    </Tooltip>
-  </TooltipProvider>
-);
-
 // Semicircle arc geometry: path from (20,100) to (180,100) with radius 80.
 const ARC_RADIUS = 80;
 const ARC_LENGTH = Math.PI * ARC_RADIUS;
@@ -88,6 +70,12 @@ export const VisibilityScore = ({ brand, score, mentions, avgPosition = 0, senti
               <li>• <strong>20%</strong> how positively you're described</li>
               <li>• <strong>10%</strong> how early you appear in the answer</li>
             </ul>
+            {/* Without the bands the number has no meaning: a user seeing 29
+                cannot tell whether that is a good result or a bad one. */}
+            <p className="mt-1.5 text-muted-foreground">
+              Bands: 70+ Great, 50+ Good, 30+ Average, 15+ Below Average, under 15 Poor. Zero
+              mentions scores 0.
+            </p>
           </InfoHint>
         </div>
 
@@ -166,8 +154,14 @@ export const VisibilityScore = ({ brand, score, mentions, avgPosition = 0, senti
         </div>
 
         <div className="space-y-2 pt-2">
-          <div className="flex items-center justify-between text-sm">
+          <div className="flex items-center gap-1.5 text-sm">
             <span className="text-muted-foreground">Sentiment</span>
+            <InfoHint>
+              How AI answers describe your brand when they mention it. Each mention is judged
+              positive, neutral or negative from the wording around it; the bar is the split of
+              those verdicts over the date range set at the top of the page. Answers that never
+              mentioned you are not counted, so this reads tone, not reach.
+            </InfoHint>
           </div>
           <div className="flex gap-1 h-2 rounded-full overflow-hidden">
             <div

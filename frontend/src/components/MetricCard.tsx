@@ -3,6 +3,7 @@ import { TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cloneElement, isValidElement } from "react";
 import { useNavigate } from "react-router-dom";
+import { InfoHint } from "@/components/InfoHint";
 
 interface MetricCardProps {
   title: string;
@@ -13,9 +14,12 @@ interface MetricCardProps {
   onClick?: () => void;
   href?: string;
   iconColor?: string;
+  /** What the metric means and how it is derived. Shown on an info icon beside
+   *  the title — a bare number with a two-word label cannot be acted on. */
+  tooltip?: React.ReactNode;
 }
 
-export const MetricCard = ({ title, value, change, icon, trend, onClick, href, iconColor = "primary" }: MetricCardProps) => {
+export const MetricCard = ({ title, value, change, icon, trend, onClick, href, iconColor = "primary", tooltip }: MetricCardProps) => {
   const navigate = useNavigate();
 
   // Clone the icon element and add the appropriate color class
@@ -45,7 +49,10 @@ export const MetricCard = ({ title, value, change, icon, trend, onClick, href, i
     >
       <div className="flex items-start justify-between mb-4">
         <div>
-          <p className="text-sm text-muted-foreground font-medium">{title}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm text-muted-foreground font-medium">{title}</p>
+            {tooltip && <InfoHint label={`What ${title} means`}>{tooltip}</InfoHint>}
+          </div>
           <h3 className="text-3xl font-bold mt-3">{value}</h3>
         </div>
         {icon && (

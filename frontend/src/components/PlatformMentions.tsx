@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Info } from "lucide-react";
+import { InfoHint } from "@/components/InfoHint";
+import { PlatformLogo } from "@/components/PlatformLogo";
 
 interface Mention {
   platform: string;
@@ -87,18 +87,6 @@ export const PlatformMentions = ({ data, totalCitedPages }: PlatformMentionsProp
   const denominator = (isCitedPages && totalCitedPages ? totalCitedPages : summed) || 1;
   const maxValue   = Math.max(1, ...platforms.map(valueOf));
 
-  const PlatformIcon = ({ platform, hexColor }: { platform: string; hexColor: string }) => {
-    const initials = PLATFORM_META[platform]?.initials ?? platform.charAt(0).toUpperCase();
-    return (
-      <span
-        className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white shadow-sm"
-        style={{ backgroundColor: hexColor }}
-      >
-        {initials}
-      </span>
-    );
-  };
-
   const tabButton = (tab: MetricTab, label: string) => (
     <button
       type="button"
@@ -119,34 +107,33 @@ export const PlatformMentions = ({ data, totalCitedPages }: PlatformMentionsProp
       <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div className="flex items-center gap-1.5">
           <h3 className="text-base font-semibold font-inter">Distribution by LLM</h3>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button type="button" className="inline-flex cursor-pointer text-muted-foreground opacity-50 hover:opacity-100 transition-opacity">
-                  <Info className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right" className="max-w-xs text-xs">
-                {activeTab === "mentions" ? (
-                  <>
-                    <p className="font-medium mb-1">Mentions by platform</p>
-                    <p>How this period's mentions split across AI platforms. These add up to your Total Mentions.</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="font-medium mb-1">Cited pages by platform</p>
-                    <p className="mb-1.5">Distinct pages on your domain that each platform cited this period.</p>
-                    <p>
-                      These do <strong>not</strong> add up to your Cited Pages total. A page cited by three
-                      platforms counts once for you but once in each platform's row, so the percentages —
-                      each platform's share of your {totalCitedPages ?? "total"} cited pages — can exceed
-                      100% combined.
-                    </p>
-                  </>
-                )}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <InfoHint side="right">
+            {activeTab === "mentions" ? (
+              <>
+                <p className="font-medium mb-1">Mentions by platform</p>
+                <p className="mb-1.5">Which AI platforms are actually naming your brand, and how the total splits between them.</p>
+                <p className="text-muted-foreground">
+                  <span className="font-medium text-foreground">How it's calculated: </span>
+                  Each platform's mentions over the date range at the top of the page, as a share of
+                  their combined total. Mentions do not overlap between platforms, so these rows add
+                  up to your Total Mentions.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium mb-1">Cited pages by platform</p>
+                <p className="mb-1.5">How many different pages on your own site each platform pointed to as a source.</p>
+                <p className="text-muted-foreground">
+                  <span className="font-medium text-foreground">How it's calculated: </span>
+                  Distinct pages on your domain that the platform cited in the date range. These do{" "}
+                  <strong>not</strong> add up to your Cited Pages total: a page cited by three
+                  platforms counts once for you but once in each platform's row, so the percentages —
+                  each platform's share of your {totalCitedPages ?? "total"} cited pages — can exceed
+                  100% combined.
+                </p>
+              </>
+            )}
+          </InfoHint>
         </div>
         <div className="flex items-center gap-0.5 rounded-lg bg-muted/60 p-0.5 border border-border/50">
           {tabButton("mentions", "Mentions")}
@@ -177,7 +164,11 @@ export const PlatformMentions = ({ data, totalCitedPages }: PlatformMentionsProp
             <div key={platform.platform} className="flex items-center gap-4">
               {/* Logo + Name */}
               <div className="flex items-center gap-2.5 w-32 flex-shrink-0">
-                <PlatformIcon platform={platform.platform} hexColor={platform.hexColor} />
+                <PlatformLogo
+                  platform={platform.platform}
+                  fallbackHex={platform.hexColor}
+                  fallbackInitials={PLATFORM_META[platform.platform]?.initials}
+                />
                 <span className="text-sm font-medium truncate text-foreground/90">{platform.platform}</span>
               </div>
 

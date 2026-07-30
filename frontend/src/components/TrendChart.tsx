@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from "recharts";
-import { Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { InfoHint } from "@/components/InfoHint";
 
 interface TrendMetrics {
   total_mentions?: number;
@@ -158,18 +158,7 @@ const MetricPill = ({ label, value, displayValue, change, colorVar, hint }: Pill
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: `hsl(var(--${colorVar}))` }} />
         <span>{label}</span>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" className="inline-flex cursor-pointer text-muted-foreground opacity-50 hover:opacity-100 transition-opacity">
-                <Info className="h-3 w-3 flex-shrink-0" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-xs text-xs">
-              {hint}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <InfoHint iconClassName="h-3 w-3">{hint}</InfoHint>
       </div>
       <div className="flex items-baseline gap-1.5 flex-wrap">
         <span className="text-2xl font-bold tracking-tight text-foreground">{displayValue ?? formatCompact(value)}</span>

@@ -1,6 +1,5 @@
 import { Card } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Info } from "lucide-react";
+import { InfoHint, MetricHint } from "@/components/InfoHint";
 
 interface CountryShare {
   code: string;
@@ -111,18 +110,20 @@ export const MentionsByCountry = ({ data }: MentionsByCountryProps) => {
       <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
         <div className="flex items-center gap-1.5">
           <h3 className="text-base font-semibold font-inter">Mentions by Country</h3>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button type="button" className="inline-flex cursor-pointer text-muted-foreground opacity-50 hover:opacity-100 transition-opacity">
-                  <Info className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right" className="max-w-xs text-xs">
-                Breakdown of brand mentions by target prompt location.
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <InfoHint side="right">
+            <MetricHint
+              title="Which markets your mentions come from"
+              plain="Every prompt is asked as if from a particular location. This splits your mentions by that location, so you can see where AI is surfacing you."
+              formula={
+                <>
+                  Mentions in the date range grouped by each prompt's target location, shown as a
+                  count and as a share of the total. It reflects where the question was asked
+                  from, not where the reader is — prompts with no specific market are grouped
+                  under Global.
+                </>
+              }
+            />
+          </InfoHint>
         </div>
       </div>
 
