@@ -263,6 +263,16 @@ def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=
     sent_n = 0
     platforms = {}
     domain_pages = set()  # distinct domain-owned cited URLs (Cited Pages)
+    # Domain-owned citation EVENTS, counted from citation_list the same way
+    # Cited Pages is, just without the de-duplication.
+    #
+    # Not derived from the total_citations column: that column is populated for
+    # some domains and left at 0 for others (Tata Motors: 0 across all 400 rows
+    # while 219 of them carry a non-empty citation_list, and 8 distinct pages of
+    # its own were cited). Counting the citation_list directly is the only
+    # measure that works for every domain, and it agrees with Cited Pages by
+    # construction because both read the same entries.
+    domain_citation_hits = 0
 
     for platform, is_m, tm, tc, pos, sscore, clist in qs.values_list(
         'platform', 'is_mention', 'total_mentions', 'total_citations',
@@ -299,6 +309,7 @@ def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=
                 if host and (host == domain_host or host.endswith('.' + domain_host)):
                     canonical_url = _canonical_page(url)
                     domain_pages.add(canonical_url)
+                    domain_citation_hits += 1
                     p['cited_pages'].add(canonical_url)
 
         if is_m:
@@ -329,6 +340,7 @@ def live_domain_window_metrics(domain_id, start_date, end_date, platform_filter=
     return {
         'total_mentions': total_mentions,
         'domain_citations': domain_citations,
+        'domain_citation_hits': domain_citation_hits,
         'cited_urls': cited_urls,
         'cited_pages': len(domain_pages),
         'avg_position': avg_position,
@@ -593,6 +605,9 @@ def snapshot_window_metrics(domain_id, start_date, end_date, platform_filter=Non
     return {
         'total_mentions': total_mentions,
         'domain_citations': total_citations,
+        # Snapshots keep no citation_list, so domain-owned citation events
+        # cannot be recovered here — same reason cited_pages is 0 above.
+        'domain_citation_hits': 0,
         'cited_urls': total_citations,
         'cited_pages': 0,
         'avg_position': avg_position,
@@ -1038,8 +1053,8 @@ def dashboard_summary(request):
     # answer — competitors, blogs, news — so on a brand dashboard it reads as
     # the brand's own figure while measuring something ~1000x larger. Both are
     # kept: this one is the headline, `total_citations` is its denominator.
-    total_brand_citations = live['domain_citations']
-    prev_total_brand_citations = live_prev['domain_citations']
+    total_brand_citations = live['domain_citation_hits']
+    prev_total_brand_citations = live_prev.get('domain_citation_hits', 0)
     # Cited Pages = distinct domain-owned pages cited by AI in the window.
     total_cited_pages = live['cited_pages']
     prev_total_cited_pages = live_prev['cited_pages']

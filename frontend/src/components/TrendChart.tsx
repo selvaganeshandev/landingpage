@@ -362,7 +362,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
       // this domain's own citations, so the card showed two numbers orders of
       // magnitude apart under one word. This is now the brand-scoped figure the
       // line has always drawn, and the old total moved into Citation Share.
-      { label: "Your Citations", value: metrics?.total_brand_citations, change: periodChange(metrics?.brand_citations_change), colorVar: "chart-2", hint: "How many times AI answers cited your own domain in this period. Counts each citation, so one page cited several times counts more than once. This is the figure the Your Citations line plots below." },
+      { label: "Your Citations", value: metrics?.total_brand_citations, change: periodChange(metrics?.brand_citations_change), colorVar: "chart-2", hint: "How many times AI answers linked to a page on your own domain in this period. Counts each link, so one page cited several times counts more than once — Cited Pages counts those same links once per page. The 'Sources Cited' line below plots every source in the answers, yours and everyone else's, so it is a much larger number." },
       { label: "Cited Pages", value: metrics?.total_cited_pages, change: periodChange(metrics?.cited_pages_change), colorVar: "chart-3", hint: "Distinct pages on your own domain that the AI cited in this period. Unlike Your Citations, each page is counted once no matter how often it was cited." },
       {
         label: "Citation Share",
@@ -574,11 +574,12 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
                     <Line
                       type="monotone"
                       dataKey="citations"
-                      // Renamed, not re-pointed: this series has always plotted
-                      // the domain's OWN citations. It was labelled "Citations"
-                      // next to a pill showing every cited URL, which is why the
-                      // two disagreed by orders of magnitude.
-                      name="Your Citations"
+                      // ALL citations in the answers, not the domain's own:
+                      // snapshots store period_citations as the full count
+                      // (Tata Motors plots 1199 while only 8 of its own pages
+                      // were cited). Named for what it plots, so it can never
+                      // be read as the brand's own figure again.
+                      name="Sources Cited"
                       stroke="hsl(var(--chart-2))"
                       strokeWidth={3}
                       dot={{ fill: "hsl(var(--chart-2))", r: 4 }}
