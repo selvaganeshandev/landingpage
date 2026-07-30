@@ -343,7 +343,21 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
   // a period with 155. This pill previously did exactly that and reported ~17
   // beside the same metric's true 29.18 on the tab next door. The window figure
   // comes from the API, which pools the periods' own inputs.
-  const totalAiSessions = (aiTrafficDaily ?? []).reduce((a, r) => a + r.sessions, 0) || undefined;
+  // Sessions actually PAIRED with a visibility score — the ones the plotted
+  // points and the r-value are built from.
+  //
+  // The window-wide total above is not the right figure for this tab. Trend
+  // points stop at the engine's last run while GA keeps recording daily, and
+  // they start whenever the first snapshot landed rather than at the window's
+  // first day. Every GA day outside those periods is attributed to no point
+  // (see correlationData), so the pill read 57 above a chart whose points
+  // summed to 10 — both correct, answering different questions. This makes the
+  // pill describe the same span as the chart beneath it; the full-window number
+  // still lives on the AI Traffic tab.
+  const pairedAiSessions = correlationData.reduce(
+    (a, d) => a + (typeof d.sessions === "number" ? d.sessions : 0),
+    0,
+  ) || undefined;
 
   // Pills double as the chart's legend/summary, so they track the active tab:
   // each tab shows the metrics that match the series it plots. Values are
@@ -378,7 +392,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
     if (chartTab === "correlation") {
       return [
         { label: "Visibility Score", value: metrics?.visibility_score, colorVar: "secondary", hint: "Your AI Visibility score (0-100) for this window — the same figure shown on the AI Visibility tab and on the gauge. Scored over every answer in the window at once, so periods with more answers count for more. It is not the average of the plotted points." },
-        { label: "AI Sessions", value: totalAiSessions, colorVar: "primary", hint: "Total sessions arriving from AI platforms (ChatGPT, Gemini, Perplexity, Claude, Copilot…) over the period, from Google Analytics." },
+        { label: "AI Sessions", value: pairedAiSessions, colorVar: "primary", hint: "Sessions from AI platforms (ChatGPT, Gemini, Perplexity, Claude, Copilot…) that fall inside the periods plotted below — the same sessions the correlation is measured on, so this figure is the sum of the points on the chart. Periods are bounded by when the engine last scored your visibility, so days after the latest run, or before the first one, are not included here. For every AI session in the selected window, see the AI Traffic tab." },
         {
           label: "Correlation",
           displayValue: correlationR !== null ? correlationR.toFixed(2) : "N/A",
