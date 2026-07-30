@@ -1109,12 +1109,31 @@ def dashboard_export(request):
     # Per-brand backlink metrics (referring domains, total backlinks, CAT A/B/C,
     # pages indexed in SERP). Runs in parallel; if no provider is configured each
     # brand returns an empty payload and the cells render N/A — same as before.
-    backlinks_map = _build_backlinks_map(brands)
+    #
+    # OPT-IN, because this is the entire cost of an export. Measured on Appkodes
+    # (6 brands): the whole export took 40.6s, of which backlinks and
+    # pages-indexed were 45.7s of wall-clock across the pool — one brand hit the
+    # 30s read timeout on its own — while every other sheet together took 1.8s.
+    # The frontend buffers the response into a blob before saving, so nothing
+    # reaches disk until the last byte and navigating away discards the lot;
+    # a 40s default made that easy to trigger. Skipped unless asked for, which
+    # puts a normal export at ~2s.
+    include_backlinks = str(
+        request.query_params.get("include_backlinks", "")
+    ).lower() in ("1", "true", "yes")
+    backlinks_map = _build_backlinks_map(brands) if include_backlinks else {}
 
     period_label = (
         f"Mentions summed: {start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}"
         f" · Visibility snapshot: {latest_day.strftime('%Y-%m-%d') if latest_day else 'n/a'}"
     )
+    if not include_backlinks:
+        # Without this the empty backlink cells read as "this brand has no
+        # backlinks" rather than "we did not go and look".
+        period_label += (
+            " · Backlinks & pages-indexed NOT FETCHED — re-export with"
+            " 'Include backlinks' to populate them"
+        )
 
     wb = _build_workbook(domain, brands, platforms, matrix, totals, visibility,
                          your_citations, backlinks_map=backlinks_map,

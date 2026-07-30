@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -134,7 +135,11 @@ const Dashboard = () => {
     setIsEndOpen(false);
   };
 
-  const handleExportReport = async () => {
+  // `includeBacklinks` adds the per-brand DataForSEO/Moz lookups, which take an
+  // export from ~2s to ~40s. The download is buffered in memory and only saved
+  // once complete, so a long export is lost if the user navigates away — hence
+  // it is a deliberate choice rather than the default.
+  const handleExportReport = async (includeBacklinks = false) => {
     const currentDomainId = selectedDomain?.id ? String(selectedDomain.id) : domainId || '';
     if (!currentDomainId) {
       toast({
@@ -164,7 +169,9 @@ const Dashboard = () => {
       setExporting(true);
       toast({
         title: "Exporting Report",
-        description: "Your AI Visibility report is being generated...",
+        description: includeBacklinks
+          ? "Fetching backlink data for every brand — this can take up to a minute. Stay on this page until the file downloads."
+          : "Your AI Visibility report is being generated...",
       });
       const safeName = (selectedDomain?.name || 'domain').replace(/\s+/g, '_');
       const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -178,6 +185,7 @@ const Dashboard = () => {
         ...(useRange ? { start_date: format(exportStartDate!, 'yyyy-MM-dd') } : {}),
         ...(useRange ? { end_date: format(exportEndDate!, 'yyyy-MM-dd') } : {}),
         filename: `${safeName}_AI_Visibility_${timestamp}.xlsx`,
+        include_backlinks: includeBacklinks,
       });
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
@@ -475,10 +483,26 @@ const Dashboard = () => {
                 Clear
               </Button>
             )}
-            <Button variant="outline" onClick={handleExportReport} disabled={exporting || loading}>
-              <Download className="h-4 w-4 mr-2" />
-              {exporting ? "Exporting..." : "Export Report"}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={exporting || loading}>
+                  <Download className="h-4 w-4 mr-2" />
+                  {exporting ? "Exporting..." : "Export Report"}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <DropdownMenuItem onClick={() => handleExportReport(false)} className="flex flex-col items-start gap-0.5">
+                  <span className="font-medium">Export report</span>
+                  <span className="text-xs text-muted-foreground">All sheets. Takes a couple of seconds.</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExportReport(true)} className="flex flex-col items-start gap-0.5">
+                  <span className="font-medium">Export with backlinks</span>
+                  <span className="text-xs text-muted-foreground">
+                    Adds backlinks &amp; pages-indexed per brand. Up to a minute — keep this page open.
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button onClick={handleRefreshData} className="gradient-primary shadow-md shadow-primary/20" disabled={loading}>
               {loading ? "Loading..." : "Refresh Data"}
             </Button>
