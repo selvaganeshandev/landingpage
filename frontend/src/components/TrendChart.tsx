@@ -136,18 +136,40 @@ const describeCorrelation = (r: number | null): string => {
   return `${strength} ${direction}`;
 };
 
+// Tone for the correlation badge. Direction decides the colour, but only once
+// the correlation is strong enough to mean anything: a "negligible positive" is
+// noise, and painting it green would read as good news that isn't there.
+const correlationTone = (r: number | null): NoteTone => {
+  if (r === null) return "neutral";
+  const magnitude = Math.abs(r);
+  if (magnitude < 0.2) return "neutral";
+  return r > 0 ? "positive" : "negative";
+};
+
+type NoteTone = "positive" | "negative" | "neutral";
+
+// Badge styling per tone. Tinted background rather than solid so the badge
+// stays quieter than the figure it annotates.
+const NOTE_TONE_CLASS: Record<NoteTone, string> = {
+  positive: "bg-success/10 text-success",
+  negative: "bg-destructive/10 text-destructive",
+  neutral: "bg-muted text-muted-foreground",
+};
+
 interface PillProps {
   label: string;
   value?: number;
   /** Pre-formatted value (%, duration, correlation) — overrides formatCompact(value). */
   displayValue?: string;
   /**
-   * Qualifier shown beside the value in small muted type — a word that
+   * Qualifier shown beside the value as a small badge — a word that
    * INTERPRETS the number ("strong positive") rather than being part of it.
    * Kept out of displayValue so it does not inherit the 2xl bold metric style,
    * where it reads as data competing with the figure instead of labelling it.
    */
   valueNote?: string;
+  /** Badge colour for `valueNote`. Defaults to neutral. */
+  valueNoteTone?: NoteTone;
   // Trend semantics:
   //   omitted (undefined) → no trend shown at all
   //   null                → "N/A" (metric has no prior-period comparison)
@@ -169,7 +191,7 @@ interface PillProps {
 // when the real story is that tracking had barely started. Past this: "New".
 const MAX_MEANINGFUL_CHANGE = 999;
 
-const MetricPill = ({ label, value, displayValue, valueNote, change, changeUnit = "%", colorVar, hint }: PillProps) => {
+const MetricPill = ({ label, value, displayValue, valueNote, valueNoteTone = "neutral", change, changeUnit = "%", colorVar, hint }: PillProps) => {
   const showTrend = change !== undefined;
   const isNoData = change === null;
   const isUp = typeof change === "number" && change > 0;
@@ -186,7 +208,9 @@ const MetricPill = ({ label, value, displayValue, valueNote, change, changeUnit 
       <div className="flex items-baseline gap-1.5 flex-wrap">
         <span className="text-2xl font-bold tracking-tight text-foreground">{displayValue ?? formatCompact(value)}</span>
         {valueNote && (
-          <span className="text-xs font-medium text-muted-foreground">{valueNote}</span>
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none whitespace-nowrap ${NOTE_TONE_CLASS[valueNoteTone]}`}>
+            {valueNote}
+          </span>
         )}
         {showTrend && (
           isNoData ? (
@@ -359,6 +383,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
           label: "Correlation",
           displayValue: correlationR !== null ? correlationR.toFixed(2) : "N/A",
           valueNote: correlationR !== null ? describeCorrelation(correlationR) : undefined,
+          valueNoteTone: correlationTone(correlationR),
           colorVar: "chart-3",
           hint: correlationR !== null
             ? `Does your AI visibility move together with the traffic AI sends you? Each point below is one period: its visibility score, paired with every Google Analytics session that arrived from an AI platform during that same period. We run a Pearson correlation across those ${correlationPairs.length} pairs. The result runs from -1 to +1 — near +1 they rise and fall together, near 0 there is no relationship, near -1 one rises as the other falls. It shows association, not cause: traffic can move for reasons that have nothing to do with AI answers.`
