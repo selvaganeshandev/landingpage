@@ -19,8 +19,14 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 
+from core.favicon_proxy import favicon
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    # Mounted at the root, and deliberately unauthenticated: it is consumed by
+    # <img src>, which cannot send an Authorization header. See favicon_proxy
+    # for why resolving these in the browser is not possible.
+    path('favicon/', favicon, name='favicon_proxy'),
     path('auth/', include('authentication.urls')),
     path('domains/', include('domains.urls')),
     path('keywords/', include('keywords.urls')),

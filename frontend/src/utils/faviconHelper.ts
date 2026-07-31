@@ -1,96 +1,48 @@
 /**
- * Utility functions for handling favicons with www/non-www fallback
+ * Favicon URLs, resolved by the backend rather than guessed here.
+ *
+ * This file used to pick between the www and non-www spelling of a host and
+ * hope. It cannot be done in the browser: Google answers a host it has no icon
+ * for with a generic globe at HTTP 200 — a valid, decodable 16x16 PNG — so
+ * `<img>` fires `load` rather than `error` and no fallback chain runs. The
+ * status is unreadable too (no access-control-allow-origin on either
+ * google.com/s2 or t*.gstatic.com, so fetch() is opaque and canvas is
+ * tainted), and size is not a signal because some real icons are also 16x16.
+ *
+ * Nor is there a fixed rule to apply, since domains need opposite answers:
+ *
+ *     menolabs.com   www -> placeholder   bare -> real
+ *     racold.com     www -> real          bare -> placeholder
+ *
+ * /favicon/ does the comparison server-side, where the bytes are readable,
+ * and caches the winner. See backend/core/favicon_proxy.py.
  */
 
-/**
- * Favicon URL for a domain: "www." for a registrable domain, the host as-is
- * for a subdomain.
- *
- * The split exists because the two cases genuinely want opposite things, and
- * because a 404 CANNOT be detected here so the first URL has to be the right
- * one. Google answers a missing favicon with HTTP 404 whose body is a valid
- * 16x16 PNG; browsers decode 404 image bodies and fire `load`, not `error`, so
- * the onError chain below never runs for it. Reading the status directly is
- * not an option either — the endpoint sends no CORS headers, so fetch() can
- * only get an opaque response. Size is no signal either: trucks.tatamotors.com
- * serves a real 16x16 icon, the same dimensions as the placeholder.
- *
- * Measured against the service:
- *   racold.com              404   www.racold.com              200
- *   trucks.tatamotors.com   200   www.trucks.tatamotors.com   404
- *
- * So: www helps a registrable domain and breaks a subdomain, which is exactly
- * the rule applied here. Prefixing everything (the original behaviour) broke
- * every subdomain; prefixing nothing broke apex domains like racold.
- */
+import { API_BASE_URL } from "@/services/api";
+
+/** Bare hostname from a URL or host string. */
+const hostOf = (url: string): string => {
+  if (!url) return "";
+  try {
+    const full = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    return new URL(full).hostname;
+  } catch {
+    return String(url).replace(/^https?:\/\//i, "").split("/")[0];
+  }
+};
+
 export const getFaviconUrl = (url: string, size: number = 32): string => {
-  try {
-    // Ensure URL has protocol
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
-      ? url
-      : `https://${url}`;
-
-    const parsedUrl = new URL(fullUrl);
-    const hostname = parsedUrl.hostname;
-    const preferred = isRegistrableDomain(hostname) ? `www.${hostname}` : hostname;
-
-    // Pass the full URL with protocol to Google's favicon service
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${preferred}&sz=${size}`;
-  } catch {
-    // Parsing failed — send what we were given rather than inventing a host.
-    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
-  }
-};
-
-const MULTI_PART_SUFFIXES = [
-  'co.uk', 'org.uk', 'ac.uk', 'gov.uk',
-  'com.au', 'net.au', 'org.au',
-  'co.in', 'net.in', 'org.in', 'bank.in', 'gov.in', 'ac.in',
-  'co.nz', 'co.za', 'co.jp', 'com.br', 'com.sg', 'com.my',
-];
-
-const isRegistrableDomain = (hostname: string): boolean => {
-  if (hostname.match(/^[0-9.]+$/)) return false; // IP address
-  const suffix = MULTI_PART_SUFFIXES.find((s) => hostname.endsWith(`.${s}`));
-  const labels = hostname.split('.').length;
-  return suffix ? labels === 3 : labels === 2;
+  const host = hostOf(url);
+  if (!host) return "";
+  return `${API_BASE_URL}/favicon/?domain=${encodeURIComponent(host)}&size=${size}`;
 };
 
 /**
- * Second attempt: the counterpart of whatever getFaviconUrl chose.
- *
- * Only reached when the browser DOES fire an error (a genuine network failure
- * or an undecodable body). Google's 404-with-a-valid-PNG does not get here —
- * see the note on getFaviconUrl — which is why the first URL has to be right.
+ * Kept for the existing call sites. There is no second URL to try any more —
+ * the backend has already tried every candidate before answering — so this
+ * returns nothing and the error handler goes straight to the placeholder.
  */
-export const getAlternativeFaviconUrl = (url: string, size: number = 32): string => {
-  try {
-    // Ensure URL has protocol
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
-      ? url
-      : `https://${url}`;
-
-    const parsedUrl = new URL(fullUrl);
-    const hostname = parsedUrl.hostname;
-
-    let alternative: string;
-    if (hostname.startsWith('www.')) {
-      // Stored WITH www, so that is what was tried — drop it.
-      alternative = hostname.substring(4);
-    } else if (isRegistrableDomain(hostname)) {
-      // www was tried first; the bare host is the remaining option.
-      alternative = hostname;
-    } else {
-      // A subdomain, already tried as-is. "www" in front of it is a host
-      // nobody publishes, so go straight to the placeholder.
-      return '';
-    }
-
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${alternative}&sz=${size}`;
-  } catch {
-    return '';
-  }
-};
+export const getAlternativeFaviconUrl = (_url: string, _size: number = 32): string => "";
 
 /**
  * Get fallback placeholder icon URL
@@ -106,8 +58,11 @@ export const getFallbackIconUrl = (name?: string): string => {
 };
 
 /**
- * Handle favicon load error with cascading fallbacks
- * Usage in img tag: onError={(e) => handleFaviconError(e, url, name, size)}
+ * Handle favicon load error.
+ *
+ * Now only fires for a genuine failure — the backend answers 404 when no real
+ * icon exists anywhere, which DOES trigger this, unlike Google's 200-with-a-
+ * globe. One step to the initial-avatar, then give up.
  */
 export const handleFaviconError = (
   event: React.SyntheticEvent<HTMLImageElement>,
@@ -116,33 +71,13 @@ export const handleFaviconError = (
   size: number = 32
 ): void => {
   const img = event.currentTarget;
-  const currentSrc = img.src;
-  const primaryUrl = getFaviconUrl(originalUrl, size);
-  const alternativeUrl = getAlternativeFaviconUrl(originalUrl, size);
   const fallbackUrl = getFallbackIconUrl(name);
 
-  // Prevent infinite loop
   if (img.dataset.faviconAttempt) {
-    const attempts = parseInt(img.dataset.faviconAttempt);
-
-    if (attempts === 1) {
-      // Second attempt: try alternative (www/non-www toggle)
-      img.dataset.faviconAttempt = '2';
-      img.src = alternativeUrl;
-      return;
-    } else if (attempts === 2) {
-      // Third attempt: use fallback
-      img.dataset.faviconAttempt = '3';
-      img.src = fallbackUrl;
-      return;
-    } else {
-      // Final fallback: hide image
-      img.style.display = 'none';
-      return;
-    }
+    img.style.display = 'none';
+    return;
   }
 
-  // First attempt failed, try alternative
   img.dataset.faviconAttempt = '1';
-  img.src = alternativeUrl;
+  img.src = fallbackUrl;
 };
