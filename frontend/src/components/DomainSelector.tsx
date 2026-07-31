@@ -20,6 +20,15 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
+/** Bare host for the dropdown subtext: no scheme, no "www.", no trailing slash. */
+const hostLabel = (url?: string | null): string => {
+  if (!url) return "";
+  return String(url)
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/\/+$/, "");
+};
+
 export const DomainSelector = () => {
   const [open, setOpen] = useState(false);
   const { toast } = useToast();
@@ -295,8 +304,16 @@ export const DomainSelector = () => {
                             Failed
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground">
-                            {domain.total_mentions} mentions
+                          // The host, not a mention count. `domain.total_mentions`
+                          // is a denormalized column the engine only rewrites when
+                          // it reprocesses a group, so it drifts — Tata Motors read
+                          // 3615 here against 3595 on Insights. It is also all-time
+                          // while Insights counts the selected window, so the two
+                          // would disagree by design on any shorter range even once
+                          // the column is fresh. The host is what actually
+                          // distinguishes two similarly named domains anyway.
+                          <span className="text-xs text-muted-foreground truncate">
+                            {hostLabel(domain.url) || " "}
                           </span>
                         )}
                       </div>
