@@ -795,6 +795,12 @@ export const apiClient = {
     return apiRequest(`/prompts/groups/${id}/${queryString}`);
   },
 
+  // Single prompt group workbook: Overview, Variants, a sheet per LLM, and the
+  // full answers. Scoped to one group, unlike exportPromptsReport which covers
+  // the whole domain.
+  exportPromptGroup: (id: number, filename?: string) =>
+    downloadFile(`/prompts/groups/${id}/export/`, filename || `prompt-${id}.xlsx`),
+
   updatePromptGroup: (id: number, data: any) => apiRequest(`/prompts/groups/${id}/`, {
     method: 'PUT',
     body: JSON.stringify(data),

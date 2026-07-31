@@ -24,6 +24,7 @@ import {
   TrendingUp,
   TrendingDown,
   Copy,
+  Download,
   Loader2,
   MessageSquare,
   GitBranch,
@@ -65,6 +66,7 @@ const PromptDetail = () => {
   // so the all-LLMs choice needs a real one; it is translated back to "send no
   // platform param" in loadPrompts.
   const [selectedPlatform, setSelectedPlatform] = useState<string>(ALL_PLATFORMS);
+  const [isExporting, setIsExporting] = useState(false);
   const [selectedResponsePlatform, setSelectedResponsePlatform] = useState<string>("");
   const [platformResponses, setPlatformResponses] = useState<Record<string, string>>({});
 
@@ -201,6 +203,23 @@ const PromptDetail = () => {
       }
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!id) return;
+    try {
+      setIsExporting(true);
+      const label = (promptGroup?.theme || `prompt-${id}`).replace(/[^\w-]+/g, "_");
+      await apiClient.exportPromptGroup(parseInt(id), `${label}_${id}.xlsx`);
+    } catch (e: any) {
+      toast({
+        title: "Export failed",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -416,6 +435,12 @@ const PromptDetail = () => {
             </p>
           </div>
         </div>
+        <Button variant="outline" onClick={handleExport} disabled={isExporting}>
+          {isExporting
+            ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            : <Download className="h-4 w-4 mr-2" />}
+          {isExporting ? "Exporting..." : "Export"}
+        </Button>
       </div>
 
       {/* Key Metrics */}

@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -22,6 +23,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.queryset_scoping import user_can_access_domain
 from domains.models import Domain
 from .models import PromptAnalytics
 
@@ -429,3 +431,174 @@ def prompts_export_data(request):
         "rows": rows,
         "total_rows": len(rows),
     })
+
+
+# ---------------------------------------------------------------------------
+# Single prompt group export
+#
+# The domain-wide export answers "how is this domain doing across its prompts".
+# Researching ONE prompt is a different question — which model ranks it where,
+# what each actually said, and which sources it leaned on — and pulling that out
+# of a 100-row workbook meant filtering by hand. This scopes the same shape to
+# one group and adds the answer text, which is the thing worth reading when the
+# question is about a single prompt.
+# ---------------------------------------------------------------------------
+
+GROUP_VARIANT_HEADERS_HEAD = ["Variant"]
+
+
+def _latest_by_prompt_platform(group):
+    """{prompt_id: {platform: latest PromptAnalytics}} for a group.
+
+    Latest-per-pair, matching what the detail page shows: analytics rows are
+    rewritten in place each run, but a re-run can leave more than one, and
+    summing them would count a single LLM answer more than once.
+    """
+    rows = (
+        PromptAnalytics.objects
+        .filter(prompt__group=group, is_published=True)
+        .exclude(platform__isnull=True).exclude(platform="")
+        .select_related("prompt")
+        .order_by("-created_at")
+    )
+    latest = {}
+    for a in rows:
+        per_prompt = latest.setdefault(a.prompt_id, {})
+        if a.platform not in per_prompt:
+            per_prompt[a.platform] = a
+    return latest
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def prompt_group_export(request, group_id):
+    """GET /prompts/groups/<id>/export/ — one workbook for a single prompt group."""
+    from .models import PromptGroup  # local: avoids a circular import at module load
+
+    group = get_object_or_404(
+        PromptGroup.objects.select_related("domain"), id=group_id
+    )
+    if not user_can_access_domain(request.user, group.domain_id, request):
+        return Response({"error": "Prompt group not found"},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    latest = _latest_by_prompt_platform(group)
+    prompts = list(group.prompts.all())
+    platforms_present = {p for per in latest.values() for p in per}
+    ordered = [p for p in PLATFORM_SHEETS if p in platforms_present]
+    ordered += sorted(p for p in platforms_present if p not in PLATFORM_SHEETS)
+
+    wb = Workbook()
+
+    # ---- Overview ----
+    ws = wb.active
+    ws.title = "Overview"
+    totals = {p: 0 for p in ordered}
+    for per in latest.values():
+        for platform, rec in per.items():
+            totals[platform] = totals.get(platform, 0) + int(rec.total_mentions or 0)
+
+    overview = [
+        ["Domain", group.domain.name or ""],
+        ["Prompt group", group.id],
+        ["Theme", group.theme or ""],
+        ["Variants tracked", len(prompts)],
+        ["Total Mentions (all LLMs)", sum(totals.values())],
+        ["Visibility Score", float(group.visibility_score or 0)],
+        ["Exported", _format_created(timezone.now())],
+        [],
+        ["Mentions by platform", ""],
+    ]
+    for platform in ordered:
+        overview.append([_display_platform(platform), totals.get(platform, 0)])
+    _write_sheet(ws, ["Field", "Value"], overview, {1: 34, 2: 60}, wrap_cols=(2,))
+
+    # ---- Variants: one row per variant, a column pair per platform ----
+    headers = list(GROUP_VARIANT_HEADERS_HEAD)
+    for platform in ordered:
+        label = _display_platform(platform)
+        headers += [f"Mentions — {label}", f"Position — {label}"]
+
+    variant_rows = []
+    for prompt in prompts:
+        per = latest.get(prompt.id, {})
+        row = [prompt.prompt or ""]
+        for platform in ordered:
+            rec = per.get(platform)
+            row.append(int(rec.total_mentions or 0) if rec else "")
+            # 0 means "not ranked", not "ranked first" — blank rather than
+            # printing a value that reads as the best possible result.
+            row.append(float(rec.position or 0) if rec and (rec.position or 0) > 0 else "")
+        variant_rows.append(row)
+
+    widths = {1: 70}
+    for i in range(len(ordered) * 2):
+        widths[2 + i] = 18
+    _write_sheet(wb.create_sheet("Variants"), headers, variant_rows, widths, wrap_cols=(1,))
+
+    # ---- One sheet per platform ----
+    for platform in ordered:
+        rows = []
+        for prompt in prompts:
+            rec = latest.get(prompt.id, {}).get(platform)
+            if not rec:
+                continue
+            rows.append([
+                prompt.prompt or "",
+                group.theme or "",
+                "Yes" if rec.is_mention else "No",
+                float(rec.position or 0) if (rec.position or 0) > 0 else "",
+                int(rec.total_mentions or 0),
+                _citation_count(rec),
+                rec.sentiment_category or "",
+                _scale_sentiment(rec.sentiment_score),
+                ", ".join(str(c) for c in (rec.competitor_mention_list or [])),
+                ", ".join(str(t) for t in (rec.topic_list or [])),
+                _format_source_urls_full(rec.citation_list),
+                _format_created(rec.tracked_at or rec.created_at),
+            ])
+        _write_sheet(
+            wb.create_sheet(_display_platform(platform)[:31]),
+            PLATFORM_HEADERS, rows,
+            {1: 60, 2: 22, 3: 11, 4: 10, 5: 10, 6: 10, 7: 13, 8: 15,
+             9: 34, 10: 30, 11: 70, 12: 22},
+            wrap_cols=(1, 9, 10, 11),
+        )
+
+    # ---- Responses: the answers themselves ----
+    # The reason to export a single prompt is usually to read what each model
+    # actually said, which no other sheet carries.
+    response_rows = []
+    for prompt in prompts:
+        per = latest.get(prompt.id, {})
+        for platform in ordered:
+            rec = per.get(platform)
+            if not rec or not (rec.context_summary or "").strip():
+                continue
+            response_rows.append([
+                prompt.prompt or "",
+                _display_platform(platform),
+                _format_created(rec.tracked_at or rec.created_at),
+                rec.context_summary,
+            ])
+    _write_sheet(
+        wb.create_sheet("Responses"), ["Variant", "Platform", "Tracked", "Full AI Response"],
+        response_rows, {1: 50, 2: 16, 3: 22, 4: 130}, wrap_cols=(1, 4),
+    )
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    safe_domain = (group.domain.name or "domain").replace(" ", "_")
+    timestamp = datetime.now().strftime("%Y%m%d")
+    filename = f"{safe_domain}_Prompt_{group.id}_{timestamp}.xlsx"
+
+    response = HttpResponse(
+        buf.getvalue(),
+        content_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
