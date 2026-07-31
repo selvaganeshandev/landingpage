@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -13,7 +14,8 @@ import {
 } from "@/components/ui/select";
 import { 
   ArrowLeft, 
-  Copy, 
+  Copy,
+  Maximize2, 
   ExternalLink, 
   TrendingUp,
   MessageSquare,
@@ -44,6 +46,7 @@ const MentionDetail = () => {
   const [activeTab, setActiveTab] = useState("overview");
   const [mention, setMention] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isResponseOpen, setIsResponseOpen] = useState(false);
   const [relatedMentions, setRelatedMentions] = useState<any[]>([]);
   const [positionTrend, setPositionTrend] = useState<any[]>([]);
   const [allAnalytics, setAllAnalytics] = useState<any[]>([]);
@@ -217,6 +220,19 @@ const MentionDetail = () => {
     }
   };
 
+  const hasResponse = Boolean((mention?.full_ai_response || '').trim());
+
+  // Sanitized once and shared by the preview and the modal. Both render the
+  // same HTML, and DOMPurify on a multi-thousand-word answer is not something
+  // to run twice on every render.
+  const sanitizedResponse = useMemo(
+    () => DOMPurify.sanitize(formatMessage(mention?.full_ai_response || ''), {
+      ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'blockquote', 'code', 'pre', 'br', 'div', 'span'],
+      ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'id'],
+    }),
+    [mention?.full_ai_response],
+  );
+
   const getSentimentColor = (sentiment: string) => {
     switch (sentiment) {
       case "positive":
@@ -344,22 +360,78 @@ const MentionDetail = () => {
                   </p>
                 </div>
 
+                {/* Preview + modal rather than the whole answer inline. These
+                    responses run to thousands of words, so everything below —
+                    metrics, trend, competitors — was pushed off-screen and the
+                    page became a document viewer with analytics hidden beneath
+                    it. The preview keeps the answer's opening visible; the
+                    modal gives it the room it needs when actually being read. */}
                 <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                    Full AI Response
-                  </h3>
-                  <div className="bg-gradient-to-br from-muted/30 to-muted/50 p-6 rounded-xl border border-border backdrop-blur-sm">
-                    <div
-                      className={FORMATTED_MESSAGE_CLASSES}
-                      dangerouslySetInnerHTML={{
-                        __html: DOMPurify.sanitize(formatMessage(mention.full_ai_response || ''), {
-                          ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'blockquote', 'code', 'pre', 'br', 'div', 'span'],
-                          ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'id']
-                        })
-                      }}
-                    />
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                      Full AI Response
+                    </h3>
+                    {hasResponse && (
+                      <Button variant="outline" size="sm" onClick={() => setIsResponseOpen(true)}>
+                        <Maximize2 className="h-3.5 w-3.5 mr-1.5" />
+                        See full result
+                      </Button>
+                    )}
+                  </div>
+                  <div
+                    className={`relative bg-gradient-to-br from-muted/30 to-muted/50 p-6 rounded-xl border border-border backdrop-blur-sm ${hasResponse ? 'max-h-[320px] overflow-hidden cursor-pointer' : ''}`}
+                    onClick={hasResponse ? () => setIsResponseOpen(true) : undefined}
+                  >
+                    {hasResponse ? (
+                      <>
+                        <div
+                          className={FORMATTED_MESSAGE_CLASSES}
+                          dangerouslySetInnerHTML={{ __html: sanitizedResponse }}
+                        />
+                        {/* Fade so the clip reads as "there is more", not as a
+                            response that stops mid-sentence. */}
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent" />
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No response recorded for this mention.</p>
+                    )}
                   </div>
                 </div>
+
+                <Dialog open={isResponseOpen} onOpenChange={setIsResponseOpen}>
+                  <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+                    <DialogHeader>
+                      <DialogTitle className="flex items-center gap-2 flex-wrap">
+                        Full AI Response
+                        {mention.platform && (
+                          <Badge variant="outline" className="capitalize">{mention.platform}</Badge>
+                        )}
+                        <span className="text-sm font-normal text-muted-foreground">
+                          {mention.prompt_text}
+                        </span>
+                      </DialogTitle>
+                    </DialogHeader>
+                    <div className="overflow-y-auto pr-2">
+                      <div
+                        className={FORMATTED_MESSAGE_CLASSES}
+                        dangerouslySetInnerHTML={{ __html: sanitizedResponse }}
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2 border-t border-border">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(mention.full_ai_response || '');
+                          toast({ title: "Copied", description: "Response copied to clipboard." });
+                        }}
+                      >
+                        <Copy className="h-3.5 w-3.5 mr-1.5" />
+                        Copy
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
 
               <div className="space-y-4 pt-4 border-t">
@@ -419,25 +491,49 @@ const MentionDetail = () => {
                 <TabsTrigger value="analysis" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
                   Analysis
                 </TabsTrigger>
-                <TabsTrigger value="competitors" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
-                  Competitors
+                <TabsTrigger value="brands" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
+                  Brands
                 </TabsTrigger>
               </TabsList>
 
               <TabsContent value="overview" className="space-y-4">
+                {/* Was "Key Topics Mentioned", reading mention.key_topics —
+                    which maps to topic_list, empty on all 11,328 analytics
+                    rows. It could only ever print "No key topics identified".
+                    Replaced with the sources this answer actually cited, which
+                    is real data and the thing worth inspecting here. */}
                 <div>
-                  <h3 className="text-lg font-semibold mb-4 font-inter">Key Topics Mentioned</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {mention.key_topics && mention.key_topics.length > 0 ? (
-                      mention.key_topics.map((topic, idx) => (
-                        <Badge key={idx} variant="outline" className="text-sm px-3 py-1">
-                          {topic}
-                        </Badge>
-                      ))
-                    ) : (
-                      <p className="text-sm text-muted-foreground">No key topics identified</p>
-                    )}
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-lg font-semibold font-inter">Sources Cited</h3>
+                    <span className="text-sm text-muted-foreground">
+                      {mention.own_domain_citations ?? 0} of {mention.citations_count ?? 0} are yours
+                    </span>
                   </div>
+                  {(mention.citations || []).length > 0 ? (
+                    <div className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1">
+                      {(mention.citations || []).map((c: any, idx: number) => {
+                        const url = typeof c === 'string' ? c : (c?.url || '');
+                        const isOwn = typeof c === 'object' && c?.is_your_domain;
+                        return (
+                          <a
+                            key={idx}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 text-sm p-2 rounded-lg border border-border hover:border-primary transition-colors"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                            <span className="truncate">{url}</span>
+                            {isOwn && (
+                              <Badge variant="outline" className="ml-auto text-xs border-success text-success">yours</Badge>
+                            )}
+                          </a>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">This answer cited no sources.</p>
+                  )}
                 </div>
 
                 <div className="pt-4">
@@ -510,19 +606,25 @@ const MentionDetail = () => {
 
               <TabsContent value="analysis" className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
+                  {/* citations_count, not total_citations: that stored column
+                      sits at 0 for whole domains, so this tile read "0" for an
+                      answer citing 21 URLs. */}
                   <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border">
                     <div className="flex items-center gap-2 mb-2">
                       <MessageSquare className="h-4 w-4 text-primary" />
-                      <p className="text-sm text-muted-foreground">Citations</p>
+                      <p className="text-sm text-muted-foreground">Sources cited</p>
                     </div>
-                    <p className="text-3xl font-bold font-inter">{mention.total_citations}</p>
+                    <p className="text-3xl font-bold font-inter">{mention.citations_count ?? 0}</p>
                   </div>
                   <div className="p-4 rounded-xl bg-gradient-to-br from-success/5 to-success/10 border border-border">
                     <div className="flex items-center gap-2 mb-2">
                       <TrendingUp className="h-4 w-4 text-success" />
                       <p className="text-sm text-muted-foreground">Position Rank</p>
                     </div>
-                    <p className="text-3xl font-bold font-inter">#{mention.position}</p>
+                    {/* "#0" read as a rank; 0 means the brand was not ranked. */}
+                    <p className="text-3xl font-bold font-inter">
+                      {mention.position > 0 ? `#${mention.position}` : '—'}
+                    </p>
                   </div>
                 </div>
 
@@ -537,20 +639,30 @@ const MentionDetail = () => {
                 </div>
               </TabsContent>
 
-              <TabsContent value="competitors" className="space-y-4">
+              <TabsContent value="brands" className="space-y-4">
+                {/* other_brands_named drops the domain's own brand, which the
+                    extractor returns alongside the third parties — IOB's own
+                    answers listed "Iob" as a competitor of itself. Titled
+                    "other brands" because the list also holds regulators and
+                    aggregators (Cibil, Rbi), which compete with nobody. */}
                 <div>
-                  <h3 className="text-lg font-semibold mb-3 font-inter">Competitors Mentioned</h3>
-                  <div className="flex flex-wrap gap-2 mb-6">
-                    {mention.competitor_mentions && mention.competitor_mentions.length > 0 ? (
-                      mention.competitor_mentions.map((competitor, idx) => (
-                        <Badge key={idx} variant="secondary" className="text-sm px-3 py-1">
-                          {competitor}
-                        </Badge>
-                      ))
+                  <h3 className="text-lg font-semibold mb-3 font-inter">Other Brands Named</h3>
+                  {(() => {
+                    const brands = mention.other_brands_named ?? mention.competitor_mentions ?? [];
+                    return brands.length > 0 ? (
+                      <div className="flex flex-wrap gap-2 mb-6">
+                        {brands.map((brand: string, idx: number) => (
+                          <Badge key={idx} variant="secondary" className="text-sm px-3 py-1">
+                            {brand}
+                          </Badge>
+                        ))}
+                      </div>
                     ) : (
-                      <p className="text-sm text-muted-foreground">No competitors mentioned</p>
-                    )}
-                  </div>
+                      <p className="text-sm text-muted-foreground mb-6">
+                        No other brands were named in this answer.
+                      </p>
+                    );
+                  })()}
                 </div>
 
                 <div className="pt-6 border-t border-border">

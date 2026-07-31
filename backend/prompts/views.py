@@ -569,6 +569,12 @@ def get_mention_detail(request, analytics_id):
                     'url': citation_url,
                     'source_url': citation_url,  # Keep for backward compatibility
                     'description': description,
+                    # Lets the UI mark which sources are the brand's own without
+                    # re-deriving host matching in the browser, and keeps the
+                    # per-row flag consistent with own_domain_citations below.
+                    'is_your_domain': _own_domain_citation_count(
+                        [citation_url], (group.domain.url if group else '')
+                    ) > 0,
                     'reliability': 'Verified',  # Default reliability
                     'referenced_at': analytics_record.created_at.isoformat()
                 })
