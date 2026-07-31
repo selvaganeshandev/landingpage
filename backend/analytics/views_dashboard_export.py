@@ -4,9 +4,13 @@ Excel export for the Insights (Dashboard) page.
 Produces an .xlsx matching the "AI Visibility" reference template:
   Block 1: per-LLM mentions for your brand + each competitor + totals row.
   Block 2: per-LLM page citations + total cited pages.
-  Block 3: Backlink Portfolio — referring domains, total backlinks and CAT A/B/C
-           breakdown fetched live from DataForSEO (primary) / Moz (fallback) for
-           your brand and each competitor URL.
+
+A third block once carried a Backlink Portfolio (referring domains, total
+backlinks, CAT A/B/C, pages indexed) fetched per brand from DataForSEO/Moz.
+It was removed: those are SEO metrics rather than AI visibility, and they were
+the entire cost of an export — 40.6s of a 40.6s run on a six-brand domain,
+against 1.8s for every sheet here combined, because each brand meant a paid
+call with a 30s timeout. Exports now finish in about two seconds.
 
 Sheets 2..n ("Summary", "Trend", "By Platform", "Cited Pages", "Mentions",
 "By Country", "AI Traffic", "Definitions") cover the domain's own performance,
@@ -15,15 +19,10 @@ dashboard_summary's response rather than from re-derived queries, so the
 workbook cannot drift from the page it was exported from.
 """
 
-import base64
 import logging
-import re
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from io import BytesIO
-from urllib.parse import urlparse
 
-import requests
 from django.conf import settings
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -227,335 +226,6 @@ def _your_brand_llm_citations(domain_id, start_date, end_date):
     return totals
 
 
-# ---------------------------------------------------------------------------
-# Backlink Portfolio — dynamic providers
-# ---------------------------------------------------------------------------
-# Block 3 of the AI Visibility export used to render hard-coded "N/A" for every
-# brand. The helpers below fetch real numbers per-brand from the first provider
-# that is configured (DataForSEO preferred — broader index — then Moz as a
-# fallback because it's already wired up in the project). Pages Indexed in SERP
-# comes from a Scrapingdog `site:` query. If no provider is configured, the
-# corresponding cell stays "N/A" — same behaviour as before for self-hosted
-# installs without API keys, so nothing else in the system is impacted.
-
-_BACKLINK_EMPTY = {
-    "referring_domains": None,
-    "total_backlinks": None,
-    "cat_a_domains": None,
-    "cat_b_domains": None,
-    "cat_c_domains": None,
-    "cat_a_backlinks": None,
-    "cat_b_backlinks": None,
-    "cat_c_backlinks": None,
-    "pages_indexed": None,
-}
-
-
-def _root_domain(url):
-    """Return bare host (no scheme/path) from a URL or already-bare host string."""
-    if not url:
-        return ""
-    raw = url.strip()
-    if "://" not in raw:
-        raw = "http://" + raw
-    parsed = urlparse(raw)
-    host = (parsed.netloc or "").lower()
-    return host[4:] if host.startswith("www.") else host
-
-
-def _classify_by_da(da):
-    """Moz Domain Authority (0-100) → CAT A/B/C — mirrors domains/views.py thresholds."""
-    if da is None:
-        return None
-    if da >= 70:
-        return "A"
-    if da >= 40:
-        return "B"
-    return "C"
-
-
-def _classify_by_rank(rank):
-    """DataForSEO rank (0-1000) → CAT A/B/C using the same 70 / 40 cutoffs scaled ×10."""
-    if rank is None:
-        return None
-    if rank >= 700:
-        return "A"
-    if rank >= 400:
-        return "B"
-    return "C"
-
-
-def _fetch_dataforseo_backlinks(host):
-    login = getattr(settings, "DATAFORSEO_LOGIN", None)
-    password = getattr(settings, "DATAFORSEO_PASSWORD", None)
-    if not login or not password or not host:
-        return None
-
-    use_sandbox = bool(getattr(settings, "DATAFORSEO_USE_SANDBOX", False))
-    base_url = "https://sandbox.dataforseo.com" if use_sandbox else "https://api.dataforseo.com"
-    if use_sandbox:
-        # Sandbox returns the same fixture for every target — log once per call
-        # so the source of the numbers is obvious in dev logs.
-        logger.warning(
-            "DataForSEO sandbox mode active for %s — numbers are mock data, not real backlinks.",
-            host,
-        )
-
-    try:
-        token = base64.b64encode(f"{login}:{password}".encode("utf-8")).decode("utf-8")
-        headers = {"Authorization": f"Basic {token}", "Content-Type": "application/json"}
-
-        s_resp = requests.post(
-            f"{base_url}/v3/backlinks/summary/live",
-            headers=headers,
-            json=[{
-                "target": host,
-                "internal_list_limit": 10,
-                "backlinks_status_type": "live",
-            }],
-            timeout=20,
-        )
-        if s_resp.status_code != 200:
-            logger.warning(
-                "DataForSEO summary returned %s for %s: %s",
-                s_resp.status_code, host, s_resp.text[:200],
-            )
-            return None
-        s_payload = s_resp.json() or {}
-        tasks = s_payload.get("tasks") or []
-        summary_results = (tasks[0].get("result") if tasks else None) or []
-        summary = summary_results[0] if summary_results else {}
-        ref_domains = int(summary.get("referring_domains") or 0)
-        total_backlinks = int(summary.get("backlinks") or 0)
-
-        cat_domains = {"A": 0, "B": 0, "C": 0}
-        cat_backlinks = {"A": 0, "B": 0, "C": 0}
-
-        d_resp = requests.post(
-            f"{base_url}/v3/backlinks/referring_domains/live",
-            headers=headers,
-            json=[{
-                "target": host,
-                "limit": 1000,
-                "order_by": ["rank,desc"],
-                "backlinks_status_type": "live",
-            }],
-            timeout=30,
-        )
-        if d_resp.status_code == 200:
-            d_payload = d_resp.json() or {}
-            d_tasks = d_payload.get("tasks") or []
-            d_results = (d_tasks[0].get("result") if d_tasks else None) or []
-            items = (d_results[0].get("items") if d_results else None) or []
-            for entry in items:
-                cat = _classify_by_rank(entry.get("rank"))
-                if not cat:
-                    continue
-                cat_domains[cat] += 1
-                cat_backlinks[cat] += int(entry.get("backlinks") or 0)
-        else:
-            logger.warning(
-                "DataForSEO referring_domains returned %s for %s: %s",
-                d_resp.status_code, host, d_resp.text[:200],
-            )
-
-        return {
-            "referring_domains": ref_domains,
-            "total_backlinks": total_backlinks,
-            "cat_a_domains": cat_domains["A"],
-            "cat_b_domains": cat_domains["B"],
-            "cat_c_domains": cat_domains["C"],
-            "cat_a_backlinks": cat_backlinks["A"],
-            "cat_b_backlinks": cat_backlinks["B"],
-            "cat_c_backlinks": cat_backlinks["C"],
-            "pages_indexed": None,
-        }
-    except Exception as exc:
-        logger.warning("DataForSEO backlink fetch failed for %s: %s", host, exc)
-        return None
-
-
-def _fetch_moz_backlinks(host):
-    """Fallback to Moz when DataForSEO isn't configured.
-    Re-uses the Moz helpers already defined in domains.views so we don't fork the
-    auth/parsing logic. Import is local so the export module doesn't take a hard
-    dependency on the domains app at import time.
-    """
-    if not host:
-        return None
-    try:
-        from domains.views import _fetch_moz_url_metrics, _fetch_moz_links
-    except Exception as exc:
-        logger.warning("Could not import Moz helpers: %s", exc)
-        return None
-
-    target = f"https://{host}"
-    metrics = _fetch_moz_url_metrics(target)
-    if metrics is None:
-        return None
-
-    links = _fetch_moz_links(target, limit=50) or []
-    cat_domains = {"A": set(), "B": set(), "C": set()}
-    cat_backlinks = {"A": 0, "B": 0, "C": 0}
-    for link in links:
-        cat = _classify_by_da(link.get("source_domain_authority") or 0)
-        if not cat:
-            continue
-        src_domain = link.get("source_root_domain") or ""
-        if src_domain:
-            cat_domains[cat].add(src_domain)
-        cat_backlinks[cat] += 1
-
-    return {
-        "referring_domains": int(metrics.get("linking_root_domains") or 0),
-        "total_backlinks": int(metrics.get("external_links") or 0),
-        "cat_a_domains": len(cat_domains["A"]),
-        "cat_b_domains": len(cat_domains["B"]),
-        "cat_c_domains": len(cat_domains["C"]),
-        "cat_a_backlinks": cat_backlinks["A"],
-        "cat_b_backlinks": cat_backlinks["B"],
-        "cat_c_backlinks": cat_backlinks["C"],
-        "pages_indexed": None,
-    }
-
-
-def _fetch_pages_indexed_dataforseo(host):
-    """Google's `About N results` count for `site:host` via DataForSEO SERP API.
-    Returns se_results_count (~$0.01 per call from prepaid balance).
-
-    Note: SERP always uses the live api.dataforseo.com endpoint, even when
-    DATAFORSEO_USE_SANDBOX=True. SERP is pay-per-call from the prepaid balance,
-    so there's no reason to fall back to mock data — and sandbox returns a
-    fixed fixture per query, not useful real-world numbers. The sandbox toggle
-    only gates Backlinks (which require a separate paid subscription).
-    """
-    login = getattr(settings, "DATAFORSEO_LOGIN", None)
-    password = getattr(settings, "DATAFORSEO_PASSWORD", None)
-    if not login or not password or not host:
-        return None
-
-    try:
-        token = base64.b64encode(f"{login}:{password}".encode("utf-8")).decode("utf-8")
-        resp = requests.post(
-            "https://api.dataforseo.com/v3/serp/google/organic/live/advanced",
-            headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"},
-            json=[{
-                "keyword": f"site:{host}",
-                "location_code": 2840,
-                "language_code": "en",
-                "depth": 10,
-            }],
-            timeout=30,
-        )
-        if resp.status_code != 200:
-            logger.warning(
-                "DataForSEO SERP returned %s for site:%s: %s",
-                resp.status_code, host, resp.text[:200],
-            )
-            return None
-        payload = resp.json() or {}
-        tasks = payload.get("tasks") or []
-        result = (tasks[0].get("result") if tasks else None) or []
-        if result:
-            count = result[0].get("se_results_count")
-            if count is not None:
-                return int(count)
-    except Exception as exc:
-        logger.warning("DataForSEO pages-indexed fetch failed for %s: %s", host, exc)
-    return None
-
-
-def _fetch_pages_indexed_scrapingdog(host):
-    """Fallback pages-indexed via Scrapingdog's dedicated /google API.
-    The legacy /scrape endpoint no longer handles Google searches (returns a
-    redirect-message JSON). The /google endpoint returns structured search
-    results at 5 credits per request.
-    """
-    api_key = getattr(settings, "SCRAPINGDOG_API_KEY", None)
-    if not api_key or not host:
-        return None
-    try:
-        resp = requests.get(
-            "https://api.scrapingdog.com/google",
-            params={"api_key": api_key, "query": f"site:{host}"},
-            timeout=20,
-        )
-        if resp.status_code != 200:
-            return None
-        data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-        # Scrapingdog returns a `success: false` body with HTTP 200 when out
-        # of credits — treat that as a soft failure.
-        if isinstance(data, dict) and data.get("success") is False:
-            logger.warning(
-                "Scrapingdog soft failure for site:%s: %s",
-                host, (data.get("message") or "")[:200],
-            )
-            return None
-        # Try common fields where Scrapingdog reports the total-results count.
-        for key in ("total_results", "search_information", "search_metadata"):
-            val = data.get(key) if isinstance(data, dict) else None
-            if isinstance(val, dict):
-                for sub in ("total_results", "result_count", "approximate_results", "results_count"):
-                    if val.get(sub) is not None:
-                        return int(str(val[sub]).replace(",", ""))
-            elif val is not None:
-                return int(str(val).replace(",", ""))
-    except Exception as exc:
-        logger.warning("Scrapingdog pages-indexed fetch failed for %s: %s", host, exc)
-    return None
-
-
-def _fetch_pages_indexed(host):
-    """Return Google's `site:<host>` indexed-pages count.
-    Tries DataForSEO SERP first (pay-per-call from prepaid balance), then
-    Scrapingdog. Returns None if both providers fail / are unconfigured.
-    """
-    return (
-        _fetch_pages_indexed_dataforseo(host)
-        or _fetch_pages_indexed_scrapingdog(host)
-    )
-
-
-def _fetch_brand_backlinks(brand):
-    host = _root_domain(brand.get("url"))
-    if not host:
-        return _BACKLINK_EMPTY.copy()
-    data = _fetch_dataforseo_backlinks(host) or _fetch_moz_backlinks(host)
-    if data is None:
-        data = _BACKLINK_EMPTY.copy()
-    if data.get("pages_indexed") is None:
-        data["pages_indexed"] = _fetch_pages_indexed(host)
-    return data
-
-
-def _build_backlinks_map(brands):
-    """Return {competitor_id_or_None: backlink_dict} fetched concurrently.
-    Falls back to empty dict for any brand that fails — those cells render N/A.
-    """
-    result = {}
-    if not brands:
-        return result
-    with ThreadPoolExecutor(max_workers=min(8, len(brands))) as pool:
-        futures = {pool.submit(_fetch_brand_backlinks, b): b for b in brands}
-        for fut, brand in futures.items():
-            try:
-                result[brand["competitor_id"]] = fut.result(timeout=60) or _BACKLINK_EMPTY.copy()
-            except Exception as exc:
-                logger.warning("Backlink fetch failed for %s: %s", brand.get("name"), exc)
-                result[brand["competitor_id"]] = _BACKLINK_EMPTY.copy()
-    return result
-
-
-def _cell_value(num):
-    """None → "N/A", otherwise integer (so Excel renders a number, not a string)."""
-    if num is None:
-        return "N/A"
-    try:
-        return int(num)
-    except (TypeError, ValueError):
-        return "N/A"
-
-
 def _write_header_label(ws, cell_ref, value, *, bold=True, fill=None):
     cell = ws[cell_ref]
     cell.value = value
@@ -567,9 +237,7 @@ def _write_header_label(ws, cell_ref, value, *, bold=True, fill=None):
 
 
 def _build_workbook(domain, brands, platforms, mention_matrix, brand_totals,
-                    brand_visibility, your_llm_citations, backlinks_map=None,
-                    period_label=None):
-    backlinks_map = backlinks_map or {}
+                    brand_visibility, your_llm_citations, period_label=None):
     wb = Workbook()
     ws = wb.active
     ws.title = "AI Visibility"
@@ -642,21 +310,6 @@ def _build_workbook(domain, brands, platforms, mention_matrix, brand_totals,
         ws.cell(row=row, column=4 + i, value=int(total))
     row += 1
 
-    # Rows for Referring Domains / Total Backlinks / Pages Indexed in SERP.
-    # Values are populated per-brand from the backlinks provider (DataForSEO/Moz)
-    # and Scrapingdog's site: query. Unconfigured providers leave the cell as N/A.
-    block1_metric_keys = (
-        ("Number of Referring Domains", "referring_domains"),
-        ("Number of Total Backlinks", "total_backlinks"),
-        ("Pages Indexed in SERP", "pages_indexed"),
-    )
-    for label, key in block1_metric_keys:
-        ws.cell(row=row, column=2, value=label).font = Font(bold=True)
-        for i, b in enumerate(brands):
-            payload = backlinks_map.get(b["competitor_id"]) or {}
-            ws.cell(row=row, column=4 + i, value=_cell_value(payload.get(key)))
-        row += 1
-
     # ---------- Block 2 ----------
     row += 1  # blank spacer row
     _write_header_label(ws, ws.cell(row=row, column=2).coordinate,
@@ -687,32 +340,6 @@ def _build_workbook(domain, brands, platforms, mention_matrix, brand_totals,
     for i in range(1, len(brands)):
         ws.cell(row=row, column=4 + i, value="N/A")
     row += 1
-
-    # ---------- Block 3: Backlink Portfolio ----------
-    row += 1
-    _write_header_label(ws, ws.cell(row=row, column=3).coordinate,
-                        "Backlink Portfolio", fill=BLOCK_FILL)
-    for i, b in enumerate(brands):
-        _write_header_label(ws, ws.cell(row=row, column=4 + i).coordinate,
-                            b["name"], fill=BLOCK_FILL)
-    row += 1
-    # (label, lookup-key) — sub-rows pull CAT A/B/C from the same backlinks payload.
-    portfolio_rows = (
-        ("Referring Domains", "referring_domains"),
-        ("CAT A", "cat_a_domains"),
-        ("CAT B", "cat_b_domains"),
-        ("CAT C", "cat_c_domains"),
-        ("Number of Total Backlinks", "total_backlinks"),
-        ("CAT A", "cat_a_backlinks"),
-        ("CAT B", "cat_b_backlinks"),
-        ("CAT C", "cat_c_backlinks"),
-    )
-    for label, key in portfolio_rows:
-        ws.cell(row=row, column=3, value=label)
-        for i, b in enumerate(brands):
-            payload = backlinks_map.get(b["competitor_id"]) or {}
-            ws.cell(row=row, column=4 + i, value=_cell_value(payload.get(key)))
-        row += 1
 
     return wb
 
@@ -1106,38 +733,14 @@ def dashboard_export(request):
     # Visibility remains a current-state percentage from the latest day.
     visibility = _brand_visibility(latest_rows, brands)
     your_citations = _your_brand_llm_citations(domain_id, start_date, end_date)
-    # Per-brand backlink metrics (referring domains, total backlinks, CAT A/B/C,
-    # pages indexed in SERP). Runs in parallel; if no provider is configured each
-    # brand returns an empty payload and the cells render N/A — same as before.
-    #
-    # OPT-IN, because this is the entire cost of an export. Measured on Appkodes
-    # (6 brands): the whole export took 40.6s, of which backlinks and
-    # pages-indexed were 45.7s of wall-clock across the pool — one brand hit the
-    # 30s read timeout on its own — while every other sheet together took 1.8s.
-    # The frontend buffers the response into a blob before saving, so nothing
-    # reaches disk until the last byte and navigating away discards the lot;
-    # a 40s default made that easy to trigger. Skipped unless asked for, which
-    # puts a normal export at ~2s.
-    include_backlinks = str(
-        request.query_params.get("include_backlinks", "")
-    ).lower() in ("1", "true", "yes")
-    backlinks_map = _build_backlinks_map(brands) if include_backlinks else {}
 
     period_label = (
         f"Mentions summed: {start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}"
         f" · Visibility snapshot: {latest_day.strftime('%Y-%m-%d') if latest_day else 'n/a'}"
     )
-    if not include_backlinks:
-        # Without this the empty backlink cells read as "this brand has no
-        # backlinks" rather than "we did not go and look".
-        period_label += (
-            " · Backlinks & pages-indexed NOT FETCHED — re-export with"
-            " 'Include backlinks' to populate them"
-        )
 
     wb = _build_workbook(domain, brands, platforms, matrix, totals, visibility,
-                         your_citations, backlinks_map=backlinks_map,
-                         period_label=period_label)
+                         your_citations, period_label=period_label)
 
     # The competitor grid is worth keeping but is not the report on its own, so
     # the domain's own numbers follow it. Failing to build them must not cost

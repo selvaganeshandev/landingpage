@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from "recharts";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -59,6 +60,9 @@ interface TrendChartProps {
   // Daily AI-referred traffic (sessions/users by date) — feeds the Visibility
   // vs Traffic correlation tab.
   aiTrafficDaily?: Array<{ date: string; dateIso?: string; sessions: number; users: number }> | null;
+  /** Link to this domain's integrations settings, shown as a button on the
+   *  GA-disconnected empty states. Omitted when no domain is selected. */
+  integrationsHref?: string;
   // AI-referred traffic aggregates — feeds the AI Traffic tab. Null when GA isn't
   // connected or there were no AI referrals in the window.
   aiTraffic?: AITraffic | null;
@@ -253,15 +257,33 @@ const TOOLTIP_STYLE = {
 } as const;
 
 // Centered icon + message used by tabs that have no data yet.
-const EmptyState = ({ title, subtitle }: { title: string; subtitle: string }) => (
+//
+// `action` exists because "Connect Google Analytics" was a statement with no
+// way to act on it: the integrations screen lives several clicks away under the
+// domain's own settings, so the tab told the user what was wrong and left them
+// to find the fix.
+const EmptyState = ({ title, subtitle, action }: {
+  title: string;
+  subtitle: string;
+  action?: { label: string; href: string };
+}) => (
   <div className="flex-1 min-h-[300px] flex flex-col items-center justify-center gap-3 text-muted-foreground">
     <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-40"><path d="M3 3v18h18" /><path d="m19 9-5 5-4-4-3 3" /></svg>
     <p className="text-sm font-medium">{title}</p>
-    <p className="text-xs opacity-60">{subtitle}</p>
+    <p className="text-xs opacity-60 max-w-md text-center">{subtitle}</p>
+    {action && (
+      <Link
+        to={action.href}
+        className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90"
+      >
+        {action.label}
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+      </Link>
+    )}
   </div>
 );
 
-export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, aiTrafficDaily, aiTraffic, isPeriodData, gaConnected, aiTrafficError, aiTrafficDailyError, isAllTime }: TrendChartProps) => {
+export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, aiTrafficDaily, aiTraffic, isPeriodData, gaConnected, aiTrafficError, aiTrafficDailyError, isAllTime, integrationsHref }: TrendChartProps) => {
   const [chartTab, setChartTab] = useState<ChartTab>("main");
 
   // "Period before all time" is not a thing. Passing undefined (rather than
@@ -441,13 +463,19 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
   // false). If GA is connected but the fetch failed, it's almost always GA4's
   // per-property hourly quota (429) — say so, don't imply it's disconnected.
   const RATE_LIMIT_SUBTITLE = "Google Analytics is temporarily rate-limited for this property (GA4 caps how many reports a property can run per hour). It usually clears within an hour — try again shortly.";
+  // Offered only when GA is genuinely disconnected, and only when we know which
+  // domain's settings to open — the integrations screen is per-domain, so a
+  // link without an id would land on the wrong page.
+  const connectAction = integrationsHref
+    ? { label: "Connect Google Analytics", href: integrationsHref }
+    : undefined;
   const aiTrafficEmpty = gaConnected === false
-    ? { title: "Connect Google Analytics", subtitle: "Connect GA to see sessions arriving from ChatGPT, Gemini, Perplexity, Claude and more." }
+    ? { title: "Connect Google Analytics", subtitle: "Connect GA to see sessions arriving from ChatGPT, Gemini, Perplexity, Claude and more.", action: connectAction }
     : aiTrafficError
       ? { title: "Couldn't load AI traffic", subtitle: RATE_LIMIT_SUBTITLE }
       : { title: "No AI-referred traffic in this period", subtitle: "No sessions arrived from AI platforms in the selected window. Try a wider time range." };
   const correlationEmpty = gaConnected === false
-    ? { title: "Connect Google Analytics", subtitle: "Connect GA so we can chart AI Visibility against AI-referred traffic over time." }
+    ? { title: "Connect Google Analytics", subtitle: "Connect GA so we can chart AI Visibility against AI-referred traffic over time.", action: connectAction }
     : aiTrafficDailyError
       ? { title: "Couldn't load AI traffic", subtitle: RATE_LIMIT_SUBTITLE }
       : { title: "Not enough overlapping data", subtitle: "We need AI-referred traffic and visibility on the same dates to chart the correlation. Try a wider time range." };
@@ -520,7 +548,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
             </ResponsiveContainer>
           </div>
         ) : (
-          <EmptyState title={aiTrafficEmpty.title} subtitle={aiTrafficEmpty.subtitle} />
+          <EmptyState title={aiTrafficEmpty.title} subtitle={aiTrafficEmpty.subtitle} action={aiTrafficEmpty.action} />
         )
       ) : chartTab === "correlation" ? (
         hasCorrelationSeries ? (
@@ -559,7 +587,7 @@ export const TrendChart = ({ data = [], metrics, timeRange, onTimeRangeChange, a
             </ResponsiveContainer>
           </div>
         ) : (
-          <EmptyState title={correlationEmpty.title} subtitle={correlationEmpty.subtitle} />
+          <EmptyState title={correlationEmpty.title} subtitle={correlationEmpty.subtitle} action={correlationEmpty.action} />
         )
       ) : data.length === 0 ? (
         <EmptyState

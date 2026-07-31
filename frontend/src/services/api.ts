@@ -1279,17 +1279,13 @@ export const apiClient = {
     return apiClient.get(`/analytics/dashboard/summary/?${queryParams.toString()}`);
   },
 
-  // `include_backlinks` is off unless asked for: it is the only slow part of
-  // the export (~40s vs ~2s), because it calls DataForSEO/Moz once per brand
-  // with a 30s timeout each.
-  exportDashboardReport: (params: { domain_id: string; days?: number; llm_model?: string; start_date?: string; end_date?: string; filename?: string; include_backlinks?: boolean }) => {
+  exportDashboardReport: (params: { domain_id: string; days?: number; llm_model?: string; start_date?: string; end_date?: string; filename?: string }) => {
     const queryParams = new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
       ...(params.llm_model ? { llm_model: params.llm_model } : {}),
       ...(params.start_date ? { start_date: params.start_date } : {}),
       ...(params.end_date ? { end_date: params.end_date } : {}),
-      ...(params.include_backlinks ? { include_backlinks: 'true' } : {}),
     });
     const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const filename = params.filename || `AI_Visibility_${timestamp}.xlsx`;
