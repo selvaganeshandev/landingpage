@@ -47,6 +47,7 @@ const MentionDetail = () => {
   const [mention, setMention] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isResponseOpen, setIsResponseOpen] = useState(false);
+  const [isCitationsOpen, setIsCitationsOpen] = useState(false);
   const [relatedMentions, setRelatedMentions] = useState<any[]>([]);
   const [positionTrend, setPositionTrend] = useState<any[]>([]);
   const [allAnalytics, setAllAnalytics] = useState<any[]>([]);
@@ -221,6 +222,11 @@ const MentionDetail = () => {
   };
 
   const hasResponse = Boolean((mention?.full_ai_response || '').trim());
+  const citationList: any[] = mention?.citations || [];
+  // Prefer the server's figure; fall back to counting the per-row flags so the
+  // two numbers cannot drift if one is ever missing from the payload.
+  const ownCitationCount =
+    mention?.own_domain_citations ?? citationList.filter((c) => c?.is_your_domain).length;
 
   // Sanitized once and shared by the preview and the modal. Both render the
   // same HTML, and DOMPurify on a multi-thousand-word answer is not something
@@ -398,6 +404,50 @@ const MentionDetail = () => {
                   </div>
                 </div>
 
+                <Dialog open={isCitationsOpen} onOpenChange={setIsCitationsOpen}>
+                  <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+                    <DialogHeader>
+                      <DialogTitle className="flex items-center gap-2 flex-wrap">
+                        Sources cited in this answer
+                        <Badge variant="outline">{citationList.length}</Badge>
+                        <span className="text-sm font-normal text-muted-foreground">
+                          <span className={ownCitationCount > 0 ? 'text-success font-medium' : ''}>{ownCitationCount}</span>
+                          {' '}from your own domain
+                        </span>
+                      </DialogTitle>
+                    </DialogHeader>
+                    <div className="overflow-y-auto pr-2 space-y-2">
+                      {citationList.map((citation: any, idx: number) => (
+                        <div
+                          key={idx}
+                          className={`p-3 rounded-lg border ${citation.is_your_domain ? 'border-success/40 bg-success/5' : 'border-border/30 bg-muted/20'}`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              {citation.text && (
+                                <p className="text-sm font-semibold text-foreground mb-2">"{citation.text}"</p>
+                              )}
+                              <a
+                                href={citation.url || citation.source_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-primary hover:underline flex items-center gap-1 mb-1 break-all"
+                              >
+                                <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                                {citation.url || citation.source_url}
+                              </a>
+                              <p className="text-xs text-muted-foreground">{citation.description}</p>
+                            </div>
+                            {citation.is_your_domain && (
+                              <Badge variant="outline" className="text-xs border-success text-success flex-shrink-0">yours</Badge>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </DialogContent>
+                </Dialog>
+
                 <Dialog open={isResponseOpen} onOpenChange={setIsResponseOpen}>
                   <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
                     <DialogHeader>
@@ -434,35 +484,28 @@ const MentionDetail = () => {
                 </Dialog>
               </div>
 
+              {/* Summary + modal. Rendering all 21 citations as full cards ran
+                  to several screens on its own, on top of the AI response above
+                  it, so the page was mostly a list nobody had asked to see yet.
+                  The counts stay visible; the list opens on demand. */}
               <div className="space-y-4 pt-4 border-t">
-                <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                    Citations ({mention.citations?.length || 0})
-                  </h3>
-                  {mention.citations && mention.citations.length > 0 ? (
-                    <div className="space-y-2">
-                      {mention.citations.map((citation, idx) => (
-                        <div key={idx} className="p-3 bg-muted/20 rounded-lg border border-border/30">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-semibold text-foreground mb-2">"{citation.text}"</p>
-                              <a 
-                                href={citation.url || citation.source_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-primary hover:underline flex items-center gap-1 mb-1"
-                              >
-                                <ExternalLink className="h-3 w-3" />
-                                {citation.source || citation.source_name || "Source"}
-                              </a>
-                              <p className="text-xs text-muted-foreground">{citation.description}</p>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No citations available</p>
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                      Citations ({citationList.length})
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      <span className={ownCitationCount > 0 ? 'text-success font-medium' : ''}>
+                        {ownCitationCount}
+                      </span>
+                      {' '}of {citationList.length} point at your own domain
+                    </p>
+                  </div>
+                  {citationList.length > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => setIsCitationsOpen(true)}>
+                      <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                      View all sources
+                    </Button>
                   )}
                 </div>
                 <div className="flex gap-2 pt-2">
@@ -502,35 +545,48 @@ const MentionDetail = () => {
                     rows. It could only ever print "No key topics identified".
                     Replaced with the sources this answer actually cited, which
                     is real data and the thing worth inspecting here. */}
+                {/* A preview of five, not the whole list — the full set lives
+                    in the same modal the Citations summary opens, so the two
+                    places that care about sources share one long list instead
+                    of each rendering their own down the page. */}
                 <div>
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
                     <h3 className="text-lg font-semibold font-inter">Sources Cited</h3>
                     <span className="text-sm text-muted-foreground">
-                      {mention.own_domain_citations ?? 0} of {mention.citations_count ?? 0} are yours
+                      <span className={ownCitationCount > 0 ? 'text-success font-medium' : ''}>{ownCitationCount}</span>
+                      {' '}of {citationList.length} are yours
                     </span>
                   </div>
-                  {(mention.citations || []).length > 0 ? (
-                    <div className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1">
-                      {(mention.citations || []).map((c: any, idx: number) => {
-                        const url = typeof c === 'string' ? c : (c?.url || '');
-                        const isOwn = typeof c === 'object' && c?.is_your_domain;
-                        return (
+                  {citationList.length > 0 ? (
+                    <>
+                      <div className="space-y-1.5">
+                        {citationList.slice(0, 5).map((c: any, idx: number) => (
                           <a
                             key={idx}
-                            href={url}
+                            href={c.url || c.source_url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex items-center gap-2 text-sm p-2 rounded-lg border border-border hover:border-primary transition-colors"
                           >
                             <ExternalLink className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                            <span className="truncate">{url}</span>
-                            {isOwn && (
+                            <span className="truncate">{c.url || c.source_url}</span>
+                            {c.is_your_domain && (
                               <Badge variant="outline" className="ml-auto text-xs border-success text-success">yours</Badge>
                             )}
                           </a>
-                        );
-                      })}
-                    </div>
+                        ))}
+                      </div>
+                      {citationList.length > 5 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mt-2 px-0"
+                          onClick={() => setIsCitationsOpen(true)}
+                        >
+                          View all {citationList.length} sources
+                        </Button>
+                      )}
+                    </>
                   ) : (
                     <p className="text-sm text-muted-foreground">This answer cited no sources.</p>
                   )}
