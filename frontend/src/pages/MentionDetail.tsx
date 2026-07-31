@@ -335,7 +335,11 @@ const MentionDetail = () => {
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                     User Prompt
                   </h3>
-                  <p className="text-lg font-mono bg-muted/30 p-4 rounded-xl border border-border">
+                  {/* Same treatment as Main Prompt on the prompt detail page:
+                      font-mono at the app's base size, not text-lg. This is a
+                      short value being displayed, not long-form reading, and at
+                      18px it outweighed the heading above it. */}
+                  <p className="font-mono text-sm leading-relaxed break-words bg-muted/30 p-4 rounded-xl border border-border">
                     {mention.prompt_text}
                   </p>
                 </div>
