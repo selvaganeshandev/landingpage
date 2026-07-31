@@ -618,19 +618,27 @@ const MentionDetail = () => {
                   {mention.position && mention.position > 0 ? mention.position : '—'}
                 </span>
               </div>
+              {/* The actionable number on this screen. Being named without
+                  being cited means the model describes you from other people's
+                  pages — mention 14980 names IOB twice across 21 sources, none
+                  of them IOB's. That points at a concrete next step in a way a
+                  lexicon sentiment score never did. */}
               <div className="flex items-center justify-between pb-3 border-b border-border">
-                <span className="text-sm text-muted-foreground">Sources cited</span>
-                {/* citations_count is len(citation_list); total_citations is a
-                    stored column left at 0 for whole domains. This answer cites
-                    21 URLs and the old card read "Citations 0". */}
-                <span className="text-lg font-bold font-inter">{mention.citations_count ?? 0}</span>
+                <span className="text-sm text-muted-foreground">Your sources cited</span>
+                <span className="text-lg font-bold font-inter">
+                  <span className={(mention.own_domain_citations ?? 0) > 0 ? 'text-success' : 'text-muted-foreground'}>
+                    {mention.own_domain_citations ?? 0}
+                  </span>
+                  <span className="text-sm font-normal text-muted-foreground"> of {mention.citations_count ?? 0}</span>
+                </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Sentiment score</span>
+                {/* "Other brands", not "competitors": the extractor also returns
+                    regulators and aggregators (Cibil, Rbi), so the stronger
+                    claim would not be honest. */}
+                <span className="text-sm text-muted-foreground">Other brands named</span>
                 <span className="text-lg font-bold font-inter">
-                  {typeof mention.sentiment_score === 'number'
-                    ? mention.sentiment_score.toFixed(2)
-                    : '—'}
+                  {(mention.other_brands_named ?? mention.competitor_mentions ?? []).length}
                 </span>
               </div>
             </div>

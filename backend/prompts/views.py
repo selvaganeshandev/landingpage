@@ -12,6 +12,7 @@ from domains.models import Domain, DomainAccess
 from .serializers import PromptAnalyticsSerializer, PromptGroupSerializer, PromptSerializer
 import json
 import logging
+import re
 import statistics
 from dateutil.relativedelta import relativedelta
 from openpyxl import Workbook
@@ -366,6 +367,57 @@ def get_mention_filters(request):
     })
 
 
+def _bare_host(url):
+    """Hostname with no scheme, www. or path — '' when there isn't one."""
+    if not url:
+        return ''
+    host = str(url).strip().lower()
+    host = re.sub(r'^[a-z]+://', '', host)
+    host = host.split('/')[0].split('?')[0].split('@')[-1].split(':')[0]
+    return host[4:] if host.startswith('www.') else host
+
+
+def _own_domain_citation_count(citation_list, domain_url):
+    """How many entries in citation_list point at the brand's own domain.
+
+    Same host rule as Cited Pages on Insights — exact match or a subdomain of
+    it — so the two surfaces cannot disagree about what counts as "yours".
+    """
+    host = _bare_host(domain_url)
+    if not host or not isinstance(citation_list, list):
+        return 0
+    count = 0
+    for entry in citation_list:
+        url = entry if isinstance(entry, str) else (entry.get('url') if isinstance(entry, dict) else None)
+        if not url:
+            continue
+        entry_host = _bare_host(url)
+        if entry_host and (entry_host == host or entry_host.endswith('.' + host)):
+            count += 1
+    return count
+
+
+def _other_brands_named(competitor_mention_list, domain_name, domain_url):
+    """Brands named in the answer, excluding the domain's own brand.
+
+    The extractor returns any capitalised entity it recognises, which includes
+    the brand itself — IOB Bank's own answers list 'Iob' alongside the actual
+    third parties. Leaving it in inflated the count and read as if the brand
+    were competing with itself.
+    """
+    if not isinstance(competitor_mention_list, list):
+        return []
+    own = {
+        (domain_name or '').strip().lower(),
+        _bare_host(domain_url).split('.')[0],
+    }
+    own.discard('')
+    return [
+        name for name in competitor_mention_list
+        if str(name).strip().lower() not in own
+    ]
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])  # Temporarily allow all for testing
 def get_mention_detail(request, analytics_id):
@@ -558,15 +610,31 @@ def get_mention_detail(request, analytics_id):
             # Citations with detailed structure
             'citations': citations_data,
             'citations_count': len(citations_data),
-            
-            # Engagement metrics
-            'views': getattr(analytics_record, 'views', None),
-            'shares': getattr(analytics_record, 'shares', None),
-            
+            # How many of those sources were the brand's OWN pages. The ratio is
+            # the actionable number on this screen: mention 14980 names IOB twice
+            # while all 21 of its sources belong to aggregators and the regulator,
+            # so the model describes the brand entirely from other people's
+            # content. Computed here rather than in the browser because the host
+            # matching has to agree with Cited Pages elsewhere.
+            'own_domain_citations': _own_domain_citation_count(
+                analytics_record.citation_list,
+                (group.domain.url if group else ''),
+            ),
+
             # Historical data (placeholder)
             'position_trend': [],
             'key_topics': (getattr(analytics_record, 'topic_list', None) or getattr(analytics_record, 'key_topics', []) or []),
             'competitor_mentions': (getattr(analytics_record, 'competitor_mention_list', None) or getattr(analytics_record, 'competitor_mentions', []) or []),
+            # Brands named in the answer besides your own. The extractor also
+            # picks up the brand itself and non-competitors (regulators,
+            # aggregators), so the own-brand entry is dropped here and the field
+            # is named for what it can honestly claim: other brands named, not
+            # competitors.
+            'other_brands_named': _other_brands_named(
+                getattr(analytics_record, 'competitor_mention_list', None) or [],
+                (group.domain.name if group else ''),
+                (group.domain.url if group else ''),
+            ),
         }
         
         return Response(response_data)
