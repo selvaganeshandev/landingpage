@@ -170,29 +170,138 @@ def _format_created(dt) -> str:
     return f"{'/'.join(date_parts)}, {':'.join(time_parts)}"
 
 
-def _build_workbook(rows):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "AI Prompt Data Export"
+# Order the per-platform sheets appear in, and the order their columns appear
+# in on Summary. Fixed rather than derived from the data so the workbook has
+# the same shape for every domain and two exports can be diffed.
+PLATFORM_SHEETS = ["ChatGPT", "Claude", "Google Gemini", "Perplexity", "Grok", "DeepSeek"]
 
-    header_fill = PatternFill("solid", fgColor="F2F2F2")
-    header_font = Font(bold=True)
-    for col_idx, label in enumerate(COLUMN_HEADERS, start=1):
+SUMMARY_HEADERS_HEAD = [
+    "Prompt", "Theme", "Platforms tracked", "Mentioned on",
+    "Total Mentions", "Total Citations", "Best Position", "Avg Sentiment",
+]
+
+PLATFORM_HEADERS = [
+    "Prompt", "Theme", "Mentioned", "Position", "Mentions", "Citations",
+    "Sentiment", "Sentiment Score", "Competitors Mentioned", "Topics",
+    "Source URLs", "Tracked",
+]
+
+_HEADER_FILL = PatternFill("solid", fgColor="F2F2F2")
+_WRAP = Alignment(wrap_text=True, vertical="top")
+
+
+def _citation_count(rec):
+    """Number of sources cited in this answer.
+
+    Counted from citation_list rather than the total_citations column, because
+    that column is populated for some domains and left at 0 for others — Tata
+    Motors carries 0 on all 400 of its rows while 219 of them have a non-empty
+    citation_list. Counting the list is the only measure that works everywhere,
+    and it agrees with the Source URLs cell beside it.
+    """
+    cl = rec.citation_list
+    return len(cl) if isinstance(cl, list) else 0
+
+
+def _write_sheet(ws, headers, rows, widths, wrap_cols=()):
+    for col_idx, label in enumerate(headers, start=1):
         cell = ws.cell(row=1, column=col_idx, value=label)
-        cell.font = header_font
-        cell.fill = header_fill
+        cell.font = Font(bold=True)
+        cell.fill = _HEADER_FILL
         cell.alignment = Alignment(vertical="center")
 
     for r_idx, row in enumerate(rows, start=2):
         for c_idx, value in enumerate(row, start=1):
             cell = ws.cell(row=r_idx, column=c_idx, value=value)
-            if c_idx in (1, 2):  # Source URLs, Prompt Text
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
+            if c_idx in wrap_cols:
+                cell.alignment = _WRAP
 
-    column_widths = {1: 60, 2: 50, 3: 14, 4: 14, 5: 14, 6: 12, 7: 22}
-    for col, width in column_widths.items():
+    for col, width in widths.items():
         ws.column_dimensions[get_column_letter(col)].width = width
     ws.freeze_panes = "A2"
+
+
+def _build_workbook(by_prompt, platforms_present):
+    """Summary sheet + one sheet per platform.
+
+    The old export was a single flat sheet of (prompt x platform) rows, which
+    made the obvious research question — how does one prompt rank across the
+    models? — a manual pivot. Summary answers it directly with a Position
+    column per platform; the per-platform sheets carry the detail (citations,
+    sources, competitors) that only makes sense scoped to one model.
+    """
+    wb = Workbook()
+
+    # Only ship a column/sheet for platforms this domain actually has, but keep
+    # PLATFORM_SHEETS' order so the layout is stable across domains.
+    ordered = [p for p in PLATFORM_SHEETS if p in platforms_present]
+    ordered += sorted(p for p in platforms_present if p not in PLATFORM_SHEETS)
+
+    # ---- Summary ----
+    ws = wb.active
+    ws.title = "Summary"
+    headers = SUMMARY_HEADERS_HEAD + [f"Position — {_display_platform(p)}" for p in ordered]
+
+    summary_rows = []
+    for entry in by_prompt:
+        recs = entry["records"]
+        positions = [float(r.position or 0) for r in recs if (r.position or 0) > 0]
+        sentiments = [_scale_sentiment(r.sentiment_score) for r in recs]
+        mentioned_on = [_display_platform(r.platform) for r in recs if r.is_mention]
+        row = [
+            entry["prompt_text"],
+            entry["theme"],
+            len(recs),
+            ", ".join(mentioned_on),
+            sum(int(r.total_mentions or 0) for r in recs),
+            sum(_citation_count(r) for r in recs),
+            # Lower is better, so "best" is the minimum of the ranks that exist.
+            # 0 means "not ranked" rather than "ranked first", so it is excluded
+            # above — averaging it in would flatter every unranked prompt.
+            min(positions) if positions else "",
+            round(sum(sentiments) / len(sentiments), 2) if sentiments else "",
+        ]
+        for platform in ordered:
+            rec = entry["by_platform"].get(platform)
+            row.append(float(rec.position or 0) if rec and (rec.position or 0) > 0 else "")
+        summary_rows.append(row)
+
+    widths = {1: 60, 2: 24, 3: 16, 4: 30, 5: 14, 6: 14, 7: 13, 8: 13}
+    for i in range(len(ordered)):
+        widths[len(SUMMARY_HEADERS_HEAD) + 1 + i] = 20
+    _write_sheet(ws, headers, summary_rows, widths, wrap_cols=(1,))
+
+    # ---- One sheet per platform ----
+    for platform in ordered:
+        rows = []
+        for entry in by_prompt:
+            rec = entry["by_platform"].get(platform)
+            if not rec:
+                continue
+            rows.append([
+                entry["prompt_text"],
+                entry["theme"],
+                "Yes" if rec.is_mention else "No",
+                float(rec.position or 0) if (rec.position or 0) > 0 else "",
+                int(rec.total_mentions or 0),
+                _citation_count(rec),
+                rec.sentiment_category or "",
+                _scale_sentiment(rec.sentiment_score),
+                ", ".join(str(c) for c in (rec.competitor_mention_list or [])),
+                ", ".join(str(t) for t in (rec.topic_list or [])),
+                _format_source_urls_full(rec.citation_list),
+                _format_created(rec.tracked_at or rec.created_at),
+            ])
+        # Excel caps sheet titles at 31 chars and forbids []:*?/\ — the display
+        # names in use are short and clean, but truncate defensively.
+        sheet = wb.create_sheet(_display_platform(platform)[:31])
+        _write_sheet(
+            sheet, PLATFORM_HEADERS, rows,
+            {1: 60, 2: 22, 3: 11, 4: 10, 5: 10, 6: 10, 7: 13, 8: 15,
+             9: 34, 10: 30, 11: 70, 12: 22},
+            wrap_cols=(1, 9, 10, 11),
+        )
+
     return wb
 
 
@@ -222,20 +331,37 @@ def prompts_export(request):
     if range_err is not None:
         return range_err
 
-    rows = []
+    # Group by prompt so Summary can put one prompt on a row with a column per
+    # platform. Keeping only the LATEST record per (prompt, platform): analytics
+    # rows are updated in place on each run, but a re-run can leave more than
+    # one, and two rows for the same pair would otherwise double the totals.
+    by_prompt = []
+    index = {}
+    platforms_present = set()
     for a in qs.iterator():
-        prompt_text = a.prompt.prompt if a.prompt else ""
-        rows.append((
-            _format_source_urls_full(a.citation_list),
-            prompt_text,
-            _display_platform(a.platform),
-            _scale_sentiment(a.sentiment_score),
-            float(a.position or 0),
-            int(a.total_mentions or 0),
-            _format_created(a.created_at),
-        ))
+        if not a.prompt:
+            continue
+        platforms_present.add(a.platform)
+        key = a.prompt_id
+        entry = index.get(key)
+        if entry is None:
+            entry = {
+                "prompt_text": a.prompt.prompt or "",
+                "theme": getattr(a.prompt.group, "theme", "") or "",
+                "records": [],
+                "by_platform": {},
+            }
+            index[key] = entry
+            by_prompt.append(entry)
+        # qs is ordered -created_at, so the first record seen for a platform is
+        # the most recent one; later duplicates are older and dropped.
+        if a.platform not in entry["by_platform"]:
+            entry["by_platform"][a.platform] = a
+            entry["records"].append(a)
 
-    wb = _build_workbook(rows)
+    by_prompt.sort(key=lambda e: e["prompt_text"].lower())
+
+    wb = _build_workbook(by_prompt, platforms_present)
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
