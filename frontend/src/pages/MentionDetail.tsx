@@ -540,58 +540,14 @@ const MentionDetail = () => {
               </TabsList>
 
               <TabsContent value="overview" className="space-y-4">
-                {/* Was "Key Topics Mentioned", reading mention.key_topics —
-                    which maps to topic_list, empty on all 11,328 analytics
-                    rows. It could only ever print "No key topics identified".
-                    Replaced with the sources this answer actually cited, which
-                    is real data and the thing worth inspecting here. */}
-                {/* A preview of five, not the whole list — the full set lives
-                    in the same modal the Citations summary opens, so the two
-                    places that care about sources share one long list instead
-                    of each rendering their own down the page. */}
-                <div>
-                  <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-                    <h3 className="text-lg font-semibold font-inter">Sources Cited</h3>
-                    <span className="text-sm text-muted-foreground">
-                      <span className={ownCitationCount > 0 ? 'text-success font-medium' : ''}>{ownCitationCount}</span>
-                      {' '}of {citationList.length} are yours
-                    </span>
-                  </div>
-                  {citationList.length > 0 ? (
-                    <>
-                      <div className="space-y-1.5">
-                        {citationList.slice(0, 5).map((c: any, idx: number) => (
-                          <a
-                            key={idx}
-                            href={c.url || c.source_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-2 text-sm p-2 rounded-lg border border-border hover:border-primary transition-colors"
-                          >
-                            <ExternalLink className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                            <span className="truncate">{c.url || c.source_url}</span>
-                            {c.is_your_domain && (
-                              <Badge variant="outline" className="ml-auto text-xs border-success text-success">yours</Badge>
-                            )}
-                          </a>
-                        ))}
-                      </div>
-                      {citationList.length > 5 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="mt-2 px-0"
-                          onClick={() => setIsCitationsOpen(true)}
-                        >
-                          View all {citationList.length} sources
-                        </Button>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">This answer cited no sources.</p>
-                  )}
-                </div>
-
+                {/* This tab used to lead with "Key Topics Mentioned", reading
+                    topic_list — empty on all 11,328 analytics rows, so it could
+                    only ever print "No key topics identified".
+                    It is not replaced with a source list: the Citations summary
+                    on the card above already covers that and opens the full set
+                    in a modal, and having both put the same data on the page
+                    twice. The tab keeps Position Trend, which nothing else
+                    shows. */}
                 <div className="pt-4">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-lg font-semibold font-inter">Position Trend</h3>
@@ -722,8 +678,17 @@ const MentionDetail = () => {
                 </div>
 
                 <div className="pt-6 border-t border-border">
-                  <h3 className="text-lg font-semibold mb-3 font-inter">Related Mentions</h3>
-                  <p className="text-sm text-muted-foreground mb-3">Same prompt on different platforms</p>
+                  <h3 className="text-lg font-semibold mb-1 font-inter">How other platforms answered</h3>
+                  {/* The prompt is not repeated on each row below. This list is
+                      the SAME question asked of other models, so printing the
+                      identical text three times said nothing and read as though
+                      three different prompts were being compared. What differs
+                      is the platform and the result, so that is what each row
+                      leads with; a row only shows text when it is a different
+                      variant. */}
+                  <p className="text-sm text-muted-foreground mb-3 font-mono">
+                    {mention.prompt_text}
+                  </p>
                   <div className="space-y-3">
                     {relatedMentions && relatedMentions.length > 0 ? (
                       relatedMentions
@@ -733,29 +698,50 @@ const MentionDetail = () => {
                           const isDifferentPlatform = related.platform !== mention.platform;
                           return isSamePrompt && isDifferentPlatform;
                         })
-                        .map((related, idx) => (
-                          <div key={idx} className="p-4 rounded-xl border border-border hover:shadow-md transition-all bg-card/50">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl gradient-primary shadow-md flex items-center justify-center font-bold text-white font-inter">
-                                  #{related.position}
+                        .map((related, idx) => {
+                          const isSameText = related.prompt_text === mention.prompt_text;
+                          return (
+                            <div key={idx} className="p-4 rounded-xl border border-border hover:shadow-md transition-all bg-card/50">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-3 min-w-0">
+                                  {/* 0 means the brand was not ranked in that
+                                      answer, so "#0" would read as a rank. */}
+                                  <div className="w-10 h-10 flex-shrink-0 rounded-xl gradient-primary shadow-md flex items-center justify-center font-bold text-white font-inter">
+                                    {related.position > 0 ? `#${related.position}` : '—'}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <Badge variant="outline">{related.platform}</Badge>
+                                      {related.sentiment && (
+                                        <Badge className={getSentimentColor(related.sentiment) + " border text-xs"}>
+                                          {related.sentiment}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    {!isSameText && (
+                                      <p className="text-sm text-muted-foreground font-mono truncate mt-1">
+                                        {related.prompt_text}
+                                      </p>
+                                    )}
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      {related.position > 0
+                                        ? `Ranked #${related.position} · ${related.time_ago}`
+                                        : `Not ranked · ${related.time_ago}`}
+                                    </p>
+                                  </div>
                                 </div>
-                                <div>
-                                  <Badge variant="outline" className="mb-1">{related.platform}</Badge>
-                                  <p className="text-sm text-muted-foreground font-mono">{related.prompt_text}</p>
-                                  <p className="text-xs text-muted-foreground">{related.time_ago}</p>
-                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="flex-shrink-0"
+                                  onClick={() => navigate(`/mentions/${related.id}`)}
+                                >
+                                  View
+                                </Button>
                               </div>
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                onClick={() => navigate(`/mentions/${related.id}`)}
-                              >
-                                View
-                              </Button>
                             </div>
-                          </div>
-                        ))
+                          );
+                        })
                     ) : (
                       <p className="text-sm text-muted-foreground">No related mentions found for this prompt on other platforms</p>
                     )}
