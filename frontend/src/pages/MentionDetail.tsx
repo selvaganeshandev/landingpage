@@ -598,25 +598,40 @@ const MentionDetail = () => {
         <div className="space-y-6">
           {/* Engagement Stats */}
           <Card className="p-6 shadow-elegant border border-border backdrop-blur-sm bg-card/80">
-            <h3 className="text-lg font-semibold mb-4 font-inter">Engagement Metrics</h3>
+            {/* Was "Engagement Metrics", leading with Views and Shares. Those
+                columns are 0 on all 11,328 analytics rows — nothing writes
+                them, and an AI answer has no views or shares to write. They
+                promised audience data that cannot exist for this medium.
+                Replaced with what this answer genuinely records. */}
+            <h3 className="text-lg font-semibold mb-4 font-inter">Answer Metrics</h3>
             <div className="space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-border">
-                <span className="text-sm text-muted-foreground">Views</span>
-                <span className="text-lg font-bold font-inter">{mention.views ? mention.views.toLocaleString() : '0'}</span>
+                <span className="text-sm text-muted-foreground">Brand mentions</span>
+                {/* No invented fallback. This used to substitute the related-
+                    mention count, or a bare 1, whenever the real value was 0 —
+                    turning "not mentioned" into "mentioned once". */}
+                <span className="text-lg font-bold font-inter">{mention.total_mentions ?? 0}</span>
               </div>
               <div className="flex items-center justify-between pb-3 border-b border-border">
-                <span className="text-sm text-muted-foreground">Shares</span>
-                <span className="text-lg font-bold font-inter">{mention.shares || '0'}</span>
-              </div>
-              <div className="flex items-center justify-between pb-3 border-b border-border">
-                <span className="text-sm text-muted-foreground">Mentions</span>
+                <span className="text-sm text-muted-foreground">Position in answer</span>
                 <span className="text-lg font-bold font-inter">
-                  {mention.total_mentions || (relatedMentions && relatedMentions.length > 0 ? relatedMentions.length + 1 : 1)}
+                  {mention.position && mention.position > 0 ? mention.position : '—'}
                 </span>
               </div>
+              <div className="flex items-center justify-between pb-3 border-b border-border">
+                <span className="text-sm text-muted-foreground">Sources cited</span>
+                {/* citations_count is len(citation_list); total_citations is a
+                    stored column left at 0 for whole domains. This answer cites
+                    21 URLs and the old card read "Citations 0". */}
+                <span className="text-lg font-bold font-inter">{mention.citations_count ?? 0}</span>
+              </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Citations</span>
-                <span className="text-lg font-bold font-inter">{mention.total_citations || '0'}</span>
+                <span className="text-sm text-muted-foreground">Sentiment score</span>
+                <span className="text-lg font-bold font-inter">
+                  {typeof mention.sentiment_score === 'number'
+                    ? mention.sentiment_score.toFixed(2)
+                    : '—'}
+                </span>
               </div>
             </div>
           </Card>
