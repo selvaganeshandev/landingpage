@@ -249,10 +249,19 @@ const Citations = () => {
               <Link2 className="h-6 w-6 text-primary" />
             </div>
           </div>
+          {/* Green with a rising arrow only when something actually rose.
+              At 0 this read "+0 new this week" in success green, which framed
+              a flat week as growth. */}
           <div className="flex items-center gap-2 text-sm">
-            <ArrowUpRight className="h-4 w-4 text-success" />
-            <span className="text-success font-medium">+{summary.new_sources_7d}</span>
-            <span className="text-muted-foreground">new this week</span>
+            {summary.new_sources_7d > 0 ? (
+              <>
+                <ArrowUpRight className="h-4 w-4 text-success" />
+                <span className="text-success font-medium">+{summary.new_sources_7d}</span>
+                <span className="text-muted-foreground">new this week</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">No new sources this week</span>
+            )}
           </div>
         </Card>
 
@@ -650,7 +659,9 @@ const CitationsTable = ({
               </TableCell>
               <TableCell className="text-center py-2 px-2">
                 <Badge variant="secondary">
-                  {citation.mention_count || 1}
+                  {/* ?? not ||: the API always sends a real count, but `|| 1`
+                      would turn a genuine 0 into a fabricated 1. */}
+                  {citation.mention_count ?? 0}
                 </Badge>
               </TableCell>
               <TableCell className="py-2 px-2">
