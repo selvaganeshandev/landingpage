@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Filter, ExternalLink, Copy, Loader2 } from "lucide-react";
+import { Search, Filter, ExternalLink, Copy, Download, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Select,
@@ -75,6 +75,7 @@ const Mentions = () => {
   const [selectedPlatform, setSelectedPlatform] = useState("all");
   const [selectedSentiment, setSelectedSentiment] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -182,6 +183,7 @@ const Mentions = () => {
   });
 
   const handleExport = async () => {
+    setIsExporting(true);
     try {
       const activeDomainId = selectedDomain?.id ?? getActiveDomainIdNumber(user);
       
@@ -217,6 +219,8 @@ const Mentions = () => {
         description: error.message || "Failed to export mentions",
         variant: "destructive",
       });
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -261,8 +265,11 @@ const Mentions = () => {
             Monitor brand mentions and citations across AI platforms
           </p>
         </div>
-        <Button onClick={handleExport} className="gradient-primary shadow-md shadow-primary/20">
-          Export Mentions
+        <Button variant="outline" onClick={handleExport} disabled={isExporting}>
+          {isExporting
+            ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            : <Download className="h-4 w-4 mr-2" />}
+          {isExporting ? "Exporting..." : "Export Mentions"}
         </Button>
       </div>
 

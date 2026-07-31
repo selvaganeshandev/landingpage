@@ -1073,22 +1073,45 @@ def _format_mention_for_export(analytics_record):
             })
     
     # Format the mention data according to the specified structure
+    domain_url = (group.domain.url if group and group.domain else '')
+    # Distinct URLs, because citation_list holds citation EVENTS: a single
+    # answer commonly cites the same page several times, so the raw length
+    # overstates how many sources were actually used.
+    unique_urls = []
+    for c in citations_data:
+        if c['url'] and c['url'] not in unique_urls:
+            unique_urls.append(c['url'])
+
     formatted_data = {
         'mention_id': analytics_record.id,
         'platform': analytics_record.platform,
+        'is_mention': bool(analytics_record.is_mention),
         'sentiment': getattr(analytics_record, 'sentiment_category', 'neutral'),
         'sentiment_score': float(analytics_record.sentiment_score),
         'prompt_text': prompt.prompt,
+        'prompt_group': (group.group_id if group else ''),
         'full_ai_response': analytics_record.context_summary or '',
         'total_mentions': analytics_record.total_mentions,
-        'total_citations': analytics_record.total_citations,
+        # Counted from citation_list, not the total_citations column, which is
+        # populated for some domains and left at 0 for others.
+        'citation_events': len(citations_data),
+        'unique_sources': len(unique_urls),
+        'own_domain_citations': _own_domain_citation_count(
+            analytics_record.citation_list, domain_url
+        ),
         'position': float(analytics_record.position),
-        'created_at': analytics_record.created_at.isoformat(),
+        'created_at': analytics_record.created_at,
+        'tracked_at': analytics_record.tracked_at,
         'domain_name': (group.domain.name if group else ''),
         'citations': citations_data,
-        'key_topics': (getattr(analytics_record, 'topic_list', None) or getattr(analytics_record, 'key_topics', []) or [])
+        'source_urls': unique_urls,
+        'other_brands_named': _other_brands_named(
+            getattr(analytics_record, 'competitor_mention_list', None) or [],
+            (group.domain.name if group and group.domain else ''),
+            domain_url,
+        ),
     }
-    
+
     return formatted_data
 
 
@@ -1112,10 +1135,18 @@ def _create_excel_from_mentions(mentions_data, sheet_name='Mentions'):
     )
     
     # Headers
+    #
+    # Two columns are gone. "Citations (JSON)" dumped a pretty-printed JSON blob
+    # into a cell — unreadable in a spreadsheet and impossible to filter or
+    # sort; it is replaced by counts plus a plain newline-separated URL list.
+    # "Key Topics (JSON)" read topic_list, which is empty on every analytics row
+    # in the database, so it only ever produced a blank column.
     headers = [
-        'Mention ID', 'Platform', 'Sentiment', 'Sentiment Score', 'Prompt Text',
-        'Full AI Response', 'Total Mentions', 'Total Citations', 'Position',
-        'Created At', 'Domain Name', 'Citations (JSON)', 'Key Topics (JSON)'
+        'Mention ID', 'Domain', 'Prompt Group', 'Prompt Text', 'Platform',
+        'Mentioned', 'Brand Mentions', 'Position',
+        'Unique Sources', 'Citation Events', 'Your Sources Cited',
+        'Sentiment', 'Sentiment Score', 'Other Brands Named',
+        'Source URLs', 'Tracked At', 'Created At', 'Full AI Response',
     ]
     
     # Write headers
@@ -1129,35 +1160,62 @@ def _create_excel_from_mentions(mentions_data, sheet_name='Mentions'):
     
     # Write data
     logger.info(f"Writing {len(mentions_data)} mentions to Excel")
+    def _cell_text(value, limit=32000):
+        """Excel rejects any cell over 32,767 characters — an AI answer can
+        exceed that on its own, and openpyxl raises rather than truncating, so
+        the whole export used to fail on one long response."""
+        text = '' if value is None else str(value)
+        return text if len(text) <= limit else text[:limit] + '… [truncated]'
+
+    def _naive(dt):
+        """Excel cannot store a timezone-aware datetime; write a real date so
+        the column sorts and filters as one, rather than an ISO string."""
+        if not dt:
+            return ''
+        return timezone.localtime(dt).replace(tzinfo=None) if timezone.is_aware(dt) else dt
+
     for row_num, mention in enumerate(mentions_data, 2):
-        # Convert citations and key_topics to JSON strings for Excel
-        citations_json = json.dumps(mention.get('citations', []), indent=2) if mention.get('citations') else ''
-        key_topics_json = json.dumps(mention.get('key_topics', []), indent=2) if mention.get('key_topics') else ''
-        
+        position = mention.get('position') or 0
         data_row = [
             mention.get('mention_id', ''),
+            mention.get('domain_name', ''),
+            mention.get('prompt_group', ''),
+            _cell_text(mention.get('prompt_text', '')),
             mention.get('platform', ''),
+            'Yes' if mention.get('is_mention') else 'No',
+            mention.get('total_mentions', 0),
+            # 0 means "not ranked"; leaving it as 0 sorts it above rank 1.
+            position if position > 0 else '',
+            mention.get('unique_sources', 0),
+            mention.get('citation_events', 0),
+            mention.get('own_domain_citations', 0),
             mention.get('sentiment', ''),
             mention.get('sentiment_score', 0),
-            mention.get('prompt_text', ''),
-            mention.get('full_ai_response', ''),
-            mention.get('total_mentions', 0),
-            mention.get('total_citations', 0),
-            mention.get('position', 0),
-            mention.get('created_at', ''),
-            mention.get('domain_name', ''),
-            citations_json,
-            key_topics_json
+            ', '.join(mention.get('other_brands_named') or []),
+            # One URL per line: readable in a cell, and still greppable, which
+            # a pretty-printed JSON array was not.
+            _cell_text('\n'.join(mention.get('source_urls') or [])),
+            _naive(mention.get('tracked_at')),
+            _naive(mention.get('created_at')),
+            _cell_text(mention.get('full_ai_response', '')),
         ]
-        
+
         for col_num, value in enumerate(data_row, 1):
             cell = ws.cell(row=row_num, column=col_num)
             cell.value = value
             cell.border = border
             cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+            if isinstance(value, datetime):
+                cell.number_format = 'yyyy-mm-dd hh:mm'
     
     logger.info(f"Excel file created with {len(mentions_data)} rows of data")
-    
+
+    # A mentions export is something people sort and filter, so give it the
+    # header row locked and a filter dropdown rather than a bare grid.
+    ws.freeze_panes = 'A2'
+    if mentions_data:
+        ws.auto_filter.ref = f'A1:{get_column_letter(len(headers))}{len(mentions_data) + 1}'
+
     # Auto-adjust column widths
     for col_num in range(1, len(headers) + 1):
         column_letter = get_column_letter(col_num)
