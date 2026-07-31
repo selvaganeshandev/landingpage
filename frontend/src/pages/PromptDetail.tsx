@@ -463,7 +463,11 @@ const PromptDetail = () => {
             </Button>
           </div>
           <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
-            <p className="font-mono text-lg">{promptGroup?.primary_prompt || 'No main prompt available'}</p>
+            {/* text-sm, not text-lg: this is a short value being displayed, not
+                long-form reading content. At 18px it outweighed the "Main
+                Prompt" heading above it. The AI response below stays at
+                text-[15px] (FORMATTED_MESSAGE_CLASSES) because that IS prose. */}
+            <p className="font-mono text-sm leading-relaxed break-words">{promptGroup?.primary_prompt || 'No main prompt available'}</p>
           </div>
         </div>
       </Card>
