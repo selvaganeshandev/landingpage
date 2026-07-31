@@ -69,13 +69,22 @@ const PromptDetail = () => {
     }
   }, [id]);
 
-  // When platform filter changes, only reload prompts
+  // Reload the variants whenever the platform changes — and once the group has
+  // loaded, because the initial fetch deliberately omits the filter.
+  //
+  // promptGroup.id is in the deps for that second case. Without it this effect
+  // ran once on mount while promptGroup was still null, bailed on the guard,
+  // and never fired again: selectedPlatform starts at "ChatGPT" and never
+  // "changes". So the table kept the UNFILTERED numbers from
+  // loadPromptGroupDetail while the dropdown claimed ChatGPT — group 474 showed
+  // 19/24/30/21 (all platforms, 94) against Platform Distribution's ChatGPT
+  // figure of 29, which was the correct one.
   useEffect(() => {
     if (id && promptGroup) {
       loadPrompts();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPlatform]);
+  }, [selectedPlatform, promptGroup?.id]);
 
   const loadPromptGroupDetail = async () => {
     try {
