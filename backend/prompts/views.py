@@ -1747,8 +1747,21 @@ def prompt_group_detail(request, group_id):
                     'avg_position': float(avg_pos)
                 })
 
-            # Fallback: if no snapshot data or all zeros, calculate from analytics directly
-            if not platform_dist or all(p['count'] == 0 for p in platform_dist):
+            # Fallback for groups with no snapshots yet — read the analytics rows
+            # directly.
+            #
+            # Triggered ONLY on absence. It used to also fire when every count
+            # was 0, which cannot be distinguished from a group that genuinely
+            # was never mentioned — and that is the common case. Worse, the
+            # fallback counted ROWS (Count('id')) while the primary path counts
+            # MENTIONS, so a group with zero mentions reported one "mention" per
+            # analytics row: prompt group 481 showed 7 on each of four platforms
+            # while its own Total Mentions box, two cards above, read 0.
+            #
+            # Now it sums the same quantity the primary path does, so `count` has
+            # one meaning regardless of which path produced it, and a group with
+            # no mentions correctly reports zeros.
+            if not platform_dist:
                 platform_dist = []
                 # Get all published analytics for the group
                 all_analytics = PromptAnalytics.objects.filter(
@@ -1756,17 +1769,22 @@ def prompt_group_detail(request, group_id):
                     is_published=True
                 ).exclude(platform__isnull=True).exclude(platform='')
 
-                # Aggregate by platform
-                from django.db.models import Count, Avg
+                # Aggregate by platform. Sum/Avg/Q come from the module-level
+                # import: re-importing them here made them function-local for
+                # the WHOLE function, so an earlier Sum() in this same view blew
+                # up with "referenced before assignment".
                 platform_stats = all_analytics.values('platform').annotate(
-                    count=Count('id'),
-                    avg_position=Avg('position')
-                ).order_by('-count')
+                    mentions=Sum('total_mentions'),
+                    # Averaged over the rows that actually ranked. Including the
+                    # zeros would drag every platform's position toward 0, which
+                    # reads as "ranked first" rather than "not ranked".
+                    avg_position=Avg('position', filter=Q(position__gt=0)),
+                ).order_by('-mentions')
 
                 for stat in platform_stats:
                     platform_dist.append({
                         'platform': stat['platform'],
-                        'count': stat['count'],
+                        'count': int(stat['mentions'] or 0),
                         'avg_position': float(stat['avg_position'] or 0)
                     })
 

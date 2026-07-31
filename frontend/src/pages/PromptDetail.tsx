@@ -22,6 +22,7 @@ import {
 import {
   ArrowLeft,
   TrendingUp,
+  TrendingDown,
   Copy,
   Loader2,
   MessageSquare,
@@ -31,6 +32,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { InfoHint } from "@/components/InfoHint";
 import { apiClient } from "@/services/api";
 import DOMPurify from 'dompurify';
 import { PageLoader } from "@/components/PageLoader";
@@ -403,17 +405,31 @@ const PromptDetail = () => {
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Total Mentions</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm text-muted-foreground font-medium">Total Mentions</p>
+                <InfoHint label="What Total Mentions means">
+                  How many times your brand was named in AI answers to this prompt and its
+                  variants, added up across every platform tracked. One answer can mention the
+                  brand more than once, and each of those counts.
+                </InfoHint>
+              </div>
               <h3 className="text-3xl font-bold mt-3">{promptGroup?.total_mentions || 0}</h3>
             </div>
-            <div className="p-3 rounded-xl bg-primary/10">
-              <MessageSquare className="h-6 w-6 text-primary" />
+            <div className="p-2 rounded-lg bg-primary/10">
+              <MessageSquare className="h-4 w-4 text-primary" />
             </div>
           </div>
           {visibilityGrowth !== null ? (
+            // Sign-aware. This used to print a literal "+" and colour every
+            // value green with an up arrow, so a fall rendered as "+-100%" in
+            // success green — the opposite of what happened.
             <div className="flex items-center gap-2 text-sm">
-              <TrendingUp className="h-4 w-4 text-success" />
-              <span className="text-success font-medium">+{visibilityGrowth}%</span>
+              {visibilityGrowth >= 0
+                ? <TrendingUp className="h-4 w-4 text-success" />
+                : <TrendingDown className="h-4 w-4 text-destructive" />}
+              <span className={`font-medium ${visibilityGrowth >= 0 ? "text-success" : "text-destructive"}`}>
+                {visibilityGrowth > 0 ? "+" : ""}{visibilityGrowth}%
+              </span>
               <span className="text-muted-foreground">vs last period</span>
             </div>
           ) : (
@@ -424,11 +440,18 @@ const PromptDetail = () => {
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Active Variants</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm text-muted-foreground font-medium">Active Variants</p>
+                <InfoHint label="What Active Variants means">
+                  How many phrasings of this prompt are being tracked. Each variant is asked
+                  separately on every platform, so the same question worded differently can rank
+                  differently — which is what the Prompt Variants table below shows.
+                </InfoHint>
+              </div>
               <h3 className="text-3xl font-bold mt-3">{promptGroup?.active_variants || prompts?.length || 0}</h3>
             </div>
-            <div className="p-3 rounded-xl bg-primary/10">
-              <GitBranch className="h-6 w-6 text-primary" />
+            <div className="p-2 rounded-lg bg-primary/10">
+              <GitBranch className="h-4 w-4 text-primary" />
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
@@ -439,11 +462,21 @@ const PromptDetail = () => {
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Avg Position</p>
-              <h3 className="text-3xl font-bold mt-3">{Math.round(promptGroup?.average_position || 0)}</h3>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm text-muted-foreground font-medium">Avg Position</p>
+                <InfoHint label="What Avg Position means">
+                  Where your brand tends to appear in the answer when it is named — 1 means it
+                  led the response. Lower is better. Averaged over the answers that actually
+                  mentioned you, across every platform; answers with no mention are left out
+                  rather than counted as 0.
+                </InfoHint>
+              </div>
+              <h3 className="text-3xl font-bold mt-3">
+                {promptGroup?.average_position ? Math.round(promptGroup.average_position) : "—"}
+              </h3>
             </div>
-            <div className="p-3 rounded-xl bg-primary/10">
-              <Target className="h-6 w-6 text-primary" />
+            <div className="p-2 rounded-lg bg-primary/10">
+              <Target className="h-4 w-4 text-primary" />
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
