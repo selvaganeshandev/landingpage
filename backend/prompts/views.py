@@ -2,6 +2,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from core.queryset_scoping import user_can_access_domain
 from django.db.models import Q, Count, Avg, F, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -790,31 +791,52 @@ def get_mention_analytics(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])  # Temporarily allow all for testing
+@permission_classes([IsAuthenticated])
 def get_related_mentions(request, analytics_id):
     """
     Get related mentions for a specific mention
     """
     try:
         # Get the original mention
-        original_mention = get_object_or_404(PromptAnalytics, id=analytics_id)
-        
-        # Access checks can be added here if needed (organisation removed)
-        
-        # Find related mentions based on similar prompts or same group
+        original_mention = get_object_or_404(
+            PromptAnalytics.objects.select_related('prompt__group__domain'),
+            id=analytics_id,
+        )
+
+        domain_id = (
+            original_mention.prompt.group.domain_id
+            if original_mention.prompt and original_mention.prompt.group
+            else None
+        )
+
+        # Tenant check. This endpoint was AllowAny with a note saying access
+        # checks could be added "if needed", and the related queries were not
+        # domain-scoped, so it served other organisations' prompt text to anyone
+        # who could guess an id.
+        if domain_id is None or not user_can_access_domain(request.user, domain_id, request):
+            return Response({'error': 'Mention not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        # Everything related is, by definition, within the same domain. Without
+        # this filter the same-platform query below matched on platform ALONE:
+        # asking for an IOB Bank mention on Claude returned the three most
+        # recent Claude mentions in the entire database, which were a different
+        # customer's prompts about chocolate gifts.
         related_mentions = PromptAnalytics.objects.filter(
             is_mention=True,
-            is_published=True
-        ).exclude(id=analytics_id)
-        
-        # Filter by same group first (only if the original mention has a group)
+            is_published=True,
+            prompt__group__domain_id=domain_id,
+        ).exclude(id=analytics_id).select_related('prompt')
+
+        # Same prompt group — this is what the UI calls "same prompt on other
+        # platforms", and it is the part that always worked.
         same_group_mentions = []
         if original_mention.prompt.group:
             same_group_mentions = related_mentions.filter(
                 prompt__group=original_mention.prompt.group
             ).order_by('-created_at')[:5]
-        
-        # Filter by similar platform
+
+        # Other prompts of the SAME DOMAIN on this platform.
         same_platform_mentions = related_mentions.filter(
             platform=original_mention.platform
         )
