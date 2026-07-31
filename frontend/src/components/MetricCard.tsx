@@ -25,7 +25,9 @@ export const MetricCard = ({ title, value, change, icon, trend, onClick, href, i
   // Clone the icon element and add the appropriate color class
   const themedIcon = icon && isValidElement(icon)
     ? cloneElement(icon as React.ReactElement, {
-        className: cn((icon as React.ReactElement).props.className, `text-${iconColor}`, "h-6 w-6")
+        // h-4 rather than h-6: the icon labels the card, it is not the content.
+        // At 24px in a 48px tile it competed with the figure for attention.
+        className: cn((icon as React.ReactElement).props.className, `text-${iconColor}`, "h-4 w-4")
       })
     : icon;
 
@@ -56,7 +58,7 @@ export const MetricCard = ({ title, value, change, icon, trend, onClick, href, i
           <h3 className="text-3xl font-bold mt-3">{value}</h3>
         </div>
         {icon && (
-          <div className={`p-3 rounded-xl bg-${iconColor}/10`}>
+          <div className={`p-2 rounded-lg bg-${iconColor}/10`}>
             {themedIcon}
           </div>
         )}

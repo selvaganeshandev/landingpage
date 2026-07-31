@@ -3,17 +3,25 @@
  */
 
 /**
- * Generate favicon URL for a domain, using the host exactly as stored.
+ * Favicon URL for a domain: "www." for a registrable domain, the host as-is
+ * for a subdomain.
  *
- * This used to prepend "www." to every host that lacked it, to help apex
- * domains that only serve a favicon from www. But it applied the rule blindly,
- * so a SUBDOMAIN became a host that does not exist: trucks.tatamotors.com was
- * requested as www.trucks.tatamotors.com, which resolves nowhere, and every
- * subdomain silently fell through to the placeholder icon.
+ * The split exists because the two cases genuinely want opposite things, and
+ * because a 404 CANNOT be detected here so the first URL has to be the right
+ * one. Google answers a missing favicon with HTTP 404 whose body is a valid
+ * 16x16 PNG; browsers decode 404 image bodies and fire `load`, not `error`, so
+ * the onError chain below never runs for it. Reading the status directly is
+ * not an option either — the endpoint sends no CORS headers, so fetch() can
+ * only get an opaque response. Size is no signal either: trucks.tatamotors.com
+ * serves a real 16x16 icon, the same dimensions as the placeholder.
  *
- * The host is now used as given. The www variant is still tried — it is what
- * getAlternativeFaviconUrl toggles to on error — so the apex-only case still
- * resolves, one request later.
+ * Measured against the service:
+ *   racold.com              404   www.racold.com              200
+ *   trucks.tatamotors.com   200   www.trucks.tatamotors.com   404
+ *
+ * So: www helps a registrable domain and breaks a subdomain, which is exactly
+ * the rule applied here. Prefixing everything (the original behaviour) broke
+ * every subdomain; prefixing nothing broke apex domains like racold.
  */
 export const getFaviconUrl = (url: string, size: number = 32): string => {
   try {
@@ -23,24 +31,17 @@ export const getFaviconUrl = (url: string, size: number = 32): string => {
       : `https://${url}`;
 
     const parsedUrl = new URL(fullUrl);
+    const hostname = parsedUrl.hostname;
+    const preferred = isRegistrableDomain(hostname) ? `www.${hostname}` : hostname;
 
     // Pass the full URL with protocol to Google's favicon service
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
+    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${preferred}&sz=${size}`;
   } catch {
     // Parsing failed — send what we were given rather than inventing a host.
     return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
   }
 };
 
-/**
- * Second attempt: the www/non-www counterpart of getFaviconUrl.
- *
- * Adding "www." is only meaningful for a registrable domain — "www" in front of
- * a subdomain is a host nobody publishes — so it is offered only when the host
- * has no subdomain of its own. Multi-part suffixes (.co.uk, .com.au, .bank.in)
- * mean label-counting alone would misread example.co.uk as a subdomain, so
- * those are recognised explicitly.
- */
 const MULTI_PART_SUFFIXES = [
   'co.uk', 'org.uk', 'ac.uk', 'gov.uk',
   'com.au', 'net.au', 'org.au',
@@ -55,6 +56,13 @@ const isRegistrableDomain = (hostname: string): boolean => {
   return suffix ? labels === 3 : labels === 2;
 };
 
+/**
+ * Second attempt: the counterpart of whatever getFaviconUrl chose.
+ *
+ * Only reached when the browser DOES fire an error (a genuine network failure
+ * or an undecodable body). Google's 404-with-a-valid-PNG does not get here —
+ * see the note on getFaviconUrl — which is why the first URL has to be right.
+ */
 export const getAlternativeFaviconUrl = (url: string, size: number = 32): string => {
   try {
     // Ensure URL has protocol
@@ -67,12 +75,14 @@ export const getAlternativeFaviconUrl = (url: string, size: number = 32): string
 
     let alternative: string;
     if (hostname.startsWith('www.')) {
+      // Stored WITH www, so that is what was tried — drop it.
       alternative = hostname.substring(4);
     } else if (isRegistrableDomain(hostname)) {
-      alternative = `www.${hostname}`;
+      // www was tried first; the bare host is the remaining option.
+      alternative = hostname;
     } else {
-      // A subdomain that already failed — there is no www variant worth trying,
-      // so fall straight through to the placeholder.
+      // A subdomain, already tried as-is. "www" in front of it is a host
+      // nobody publishes, so go straight to the placeholder.
       return '';
     }
 
