@@ -3,8 +3,17 @@
  */
 
 /**
- * Generate favicon URL with protocol
- * Automatically adds www. if domain doesn't have it (improves success rate)
+ * Generate favicon URL for a domain, using the host exactly as stored.
+ *
+ * This used to prepend "www." to every host that lacked it, to help apex
+ * domains that only serve a favicon from www. But it applied the rule blindly,
+ * so a SUBDOMAIN became a host that does not exist: trucks.tatamotors.com was
+ * requested as www.trucks.tatamotors.com, which resolves nowhere, and every
+ * subdomain silently fell through to the placeholder icon.
+ *
+ * The host is now used as given. The www variant is still tried — it is what
+ * getAlternativeFaviconUrl toggles to on error — so the apex-only case still
+ * resolves, one request later.
  */
 export const getFaviconUrl = (url: string, size: number = 32): string => {
   try {
@@ -14,27 +23,38 @@ export const getFaviconUrl = (url: string, size: number = 32): string => {
       : `https://${url}`;
 
     const parsedUrl = new URL(fullUrl);
-    let hostname = parsedUrl.hostname;
-
-    // If hostname doesn't start with www., try adding it
-    // Many sites work with www but not without (e.g., www.edelweisslife.in works, edelweisslife.in doesn't)
-    if (!hostname.startsWith('www.') && !hostname.match(/^[0-9.]+$/)) { // Don't add www to IP addresses
-      hostname = `www.${hostname}`;
-    }
 
     // Pass the full URL with protocol to Google's favicon service
-    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${hostname}&sz=${size}`;
+    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${parsedUrl.hostname}&sz=${size}`;
   } catch {
-    // Fallback if URL parsing fails - add www if not present
-    const normalizedUrl = url.startsWith('www.') ? url : `www.${url}`;
-    return `https://www.google.com/s2/favicons?domain=${normalizedUrl}&sz=${size}`;
+    // Parsing failed — send what we were given rather than inventing a host.
+    return `https://www.google.com/s2/favicons?domain=${url}&sz=${size}`;
   }
 };
 
 /**
- * Generate alternative favicon URL (toggle www/non-www)
- * If URL has www, returns non-www version and vice versa
+ * Second attempt: the www/non-www counterpart of getFaviconUrl.
+ *
+ * Adding "www." is only meaningful for a registrable domain — "www" in front of
+ * a subdomain is a host nobody publishes — so it is offered only when the host
+ * has no subdomain of its own. Multi-part suffixes (.co.uk, .com.au, .bank.in)
+ * mean label-counting alone would misread example.co.uk as a subdomain, so
+ * those are recognised explicitly.
  */
+const MULTI_PART_SUFFIXES = [
+  'co.uk', 'org.uk', 'ac.uk', 'gov.uk',
+  'com.au', 'net.au', 'org.au',
+  'co.in', 'net.in', 'org.in', 'bank.in', 'gov.in', 'ac.in',
+  'co.nz', 'co.za', 'co.jp', 'com.br', 'com.sg', 'com.my',
+];
+
+const isRegistrableDomain = (hostname: string): boolean => {
+  if (hostname.match(/^[0-9.]+$/)) return false; // IP address
+  const suffix = MULTI_PART_SUFFIXES.find((s) => hostname.endsWith(`.${s}`));
+  const labels = hostname.split('.').length;
+  return suffix ? labels === 3 : labels === 2;
+};
+
 export const getAlternativeFaviconUrl = (url: string, size: number = 32): string => {
   try {
     // Ensure URL has protocol
@@ -43,17 +63,20 @@ export const getAlternativeFaviconUrl = (url: string, size: number = 32): string
       : `https://${url}`;
 
     const parsedUrl = new URL(fullUrl);
-    let hostname = parsedUrl.hostname;
+    const hostname = parsedUrl.hostname;
 
-    // Since getFaviconUrl already tries www., this should try non-www
-    // Remove www if present (toggle opposite of what getFaviconUrl does)
+    let alternative: string;
     if (hostname.startsWith('www.')) {
-      hostname = hostname.substring(4);
+      alternative = hostname.substring(4);
+    } else if (isRegistrableDomain(hostname)) {
+      alternative = `www.${hostname}`;
+    } else {
+      // A subdomain that already failed — there is no www variant worth trying,
+      // so fall straight through to the placeholder.
+      return '';
     }
-    // If www was already added by getFaviconUrl and failed, don't add it again
-    // Just return empty to skip to fallback
 
-    return hostname === parsedUrl.hostname ? '' : `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${hostname}&sz=${size}`;
+    return `https://www.google.com/s2/favicons?domain=${parsedUrl.protocol}//${alternative}&sz=${size}`;
   } catch {
     return '';
   }
