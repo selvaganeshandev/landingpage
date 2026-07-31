@@ -140,7 +140,15 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground font-inter antialiased;
+    /* text-sm (14px) is the app's base, not Tailwind's 16px default.
+       The sidebar is written entirely in text-sm/text-xs, but body carried no
+       size at all, so any page text without an explicit class fell back to
+       16px — 84 page-level paragraphs across src/pages were rendering two
+       pixels larger than the navigation beside them. Setting the base here
+       fixes them together and makes 14px what new markup inherits, rather
+       than something every author has to remember to add.
+       Headings are unaffected: they all carry their own text-* class. */
+    @apply bg-background text-foreground font-inter antialiased text-sm;
     font-feature-settings: 'cv11', 'ss01';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
