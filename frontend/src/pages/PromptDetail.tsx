@@ -50,6 +50,9 @@ import {
   Legend
 } from "recharts";
 
+/** Value of the "All LLMs" choice in the Prompt Variants selector. */
+const ALL_PLATFORMS = "all";
+
 const PromptDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -58,7 +61,10 @@ const PromptDetail = () => {
   const [prompts, setPrompts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingPrompts, setIsLoadingPrompts] = useState(false);
-  const [selectedPlatform, setSelectedPlatform] = useState<string>("ChatGPT");
+  // Sentinel for "no platform filter". Radix Select cannot hold "" as a value,
+  // so the all-LLMs choice needs a real one; it is translated back to "send no
+  // platform param" in loadPrompts.
+  const [selectedPlatform, setSelectedPlatform] = useState<string>(ALL_PLATFORMS);
   const [selectedResponsePlatform, setSelectedResponsePlatform] = useState<string>("");
   const [platformResponses, setPlatformResponses] = useState<Record<string, string>>({});
 
@@ -74,11 +80,11 @@ const PromptDetail = () => {
   //
   // promptGroup.id is in the deps for that second case. Without it this effect
   // ran once on mount while promptGroup was still null, bailed on the guard,
-  // and never fired again: selectedPlatform starts at "ChatGPT" and never
-  // "changes". So the table kept the UNFILTERED numbers from
-  // loadPromptGroupDetail while the dropdown claimed ChatGPT — group 474 showed
-  // 19/24/30/21 (all platforms, 94) against Platform Distribution's ChatGPT
-  // figure of 29, which was the correct one.
+  // and never fired again — the initial selection never "changes", so nothing
+  // retriggered it. The table therefore kept the UNFILTERED numbers from
+  // loadPromptGroupDetail while the dropdown named a single platform: group 474
+  // showed 19/24/30/21 (all platforms, 94) under a "ChatGPT" label, against
+  // Platform Distribution's ChatGPT figure of 29, which was the correct one.
   useEffect(() => {
     if (id && promptGroup) {
       loadPrompts();
@@ -202,7 +208,11 @@ const PromptDetail = () => {
     try {
       setIsLoadingPrompts(true);
       // Load only prompts with platform filter
-      const params = selectedPlatform ? { platform: selectedPlatform } : undefined;
+      // Omitting `platform` is how the API is asked for every LLM at once — the
+      // same thing "All LLMs" means on Insights.
+      const params = selectedPlatform && selectedPlatform !== ALL_PLATFORMS
+        ? { platform: selectedPlatform }
+        : undefined;
       const response = await apiClient.getPromptGroupDetail(parseInt(id!), params);
       const promptsData = response.group?.prompts || [];
       setPrompts(promptsData);
@@ -285,14 +295,13 @@ const PromptDetail = () => {
     return platformPrompt?.full_ai_response || promptGroup?.primary_full_ai_response || '';
   }, [selectedResponsePlatform, prompts, promptGroup]);
 
-  // Set default platform to ChatGPT if available, otherwise use first available platform
+  // Keep the selection valid if the platform list changes. "All LLMs" is always
+  // valid, so it is exempt — without that check this would immediately rewrite
+  // it to a single platform and the option could never stay selected.
   useEffect(() => {
-    if (availablePlatforms.length > 0) {
-      // If current selection is not in available platforms, or if it's the initial "ChatGPT" default
-      // but ChatGPT is not available, switch to the first available platform
+    if (availablePlatforms.length > 0 && selectedPlatform !== ALL_PLATFORMS) {
       if (!availablePlatforms.includes(selectedPlatform)) {
-        const defaultPlatform = availablePlatforms.includes('ChatGPT') ? 'ChatGPT' : availablePlatforms[0];
-        setSelectedPlatform(defaultPlatform);
+        setSelectedPlatform(ALL_PLATFORMS);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -670,6 +679,7 @@ const PromptDetail = () => {
                   <SelectValue placeholder="Select Platform" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={ALL_PLATFORMS}>All LLMs</SelectItem>
                   {availablePlatforms.map((platform) => (
                     <SelectItem key={platform} value={platform}>
                       {platform}
