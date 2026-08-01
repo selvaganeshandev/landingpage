@@ -357,6 +357,17 @@ DATABLUE_PAGES = config('DATABLUE_PAGES', default=0, cast=int)  # 0 = derive fro
 DATABLUE_GOOGLE_DOMAIN = config('DATABLUE_GOOGLE_DOMAIN', default='')
 DATABLUE_ADVANCED = config('DATABLUE_ADVANCED', default=False, cast=bool)
 
+# DataBlue web scrape (/v1/scrape, POST) — second-opinion link checking for the
+# misinformation scan. Only reached when the free HEAD check is inconclusive
+# (403 / 429 / timeout / connection error), so it bills on a fraction of URLs.
+# Set MISINFO_DATABLUE_FALLBACK=False to disable and keep the HEAD-only verdict.
+MISINFO_DATABLUE_FALLBACK = config('MISINFO_DATABLUE_FALLBACK', default=True, cast=bool)
+DATABLUE_SCRAPE_URL = config('DATABLUE_SCRAPE_URL', default='https://api.datablue.dev/v1/scrape')
+DATABLUE_SCRAPE_TIMEOUT = config('DATABLUE_SCRAPE_TIMEOUT', default=30, cast=int)
+# Request body field holding the target URL. "url" is what /v1/scrape expects
+# (verified against the live endpoint); overridable if that ever changes.
+DATABLUE_SCRAPE_URL_FIELD = config('DATABLUE_SCRAPE_URL_FIELD', default='url')
+
 # Google PageSpeed Insights API Configuration (for Core Web Vitals & Performance)
 GOOGLE_PAGESPEED_API_KEY = config('GOOGLE_PAGESPEED_API_KEY', default=None)
 

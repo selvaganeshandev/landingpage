@@ -293,16 +293,42 @@ class MisinformationProcessor:
                 return True
             return False
 
-        # Crawl the URL
+        # The link is alive — the validator just proved it. Record that verdict
+        # NOW, before any content work, because these two questions are separate:
+        #
+        #   "does this link work?"        -> the validator, and only the validator
+        #   "what does the page say?"     -> the scrape below, for misinformation
+        #
+        # They used to be conflated: a validated-alive URL whose *content* could
+        # not be scraped was written back as crawl_status='failed', so the
+        # Citations page reported working links as broken. With the scraper key
+        # unset that hit every single URL.
+        citation_url.crawl_status = 'success'
+        citation_url.http_status_code = status_code
+        citation_url.crawl_error = None
+        citation_url.is_crawlable = True
+        citation_url.last_crawled_at = timezone.now()
+        citation_url.save()
+
+        # Fetch the page text. This feeds the misinformation comparison only —
+        # its outcome must not change the link status set above.
         html, http_status, crawl_error = self.crawler.crawl(url)
 
-        citation_url.http_status_code = http_status
-
         if not html:
-            citation_url.crawl_status = 'failed' if http_status != 403 else 'blocked'
-            citation_url.crawl_error = crawl_error
-            citation_url.is_crawlable = False
-            citation_url.save()
+            # One exception: if the scraper reports a definitive gone-status from
+            # the origin, that is better evidence than a HEAD that may have been
+            # served a cached or soft response.
+            if http_status in (404, 410):
+                citation_url.crawl_status = 'failed'
+                citation_url.http_status_code = http_status
+                citation_url.crawl_error = crawl_error
+                citation_url.is_crawlable = False
+                citation_url.save()
+            else:
+                # Content unavailable, link still fine. Note why the text is
+                # missing without disturbing the verdict.
+                citation_url.crawl_error = f'Content unavailable: {crawl_error}'
+                citation_url.save(update_fields=['crawl_error'])
 
             # Only create broken link alert for brand-related URLs
             if is_brand_url and http_status in (404, 410):

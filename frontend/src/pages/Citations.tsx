@@ -42,8 +42,11 @@ import {
   Loader2,
   LinkIcon,
   TrendingUp,
+  ShieldCheck,
+  Download,
 } from "lucide-react";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
+import { InfoHint, MetricHint } from "@/components/InfoHint";
 
 const Citations = () => {
   const { selectedDomain } = useDomainStore();
@@ -56,6 +59,8 @@ const Citations = () => {
   const [activeTab, setActiveTab] = useState("all");
   const [paginationDirection, setPaginationDirection] = useState<'next' | 'prev' | null>(null);
   const [isPaginationLoading, setIsPaginationLoading] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const pageSize = 10; // Reduced from 20 for faster loading
 
   // Ref to track table container position
@@ -131,12 +136,9 @@ const Citations = () => {
     }
   }, [citationsFetching, isPaginationLoading]);
 
-  const handleExport = () => {
-    toast({
-      title: "Exporting Report",
-      description: "Your citations report is being generated...",
-    });
-  };
+  // A previous `handleExport` lived here that only fired a "your report is being
+  // generated" toast and generated nothing. It was wired to no button, so it
+  // never misled anyone — the real implementation is further down.
 
   const handleRefresh = async () => {
     await Promise.all([refetchDashboard(), refetchCitations(), refetchSource()]);
@@ -194,6 +196,63 @@ const Citations = () => {
   const totalCitations = citationsData?.total || 0;
   const totalPages = Math.ceil(totalCitations / pageSize);
 
+  // Validated means at least one citation has actually been crawled. Read off
+  // the status breakdown rather than a flag, so the button reflects the same
+  // data the table shows: if every row still reads "pending", it stays enabled.
+  const alreadyValidated =
+    (statusBreakdown.valid || 0) + (statusBreakdown.broken || 0) + (statusBreakdown.blocked || 0) > 0;
+
+  const handleExport = async () => {
+    if (!domainId) return;
+    setIsExporting(true);
+    try {
+      toast({ title: "Preparing export", description: "Building your citations workbook…" });
+      await apiClient.exportCitationsExcel({
+        domain_id: domainId,
+        domain_name: selectedDomain?.name,
+      });
+      toast({ title: "Export ready", description: "Your citations workbook has been downloaded." });
+    } catch (error: any) {
+      toast({
+        title: "Export failed",
+        description: error?.message || "Could not build the export.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleValidate = async () => {
+    if (!domainId) return;
+    setIsValidating(true);
+    try {
+      const result: any = await apiClient.validateCitations({ domain_id: domainId });
+      toast({
+        title: "Validation started",
+        description: result?.message || "Checking each cited URL now.",
+      });
+      // The crawl runs in the background; poll once the first URLs land so the
+      // page starts filling in without a manual refresh.
+      setTimeout(() => {
+        refetchDashboard();
+        refetchCitations();
+      }, 15000);
+    } catch (error: any) {
+      // 409 is the expected "already done" path, not a failure — say so plainly
+      // instead of showing a generic error.
+      const detail = error?.data?.error || error?.message || "Could not start validation.";
+      const isAlreadyValidated = error?.status === 409;
+      toast({
+        title: isAlreadyValidated ? "Already validated" : "Validation failed",
+        description: detail,
+        variant: isAlreadyValidated ? "default" : "destructive",
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "valid":
@@ -235,6 +294,36 @@ const Citations = () => {
             Track and analyze source citations across AI platforms
           </p>
         </div>
+        {/* Validation is normally automatic, but it only fires once — on the
+            transition into COMP at the end of a domain's first prompt run. A
+            domain that missed that event has no other way to clear its pending
+            citations, which is what this button is for. It refuses to re-run
+            on an already-validated domain rather than re-billing the crawl. */}
+        <div className="flex items-center gap-3">
+          {/* Outline, matching the export buttons on Mentions and Prompts —
+              the primary gradient is reserved for the action that starts work. */}
+          <Button variant="outline" onClick={handleExport} disabled={isExporting}>
+            {isExporting
+              ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              : <Download className="h-4 w-4 mr-2" />}
+            {isExporting ? "Exporting..." : "Export Citations"}
+          </Button>
+          <Button
+            className="gradient-primary shadow-md shadow-primary/20 text-primary-foreground"
+            onClick={handleValidate}
+            disabled={isValidating || alreadyValidated}
+            title={
+              alreadyValidated
+                ? "These citations have already been validated"
+                : "Check every cited URL and mark it valid or broken"
+            }
+          >
+            {isValidating
+              ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              : <ShieldCheck className="h-4 w-4 mr-2" />}
+            {isValidating ? "Validating..." : alreadyValidated ? "Citations Validated" : "Validate Citations"}
+          </Button>
+        </div>
       </div>
 
       {/* Overview Cards */}
@@ -242,7 +331,16 @@ const Citations = () => {
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Total Citations</p>
+              <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+                Total Citations
+                <InfoHint>
+                  <MetricHint
+                    title="Total Citations"
+                    plain="Every source link the AI platforms attached to an answer about you — your own pages and everyone else's."
+                    formula="Counts each URL in every completed response, all-time. The same URL cited in five answers counts five times; use Unique Sources for distinct websites."
+                  />
+                </InfoHint>
+              </p>
               <h3 className="text-4xl font-bold mt-2">{summary.total_citations}</h3>
             </div>
             <div className="p-3 rounded-xl bg-primary/10">
@@ -268,7 +366,16 @@ const Citations = () => {
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Unique Sources</p>
+              <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+                Unique Sources
+                <InfoHint>
+                  <MetricHint
+                    title="Unique Sources"
+                    plain="How many different websites the AI platforms draw on when they talk about your market."
+                    formula="Distinct hostnames across all cited URLs. Ten pages from one site count as one source."
+                  />
+                </InfoHint>
+              </p>
               <h3 className="text-4xl font-bold mt-2">{summary.unique_sources}</h3>
             </div>
             <div className="p-3 rounded-xl bg-secondary/10">
@@ -283,7 +390,16 @@ const Citations = () => {
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Your Domain</p>
+              <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+                Your Domain
+                <InfoHint>
+                  <MetricHint
+                    title="Your Domain"
+                    plain="Citations that point at your own website — the ones you directly control and can improve."
+                    formula="Cited URLs containing your registered domain. Everything else counts as third-party."
+                  />
+                </InfoHint>
+              </p>
               <h3 className="text-4xl font-bold text-success mt-2">{summary.your_domain_citations}</h3>
             </div>
             <div className="p-3 rounded-xl bg-success/10">
@@ -298,7 +414,16 @@ const Citations = () => {
         <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Broken Links</p>
+              <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+                Broken Links
+                <InfoHint>
+                  <MetricHint
+                    title="Broken Links"
+                    plain="Cited pages that no longer load. If one of these is yours, an AI answer is sending readers to a dead page."
+                    formula="Crawled citations that returned an HTTP error (400 or above) or that the crawler could not fetch at all."
+                  />
+                </InfoHint>
+              </p>
               <h3 className="text-4xl font-bold text-destructive mt-2">{summary.broken_links}</h3>
             </div>
             <div className="p-3 rounded-xl bg-destructive/10">
@@ -316,7 +441,16 @@ const Citations = () => {
         <Card className="p-6 border border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Citation Rate</p>
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                Citation Rate
+                <InfoHint>
+                  <MetricHint
+                    title="Citation Rate"
+                    plain="How often the AI platforms bother to show their sources at all. A low rate means most answers about you are unsourced assertions."
+                    formula="Completed responses carrying at least one citation ÷ all completed responses, as a percentage."
+                  />
+                </InfoHint>
+              </p>
               <p className="text-2xl font-bold mt-1">{summary.citation_rate}%</p>
             </div>
             <TrendingUp className="h-5 w-5 text-muted-foreground" />
@@ -327,7 +461,16 @@ const Citations = () => {
         <Card className="p-6 border border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Avg Citations/Response</p>
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                Avg Citations/Response
+                <InfoHint>
+                  <MetricHint
+                    title="Avg Citations/Response"
+                    plain="How many sources a typical answer leans on. Higher means more competition for the reader's attention inside a single answer."
+                    formula="Total citations ÷ all completed responses — responses with no citations are included in the divisor, so this sits below the per-cited-answer average."
+                  />
+                </InfoHint>
+              </p>
               <p className="text-2xl font-bold mt-1">{summary.avg_citations_per_response}</p>
             </div>
             <LinkIcon className="h-5 w-5 text-muted-foreground" />
@@ -338,7 +481,16 @@ const Citations = () => {
         <Card className="p-6 border border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Valid Links</p>
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                Valid Links
+                <InfoHint>
+                  <MetricHint
+                    title="Valid Links"
+                    plain="Cited pages confirmed to be live and reachable."
+                    formula="Crawled citations the crawler fetched successfully with an HTTP status below 400."
+                  />
+                </InfoHint>
+              </p>
               <p className="text-2xl font-bold text-success mt-1">{statusBreakdown.valid || 0}</p>
             </div>
             <CheckCircle2 className="h-5 w-5 text-success" />
@@ -349,7 +501,16 @@ const Citations = () => {
         <Card className="p-6 border border-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Pending</p>
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                Pending
+                <InfoHint>
+                  <MetricHint
+                    title="Pending"
+                    plain="Citations we have collected but not yet visited, so their live/broken status is still unknown."
+                    formula="Total citations minus the ones the crawler has already checked. This falls as validation catches up."
+                  />
+                </InfoHint>
+              </p>
               <p className="text-2xl font-bold text-warning mt-1">{statusBreakdown.pending || 0}</p>
             </div>
             <Clock className="h-5 w-5 text-warning" />

@@ -13,6 +13,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.queryset_scoping import user_can_access_domain
 from domains.models import Domain
 from prompts.models import PromptAnalytics
 from .models import (
@@ -837,6 +838,139 @@ def citations_list(request):
         'page_size': page_size,
         'results': results
     })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def validate_citations(request):
+    """
+    Start a one-off validation pass over this domain's cited URLs.
+
+    Exists because the automatic scan only fires on the PROC -> COMP transition
+    at the end of a domain's first prompt run. A domain that is already COMP has
+    missed that event permanently, which is why every citation on such a domain
+    shows the "pending" clock forever with no way to clear it from the UI.
+
+    Two deliberate differences from `trigger_scan`:
+
+    1. It passes an explicit `prompt_analytics_ids` list. The scanner applies its
+       `is_mention=True` filter only when no IDs are given, and that filter hides
+       ~78% of completed responses — including every response that cites sources
+       without naming the brand. Naming the rows makes those citations reachable.
+
+    2. It refuses to run when the domain has already been validated, so the
+       button cannot be used to re-bill a crawl that has already happened.
+
+    Body:
+        domain_id: Required - ID of the domain to validate
+    """
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # 404 rather than 403 for a domain the caller cannot see: a 403 would confirm
+    # the domain exists, which is exactly what an enumeration probe wants.
+    if not user_can_access_domain(request.user, domain_id, request):
+        return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        domain = Domain.objects.get(id=domain_id)
+    except Domain.DoesNotExist:
+        return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Already running — report progress rather than starting a second pass.
+    running_scan = MisinformationScan.objects.filter(domain=domain, status='running').first()
+    if running_scan:
+        return Response(
+            {
+                'error': 'Validation is already running for this domain.',
+                'status': 'running',
+                'scan_id': running_scan.id,
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    # "Already validated" is judged on crawl rows, not on scan records: the rows
+    # are what the Citations page actually reads, so this matches what the user
+    # can see. A scan that completed but wrote nothing should still be re-runnable.
+    already_crawled = CitationURL.objects.filter(domain=domain).count()
+    if already_crawled:
+        last_scan = MisinformationScan.objects.filter(
+            domain=domain, status='completed'
+        ).order_by('-completed_at').first()
+        return Response(
+            {
+                'error': 'This domain has already been validated.',
+                'status': 'already_validated',
+                'validated_urls': already_crawled,
+                'last_validated_at': last_scan.completed_at if last_scan else None,
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    # Only rows that actually carry citations are worth handing to the scanner.
+    analytics_ids = list(
+        PromptAnalytics.objects.filter(
+            prompt__group__domain=domain,
+            track_status='COMP',
+        )
+        .exclude(citation_list=[])
+        .exclude(citation_list__isnull=True)
+        .values_list('id', flat=True)
+    )
+
+    if not analytics_ids:
+        return Response(
+            {
+                'error': 'No citations found for this domain yet. Validation runs once prompts have been tracked.',
+                'status': 'no_data',
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    citation_count = sum(
+        len(cl or [])
+        for cl in PromptAnalytics.objects.filter(id__in=analytics_ids).values_list('citation_list', flat=True)
+    )
+
+    try:
+        engine_api_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001').rstrip('/')
+        response = requests.post(
+            f"{engine_api_url}/api/misinformation/scan/",
+            json={'domain_id': domain_id, 'prompt_analytics_ids': analytics_ids},
+            timeout=15,
+        )
+    except requests.exceptions.RequestException as e:
+        logger.error(f"validate_citations: engine unreachable for domain {domain_id}: {e}")
+        return Response(
+            {'error': 'Could not reach the validation engine. Please try again shortly.'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    if response.status_code == 409:
+        # Engine saw a running scan between our check above and the dispatch.
+        return Response(response.json(), status=status.HTTP_409_CONFLICT)
+
+    if response.status_code != 202:
+        logger.error(f"validate_citations: engine returned {response.status_code} for domain {domain_id}")
+        return Response(
+            {'error': 'The validation engine rejected the request.'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    domain.misinformation_scan_status = 'SCANNING'
+    domain.save(update_fields=['misinformation_scan_status'])
+
+    return Response(
+        {
+            'status': 'started',
+            'message': f'Validating {citation_count} citations across {len(analytics_ids)} responses.',
+            'citation_count': citation_count,
+            'response_count': len(analytics_ids),
+            'task_id': response.json().get('task_id'),
+        },
+        status=status.HTTP_202_ACCEPTED,
+    )
 
 
 @api_view(['GET'])

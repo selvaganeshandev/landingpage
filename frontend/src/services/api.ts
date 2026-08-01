@@ -214,7 +214,10 @@ async function apiRequest<T>(
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
     const errorMessage = error.detail || error.error || error.message || `HTTP ${response.status}: ${response.statusText}`;
-    throw new Error(errorMessage);
+    // Message is unchanged, but the status and parsed body ride along so callers
+    // can distinguish an expected rejection (409 "already validated") from a
+    // real failure. Every existing `error.message` caller is unaffected.
+    throw Object.assign(new Error(errorMessage), { status: response.status, data: error });
   }
 
   // Handle empty responses
@@ -1724,6 +1727,26 @@ export const apiClient = {
     }).toString()}`;
     return apiRequest(`/misinformation/citations/by-source/${queryParams}`);
   },
+
+  /** Every citation for the domain as a multi-sheet workbook (no pagination). */
+  exportCitationsExcel: (params: { domain_id: string; domain_name?: string }) => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const safeName = (params.domain_name || 'domain').replace(/[^a-z0-9]+/gi, '_');
+    return downloadFile(
+      `/misinformation/citations/export/?domain_id=${encodeURIComponent(params.domain_id)}`,
+      `citations_${safeName}_${stamp}.xlsx`,
+    );
+  },
+
+  /**
+   * Start the one-off crawl that turns "pending" citations into valid/broken.
+   * Rejects with 409 when the domain has already been validated.
+   */
+  validateCitations: (params: { domain_id: string }) =>
+    apiRequest('/misinformation/citations/validate/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: Number(params.domain_id) }),
+    }),
 
   // ===== Agentic ChatBot =====
   sendChatMessage: (data: {

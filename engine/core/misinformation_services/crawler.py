@@ -1,6 +1,19 @@
 """
 Web Crawler Service
-Crawls URLs using ScrapingDog API for reliable scraping with anti-bot bypass.
+Crawls URLs using the DataBlue scrape API for reliable scraping with anti-bot bypass.
+
+Was ScrapingDog. That key is not configured in any environment, so every crawl
+returned "SCRAPINGDOG_API_KEY not configured" and the page content needed for
+misinformation comparison was never fetched — the failure was silent because the
+error was recorded per-URL as an ordinary crawl failure. DataBlue is the scraper
+this product already pays for, so the crawl now goes through the same account as
+SERP tracking and link validation.
+
+DataBlue returns rendered **markdown**, not raw HTML. `ContentParser` runs
+BeautifulSoup over the result, which degrades to plain text extraction on
+markdown, so the comparison step still receives readable prose. `metadata` also
+carries the origin's real HTTP status, which is what makes 404s distinguishable
+from anti-bot blocks.
 """
 import logging
 import time
@@ -12,18 +25,17 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SCRAPE_URL = "https://api.datablue.dev/v1/scrape"
+
 
 class WebCrawler:
     """
-    Web crawler using ScrapingDog API.
+    Web crawler using the DataBlue scrape API.
     Provides reliable scraping with Cloudflare and anti-bot bypass.
     """
 
-    # ScrapingDog API endpoint
-    API_URL = "https://api.scrapingdog.com/scrape"
-
     # Default configuration
-    DEFAULT_TIMEOUT = 30  # seconds (ScrapingDog may take longer)
+    DEFAULT_TIMEOUT = 30  # seconds (a rendered scrape can take longer than a plain GET)
     DEFAULT_MAX_RETRIES = 2
     DEFAULT_RATE_LIMIT = 60  # requests per minute
 
@@ -43,9 +55,10 @@ class WebCrawler:
             rate_limit: Maximum requests per minute
             use_dynamic: Whether to use dynamic rendering (JavaScript execution)
         """
-        self.api_key = getattr(settings, 'SCRAPINGDOG_API_KEY', None)
+        self.api_key = getattr(settings, 'DATABLUE_API_KEY', None)
+        self.api_url = getattr(settings, 'DATABLUE_SCRAPE_URL', DEFAULT_SCRAPE_URL)
         if not self.api_key:
-            logger.warning("SCRAPINGDOG_API_KEY not configured - crawling will fail")
+            logger.warning("DATABLUE_API_KEY not configured - crawling will fail")
 
         self.timeout = timeout or getattr(
             settings, 'MISINFO_CRAWL_TIMEOUT', self.DEFAULT_TIMEOUT
@@ -83,7 +96,7 @@ class WebCrawler:
 
     def crawl(self, url: str, dynamic: bool = None) -> Tuple[Optional[str], int, Optional[str]]:
         """
-        Crawl a URL and return the HTML content using ScrapingDog API.
+        Crawl a URL and return the page content using the DataBlue scrape API.
 
         Args:
             url: The URL to crawl
@@ -96,69 +109,46 @@ class WebCrawler:
             - error_message: Error message or None if successful
         """
         if not self.api_key:
-            return None, 0, "SCRAPINGDOG_API_KEY not configured"
-
-        use_dynamic = dynamic if dynamic is not None else self.use_dynamic
+            return None, 0, "DATABLUE_API_KEY not configured"
 
         for attempt in range(self.max_retries):
             try:
                 self._rate_limit_wait()
 
-                # Build ScrapingDog API parameters
-                params = {
-                    "api_key": self.api_key,
-                    "url": url,
-                    "dynamic": "true" if use_dynamic else "false"
-                }
+                logger.debug(f"Crawling URL with DataBlue: {url}")
 
-                logger.debug(f"Crawling URL with ScrapingDog: {url} (dynamic={use_dynamic})")
-
-                response = self.session.get(
-                    self.API_URL,
-                    params=params,
-                    timeout=self.timeout
+                response = self.session.post(
+                    self.api_url,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"url": url},
+                    timeout=self.timeout,
                 )
 
                 status_code = response.status_code
 
-                # Check for successful response
                 if status_code == 200:
-                    html = response.text
+                    return self._parse_scrape(url, response)
 
-                    # Check if ScrapingDog returned an error in the response
-                    if html.startswith('{"error"'):
-                        try:
-                            error_data = response.json()
-                            error_msg = error_data.get('error', 'Unknown ScrapingDog error')
-                            logger.warning(f"ScrapingDog error for {url}: {error_msg}")
-                            return None, 0, error_msg
-                        except Exception:
-                            pass
-
-                    logger.info(f"Successfully crawled {url} ({len(html)} chars)")
-                    return html, 200, None
-
-                elif status_code == 401:
-                    logger.error("ScrapingDog API key invalid or expired")
+                elif status_code in (401, 403):
+                    logger.error("DataBlue API key invalid or expired")
                     return None, status_code, "Invalid API key"
 
                 elif status_code == 402:
-                    logger.error("ScrapingDog API credits exhausted")
+                    logger.error("DataBlue API credits exhausted")
                     return None, status_code, "API credits exhausted"
 
-                elif status_code == 404:
-                    logger.info(f"Page not found (404): {url}")
-                    return None, 404, "Page not found"
-
                 elif status_code == 429:
-                    logger.warning("ScrapingDog rate limit exceeded")
+                    logger.warning("DataBlue rate limit exceeded")
                     if attempt < self.max_retries - 1:
                         time.sleep(5 * (attempt + 1))
                         continue
                     return None, status_code, "Rate limit exceeded"
 
                 elif status_code >= 500:
-                    logger.warning(f"ScrapingDog server error ({status_code}) for {url}")
+                    logger.warning(f"DataBlue server error ({status_code}) for {url}")
                     if attempt < self.max_retries - 1:
                         time.sleep(2 ** attempt)
                         continue
@@ -190,6 +180,53 @@ class WebCrawler:
 
         return None, 0, "Max retries exceeded"
 
+    def _parse_scrape(self, url: str, response) -> Tuple[Optional[str], int, Optional[str]]:
+        """Turn a 200 from /v1/scrape into (content, origin_status, error).
+
+        DataBlue answers 200 with `success: true` even when the target is dead —
+        it renders the site's 404 into markdown. The origin's real status lives
+        at data.metadata.status_code, and that is what decides the outcome here.
+        Returning the rendered error page as if it were content would feed a
+        "page not found" body into the misinformation comparison.
+        """
+        try:
+            payload = response.json()
+        except ValueError:
+            return None, 0, "DataBlue returned non-JSON"
+
+        if not isinstance(payload, dict) or payload.get("success") is False:
+            detail = (payload or {}).get("error") or (payload or {}).get("detail") or "scrape failed"
+            logger.warning(f"DataBlue scrape failed for {url}: {detail}")
+            return None, 0, str(detail)
+
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            data = payload
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+
+        origin_status = metadata.get("status_code")
+        try:
+            origin_status = int(origin_status)
+        except (TypeError, ValueError):
+            origin_status = 0
+
+        # 0 means DataBlue never reached the host; 'blocked' means it was turned
+        # away. Neither yields usable page content.
+        if data.get("status") == "blocked" or origin_status == 0:
+            reason = data.get("empty_reason") or "blocked"
+            return None, origin_status or 403, f"Blocked by origin ({reason})"
+
+        if origin_status >= 400:
+            logger.info(f"Origin returned {origin_status} for {url}")
+            return None, origin_status, f"HTTP {origin_status}"
+
+        content = data.get("markdown") or data.get("html") or data.get("content") or ""
+        if not content.strip():
+            return None, origin_status, "Empty page content"
+
+        logger.info(f"Successfully crawled {url} ({len(content)} chars)")
+        return content, origin_status, None
+
     def crawl_dynamic(self, url: str) -> Tuple[Optional[str], int, Optional[str]]:
         """
         Crawl a URL with JavaScript rendering enabled.
@@ -206,7 +243,7 @@ class WebCrawler:
     def is_crawlable(self, url: str) -> bool:
         """
         Quick check if a URL is likely crawlable.
-        Does a simple HEAD request (not through ScrapingDog to save credits).
+        Does a simple HEAD request (not through DataBlue, to save credits).
 
         Args:
             url: The URL to check

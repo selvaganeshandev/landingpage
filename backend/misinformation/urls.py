@@ -3,6 +3,7 @@ URL Configuration for Misinformation Module
 """
 from django.urls import path
 from . import views
+from . import views_citations_export
 
 app_name = 'misinformation'
 
@@ -28,4 +29,6 @@ urlpatterns = [
     path('citations/', views.citations_list, name='citations-list'),
     path('citations/<int:citation_id>/', views.citation_detail, name='citation-detail'),
     path('citations/by-source/', views.citations_by_source, name='citations-by-source'),
+    path('citations/validate/', views.validate_citations, name='citations-validate'),
+    path('citations/export/', views_citations_export.citations_export, name='citations-export'),
 ]
