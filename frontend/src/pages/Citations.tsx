@@ -341,12 +341,16 @@ const Citations = () => {
         </div>
       </div>
 
-      {/* Overview Cards */}
+      {/* Overview Cards
+          Same card shape as the Secondary Metrics row below: a compact
+          text-2xl figure with a plain icon. The two rows used to differ
+          (text-4xl and a padded icon tile up here), which made the top row
+          noticeably taller and the grid look misaligned. */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="flex items-start justify-between mb-4">
+        <Card className="p-6 border border-border">
+          <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
                 Total Citations
                 <InfoHint>
                   <MetricHint
@@ -356,32 +360,28 @@ const Citations = () => {
                   />
                 </InfoHint>
               </p>
-              <h3 className="text-4xl font-bold mt-2">{summary.total_citations}</h3>
+              <p className="text-2xl font-bold mt-1">{summary.total_citations}</p>
             </div>
-            <div className="p-3 rounded-xl bg-primary/10">
-              <Link2 className="h-6 w-6 text-primary" />
-            </div>
+            <Link2 className="h-5 w-5 text-primary" />
           </div>
           {/* Green with a rising arrow only when something actually rose.
               At 0 this read "+0 new this week" in success green, which framed
               a flat week as growth. */}
-          <div className="flex items-center gap-2 text-sm">
-            {summary.new_sources_7d > 0 ? (
-              <>
-                <ArrowUpRight className="h-4 w-4 text-success" />
-                <span className="text-success font-medium">+{summary.new_sources_7d}</span>
-                <span className="text-muted-foreground">new this week</span>
-              </>
-            ) : (
-              <span className="text-muted-foreground">No new sources this week</span>
-            )}
-          </div>
+          {summary.new_sources_7d > 0 ? (
+            <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+              <ArrowUpRight className="h-3 w-3 text-success" />
+              <span className="text-success font-medium">+{summary.new_sources_7d}</span>
+              new this week
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-2">No new sources this week</p>
+          )}
         </Card>
 
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="flex items-start justify-between mb-4">
+        <Card className="p-6 border border-border">
+          <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
                 Unique Sources
                 <InfoHint>
                   <MetricHint
@@ -391,21 +391,17 @@ const Citations = () => {
                   />
                 </InfoHint>
               </p>
-              <h3 className="text-4xl font-bold mt-2">{summary.unique_sources}</h3>
+              <p className="text-2xl font-bold mt-1">{summary.unique_sources}</p>
             </div>
-            <div className="p-3 rounded-xl bg-secondary/10">
-              <Globe className="h-6 w-6 text-secondary" />
-            </div>
+            <Globe className="h-5 w-5 text-secondary" />
           </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">Distinct domains cited</span>
-          </div>
+          <p className="text-xs text-muted-foreground mt-2">Distinct domains cited</p>
         </Card>
 
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="flex items-start justify-between mb-4">
+        <Card className="p-6 border border-border">
+          <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
                 Your Domain
                 <InfoHint>
                   <MetricHint
@@ -415,21 +411,17 @@ const Citations = () => {
                   />
                 </InfoHint>
               </p>
-              <h3 className="text-4xl font-bold text-success mt-2">{summary.your_domain_citations}</h3>
+              <p className="text-2xl font-bold text-success mt-1">{summary.your_domain_citations}</p>
             </div>
-            <div className="p-3 rounded-xl bg-success/10">
-              <Building2 className="h-6 w-6 text-success" />
-            </div>
+            <Building2 className="h-5 w-5 text-success" />
           </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">Citations to your website</span>
-          </div>
+          <p className="text-xs text-muted-foreground mt-2">Citations to your website</p>
         </Card>
 
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="flex items-start justify-between mb-4">
+        <Card className="p-6 border border-border">
+          <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
                 Broken Links
                 <InfoHint>
                   <MetricHint
@@ -439,15 +431,11 @@ const Citations = () => {
                   />
                 </InfoHint>
               </p>
-              <h3 className="text-4xl font-bold text-destructive mt-2">{summary.broken_links}</h3>
+              <p className="text-2xl font-bold text-destructive mt-1">{summary.broken_links}</p>
             </div>
-            <div className="p-3 rounded-xl bg-destructive/10">
-              <XCircle className="h-6 w-6 text-destructive" />
-            </div>
+            <XCircle className="h-5 w-5 text-destructive" />
           </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">Need attention</span>
-          </div>
+          <p className="text-xs text-muted-foreground mt-2">Need attention</p>
         </Card>
       </div>
 
