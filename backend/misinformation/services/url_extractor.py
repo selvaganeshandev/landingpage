@@ -67,11 +67,21 @@ class URLExtractor:
         """
         Extract URLs from a citation list (JSON array).
 
+        Every URL here is taken as-is: the platform explicitly cited it, and the
+        Citations page displays it, so the scan must be able to report a status
+        for it. Passing these through _is_valid_url would silently drop whole
+        categories — YouTube, LinkedIn, Reddit, every PDF — leaving them stuck on
+        the pending clock forever with no way to resolve them. On xberra tagger
+        that was 84 citations, almost all YouTube.
+
+        Whether a URL is worth scraping *text* from is a separate question,
+        answered by is_content_scrapable().
+
         Args:
             citation_list: List of citation objects, each may have 'url', 'source', or 'link' field
 
         Returns:
-            List of unique, validated URLs
+            List of unique URLs
         """
         if not citation_list or not isinstance(citation_list, list):
             return []
@@ -85,7 +95,7 @@ class URLExtractor:
                     url = citation.get(field)
                     if url and isinstance(url, str):
                         normalized = self._normalize_url(url)
-                        if normalized and self._is_valid_url(normalized):
+                        if normalized and self._is_well_formed(normalized):
                             urls.append(normalized)
                             break
 
@@ -97,7 +107,7 @@ class URLExtractor:
             elif isinstance(citation, str):
                 # Citation might be a plain URL string
                 normalized = self._normalize_url(citation)
-                if normalized and self._is_valid_url(normalized):
+                if normalized and self._is_well_formed(normalized):
                     urls.append(normalized)
                 else:
                     # Or it might be text containing URLs
@@ -167,6 +177,53 @@ class URLExtractor:
         url = url.rstrip('/')
 
         return url
+
+    def _is_well_formed(self, url: str) -> bool:
+        """Structural check only: an http(s) URL with a host.
+
+        No opinion on what the URL points at. Used for cited URLs, where the
+        only reason to reject is that the string cannot be fetched at all —
+        e.g. the truncated "https://bizfinx." that an LLM occasionally emits.
+        """
+        if not url:
+            return False
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme not in ('http', 'https'):
+                return False
+            host = parsed.netloc or ''
+            # A host must contain a dot and not end on one; "bizfinx." fails both.
+            return bool(host) and '.' in host and not host.endswith('.')
+        except Exception:
+            return False
+
+    def is_content_scrapable(self, url: str) -> bool:
+        """
+        Whether this URL is worth fetching page *text* from.
+
+        False for social/video platforms and for binary files. Scraping a
+        YouTube watch page or a PDF for prose to compare against an LLM claim
+        produces nothing useful, which is what SKIP_DOMAINS and
+        EXCLUDED_EXTENSIONS were written for.
+
+        This is deliberately NOT the same question as "should we check whether
+        this link works". Every cited URL deserves that check — a dead YouTube
+        link in an AI answer about your brand matters just as much as a dead
+        article — so link validation must not consult this method.
+        """
+        if not url:
+            return False
+        try:
+            parsed = urlparse(url)
+            domain = (parsed.netloc or '').lower()
+            if any(skip in domain for skip in self.SKIP_DOMAINS):
+                return False
+            path_lower = (parsed.path or '').lower()
+            if any(path_lower.endswith(ext) for ext in self.EXCLUDED_EXTENSIONS):
+                return False
+            return True
+        except Exception:
+            return False
 
     def _is_valid_url(self, url: str) -> bool:
         """

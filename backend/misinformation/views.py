@@ -593,22 +593,48 @@ def citations_dashboard(request):
 
     # For crawl status, check CitationURL table if data exists
     crawled_urls = CitationURL.objects.filter(domain=domain)
-    broken_links = crawled_urls.filter(
-        Q(http_status_code__gte=400) | Q(crawl_status='failed')
-    ).count()
 
     # New sources in last 7 days
     seven_days_ago = timezone.now() - timedelta(days=7)
     recent_urls = [u for u in all_urls if u['created_at'] >= seven_days_ago]
     new_sources_7d = len(set(extract_domain_from_url(u['url']) for u in recent_urls))
 
-    # Status breakdown (only if misinformation scan has run)
-    status_breakdown = {
-        'valid': crawled_urls.filter(crawl_status='success', http_status_code__lt=400).count(),
-        'broken': broken_links,
-        'pending': total_citations - crawled_urls.count(),  # URLs not yet crawled
-        'blocked': crawled_urls.filter(crawl_status='blocked').count(),
-    }
+    # Status breakdown, counted per citation event.
+    #
+    # This used to subtract crawl rows from total citations to get "pending",
+    # which compared two different units and so could never reach zero. Total
+    # citations counts every citation event including repeats (1,243 on xberra
+    # tagger), while CitationURL is one row per (response, URL) pair (631) over
+    # only 253 distinct URLs. A fully finished scan still showed 612 "awaiting
+    # validation" — pure arithmetic residue, not unchecked work.
+    #
+    # Mapping each event through the crawl rows makes the four buckets sum to
+    # total_citations, so Pending reaching 0 means exactly what it says.
+    crawl_by_url = {}
+    for row in crawled_urls.only('url', 'crawl_status', 'http_status_code'):
+        crawl_by_url[row.url] = row
+        crawl_by_url[row.url.rstrip('/')] = row
+
+    status_breakdown = {'valid': 0, 'broken': 0, 'blocked': 0, 'pending': 0}
+    for url_data in all_urls:
+        url = url_data['url']
+        row = crawl_by_url.get(url) or crawl_by_url.get(str(url).rstrip('/'))
+        if not row:
+            status_breakdown['pending'] += 1
+        elif row.crawl_status == 'success' and row.http_status_code and row.http_status_code < 400:
+            status_breakdown['valid'] += 1
+        elif row.crawl_status == 'blocked':
+            # Before the >=400 test: blocked rows carry http_status_code=403 and
+            # would otherwise be miscounted as broken.
+            status_breakdown['blocked'] += 1
+        elif (row.http_status_code and row.http_status_code >= 400) or row.crawl_status in ('failed', 'broken'):
+            status_breakdown['broken'] += 1
+        else:
+            status_breakdown['pending'] += 1
+
+    # The headline "Broken Links" card reads from the same per-event count, so
+    # it cannot disagree with the Valid/Pending cards beside it.
+    broken_links = status_breakdown['broken']
 
     # Citations by platform
     platform_breakdown = {}
@@ -653,7 +679,8 @@ def citations_dashboard(request):
     # already-validated while 1,237 URLs were still queued. A running scan is
     # its own state and the only reliable signal for it is the scan record.
     running_scan = MisinformationScan.objects.filter(domain=domain, status='running').first()
-    checked = crawled_urls.count()
+    # Progress in the same unit as the cards, so "x of y" matches Pending.
+    checked = total_citations - status_breakdown['pending']
     if running_scan:
         validation_state = 'running'
     elif checked:

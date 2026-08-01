@@ -312,6 +312,15 @@ class MisinformationProcessor:
 
         # Fetch the page text. This feeds the misinformation comparison only —
         # its outcome must not change the link status set above.
+        #
+        # Social/video platforms and binary files are skipped here rather than at
+        # extraction time: their links still need validating (done above), but
+        # scraping a YouTube watch page or a PDF for prose to compare against an
+        # LLM claim yields nothing and costs a credit per URL.
+        if not self.url_extractor.is_content_scrapable(url):
+            logger.debug(f"Validated but not scraping content for {url}")
+            return False
+
         html, http_status, crawl_error = self.crawler.crawl(url)
 
         if not html:
