@@ -88,6 +88,11 @@ const Citations = () => {
     enabled: !!domainId,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
     refetchOnWindowFocus: false, // Prevent refetch on window focus
+    // While a validation is running, poll so the counts and the button state
+    // advance on their own. The scan is a background job, so without this the
+    // page would keep showing whatever was true when it was opened — including
+    // after a refresh, since the cache is keyed only on the domain.
+    refetchInterval: (data: any) => (data?.validation?.state === 'running' ? 10000 : false),
   });
 
   // Fetch citations list
@@ -113,6 +118,9 @@ const Citations = () => {
     staleTime: 2 * 60 * 1000, // Cache for 2 minutes
     refetchOnWindowFocus: false, // Prevent refetch on window focus
     keepPreviousData: true, // Keep previous data while fetching new page
+    // Slower than the dashboard poll: the table is heavier to rebuild and the
+    // per-row clocks matter less than the headline counts while a run is live.
+    refetchInterval: (dashboardData as any)?.validation?.state === 'running' ? 20000 : false,
   });
 
   // Fetch citations by source
@@ -190,17 +198,21 @@ const Citations = () => {
   };
 
   const statusBreakdown = dashboardData?.status_breakdown || {};
+  const validation = dashboardData?.validation;
   const platformBreakdown = dashboardData?.platform_breakdown || {};
   const topSources = sourceData?.results || dashboardData?.top_domains || [];
   const citations = citationsData?.results || [];
   const totalCitations = citationsData?.total || 0;
   const totalPages = Math.ceil(totalCitations / pageSize);
 
-  // Validated means at least one citation has actually been crawled. Read off
-  // the status breakdown rather than a flag, so the button reflects the same
-  // data the table shows: if every row still reads "pending", it stays enabled.
-  const alreadyValidated =
-    (statusBreakdown.valid || 0) + (statusBreakdown.broken || 0) + (statusBreakdown.blocked || 0) > 0;
+  // Three states from the server, never inferred from row counts: rows start
+  // landing seconds into a run, so "some rows exist" would read as finished
+  // while most URLs were still queued.
+  const validationState: string = validation?.state || 'never';
+  const isValidationRunning = validationState === 'running' || isValidating;
+  const alreadyValidated = validationState === 'validated';
+  const validationProgress =
+    validation?.total ? `${validation.checked ?? 0} of ${validation.total}` : '';
 
   const handleExport = async () => {
     if (!domainId) return;
@@ -232,12 +244,9 @@ const Citations = () => {
         title: "Validation started",
         description: result?.message || "Checking each cited URL now.",
       });
-      // The crawl runs in the background; poll once the first URLs land so the
-      // page starts filling in without a manual refresh.
-      setTimeout(() => {
-        refetchDashboard();
-        refetchCitations();
-      }, 15000);
+      // Refetch straight away so `validation.state` flips to 'running' and the
+      // polling above takes over from here.
+      refetchDashboard();
     } catch (error: any) {
       // 409 is the expected "already done" path, not a failure — say so plainly
       // instead of showing a generic error.
@@ -311,17 +320,23 @@ const Citations = () => {
           <Button
             className="gradient-primary shadow-md shadow-primary/20 text-primary-foreground"
             onClick={handleValidate}
-            disabled={isValidating || alreadyValidated}
+            disabled={isValidationRunning || alreadyValidated}
             title={
-              alreadyValidated
-                ? "These citations have already been validated"
-                : "Check every cited URL and mark it valid or broken"
+              isValidationRunning
+                ? `Validation in progress${validationProgress ? ` — ${validationProgress} checked` : ""}`
+                : alreadyValidated
+                  ? "These citations have already been validated"
+                  : "Check every cited URL and mark it valid or broken"
             }
           >
-            {isValidating
+            {isValidationRunning
               ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               : <ShieldCheck className="h-4 w-4 mr-2" />}
-            {isValidating ? "Validating..." : alreadyValidated ? "Citations Validated" : "Validate Citations"}
+            {isValidationRunning
+              ? "Validating..."
+              : alreadyValidated
+                ? "Citations Validated"
+                : "Validate Citations"}
           </Button>
         </div>
       </div>

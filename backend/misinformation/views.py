@@ -646,6 +646,25 @@ def citations_dashboard(request):
         except Exception as e:
             logger.debug(f"DataBlue dashboard fallback notice: {e}")
 
+    # Validation state for the Validate Citations button.
+    #
+    # Three states, not two. Crawl rows start appearing within seconds of a scan
+    # starting, so "has any crawl row" cannot mean "finished" — that read as
+    # already-validated while 1,237 URLs were still queued. A running scan is
+    # its own state and the only reliable signal for it is the scan record.
+    running_scan = MisinformationScan.objects.filter(domain=domain, status='running').first()
+    checked = crawled_urls.count()
+    if running_scan:
+        validation_state = 'running'
+    elif checked:
+        validation_state = 'validated'
+    else:
+        validation_state = 'never'
+
+    last_completed = MisinformationScan.objects.filter(
+        domain=domain, status='completed'
+    ).order_by('-completed_at').first()
+
     return Response({
         'summary': {
             'total_citations': total_citations,
@@ -656,6 +675,13 @@ def citations_dashboard(request):
             'avg_citations_per_response': avg_citations_per_response,
             'broken_links': broken_links,
             'new_sources_7d': new_sources_7d,
+        },
+        'validation': {
+            'state': validation_state,
+            'checked': checked,
+            'total': total_citations,
+            'started_at': running_scan.started_at if running_scan else None,
+            'last_validated_at': last_completed.completed_at if last_completed else None,
         },
         'status_breakdown': status_breakdown,
         'platform_breakdown': platform_breakdown,
