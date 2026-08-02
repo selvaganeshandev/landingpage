@@ -86,6 +86,7 @@ const Topics = () => {
   const [keywordPerformance, setKeywordPerformance] = useState<any[]>([]);
   const [promptSuggestions, setPromptSuggestions] = useState<any[]>([]);
   const [promptLoading, setPromptLoading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const handleGenerateContent = (topic: typeof topics[0]) => {
     setSelectedTopic(topic);
@@ -351,6 +352,30 @@ const Topics = () => {
   const filteredTopics = topics;
 
   // Show PageLoader while loading
+  const handleGenerateTopics = async () => {
+    if (!selectedDomain?.id) return;
+    setIsGenerating(true);
+    try {
+      const result: any = await apiClient.generateTopics({ domain_id: selectedDomain.id });
+      toast({
+        title: "Analysis started",
+        description: result?.message || "Grouping your keywords into topics.",
+      });
+      // The run is a background job; give it time to write before reloading so
+      // the user does not land back on the same empty card.
+      setTimeout(() => window.location.reload(), 20000);
+    } catch (error: any) {
+      // 409 means there is nothing to group — an answer, not a failure.
+      const alreadyGrouped = error?.status === 409;
+      toast({
+        title: alreadyGrouped ? "Nothing to group" : "Could not start analysis",
+        description: error?.data?.error || error?.message || "Please try again shortly.",
+        variant: alreadyGrouped ? "default" : "destructive",
+      });
+      setIsGenerating(false);
+    }
+  };
+
   if (loading) {
     return <PageLoader />;
   }
@@ -366,34 +391,41 @@ const Topics = () => {
               Monitor performance across key topics and categories
             </p>
           </div>
-          <Button
-            onClick={() => window.location.reload()}
-            variant="outline"
-            size="sm"
-          >
-            <Loader2 className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
         </div>
 
+        {/* This card used to claim "Processing topic data..." with a spinner and
+            "typically takes 2-5 minutes" whenever topics were absent — but
+            nothing was queued. Topic generation fires once, on the PROC -> COMP
+            transition at the end of a domain's first prompt run, so a domain
+            past that point waited forever on work that did not exist. The card
+            now says what is true and offers the trigger. */}
         <Card className="p-6 border-dashed border-primary/40 bg-card/70">
           <div className="flex flex-col md:flex-row gap-4 items-start">
             <div className="p-3 rounded-full bg-primary/10 text-primary">
-              <Loader2 className="h-6 w-6 animate-spin" />
+              {isGenerating ? <Loader2 className="h-6 w-6 animate-spin" /> : <Sparkles className="h-6 w-6" />}
             </div>
             <div className="flex-1 space-y-2">
               <h3 className="text-lg font-semibold">
-                Processing topic data...
+                {isGenerating ? "Grouping your keywords..." : "No topics yet"}
               </h3>
               <p className="text-sm text-muted-foreground">
-                Topics are being generated based on your prompts and keywords. Topic data will appear here once processing is complete.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                This typically takes 2-5 minutes. The page will update automatically, or you can click Refresh to check for updates.
+                {isGenerating
+                  ? "Your keywords are being grouped into topics. This runs in the background — you can leave this page and come back."
+                  : "Topics group your keywords into the subjects the AI platforms are asked about. Start the analysis to generate them for this domain."}
               </p>
               <div className="flex flex-wrap gap-3 pt-2">
-                <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
-                  Refresh Status
+                <Button
+                  onClick={handleGenerateTopics}
+                  disabled={isGenerating}
+                  className="gradient-primary shadow-md shadow-primary/20 text-primary-foreground"
+                >
+                  {isGenerating
+                    ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    : <Sparkles className="h-4 w-4 mr-2" />}
+                  {isGenerating ? "Analysing..." : "Start Analysing"}
+                </Button>
+                <Button variant="outline" onClick={() => window.location.reload()}>
+                  Refresh
                 </Button>
               </div>
             </div>

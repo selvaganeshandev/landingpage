@@ -1093,6 +1093,70 @@ def competitor_process(request, competitor_id):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+def start_topic_generation(request):
+    """
+    Queue topic generation for a domain.
+
+    Topic generation otherwise only fires once, on the PROC -> COMP transition
+    at the end of a domain's first prompt run. A domain already past that point
+    — or one whose grouping failed at the time — has no way to produce topics,
+    and the page sits on a "Processing topic data..." card describing work that
+    is not queued.
+
+    The run is additive: TopicProcessor contains no deletes, matching topics have
+    their keyword list merged rather than replaced, and only keywords with
+    last_used_for_topic_generation NULL are considered. Triggering it on a domain
+    that already has topics cannot damage them.
+
+    Body:
+        domain_id: Required
+    """
+    try:
+        domain_id = request.data.get('domain_id')
+        if not domain_id:
+            return Response(
+                {'error': 'domain_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        domain = get_object_or_404(Domain, id=domain_id)
+
+        from shared_models.models import Keyword
+        pending = Keyword.objects.filter(
+            domain_id=domain_id,
+            last_used_for_topic_generation__isnull=True
+        ).count()
+
+        if pending == 0:
+            return Response(
+                {
+                    'error': 'Every keyword for this domain has already been grouped. '
+                             'Add keywords to generate more topics.',
+                    'status': 'no_pending_keywords',
+                },
+                status=status.HTTP_409_CONFLICT
+            )
+
+        task = process_topics_for_domain_task.delay(domain_id)
+
+        return Response({
+            'success': True,
+            'message': f'Grouping {pending} keyword(s) into topics for {domain.name}.',
+            'domain_id': domain_id,
+            'pending_keywords': pending,
+            'task_id': task.id,
+        }, status=status.HTTP_202_ACCEPTED)
+
+    except Exception as e:
+        logger.error(f"Error starting topic generation: {str(e)}", exc_info=True)
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
 def start_misinformation_scan(request):
     """
     Start misinformation scan for a domain.

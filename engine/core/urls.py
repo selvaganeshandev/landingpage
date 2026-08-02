@@ -46,6 +46,7 @@ urlpatterns = [
     
     # Misinformation scanning
     path('misinformation/scan/', views.start_misinformation_scan, name='start_misinformation_scan'),
+    path('topics/generate/', views.start_topic_generation, name='start_topic_generation'),
     
     # Integration Insights
     path('integrations/scheduler/start/', views.start_integration_insights_scheduler, name='start_integration_insights_scheduler'),

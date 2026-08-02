@@ -1185,10 +1185,21 @@ class PromptAnalyticsProcessor:
                         domain_fresh.tracked_at = timezone.now()
                         domain_fresh.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
 
-                        # Trigger topic processing when domain completes
-                        from core.processing_tasks import process_topics_for_domain_task
-                        process_topics_for_domain_task.delay(domain.id)
-                        logger.info(f"Scheduled topic processing for domain {domain.id}")
+                        # Topic generation is NOT triggered here any more.
+                        #
+                        # It used to fire automatically on this PROC -> COMP
+                        # transition, which made it a one-shot: a domain that
+                        # completed before its keywords were ready, or whose
+                        # grouping call failed that day, had no second chance and
+                        # no way to ask for one. It also meant a run started
+                        # itself, so a failure was invisible until someone opened
+                        # the page and found it empty.
+                        #
+                        # Generation now runs only when a user asks for it, via
+                        # POST /api/topics/generate/ behind the Start Analysing
+                        # button on the Topics page. The run is additive and
+                        # repeatable, so triggering it deliberately costs nothing
+                        # that an automatic run did not already cost.
 
                         # Auto-trigger competitor analysis
                         logger.info(f"🎯 Auto-triggering competitor analysis for domain {domain.id}")

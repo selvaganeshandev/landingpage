@@ -57,8 +57,6 @@ const ShareOfVoice = () => {
   const [latest, setLatest] = useState<LatestSov | null>(null);
   const [rows, setRows] = useState<SovRow[]>([]);
   const [opportunities, setOpportunities] = useState<any[]>([]);
-  const [competitors, setCompetitors] = useState<any[]>([]);
-  const [isLoadingCompetitors, setIsLoadingCompetitors] = useState(true);
 
   // Sync domainId from selectedDomain (Zustand store) or localStorage when domain changes
   useEffect(() => {
@@ -78,30 +76,10 @@ const ShareOfVoice = () => {
     if (id && id !== domainId) setDomainId(id);
   }, [user, selectedDomain?.id, domainId]);
 
-  // Load competitors first to check if any exist
-  useEffect(() => {
-    const loadCompetitors = async () => {
-      if (!domainId) return;
-      setIsLoadingCompetitors(true);
-      try {
-        // apiClient.getCompetitorsEngine does not exist — the call threw a
-        // TypeError on every load, caught below. The only visible effect was a
-        // console error, because `competitors` is written here and never read;
-        // the empty state is driven by latest.players and isLoadingCompetitors
-        // is cleared in the finally block either way. Corrected rather than
-        // deleted so the state has a chance of being used deliberately.
-        const response = await apiClient.getCompetitors({ domain_id: domainId });
-        const competitorList = Array.isArray(response) ? response : response?.results || [];
-        setCompetitors(competitorList);
-      } catch (e: any) {
-        console.error('Failed to load competitors:', e);
-        setCompetitors([]);
-      } finally {
-        setIsLoadingCompetitors(false);
-      }
-    };
-    void loadCompetitors();
-  }, [domainId]);
+  // A competitors fetch used to run here on every page load. Its result was
+  // written to state and never read — the empty state comes from latest.players
+  // — so it was a request per load whose only effect was gating the loader.
+  // Removed; the loader now waits on the data the page actually renders.
 
   const [isLoadingData, setIsLoadingData] = useState(true);
 
@@ -285,7 +263,7 @@ const ShareOfVoice = () => {
   }, [shareHistory, ownBrandName]);
 
   // Show loading state while data is being fetched
-  if (isLoadingCompetitors || isLoadingData) {
+  if (isLoadingData) {
     return <PageLoader />;
   }
 

@@ -19,7 +19,8 @@ import logging
 import re
 from typing import Dict, Any, List, Tuple
 from .telemetry import observe, trace_metadata
-from datetime import date, datetime
+import os
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.db import transaction
@@ -43,6 +44,11 @@ from .analytics_helpers import get_openai_client
 
 
 logger = logging.getLogger(__name__)
+
+# How long a competitor may sit in PROC before schedule_tick treats the run as
+# abandoned and requeues it. Long enough that a genuinely slow run is never
+# interrupted; short enough that a crash costs one cycle rather than months.
+STALE_PROC_HOURS = int(os.getenv('COMPETITOR_STALE_PROC_HOURS', '6'))
 
 
 def extract_competitor_citations(citation_list: list, competitor_name: str, competitor_url: str = None) -> list:
@@ -274,6 +280,32 @@ class CompetitorProcessor:
             dict: Summary of processing results
         """
         try:
+            # Recover competitors abandoned mid-run before selecting new work.
+            #
+            # PROC is not in the pickup filter below, so a competitor whose run
+            # died — worker restart, unhandled error, deploy — stayed PROC
+            # forever and was never retried. Fourteen were stranded this way,
+            # the oldest since December 2025, and because a PROC competitor
+            # still holds a mention count it also skewed the share-of-voice
+            # denominator without ever refreshing its own numbers.
+            #
+            # tracked_at is the marker, not modified_at: modified_at is touched
+            # by unrelated writes (the share recalculation updates it on every
+            # competitor), so it does not indicate when processing began.
+            stale_before = timezone.now() - timedelta(hours=STALE_PROC_HOURS)
+            stale = Competitor.objects.filter(
+                track_status='PROC'
+            ).filter(
+                Q(tracked_at__lt=stale_before) | Q(tracked_at__isnull=True)
+            )
+            recovered = stale.update(
+                track_status='FAIL',
+                track_message=f'Reset after being stuck in PROC for over {STALE_PROC_HOURS}h',
+                modified_at=timezone.now(),
+            )
+            if recovered:
+                logger.warning(f"Recovered {recovered} competitor(s) stranded in PROC")
+
             # Get competitors ready for processing (INIT or FAIL status)
             ready_competitors = Competitor.objects.filter(
                 track_status__in=['INIT', 'FAIL']

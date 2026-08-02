@@ -1032,6 +1032,17 @@ export const apiClient = {
    * the same rows Insights, Mentions and Citations report on, so the figures
    * reconcile with those pages. Omit `days` for all-time.
    */
+  /**
+   * Queue topic generation for a domain. Additive — only ungrouped keywords are
+   * read and TopicProcessor performs no deletes — so it is safe on a domain
+   * that already has topics. 409 means every keyword is already grouped.
+   */
+  generateTopics: (params: { domain_id: number | string }) =>
+    apiRequest('/topics/generate/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: Number(params.domain_id) }),
+    }),
+
   getTopicPerformance: (params: { domain_id: number | string; days?: number }) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: String(params.domain_id),

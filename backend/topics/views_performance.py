@@ -29,6 +29,9 @@ Nothing is written. Topic rows keep their stored values; this reads through them
 import logging
 from datetime import timedelta
 
+import requests
+from django.conf import settings
+
 from django.db.models import Avg, Count, Q
 from django.utils import timezone
 from rest_framework import status
@@ -212,3 +215,60 @@ def topic_performance(request):
         'totals': totals,
         'results': results,
     })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_topics(request):
+    """
+    Start topic generation for a domain.
+
+    Topics are otherwise produced once, on the PROC -> COMP transition at the end
+    of a domain's first prompt run. A domain past that point has no route to
+    generate them, which is why the page could sit indefinitely on a "Processing
+    topic data..." card describing work that was never queued.
+
+    The run only reads keywords whose last_used_for_topic_generation is NULL and
+    only ever inserts or merges — TopicProcessor performs no deletes — so this is
+    safe to trigger on a domain that already has topics.
+
+    Body:
+        domain_id: Required
+    """
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # 404 rather than 403 so the response cannot confirm a domain exists.
+    if not user_can_access_domain(request.user, domain_id, request):
+        return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        engine_api_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001').rstrip('/')
+        response = requests.post(
+            f"{engine_api_url}/api/topics/generate/",
+            json={'domain_id': int(domain_id)},
+            timeout=15,
+        )
+    except requests.exceptions.RequestException as e:
+        logger.error(f"generate_topics: engine unreachable for domain {domain_id}: {e}")
+        return Response(
+            {'error': 'Could not reach the processing engine. Please try again shortly.'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {'error': 'Unexpected response from the processing engine.'}
+
+    # 409 means every keyword is already grouped — an expected answer, not a
+    # failure, so it is passed through for the UI to phrase properly.
+    if response.status_code in (202, 409, 400, 404):
+        return Response(payload, status=response.status_code)
+
+    logger.error(f"generate_topics: engine returned {response.status_code} for domain {domain_id}")
+    return Response(
+        {'error': 'The processing engine rejected the request.'},
+        status=status.HTTP_502_BAD_GATEWAY,
+    )

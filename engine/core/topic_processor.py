@@ -95,21 +95,85 @@ class TopicProcessor:
     
     def _group_keywords_into_topics(self, keywords: List[str], domain: Domain) -> List[Dict[str, Any]]:
         """
-        Use ChatGPT to group keywords into topics
-        
+        Group keywords into topics, one batch of keywords per model call.
+
+        Every keyword used to go into a single request with max_tokens=2000.
+        Two things went wrong with that. The output for a large domain cannot fit
+        — domain 40 sends 1,803 keywords and would need tens of thousands of
+        tokens to name them all — so the JSON came back truncated mid-string. And
+        because the configured model is a reasoning model, that same budget is
+        shared with reasoning tokens, so the model could exhaust it before
+        emitting anything and return content=None, which then raised
+        AttributeError on .strip(). Both failures fell through to the fallback,
+        which is why 28% of topics in production ended up named "General".
+
+        Batching bounds the output per call, and results are merged across
+        batches by topic name so a subject split over two batches becomes one
+        topic rather than two.
+
         Args:
             keywords: List of keyword strings
             domain: Domain for context
-            
+
         Returns:
             List of topic dictionaries with name and keywords
         """
         if not keywords:
             return []
-        
-        try:
-            # Prepare system prompt for keyword grouping
-            system_prompt = """You are an expert in natural language processing and content organization.
+
+        batch_size = int(getattr(settings, 'TOPIC_GROUPING_BATCH_SIZE', 40))
+        batches = [keywords[i:i + batch_size] for i in range(0, len(keywords), batch_size)]
+
+        merged: Dict[str, List[str]] = {}
+        succeeded = 0
+
+        for index, batch in enumerate(batches, start=1):
+            groups = self._group_keyword_batch(batch, domain, index, len(batches))
+            if groups is None:
+                continue
+            succeeded += 1
+            for group in groups:
+                name = group['topic_name']
+                # Case-insensitive merge so "Truck Services" from one batch and
+                # "truck services" from another do not become two topics.
+                key = name.strip().lower()
+                existing = next((k for k in merged if k == key), None)
+                if existing is None:
+                    merged[key] = {'topic_name': name, 'keywords': list(group['keywords'])}
+                else:
+                    for kw in group['keywords']:
+                        if kw not in merged[existing]['keywords']:
+                            merged[existing]['keywords'].append(kw)
+
+        if not succeeded:
+            logger.error(
+                f"All {len(batches)} grouping batch(es) failed for domain {domain.id}"
+            )
+            return self._fallback_group_keywords(keywords)
+
+        if succeeded < len(batches):
+            logger.warning(
+                f"Domain {domain.id}: {succeeded} of {len(batches)} grouping batches "
+                f"succeeded; keywords from failed batches stay unconsumed for the next run"
+            )
+
+        result = list(merged.values())
+        logger.info(
+            f"Domain {domain.id}: grouped {len(keywords)} keywords into {len(result)} "
+            f"topics across {succeeded}/{len(batches)} batches"
+        )
+        return result
+
+    def _group_keyword_batch(
+        self, keywords: List[str], domain: Domain, index: int, total: int
+    ) -> Optional[List[Dict[str, Any]]]:
+        """One model call for one batch. Returns None when the call is unusable.
+
+        None is distinct from an empty list: empty would mean "the model saw
+        these and found no groups", None means "we never got an answer", and
+        only the latter should leave the keywords unconsumed for a retry.
+        """
+        system_prompt = """You are an expert in natural language processing and content organization.
 Your task is to group related keywords into logical topics based on their semantic similarity and themes.
 
 For each group, provide:
@@ -131,39 +195,58 @@ Return ONLY a JSON array with this structure:
 ]
 
 Ensure all keywords are included in exactly one topic."""
-            
-            # Prepare user message
-            keywords_text = ", ".join(keywords)
-            user_message = f"""Group these keywords into logical topics for domain: {domain.name}
+
+        keywords_text = ", ".join(keywords)
+        user_message = f"""Group these keywords into logical topics for domain: {domain.name}
 
 Keywords: {keywords_text}
 
 Return ONLY the JSON array, no markdown, no explanations."""
-            
-            # Call ChatGPT
+
+        try:
             self.chatgpt_client._ensure_client()
             if not self.chatgpt_client.client:
-                logger.warning("ChatGPT client not available, using fallback grouping")
-                return self._fallback_group_keywords(keywords)
-            
+                logger.warning("ChatGPT client not available for topic grouping")
+                return None
+
             response = self.chatgpt_client.client.chat.completions.create(
                 model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
+                    {"role": "user", "content": user_message},
                 ],
                 temperature=0.3,
-                max_tokens=2000,
-                timeout=60
+                # Headroom for reasoning tokens plus the JSON itself. At 2000 the
+                # model could spend the whole budget reasoning and return nothing.
+                max_tokens=int(getattr(settings, 'TOPIC_GROUPING_MAX_TOKENS', 8000)),
+                timeout=120,
             )
-            
-            content = response.choices[0].message.content.strip()
-            return self._parse_topic_groups(content, keywords)
-            
+
+            choice = response.choices[0] if response.choices else None
+            content = getattr(getattr(choice, 'message', None), 'content', None)
+
+            if not content or not content.strip():
+                finish = getattr(choice, 'finish_reason', 'unknown')
+                logger.warning(
+                    f"Domain {domain.id} batch {index}/{total}: empty content "
+                    f"(finish_reason={finish}) for {len(keywords)} keywords"
+                )
+                return None
+
+            groups = self._parse_topic_groups(content.strip(), keywords)
+            if not groups:
+                logger.warning(
+                    f"Domain {domain.id} batch {index}/{total}: response could not be parsed"
+                )
+                return None
+            return groups
+
         except Exception as e:
-            logger.error(f"Error grouping keywords with ChatGPT: {str(e)}", exc_info=True)
-            return self._fallback_group_keywords(keywords)
-    
+            logger.error(
+                f"Domain {domain.id} batch {index}/{total} failed: {str(e)}"
+            )
+            return None
+
     def _parse_topic_groups(self, content: str, original_keywords: List[str]) -> List[Dict[str, Any]]:
         """
         Parse ChatGPT response to extract topic groups
@@ -200,33 +283,48 @@ Return ONLY the JSON array, no markdown, no explanations."""
                             })
                             used_keywords.update(topic_keywords)
                 
-                # Add any unused keywords to a "General" topic
+                # Keywords the model left out are NOT swept into a "General"
+                # bucket. Being unplaced is not a topic; consuming them here
+                # would stamp last_used_for_topic_generation and make the
+                # omission permanent. Left unconsumed, the next run retries them.
                 unused_keywords = [kw for kw in original_keywords if kw not in used_keywords]
                 if unused_keywords:
-                    topics.append({
-                        'topic_name': 'General',
-                        'keywords': unused_keywords
-                    })
-                
+                    logger.info(
+                        f"{len(unused_keywords)} keyword(s) not placed in a topic; "
+                        f"leaving them for the next run"
+                    )
+
                 return topics
                 
         except (json.JSONDecodeError, ValueError, KeyError) as e:
-            logger.warning(f"Failed to parse JSON response: {str(e)}, using fallback")
-        
-        return self._fallback_group_keywords(original_keywords)
+            logger.warning(f"Failed to parse JSON response: {str(e)}")
+
+        # Empty, not a General bucket. The caller treats this as a failed batch
+        # and leaves the keywords unconsumed so a later run can retry them.
+        return []
     
     def _fallback_group_keywords(self, keywords: List[str]) -> List[Dict[str, Any]]:
         """
-        Fallback grouping when ChatGPT is unavailable
-        Groups all keywords into a single "General" topic
+        No grouping is possible when the model call fails, so return none.
+
+        This used to put every keyword into one topic called "General". Because
+        _link_keywords_to_topic stamps last_used_for_topic_generation on each
+        keyword it links, that bucket was permanent: the keywords were consumed,
+        the next run skipped them, and the domain kept a topic that carried no
+        semantic grouping at all. 33 of the 116 topics in production were created
+        this way — 28% of the page.
+
+        Returning an empty list makes process_topics_for_domain report failure
+        without touching the keywords, so the next run retries the grouping. An
+        empty Topics page is a fair description of "we could not group these";
+        a single bucket labelled General is not, because it looks like a result.
         """
-        if not keywords:
-            return []
-        
-        return [{
-            'topic_name': 'General',
-            'keywords': keywords
-        }]
+        if keywords:
+            logger.warning(
+                f"Topic grouping unavailable for {len(keywords)} keywords — leaving them "
+                f"unconsumed so the next run retries instead of bucketing them as 'General'"
+            )
+        return []
     
     def _find_similar_topic(self, domain: Domain, topic_name: str, similarity_threshold: float = 0.8) -> Optional[Topic]:
         """
