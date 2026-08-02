@@ -35,7 +35,8 @@ import {
   Mail,
   MessageSquare,
   Smartphone,
-  Trash2
+  Trash2,
+  Pencil
 } from "lucide-react";
 import { NewAlertRuleDialog } from "@/components/NewAlertRuleDialog";
 import { AlertConfigDialog } from "@/components/AlertConfigDialog";
@@ -73,6 +74,8 @@ const Alerts = () => {
   const { selectedDomain } = useDomainStore();
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [newRuleDialogOpen, setNewRuleDialogOpen] = useState(false);
+  // Rule currently being edited; null means the dialog creates a new one.
+  const [editingRule, setEditingRule] = useState<any | null>(null);
 
   // Delete confirmation dialogs
   const [deleteAlertDialogOpen, setDeleteAlertDialogOpen] = useState(false);
@@ -149,6 +152,12 @@ const Alerts = () => {
   };
 
   const handleNewAlertRule = () => {
+    setEditingRule(null);
+    setNewRuleDialogOpen(true);
+  };
+
+  const handleEditRule = (rule: any) => {
+    setEditingRule(rule);
     setNewRuleDialogOpen(true);
   };
 
@@ -248,25 +257,31 @@ const Alerts = () => {
     }
   };
 
-  const validateEmail = (email: string): boolean => {
-    if (!email || email.trim() === '') {
+  /**
+   * Validates a comma-separated recipient list. Alerts are acted on by teams, so
+   * the field takes several addresses; every one is checked and all the bad ones
+   * are named at once rather than surfacing them one save at a time.
+   */
+  const validateEmail = (value: string): boolean => {
+    const addresses = value.split(',').map((a) => a.trim()).filter(Boolean);
+    if (addresses.length === 0) {
       setEmailError('Email address is required');
       return false;
     }
-    
-    // Basic email validation regex
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email.trim())) {
-      setEmailError('Please enter a valid email address');
+    const invalid = addresses.filter(
+      (a) => !emailRegex.test(a) || a.includes('..') || a.startsWith('.') || a.startsWith('@'),
+    );
+    if (invalid.length > 0) {
+      setEmailError(
+        invalid.length === 1
+          ? `"${invalid[0]}" is not a valid email address`
+          : `Not valid email addresses: ${invalid.join(', ')}`,
+      );
       return false;
     }
-    
-    // Check for common invalid patterns
-    if (email.includes('..') || email.startsWith('.') || email.startsWith('@')) {
-      setEmailError('Please enter a valid email address');
-      return false;
-    }
-    
+
     setEmailError('');
     return true;
   };
@@ -404,10 +419,9 @@ const Alerts = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" onClick={handleConfigure}>
-            <Settings className="h-4 w-4 mr-2" />
-            Configure
-          </Button>
+          {/* The Configure button opened a dialog duplicating the Notification
+              Channels card already on this page, so it is hidden rather than
+              removed — the dialog is still wired and can be brought back. */}
           <Button onClick={handleNewAlertRule} className="gradient-primary shadow-md shadow-primary/20">
             <Plus className="h-4 w-4 mr-2" />
             New Alert Rule
@@ -417,39 +431,39 @@ const Alerts = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Active Alerts</p>
             <Bell className="h-5 w-5 text-destructive" />
           </div>
-          <h3 className="text-3xl font-bold text-destructive">{summary.active || 0}</h3>
+          <h3 className="text-2xl font-bold text-destructive">{summary.active || 0}</h3>
           <p className="text-xs text-muted-foreground mt-1">Require attention</p>
         </Card>
 
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">High Priority</p>
             <AlertTriangle className="h-5 w-5 text-destructive" />
           </div>
-          <h3 className="text-3xl font-bold text-destructive">{summary.high_priority || 0}</h3>
+          <h3 className="text-2xl font-bold text-destructive">{summary.high_priority || 0}</h3>
           <p className="text-xs text-muted-foreground mt-1">Critical issues</p>
         </Card>
 
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Resolved Today</p>
             <CheckCircle2 className="h-5 w-5 text-success" />
           </div>
-          <h3 className="text-3xl font-bold text-success">{summary.resolved_today || 0}</h3>
+          <h3 className="text-2xl font-bold text-success">{summary.resolved_today || 0}</h3>
           <p className="text-xs text-muted-foreground mt-1">Issues fixed</p>
         </Card>
 
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
+        <Card className="p-6 border border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-muted-foreground font-medium">Avg Response</p>
             <Clock className="h-5 w-5 text-muted-foreground" />
           </div>
-          <h3 className={`text-3xl font-bold ${summary.avg_response_time ? '' : 'text-muted-foreground opacity-50'}`}>
+          <h3 className={`text-2xl font-bold ${summary.avg_response_time ? '' : 'text-muted-foreground opacity-50'}`}>
             {summary.avg_response_time ? `${summary.avg_response_time}h` : 'NA'}
           </h3>
           <p className="text-xs text-muted-foreground mt-1">Response time</p>
@@ -457,16 +471,16 @@ const Alerts = () => {
       </div>
 
       {/* Alerts List */}
-      <Tabs defaultValue="active" className="space-y-6">
+      <Tabs defaultValue="rules" className="space-y-6">
         <TabsList className="bg-muted/50 p-1 border border-border">
+          <TabsTrigger value="rules" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
+            Alert Rules ({alertRules.length})
+          </TabsTrigger>
           <TabsTrigger value="active" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
             Active Alerts ({activeAlerts.length})
           </TabsTrigger>
           <TabsTrigger value="resolved" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
             Resolved ({resolvedAlerts.length})
-          </TabsTrigger>
-          <TabsTrigger value="rules" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
-            Alert Rules ({alertRules.length})
           </TabsTrigger>
         </TabsList>
 
@@ -652,14 +666,25 @@ const Alerts = () => {
                         </div>
                       </div>
                     </div>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleDeleteRule(rule.id)}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEditRule(rule)}
+                        title="Edit rule"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteRule(rule.id)}
+                        className="text-destructive hover:text-destructive"
+                        title="Delete rule"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -693,7 +718,7 @@ const Alerts = () => {
             <div className="space-y-1">
               <Input 
                 type="email"
-                placeholder="Enter email address" 
+                placeholder="you@company.com, teammate@company.com" 
                 className={`mb-2 ${emailError ? 'border-destructive' : ''}`}
                 value={emailAddress}
                 onChange={(e) => handleEmailChange(e.target.value)}
@@ -707,14 +732,17 @@ const Alerts = () => {
                 <p className="text-xs text-destructive">{emailError}</p>
               )}
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="w-full" 
+            <p className="text-xs text-muted-foreground mb-2">
+              Separate multiple recipients with commas.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
               onClick={handleUpdateEmail}
               disabled={!emailAddress.trim()}
             >
-              Update Email
+              Update Recipients
             </Button>
           </div>
 
@@ -779,10 +807,14 @@ const Alerts = () => {
       </Card>
 
       {/* Dialogs */}
-      <NewAlertRuleDialog 
-        open={newRuleDialogOpen} 
-        onOpenChange={setNewRuleDialogOpen}
+      <NewAlertRuleDialog
+        open={newRuleDialogOpen}
+        onOpenChange={(open) => {
+          setNewRuleDialogOpen(open);
+          if (!open) setEditingRule(null);
+        }}
         domainId={selectedDomain?.id}
+        rule={editingRule}
         onAdd={() => { void loadData(); }}
       />
       <AlertConfigDialog 

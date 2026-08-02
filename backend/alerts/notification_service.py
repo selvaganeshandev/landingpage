@@ -118,8 +118,8 @@ class NotificationService:
             # Try to get email from AlertConfiguration for the domain
             config = AlertConfiguration.objects.filter(domain_id=alert.domain_id).first()
             
-            if config and config.email_enabled and config.email_address:
-                email_addresses = [config.email_address]
+            if config and config.email_enabled and config.email_address_list:
+                email_addresses = config.email_address_list
             else:
                 # Fallback to domain's organisation admins
                 domain = alert.domain

@@ -196,15 +196,19 @@ def alert_configuration(request):
         
         elif request.method in ['POST', 'PUT']:
             # Create or update configuration
+            # organisation is deliberately left NULL on a domain-scoped config.
+            # AlertConfiguration has two partial unique constraints — one per
+            # domain, one per organisation — so setting both FKs makes the row
+            # occupy its organisation's single slot, and the *second* domain in
+            # that org then fails with a unique_org_config violation on save.
             config, created = AlertConfiguration.objects.get_or_create(
                 domain_id=domain_id,
-                defaults={'organisation': domain.organisation}
+                defaults={}
             )
-            
+
             # Update fields from request data
             data = request.data.copy()
             data['domain'] = domain_id
-            data['organisation'] = domain.organisation_id
             
             serializer = AlertConfigurationSerializer(config, data=data, partial=True)
             if serializer.is_valid():
@@ -248,16 +252,40 @@ def update_email_config(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    # Validate email format
+    # Validate every address. The field accepts a comma-separated list so a team
+    # can be alerted, and one bad entry must fail the whole save rather than be
+    # stored silently and then bounce at send time.
     from django.core.validators import validate_email
     from django.core.exceptions import ValidationError
-    try:
-        validate_email(email_address)
-    except ValidationError:
+
+    addresses = [part.strip() for part in str(email_address).split(',') if part.strip()]
+    if not addresses:
         return Response(
-            {'error': 'Invalid email address format'}, 
+            {'error': 'email_address is required'},
             status=status.HTTP_400_BAD_REQUEST
         )
+
+    invalid = []
+    for address in addresses:
+        try:
+            validate_email(address)
+        except ValidationError:
+            invalid.append(address)
+    if invalid:
+        return Response(
+            {'error': f"Invalid email address format: {', '.join(invalid)}"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Store de-duplicated and normalised so the list stays readable on re-edit.
+    seen = set()
+    deduped = []
+    for address in addresses:
+        key = address.lower()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(address)
+    email_address = ', '.join(deduped)
     
     try:
         from domains.models import Domain
@@ -272,10 +300,12 @@ def update_email_config(request):
             )
         
         # Get or create configuration
+        # Domain-scoped: organisation stays NULL. See the note in
+        # alert_configuration — setting both FKs trips unique_org_config for
+        # every domain after the first in the same organisation.
         config, created = AlertConfiguration.objects.get_or_create(
             domain_id=domain_id,
             defaults={
-                'organisation': domain.organisation,
                 'email_enabled': True,
                 'email_address': email_address
             }

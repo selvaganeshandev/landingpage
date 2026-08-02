@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,17 +27,44 @@ interface NewAlertRuleDialogProps {
   onOpenChange: (open: boolean) => void;
   onAdd?: (rule: any) => void;
   domainId?: number | string;
+  /** Pass an existing rule to edit it; omit to create a new one. */
+  rule?: any | null;
 }
 
 import { apiClient } from "@/services/api";
 
-export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewAlertRuleDialogProps) => {
+export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId, rule }: NewAlertRuleDialogProps) => {
   const { toast } = useToast();
+  const isEdit = Boolean(rule?.id);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [triggerType, setTriggerType] = useState("");
   const [threshold, setThreshold] = useState("");
   const [channels, setChannels] = useState<string[]>([]);
+
+  // Load the rule being edited each time the dialog opens, and clear the form
+  // when opening for a new rule — otherwise the previous rule's values would
+  // persist and silently become the starting point for the next one.
+  useEffect(() => {
+    if (!open) return;
+    if (rule) {
+      setName(rule.name || "");
+      setDescription(rule.description || "");
+      setTriggerType(rule.conditions?.trigger_type || "");
+      setThreshold(
+        rule.conditions?.threshold_percent !== undefined && rule.conditions?.threshold_percent !== null
+          ? String(rule.conditions.threshold_percent)
+          : "",
+      );
+      setChannels(rule.notification_channel_list || []);
+    } else {
+      setName("");
+      setDescription("");
+      setTriggerType("");
+      setThreshold("");
+      setChannels([]);
+    }
+  }, [open, rule]);
 
   const handleChannelToggle = (channel: string) => {
     setChannels(prev =>
@@ -72,26 +99,32 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewA
       conditions: {
         trigger_type: triggerType,
         threshold_percent: Number(threshold),
-        time_window_hours: 168, // Weekly default (7 days = 168 hours)
+        // Preserve the window an existing rule was created with rather than
+        // silently resetting it to the weekly default on every edit.
+        time_window_hours: rule?.conditions?.time_window_hours ?? 168,
       },
       notification_channel_list: channels,
-      enabled: true,
+      // Editing must not flip a disabled rule back on.
+      enabled: isEdit ? Boolean(rule?.enabled) : true,
       ...(domainId ? { domain: domainId } : {}),
     } as any;
 
     try {
-      const created = await apiClient.createAlertRule(payload);
-      if (onAdd) onAdd(created);
-      toast({ title: "Alert Rule Created", description: `"${name}" has been created successfully.` });
-      // Reset form
-      setName("");
-      setDescription("");
-      setTriggerType("");
-      setThreshold("");
-      setChannels([]);
+      const saved = isEdit
+        ? await apiClient.updateAlertRule(rule.id, payload)
+        : await apiClient.createAlertRule(payload);
+      if (onAdd) onAdd(saved);
+      toast({
+        title: isEdit ? "Alert Rule Updated" : "Alert Rule Created",
+        description: `"${name}" has been ${isEdit ? "updated" : "created"} successfully.`,
+      });
       onOpenChange(false);
     } catch (e:any) {
-      toast({ title: 'Failed to create rule', description: String(e.message||e), variant: 'destructive' });
+      toast({
+        title: isEdit ? 'Failed to update rule' : 'Failed to create rule',
+        description: String(e.message||e),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -99,7 +132,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewA
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-inter text-2xl">Create New Alert Rule</DialogTitle>
+          <DialogTitle className="font-inter text-2xl">{isEdit ? "Edit Alert Rule" : "Create New Alert Rule"}</DialogTitle>
           <DialogDescription>
             Configure conditions and notifications for monitoring your brand visibility
           </DialogDescription>
@@ -219,7 +252,7 @@ export const NewAlertRuleDialog = ({ open, onOpenChange, onAdd, domainId }: NewA
             Cancel
           </Button>
           <Button onClick={handleSubmit} className="gradient-primary">
-            Create Alert Rule
+            {isEdit ? "Save Changes" : "Create Alert Rule"}
           </Button>
         </DialogFooter>
       </DialogContent>

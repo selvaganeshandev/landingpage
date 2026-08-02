@@ -140,7 +140,11 @@ class AlertConfiguration(models.Model):
     
     # Email Settings
     email_enabled = models.BooleanField(default=True)
-    email_address = models.EmailField(null=True, blank=True)
+    # Comma-separated list, not a single address: alerts are acted on by teams,
+    # and a single EmailField meant one person had to forward every alert by
+    # hand. Kept on the same column so existing single-address rows stay valid —
+    # one address is just a list of length one. Use email_address_list to read.
+    email_address = models.TextField(null=True, blank=True)
     
     # Slack Settings
     slack_enabled = models.BooleanField(default=False)
@@ -165,6 +169,13 @@ class AlertConfiguration(models.Model):
             models.Index(fields=['organisation']),
         ]
     
+    @property
+    def email_address_list(self):
+        """Recipients as a list. Empty when unset."""
+        if not self.email_address:
+            return []
+        return [part.strip() for part in self.email_address.split(',') if part.strip()]
+
     def __str__(self):
         scope = f"Domain: {self.domain.name}" if self.domain else f"Org: {self.organisation.name}"
         return f"Alert Config - {scope}"
