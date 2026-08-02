@@ -818,92 +818,135 @@ class CompetitorProcessor:
     
     def _update_share_of_voice(self, competitor: Competitor) -> None:
         """
-        Update ShareOfVoiceAnalytics for this competitor.
-        Calculates competitor's share relative to:
-        1. Own brand (domain)
-        2. Other competitors for same domain
-        
-        Args:
-            competitor: Competitor instance
+        Recalculate share of voice for every player in this competitor's domain.
+
+        Deliberately domain-wide rather than per competitor. Share is a ratio
+        against a market total, so writing one player's share in isolation means
+        writing a ratio whose denominator no longer matches the other rows.
+
+        That is exactly what used to happen. schedule_tick processes five
+        competitors per tick; each one summed Competitor.total_mentions across
+        the domain to build its denominator, but competitors not yet processed
+        in that tick still held stale or zero totals. Every pass also rewrote the
+        own-brand share against its own, different denominator. The result was
+        rows that could not add up: 17 of 56 domains had a latest snapshot that
+        did not sum to 100% (Tata Motors reached 145.7%, one domain 880%), and
+        486 rows carried 0% share alongside a non-zero mention count, having been
+        written before their mentions landed.
+
+        Recomputing the whole domain is idempotent — each call rewrites every
+        player from one snapshot of the data — so calling it after each
+        competitor is harmless and leaves the set consistent at every step.
         """
         try:
             domain = competitor.domain
             domain_id = domain.id if hasattr(domain, 'id') else domain
-            today = date.today()
-            
-            # Get own brand's mention count from PromptAnalytics
-            # Note: Prompt doesn't have domain field directly, it's through group.domain
-            own_mentions = PromptAnalytics.objects.filter(
-                prompt__group__domain_id=domain_id,  # Access domain through group
-                prompt__track_status='COMP',  # Only completed prompts
-                track_status='COMP'  # Only completed analytics
-            ).aggregate(total=Sum('total_mentions'))['total'] or 0
-            
-            # Get all competitors' mention counts for this domain
-            competitors_mentions = Competitor.objects.filter(
-                domain_id=domain_id,
-                track_status='COMP'
-            ).aggregate(total=Sum('total_mentions'))['total'] or 0
-            
-            # Total mentions in market
-            total_market_mentions = own_mentions + competitors_mentions
-            
-            logger.info(f"Share of Voice calculation for domain {domain_id}: "
-                       f"own_mentions={own_mentions}, competitors_mentions={competitors_mentions}, "
-                       f"competitor.total_mentions={competitor.total_mentions}, "
-                       f"total_market_mentions={total_market_mentions}")
-            
-            # Calculate competitor's share percentage
-            if total_market_mentions > 0:
-                competitor_share = (competitor.total_mentions / total_market_mentions) * 100
-            else:
-                competitor_share = 0.0
-                logger.warning(f"No mentions found for share of voice calculation (domain={domain_id}), setting share to 0%")
-            
-            # Update ShareOfVoiceAnalytics for competitor
-            sov_record, created = _upsert_share_of_voice(
-                domain_id=domain_id,
-                competitor=competitor,
-                platform='ChatGPT',
-                timestamp=today,
-                defaults={
-                    'share_percentage': Decimal(str(round(competitor_share, 2))),
-                    'mention_count': competitor.total_mentions,
-                    'market_position': None  # Will be calculated separately
-                }
-            )
-            logger.info(f"{'Created' if created else 'Updated'} ShareOfVoice record for competitor {competitor.id}: {competitor_share:.2f}%")
-            
-            # Update own brand's ShareOfVoiceAnalytics
-            own_share = (own_mentions / total_market_mentions) * 100 if total_market_mentions > 0 else 0.0
-            own_sov_record, own_created = _upsert_share_of_voice(
-                domain_id=domain_id,
-                competitor=None,  # NULL = own brand
-                platform='ChatGPT',
-                timestamp=today,
-                defaults={
-                    'share_percentage': Decimal(str(round(own_share, 2))),
-                    'mention_count': own_mentions,
-                    'market_position': None
-                }
-            )
-            logger.info(f"{'Created' if own_created else 'Updated'} ShareOfVoice record for own brand: {own_share:.2f}%")
-            
-            # Calculate market positions (ranks)
-            self._calculate_market_positions(domain, today)
-            
-            # Update competitor's share_of_voice_percentage field
-            with transaction.atomic():
-                comp = Competitor.objects.select_for_update().get(id=competitor.id)
-                comp.share_of_voice_percentage = Decimal(str(round(competitor_share, 2)))
-                comp.save(update_fields=['share_of_voice_percentage', 'modified_at'])
-            
-            logger.info(f"Updated share of voice for competitor {competitor.id}: {competitor_share:.2f}%")
-        
+            self.recalculate_share_of_voice(domain_id)
         except Exception as e:
             logger.error(f"Error updating share of voice: {str(e)}")
             raise
-    
+
+    def recalculate_share_of_voice(self, domain_id: int, timestamp: date = None) -> Dict[str, Any]:
+        """
+        Rewrite every player's share for one domain against a single denominator.
+
+        Returns a summary dict so callers (and the backfill command) can report
+        what changed.
+        """
+        today = timestamp or date.today()
+
+        # Own brand. Prompt has no domain field; it is reached through group.
+        own_mentions = PromptAnalytics.objects.filter(
+            prompt__group__domain_id=domain_id,
+            prompt__track_status='COMP',
+            track_status='COMP'
+        ).aggregate(total=Sum('total_mentions'))['total'] or 0
+
+        # Every competitor's mentions read in one query, so all numerators come
+        # from the same moment as the denominator built from them.
+        #
+        # Deliberately not filtered to track_status='COMP'. That filter left
+        # competitors mid-processing out of the denominator while their existing
+        # share rows stayed on the books, so the set could not add up: domain 21
+        # has five competitors holding 218 mentions between them, all still PROC,
+        # and excluding them made the own brand 100% of a market it holds 2% of
+        # while an orphaned row claimed 780%. A competitor part-way through
+        # processing still has a real mention count; using it is closer to the
+        # truth than pretending the competitor is absent.
+        competitor_rows = list(
+            Competitor.objects.filter(domain_id=domain_id)
+        )
+
+        competitors_mentions = sum(int(c.total_mentions or 0) for c in competitor_rows)
+        total_market_mentions = own_mentions + competitors_mentions
+
+        if total_market_mentions <= 0:
+            logger.warning(
+                f"Share of voice: no mentions for domain {domain_id}, leaving shares untouched"
+            )
+            return {
+                'domain_id': domain_id,
+                'total_market_mentions': 0,
+                'players': 0,
+                'updated': False,
+            }
+
+        written = 0
+
+        for comp in competitor_rows:
+            mentions = int(comp.total_mentions or 0)
+            share = round((mentions / total_market_mentions) * 100, 2)
+            _upsert_share_of_voice(
+                domain_id=domain_id,
+                competitor=comp,
+                platform='ChatGPT',
+                timestamp=today,
+                defaults={
+                    'share_percentage': Decimal(str(share)),
+                    'mention_count': mentions,
+                    'market_position': None,
+                }
+            )
+            # Keep the denormalised field on Competitor in step with the row just
+            # written; the UI reads both in different places.
+            Competitor.objects.filter(id=comp.id).update(
+                share_of_voice_percentage=Decimal(str(share)),
+                modified_at=timezone.now(),
+            )
+            written += 1
+
+        own_share = (own_mentions / total_market_mentions) * 100
+        _upsert_share_of_voice(
+            domain_id=domain_id,
+            competitor=None,  # NULL = own brand
+            platform='ChatGPT',
+            timestamp=today,
+            defaults={
+                'share_percentage': Decimal(str(round(own_share, 2))),
+                'mention_count': own_mentions,
+                'market_position': None,
+            }
+        )
+        written += 1
+
+        domain = Domain.objects.filter(id=domain_id).first()
+        if domain:
+            self._calculate_market_positions(domain, today)
+
+        logger.info(
+            f"Share of voice recalculated for domain {domain_id}: "
+            f"own={own_share:.2f}% of {total_market_mentions} mentions across {written} players"
+        )
+
+        return {
+            'domain_id': domain_id,
+            'total_market_mentions': total_market_mentions,
+            'own_mentions': own_mentions,
+            'own_share': round(own_share, 2),
+            'players': written,
+            'updated': True,
+        }
+
     def _calculate_market_positions(self, domain: Domain, timestamp: date) -> None:
         """
         Calculate and update market positions (ranks) for all players in the domain.

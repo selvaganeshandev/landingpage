@@ -85,9 +85,11 @@ const ShareOfVoice = () => {
       setIsLoadingCompetitors(true);
       try {
         // apiClient.getCompetitorsEngine does not exist — the call threw a
-        // TypeError on every load and the catch below swallowed it, so the
-        // competitor list was always empty and the "no competitors" empty state
-        // could show even when competitors were configured.
+        // TypeError on every load, caught below. The only visible effect was a
+        // console error, because `competitors` is written here and never read;
+        // the empty state is driven by latest.players and isLoadingCompetitors
+        // is cleared in the finally block either way. Corrected rather than
+        // deleted so the state has a chance of being used deliberately.
         const response = await apiClient.getCompetitors({ domain_id: domainId });
         const competitorList = Array.isArray(response) ? response : response?.results || [];
         setCompetitors(competitorList);
