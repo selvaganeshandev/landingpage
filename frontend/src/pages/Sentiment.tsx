@@ -36,6 +36,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
 import { useDomainStore } from "@/stores/domainStore";
 import { downloadCsv } from "@/utils/exportCsv";
+import { InfoHint, MetricHint } from "@/components/InfoHint";
 
 type SentimentRow = { theme: string; positive_percentage: number; neutral_percentage: number; negative_percentage: number; mention_count: number; platform?: string | null; timestamp: string };
 
@@ -54,7 +55,18 @@ const Sentiment = () => {
   const [loading, setLoading] = useState<boolean>(false);
 
   // API data
-  const [summary, setSummary] = useState<{ positive_percentage: number; neutral_percentage: number; negative_percentage: number; total_mentions: number } | null>(null);
+  // The *_change fields are returned by /sentiment/summary/ (percentage-point
+  // deltas vs the previous 30 days) and are read below; they were missing from
+  // this type, so every card's change line was an unchecked property access.
+  const [summary, setSummary] = useState<{
+    positive_percentage: number;
+    neutral_percentage: number;
+    negative_percentage: number;
+    total_mentions: number;
+    positive_change?: number;
+    neutral_change?: number;
+    negative_change?: number;
+  } | null>(null);
   const [rows, setRows] = useState<SentimentRow[]>([]);
   const [competitorRows, setCompetitorRows] = useState<any[]>([]);
 
@@ -93,10 +105,11 @@ const Sentiment = () => {
         try {
           const cp = await apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId });
           // Ensure we always set an array
-          if (Array.isArray(cp)) {
-            setCompetitorRows(cp);
-          } else if (cp && typeof cp === 'object' && Array.isArray(cp.results)) {
-            setCompetitorRows(cp.results);
+          const payload = cp as any;
+          if (Array.isArray(payload)) {
+            setCompetitorRows(payload);
+          } else if (payload && typeof payload === 'object' && Array.isArray(payload.results)) {
+            setCompetitorRows(payload.results);
           } else {
             setCompetitorRows([]);
           }
@@ -273,11 +286,13 @@ const Sentiment = () => {
   // Competitor sentiment from engine competitor prompt analytics (average sentiment_score -> categories pct approx)
   // Now includes "You" (your brand) from summary data
   const competitorSentiment = useMemo(() => {
-    if (!competitorRows || !Array.isArray(competitorRows) || competitorRows.length === 0) return [] as any[];
     const map: Record<string, { name: string; pos: number; neu: number; neg: number; count: number }> = {};
-    
-    // Add "You" (your brand) from summary data
-    if (summary) {
+
+    // Your own bar is built from `summary`, not from competitorRows, so it must
+    // not be gated on competitors existing. Returning early when the competitor
+    // list was empty hid your own sentiment too, leaving the tab blank for any
+    // domain with no competitors configured.
+    if (summary && summary.total_mentions > 0) {
       map['You'] = {
         name: 'You',
         pos: Math.round((summary.positive_percentage / 100) * summary.total_mentions),
@@ -301,6 +316,8 @@ const Sentiment = () => {
       });
     }
     
+    if (Object.keys(map).length === 0) return [] as any[];
+
     return Object.values(map).map(v => ({
       name: v.name,
       positive: v.count ? +(v.pos * 100 / v.count).toFixed(1) : 0,
@@ -340,17 +357,24 @@ const Sentiment = () => {
 
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="flex items-start justify-between mb-4">
+        <Card className="p-6 border border-border">
+          <div className="flex items-center justify-between mb-2">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Positive Sentiment</p>
-              <h3 className="text-4xl font-bold text-success mt-2">{sentimentOverview.positive}%</h3>
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                Positive Sentiment
+                <InfoHint>
+                  <MetricHint
+                    title="Positive Sentiment"
+                    plain="The share of brand mentions that read as favourable across all AI answers in the last 30 days."
+                    formula="Each day\u2019s theme snapshot carries its own positive percentage; these are averaged weighted by that snapshot\u2019s mention count, so a day with 40 mentions counts forty times as much as a day with one."
+                  />
+                </InfoHint>
+              </p>
+              <h3 className="text-2xl font-bold text-success mt-1">{sentimentOverview.positive}%</h3>
             </div>
-            <div className="p-3 rounded-xl bg-success/10">
-              <Smile className="h-6 w-6 text-success" />
-            </div>
+            <Smile className="h-5 w-5 text-success" />
           </div>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex items-center gap-2 text-xs">
             {sentimentOverview.positive_change !== 0 ? (
               <>
                 {sentimentOverview.positive_change > 0 ? (
@@ -371,17 +395,24 @@ const Sentiment = () => {
           </div>
         </Card>
 
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="flex items-start justify-between mb-4">
+        <Card className="p-6 border border-border">
+          <div className="flex items-center justify-between mb-2">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Neutral Sentiment</p>
-              <h3 className="text-4xl font-bold text-warning mt-2">{sentimentOverview.neutral}%</h3>
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                Neutral Sentiment
+                <InfoHint>
+                  <MetricHint
+                    title="Neutral Sentiment"
+                    plain="Mentions that state facts about you without leaning positive or negative \u2014 usually listings and comparisons."
+                    formula="Same mention-weighted average as the other two. Positive, neutral and negative always total 100%."
+                  />
+                </InfoHint>
+              </p>
+              <h3 className="text-2xl font-bold text-warning mt-1">{sentimentOverview.neutral}%</h3>
             </div>
-            <div className="p-3 rounded-xl bg-warning/10">
-              <Meh className="h-6 w-6 text-warning" />
-            </div>
+            <Meh className="h-5 w-5 text-warning" />
           </div>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex items-center gap-2 text-xs">
             {sentimentOverview.neutral_change !== 0 ? (
               <>
                 {sentimentOverview.neutral_change > 0 ? (
@@ -400,17 +431,24 @@ const Sentiment = () => {
           </div>
         </Card>
 
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="flex items-start justify-between mb-4">
+        <Card className="p-6 border border-border">
+          <div className="flex items-center justify-between mb-2">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Negative Sentiment</p>
-              <h3 className="text-4xl font-bold text-destructive mt-2">{sentimentOverview.negative}%</h3>
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                Negative Sentiment
+                <InfoHint>
+                  <MetricHint
+                    title="Negative Sentiment"
+                    plain="Mentions that read as unfavourable. This is the number worth acting on \u2014 each one is an AI answer steering someone away."
+                    formula="Same mention-weighted average. The change compares against the previous 30 days and is shown in percentage points, not a percentage of a percentage."
+                  />
+                </InfoHint>
+              </p>
+              <h3 className="text-2xl font-bold text-destructive mt-1">{sentimentOverview.negative}%</h3>
             </div>
-            <div className="p-3 rounded-xl bg-destructive/10">
-              <Frown className="h-6 w-6 text-destructive" />
-            </div>
+            <Frown className="h-5 w-5 text-destructive" />
           </div>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex items-center gap-2 text-xs">
             {sentimentOverview.negative_change !== 0 ? (
               <>
                 {sentimentOverview.negative_change < 0 ? (
@@ -512,6 +550,11 @@ const Sentiment = () => {
       {/* Thematic Sentiment Breakdown */}
       <Card className="p-6 border border-border">
         <h3 className="text-lg font-semibold mb-6">Thematic Sentiment Breakdown</h3>
+        {thematicSentiment.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">
+            No sentiment recorded in the last 30 days.
+          </p>
+        ) : (
         <div className="space-y-6">
           {thematicSentiment.map((theme) => (
             <div key={theme.theme} className="space-y-2">
@@ -543,6 +586,7 @@ const Sentiment = () => {
             </div>
           ))}
         </div>
+        )}
       </Card>
 
       {/* Platform & Competitor Analysis */}
@@ -555,6 +599,11 @@ const Sentiment = () => {
         <TabsContent value="platform" className="space-y-4">
           <Card className="p-6 border border-border">
             <h3 className="text-lg font-semibold mb-6">Platform Sentiment Breakdown</h3>
+            {platformSentiment.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-12 text-center">
+                No sentiment recorded in the last 30 days.
+              </p>
+            ) : (
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={platformSentiment}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -573,12 +622,27 @@ const Sentiment = () => {
                 <Bar dataKey="negative" stackId="a" fill={COLORS.negative} />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </Card>
         </TabsContent>
 
         <TabsContent value="competitor" className="space-y-4">
           <Card className="p-6 border border-border">
-            <h3 className="text-lg font-semibold mb-6">Competitive Sentiment Analysis</h3>
+            <div className="flex items-center gap-1.5 mb-6">
+              <h3 className="text-lg font-semibold">Competitive Sentiment Analysis</h3>
+              <InfoHint>
+                <MetricHint
+                  title="Competitive Sentiment"
+                  plain="How favourably the AI platforms speak about you compared with each tracked competitor."
+                  formula="Your row is the mention-weighted sentiment shown in the cards above. Competitor rows count how many of their tracked responses were classified positive, neutral or negative. The two are computed from different sources, so read this as a directional comparison rather than an exact like-for-like ranking."
+                />
+              </InfoHint>
+            </div>
+            {competitorSentiment.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-8 text-center">
+                No sentiment recorded in the last 30 days.
+              </p>
+            ) : (
             <div className="space-y-6">
               {competitorSentiment.map((competitor, index) => (
                 <div key={competitor.name} className="space-y-2">
@@ -621,6 +685,7 @@ const Sentiment = () => {
                 </div>
               ))}
             </div>
+            )}
           </Card>
         </TabsContent>
       </Tabs>
