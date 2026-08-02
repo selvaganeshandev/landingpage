@@ -312,7 +312,10 @@ const Sentiment = () => {
           </p>
         </div>
         <div className="flex items-center gap-4">
-          <Button onClick={handleExportReport} className="gradient-primary shadow-md shadow-primary/20">
+          {/* Outline, like the export buttons on Citations, Mentions, Prompts
+              and Sources. The primary gradient is reserved for the action that
+              starts work on a page, not for pulling a copy of what is shown. */}
+          <Button variant="outline" onClick={handleExportReport}>
             <FileText className="h-4 w-4 mr-2" />
             Export Sentiment Report
           </Button>
