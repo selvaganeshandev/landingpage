@@ -1100,6 +1100,19 @@ export const apiClient = {
     return apiRequest(`/analytics/sentiment-analytics/by_domain/${queryParams}`);
   },
 
+  /**
+   * Sentiment share for your brand and each competitor, both computed as the
+   * share of responses mentioning that brand — unlike the page's other
+   * endpoints, which weight daily theme percentages by mention count.
+   */
+  getCompetitiveSentiment: (params: { domain_id: string; days?: number }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: params.domain_id,
+      ...(params.days ? { days: String(params.days) } : {}),
+    }).toString()}`;
+    return apiRequest(`/analytics/sentiment-analytics/competitive/${queryParams}`);
+  },
+
   getShareOfVoice: (params?: any) => {
     const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';
     return apiRequest(`/analytics/share-of-voice/${queryParams}`);

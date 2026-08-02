@@ -4,10 +4,11 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from datetime import timedelta
 from django.utils import timezone
-from django.db.models import Sum, Avg
+from django.db.models import Sum, Avg, Count
+from domains.models import Domain
 from .models import SentimentAnalytics, ShareOfVoiceAnalytics
 from .serializers import SentimentAnalyticsSerializer, ShareOfVoiceAnalyticsSerializer
-from core.queryset_scoping import filter_by_accessible_domains
+from core.queryset_scoping import filter_by_accessible_domains, user_can_access_domain
 
 
 class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
@@ -136,6 +137,113 @@ class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
             'neutral_change': neutral_change,
             'negative_change': negative_change,
             'themes': list(themes)
+        })
+
+
+    @action(detail=False, methods=['get'])
+    def competitive(self, request):
+        """Sentiment share for your brand and each competitor, computed identically.
+
+        The Competitive Sentiment chart used to draw two different measures side
+        by side: your bar came from SentimentAnalytics (daily theme percentages
+        averaged by mention count) while competitor bars counted classified
+        responses. Equal-length bars therefore did not mean equal evidence.
+
+        Both sides are now the same statistic — the share of *responses that
+        mentioned that brand* falling into each sentiment category, over one
+        window. PromptAnalytics and CompetitorPromptAnalytics carry the same
+        `sentiment_category` vocabulary (positive / neutral / negative), so the
+        two populations are directly comparable.
+
+        Query params:
+            domain_id: Required
+            days: Optional, default 30
+        """
+        domain_id = request.query_params.get('domain_id')
+        try:
+            days = int(request.query_params.get('days', 30))
+        except (TypeError, ValueError):
+            days = 30
+
+        if not domain_id:
+            return Response(
+                {'error': 'domain_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not user_can_access_domain(request.user, domain_id, request):
+            # 404 rather than 403 so the response cannot confirm a domain exists.
+            return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        start = timezone.now() - timedelta(days=days)
+
+        def _shares(counts, label, is_you):
+            total = sum(counts.values())
+            if not total:
+                return None
+            return {
+                'name': label,
+                'is_you': is_you,
+                'responses': total,
+                'positive': round(counts.get('positive', 0) * 100 / total, 1),
+                'neutral': round(counts.get('neutral', 0) * 100 / total, 1),
+                'negative': round(counts.get('negative', 0) * 100 / total, 1),
+            }
+
+        def _tally(queryset):
+            tally = {}
+            for row in queryset.values('sentiment_category').annotate(n=Count('id')):
+                category = (row['sentiment_category'] or 'neutral').lower()
+                if category not in ('positive', 'neutral', 'negative'):
+                    category = 'neutral'
+                tally[category] = tally.get(category, 0) + row['n']
+            return tally
+
+        results = []
+
+        # Your brand: completed responses that actually named you. Responses with
+        # no mention carry a default neutral category and would flatten the mix.
+        from prompts.models import PromptAnalytics
+        own = PromptAnalytics.objects.filter(
+            prompt__group__domain_id=domain_id,
+            track_status='COMP',
+            is_mention=True,
+            created_at__gte=start,
+        )
+        domain = Domain.objects.filter(id=domain_id).first()
+        own_row = _shares(_tally(own), domain.name if domain else 'You', True)
+        if own_row:
+            results.append(own_row)
+
+        # Competitors: the same statistic over responses that named them.
+        from competitors.models import CompetitorPromptAnalytics
+        competitor_rows = CompetitorPromptAnalytics.objects.filter(
+            competitor__domain_id=domain_id,
+            is_mentioned=True,
+            created_at__gte=start,
+        ).select_related('competitor')
+
+        by_competitor = {}
+        for row in competitor_rows.values('competitor__name', 'sentiment_category').annotate(n=Count('id')):
+            name = row['competitor__name'] or 'Unknown'
+            category = (row['sentiment_category'] or 'neutral').lower()
+            if category not in ('positive', 'neutral', 'negative'):
+                category = 'neutral'
+            by_competitor.setdefault(name, {})
+            by_competitor[name][category] = by_competitor[name].get(category, 0) + row['n']
+
+        for name, counts in by_competitor.items():
+            row = _shares(counts, name, False)
+            if row:
+                results.append(row)
+
+        # You first, then most positive.
+        results.sort(key=lambda r: (not r['is_you'], -r['positive'], r['name']))
+
+        return Response({
+            'days': days,
+            'method': 'response_share',
+            'results': results,
         })
 
 

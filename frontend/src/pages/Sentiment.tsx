@@ -101,18 +101,13 @@ const Sentiment = () => {
         ]);
         setSummary(sum as any);
         setRows(Array.isArray(list) ? list : []);
-        // Optional: competitor sentiment (engine)
+        // Competitive sentiment comes from its own endpoint, which computes
+        // your brand and every competitor with the SAME statistic. Deriving the
+        // two sides separately on the client is what made the bars
+        // incomparable.
         try {
-          const cp = await apiClient.getCompetitorPromptAnalyticsEngine({ domain_id: domainId });
-          // Ensure we always set an array
-          const payload = cp as any;
-          if (Array.isArray(payload)) {
-            setCompetitorRows(payload);
-          } else if (payload && typeof payload === 'object' && Array.isArray(payload.results)) {
-            setCompetitorRows(payload.results);
-          } else {
-            setCompetitorRows([]);
-          }
+          const cp: any = await apiClient.getCompetitiveSentiment({ domain_id: domainId, days: DAYS });
+          setCompetitorRows(Array.isArray(cp?.results) ? cp.results : []);
         } catch {
           setCompetitorRows([]);
         }
@@ -283,55 +278,25 @@ const Sentiment = () => {
     }));
   }, [rows]);
 
-  // Competitor sentiment from engine competitor prompt analytics (average sentiment_score -> categories pct approx)
-  // Now includes "You" (your brand) from summary data
-  const competitorSentiment = useMemo(() => {
-    const map: Record<string, { name: string; pos: number; neu: number; neg: number; count: number }> = {};
+  // Server-computed and already ordered (you first, then most positive). Both
+  // your row and each competitor's are the share of responses mentioning that
+  // brand by sentiment category, so the bars are directly comparable.
+  const competitorSentiment = useMemo(
+    () =>
+      competitorRows.map((r: any) => ({
+        name: r.name,
+        positive: r.positive,
+        neutral: r.neutral,
+        negative: r.negative,
+        responses: r.responses,
+        isYou: Boolean(r.is_you),
+      })),
+    [competitorRows],
+  );
 
-    // Your own bar is built from `summary`, not from competitorRows, so it must
-    // not be gated on competitors existing. Returning early when the competitor
-    // list was empty hid your own sentiment too, leaving the tab blank for any
-    // domain with no competitors configured.
-    if (summary && summary.total_mentions > 0) {
-      map['You'] = {
-        name: 'You',
-        pos: Math.round((summary.positive_percentage / 100) * summary.total_mentions),
-        neu: Math.round((summary.neutral_percentage / 100) * summary.total_mentions),
-        neg: Math.round((summary.negative_percentage / 100) * summary.total_mentions),
-        count: summary.total_mentions
-      };
-    }
-    
-    // Add competitors from competitorRows
-    if (competitorRows && competitorRows.length > 0) {
-      competitorRows.forEach((r:any) => {
-        // Use competitor_name from serializer, fallback to competitor?.name or competitor_id
-        const key = r.competitor_name || r.competitor?.name || `Competitor ${r.competitor_id || r.competitor || ''}`;
-        if (!map[key]) map[key] = { name: key, pos: 0, neu: 0, neg: 0, count: 0 };
-        const cat = (r.sentiment_category || '').toLowerCase();
-        if (cat === 'positive') map[key].pos += 1; 
-        else if (cat === 'negative') map[key].neg += 1; 
-        else map[key].neu += 1;
-        map[key].count += 1;
-      });
-    }
-    
-    if (Object.keys(map).length === 0) return [] as any[];
-
-    return Object.values(map).map(v => ({
-      name: v.name,
-      positive: v.count ? +(v.pos * 100 / v.count).toFixed(1) : 0,
-      neutral: v.count ? +(v.neu * 100 / v.count).toFixed(1) : 0,
-      negative: v.count ? +(v.neg * 100 / v.count).toFixed(1) : 0,
-      isYou: v.name === 'You'
-    })).sort((a, b) => {
-      // Sort "You" first, then by positive sentiment descending, then by name
-      if (a.isYou && !b.isYou) return -1;
-      if (!a.isYou && b.isYou) return 1;
-      if (a.positive !== b.positive) return b.positive - a.positive;
-      return a.name.localeCompare(b.name);
-    });
-  }, [competitorRows, summary]);
+  // Your brand missing from the list is meaningful: no answer named you in the
+  // window, so there is no sentiment to place beside the competitors.
+  const hasOwnSentiment = competitorSentiment.some((c) => c.isYou);
 
   if (loading) {
     return <PageLoader />;
@@ -634,10 +599,15 @@ const Sentiment = () => {
                 <MetricHint
                   title="Competitive Sentiment"
                   plain="How favourably the AI platforms speak about you compared with each tracked competitor."
-                  formula="Your row is the mention-weighted sentiment shown in the cards above. Competitor rows count how many of their tracked responses were classified positive, neutral or negative. The two are computed from different sources, so read this as a directional comparison rather than an exact like-for-like ranking."
+                  formula="Every row is the same statistic: of the AI responses that named that brand in the last 30 days, the share classified positive, neutral or negative. Your brand and each competitor are counted identically, so bar lengths are directly comparable. The response count behind each row is shown beside its name."
                 />
               </InfoHint>
             </div>
+            {!hasOwnSentiment && competitorSentiment.length > 0 && (
+              <p className="text-xs text-muted-foreground mb-4">
+                No AI response named your brand in the last 30 days, so only competitors are shown.
+              </p>
+            )}
             {competitorSentiment.length === 0 ? (
               <p className="text-sm text-muted-foreground py-8 text-center">
                 No sentiment recorded in the last 30 days.
@@ -660,6 +630,11 @@ const Sentiment = () => {
                         {competitor.isYou && (
                           <Badge variant="default" className="gradient-primary border-0 text-xs">You</Badge>
                         )}
+                        {/* Sample size matters here: 78% positive from 9
+                            responses is not the same evidence as 35% from 296. */}
+                        <span className="text-xs text-muted-foreground">
+                          {competitor.responses} response{competitor.responses === 1 ? "" : "s"}
+                        </span>
                       </div>
                     </div>
                     <div className="flex items-center gap-6 text-sm">
