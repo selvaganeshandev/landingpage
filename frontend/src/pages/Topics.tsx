@@ -43,6 +43,12 @@ const CHART_COLORS = [
   "hsl(var(--success))"
 ];
 
+interface TopicCompetitor {
+  name: string;
+  mentions: number;
+  mention_share: number;
+}
+
 interface Topic {
   id: number;
   name: string;
@@ -53,6 +59,16 @@ interface Topic {
   trend: number;
   platforms: string[];
   color: string;
+  // From /topics/performance/ — derived from PromptAnalytics, so these
+  // reconcile with Insights, Mentions and Citations. The legacy fields above
+  // come from TopicAnalytics, which computes its own figures.
+  responses?: number;
+  mentionShare?: number;
+  avgPosition?: number | null;
+  citations?: number;
+  opportunity?: number;
+  competitors?: TopicCompetitor[];
+  promptCount?: number;
 }
 
 const Topics = () => {
@@ -171,6 +187,34 @@ const Topics = () => {
             color: CHART_COLORS[index % CHART_COLORS.length]
           };
         });
+
+        // Overlay the reconciled figures. Kept as a merge rather than a
+        // replacement so the existing charts, which read the legacy fields,
+        // keep working while the cards show numbers that match the rest of the
+        // product.
+        try {
+          const perf: any = await apiClient.getTopicPerformance({ domain_id: selectedDomain.id });
+          const byId = new Map<number, any>((perf?.results || []).map((r: any) => [r.id, r]));
+          transformedTopics.forEach((topic) => {
+            const row = byId.get(topic.id);
+            if (!row) return;
+            topic.responses = row.responses;
+            topic.mentionShare = row.mention_share;
+            topic.avgPosition = row.avg_position;
+            topic.citations = row.citations;
+            topic.opportunity = row.opportunity;
+            topic.competitors = row.competitors || [];
+            topic.promptCount = row.prompts;
+            topic.mentions = row.mentions;
+            topic.platforms = row.platforms?.length ? row.platforms : topic.platforms;
+          });
+          // Biggest gap first, matching the endpoint's own ordering.
+          transformedTopics.sort(
+            (a, b) => (b.opportunity ?? -1) - (a.opportunity ?? -1) || a.name.localeCompare(b.name),
+          );
+        } catch (perfError) {
+          console.warn('Topic performance unavailable, showing stored figures', perfError);
+        }
 
         setTopics(transformedTopics);
 
@@ -490,37 +534,64 @@ const Topics = () => {
                     )}
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-2xl font-bold" style={{ color: topic.color }}>{topic.mentions}</p>
-                  <p className="text-xs text-muted-foreground">mentions</p>
+                <div className="text-right shrink-0">
+                  <p className="text-2xl font-bold" style={{ color: topic.color }}>
+                    {topic.mentionShare !== undefined ? `${topic.mentionShare}%` : topic.mentions}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {topic.responses !== undefined
+                      ? `named in ${topic.mentions} of ${topic.responses}`
+                      : "mentions"}
+                  </p>
                 </div>
               </div>
 
+              {/* Visibility/Sentiment/Trend used to come from TopicAnalytics,
+                  which computes visibility as 100/avg_position and counts a
+                  mention whenever a keyword's tokens appear anywhere in a
+                  response. Those figures matched no other page. These read from
+                  PromptAnalytics via /topics/performance/. */}
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <p className="text-xs text-muted-foreground mb-1">Visibility</p>
-                  <p className="text-lg font-bold">{topic.visibility}%</p>
-                  <Progress value={topic.visibility} className="h-1 mt-1" />
+                  <p className="text-xs text-muted-foreground mb-1">Avg Position</p>
+                  <p className="text-lg font-bold">
+                    {topic.avgPosition ? topic.avgPosition.toFixed(2) : "—"}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">when named</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground mb-1">Sentiment</p>
-                  <p className="text-lg font-bold">{topic.sentiment}%</p>
-                  <Progress value={topic.sentiment} className="h-1 mt-1" />
+                  <p className="text-xs text-muted-foreground mb-1">Citations</p>
+                  <p className="text-lg font-bold">{topic.citations ?? 0}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    across {topic.promptCount ?? 0} prompt{topic.promptCount === 1 ? "" : "s"}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground mb-1">Trend</p>
-                  <div className="flex items-center gap-1">
-                    {topic.trend > 0 ? (
-                      <TrendingUp className="h-4 w-4 text-success" />
-                    ) : (
-                      <TrendingDown className="h-4 w-4 text-destructive" />
-                    )}
-                    <p className={`text-lg font-bold ${topic.trend > 0 ? 'text-success' : 'text-destructive'}`}>
-                      {topic.trend > 0 ? '+' : ''}{topic.trend}%
-                    </p>
-                  </div>
+                  <p className="text-xs text-muted-foreground mb-1">Opportunity</p>
+                  <p className="text-lg font-bold text-warning">{topic.opportunity ?? 0}</p>
+                  <p className="text-[11px] text-muted-foreground">answers missing you</p>
                 </div>
               </div>
+
+              {/* The competitive view is what this page can show and Prompts
+                  cannot: a subject usually spans several prompt groups, so this
+                  is the only place rivals can be ranked per subject. */}
+              {topic.competitors && topic.competitors.length > 0 && (
+                <div className="pt-2 border-t border-border">
+                  <p className="text-xs text-muted-foreground mb-2">Also named on this topic:</p>
+                  <div className="space-y-1.5">
+                    {topic.competitors.slice(0, 3).map((c) => (
+                      <div key={c.name} className="flex items-center gap-2">
+                        <span className="text-xs w-28 truncate" title={c.name}>{c.name}</span>
+                        <Progress value={c.mention_share} className="h-1.5 flex-1" />
+                        <span className="text-xs text-muted-foreground w-12 text-right">
+                          {c.mention_share}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="pt-2 border-t border-border">
                 <p className="text-xs text-muted-foreground mb-2">Active Platforms:</p>

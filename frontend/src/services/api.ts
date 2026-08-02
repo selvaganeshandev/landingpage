@@ -1027,6 +1027,19 @@ export const apiClient = {
     return apiRequest(`/topics/topics/by_domain/?domain_id=${domainId}`);
   },
 
+  /**
+   * Per-topic brand and competitor performance derived from PromptAnalytics —
+   * the same rows Insights, Mentions and Citations report on, so the figures
+   * reconcile with those pages. Omit `days` for all-time.
+   */
+  getTopicPerformance: (params: { domain_id: number | string; days?: number }) => {
+    const queryParams = `?${new URLSearchParams({
+      domain_id: String(params.domain_id),
+      ...(params.days ? { days: String(params.days) } : {}),
+    }).toString()}`;
+    return apiRequest(`/topics/performance/${queryParams}`);
+  },
+
   getTrendingTopics: (domainId?: number) => {
     const params = domainId ? `?domain_id=${domainId}` : '';
     return apiRequest(`/topics/topics/trending/${params}`);
