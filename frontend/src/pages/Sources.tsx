@@ -13,6 +13,12 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Table,
   TableBody,
   TableCell,
@@ -306,6 +312,9 @@ const Sources = () => {
   }
 
   return (
+    // One provider for the page: every domain in the table is a tooltip trigger,
+    // and mounting a provider per row would be needless work.
+    <TooltipProvider delayDuration={200}>
     <div className="p-8 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -682,66 +691,76 @@ const Sources = () => {
                               No sources available
                             </span>
                           ) : (
-                            <div className="space-y-2 max-w-[460px]">
+                            <div className="space-y-1.5 max-w-[460px]">
+                              {/* Domain plus a page count only. Listing three
+                                  URLs per domain made a single row taller than
+                                  the screen on prompts citing ten sources; the
+                                  URLs live in the hover tooltip and the dialog
+                                  instead of pushing every other column down. */}
                               {groups.slice(0, 4).map((g) => {
                                 const domainHref = g.urls[0] || (g.domain.startsWith("http") ? g.domain : `https://${g.domain}`);
-                                const visibleUrls = g.urls.slice(0, 3);
-                                const hiddenCount = Math.max(0, g.urls.length - visibleUrls.length);
                                 return (
-                                  <div key={g.domain} className="rounded border border-border bg-muted/20 px-2 py-1.5">
-                                    <a
-                                      href={domainHref}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                                      title={g.domain}
-                                    >
-                                      {g.domain}
-                                      <ExternalLink className="h-3 w-3 opacity-60" />
-                                    </a>
-                                    {visibleUrls.length > 0 && (
-                                      <ul className="mt-1 space-y-0.5 pl-2">
-                                        {visibleUrls.map((u) => (
-                                          <li key={u} className="text-[11px] leading-snug text-muted-foreground truncate" title={u}>
-                                            <a
-                                              href={u}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className="hover:text-primary hover:underline break-all"
-                                            >
-                                              {u}
-                                            </a>
-                                          </li>
-                                        ))}
-                                        {hiddenCount > 0 && (
-                                          <li>
-                                            <button
-                                              type="button"
-                                              onClick={() => setSourcesModal({ prompt: row.prompt_text, model: row.model, groups })}
-                                              className="text-[11px] text-muted-foreground italic hover:text-primary hover:underline"
-                                            >
-                                              + {hiddenCount} more page{hiddenCount === 1 ? "" : "s"}
-                                            </button>
-                                          </li>
+                                  <div key={g.domain} className="flex items-center gap-1.5">
+                                    <img
+                                      src={getFaviconUrl(g.domain, 32)}
+                                      alt=""
+                                      className="w-3.5 h-3.5 flex-shrink-0"
+                                      onError={(e) => handleFaviconError(e, g.domain, "", 32)}
+                                    />
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <a
+                                          href={domainHref}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline truncate"
+                                        >
+                                          <span className="truncate">{g.domain}</span>
+                                          {g.urls.length > 0 && (
+                                            <span className="text-muted-foreground font-normal">({g.urls.length})</span>
+                                          )}
+                                          <ExternalLink className="h-3 w-3 opacity-60 flex-shrink-0" />
+                                        </a>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="right" className="max-w-lg">
+                                        {g.urls.length === 0 ? (
+                                          <p className="text-xs">{g.domain}</p>
+                                        ) : (
+                                          <>
+                                            <p className="text-xs font-medium mb-1">
+                                              {g.urls.length} page{g.urls.length === 1 ? "" : "s"} cited on {g.domain}
+                                            </p>
+                                            <ul className="space-y-0.5">
+                                              {g.urls.slice(0, 10).map((u) => (
+                                                <li key={u} className="text-[11px] leading-snug break-all opacity-90">
+                                                  {u}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                            {g.urls.length > 10 && (
+                                              <p className="text-[11px] italic mt-1 opacity-75">
+                                                +{g.urls.length - 10} more — open the full list below
+                                              </p>
+                                            )}
+                                          </>
                                         )}
-                                      </ul>
-                                    )}
+                                      </TooltipContent>
+                                    </Tooltip>
                                   </div>
                                 );
                               })}
-                              {/* The overflow used to be a dead <span> whose only
-                                  affordance was a title tooltip listing domain
-                                  names — the URLs behind them were unreachable.
-                                  Opens the full list in a dialog instead. */}
-                              {groups.length > 4 && (
-                                <button
-                                  type="button"
-                                  onClick={() => setSourcesModal({ prompt: row.prompt_text, model: row.model, groups })}
-                                  className="inline-flex items-center px-2 py-0.5 rounded border border-border bg-muted/20 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors"
-                                >
-                                  +{groups.length - 4} more domain{groups.length - 4 === 1 ? "" : "s"}
-                                </button>
-                              )}
+                              {/* Opens every domain for this row, the first four
+                                  included — the dialog is the only place the
+                                  full list is readable. */}
+                              <button
+                                type="button"
+                                onClick={() => setSourcesModal({ prompt: row.prompt_text, model: row.model, groups })}
+                                className="inline-flex items-center px-2 py-0.5 rounded border border-border bg-muted/20 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                              >
+                                {groups.length > 4
+                                  ? `+${groups.length - 4} more domain${groups.length - 4 === 1 ? "" : "s"}`
+                                  : "View all sources"}
+                              </button>
                             </div>
                           )}
                         </TableCell>
@@ -929,6 +948,7 @@ const Sources = () => {
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
   );
 };
 
