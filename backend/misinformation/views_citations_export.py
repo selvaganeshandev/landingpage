@@ -37,6 +37,7 @@ from domains.models import Domain
 from prompts.models import PromptAnalytics
 
 from .models import CitationURL
+from .views import citation_lookup_key
 
 logger = logging.getLogger(__name__)
 
@@ -169,12 +170,15 @@ def citations_export(request):
         .order_by('-created_at')
     )
 
+    # Keyed through citation_lookup_key: crawl rows are stored under the URL with
+    # trailing punctuation stripped, while citation_list keeps whatever the LLM
+    # emitted ("https://www.upwork.com,"). Matching raw strings marked already
+    # checked citations as pending.
     crawl_map = {}
     for row in CitationURL.objects.filter(domain=domain).only(
         'url', 'crawl_status', 'http_status_code', 'last_crawled_at'
     ):
-        crawl_map[row.url] = row
-        crawl_map[row.url.rstrip('/')] = row
+        crawl_map[citation_lookup_key(row.url)] = row
 
     rows = []
     by_source = {}
@@ -193,7 +197,7 @@ def citations_export(request):
         for position, url in enumerate(citations, start=1):
             if not url:
                 continue
-            crawled = crawl_map.get(url) or crawl_map.get(str(url).rstrip('/'))
+            crawled = crawl_map.get(citation_lookup_key(url))
             label, code = _status_for(crawled)
             status_counts[label] = status_counts.get(label, 0) + 1
 

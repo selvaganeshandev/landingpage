@@ -40,6 +40,28 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 
+def citation_lookup_key(url):
+    """Key for matching a cited URL against its CitationURL row.
+
+    URLExtractor._normalize_url strips trailing punctuation, the fragment and a
+    trailing slash before saving, because LLMs routinely emit a citation with the
+    sentence punctuation still attached — "https://www.upwork.com," and
+    "https://bizfinx.". The crawl row is therefore stored under the cleaned form
+    while citation_list keeps the raw string.
+
+    Matching on the raw string alone left those citations reading "pending"
+    forever even though they had been checked and returned HTTP 200. Both sides
+    must be reduced the same way.
+    """
+    if not url:
+        return ''
+    key = str(url).strip()
+    if '#' in key:
+        key = key.split('#')[0]
+    key = key.rstrip('.,;:!?\'"')
+    return key.rstrip('/')
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard(request):
@@ -612,13 +634,12 @@ def citations_dashboard(request):
     # total_citations, so Pending reaching 0 means exactly what it says.
     crawl_by_url = {}
     for row in crawled_urls.only('url', 'crawl_status', 'http_status_code'):
-        crawl_by_url[row.url] = row
-        crawl_by_url[row.url.rstrip('/')] = row
+        crawl_by_url[citation_lookup_key(row.url)] = row
 
     status_breakdown = {'valid': 0, 'broken': 0, 'blocked': 0, 'pending': 0}
     for url_data in all_urls:
         url = url_data['url']
-        row = crawl_by_url.get(url) or crawl_by_url.get(str(url).rstrip('/'))
+        row = crawl_by_url.get(citation_lookup_key(url))
         if not row:
             status_breakdown['pending'] += 1
         elif row.crawl_status == 'success' and row.http_status_code and row.http_status_code < 400:
@@ -774,19 +795,12 @@ def citations_list(request):
     all_citations = []
     domain_url_clean = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
 
-    def _norm_url(u):
-        if not u:
-            return ''
-        u = u.strip()
-        return u[:-1] if u.endswith('/') else u
-
-    # Pre-fetch all citation URLs for this domain to avoid N+1 queries
+    # Pre-fetch all citation URLs for this domain to avoid N+1 queries.
+    # Keyed through citation_lookup_key so a citation the LLM emitted with
+    # trailing punctuation still finds the row saved under its cleaned form.
     citation_urls_map = {}
     for citation_url in CitationURL.objects.filter(domain=domain).only('url', 'crawl_status', 'http_status_code'):
-        citation_urls_map[citation_url.url] = citation_url
-        norm = _norm_url(citation_url.url)
-        if norm:
-            citation_urls_map[norm] = citation_url
+        citation_urls_map[citation_lookup_key(citation_url.url)] = citation_url
 
     # Process analytics in batches and use early exit strategy
     # We'll stop fetching once we have enough results for the current page
@@ -817,7 +831,7 @@ def citations_list(request):
                             continue
 
                     # Check if this URL has been crawled (from pre-fetched map)
-                    crawled_citation = citation_urls_map.get(url) or citation_urls_map.get(_norm_url(url))
+                    crawled_citation = citation_urls_map.get(citation_lookup_key(url))
 
                     display_status = 'pending'
                     http_status_code = None
