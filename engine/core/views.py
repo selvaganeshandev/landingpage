@@ -1391,21 +1391,31 @@ def share_of_voice(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    # Get latest timestamp
-    latest = ShareOfVoiceAnalytics.objects.filter(
-        domain_id=domain_id
-    ).order_by('-timestamp').first()
-    
+    # Share is stored once per platform plus an aggregate row per brand. Without
+    # a platform filter this returned every brand several times over — once per
+    # platform — and callers summing the result counted each brand repeatedly.
+    # Defaults to the aggregate; pass ?platform=ChatGPT for one platform's split.
+    from core.competitor_processor import SOV_OVERALL_PLATFORM
+    platform = request.query_params.get('platform') or SOV_OVERALL_PLATFORM
+
+    scoped = ShareOfVoiceAnalytics.objects.filter(domain_id=domain_id, platform=platform)
+
+    # Rows written before share was computed per platform carry the literal
+    # 'ChatGPT' for what was actually an all-platform total; fall back to them so
+    # a domain that has not been recalculated still renders.
+    if not scoped.exists() and platform == SOV_OVERALL_PLATFORM:
+        scoped = ShareOfVoiceAnalytics.objects.filter(domain_id=domain_id)
+
+    latest = scoped.order_by('-timestamp').first()
+
     if not latest:
         return Response({
             'domain_id': int(domain_id),
             'message': 'No share of voice data available yet',
             'players': []
         })
-    
-    # Get all records for latest timestamp
-    sov_data = ShareOfVoiceAnalytics.objects.filter(
-        domain_id=domain_id,
+
+    sov_data = scoped.filter(
         timestamp=latest.timestamp
     ).select_related('competitor', 'domain').order_by('market_position')
     

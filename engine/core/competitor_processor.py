@@ -50,6 +50,11 @@ logger = logging.getLogger(__name__)
 # interrupted; short enough that a crash costs one cycle rather than months.
 STALE_PROC_HOURS = int(os.getenv('COMPETITOR_STALE_PROC_HOURS', '6'))
 
+# Platform label for the aggregate row — the one figure per brand across every
+# platform. Kept distinct from real platform names so a query can ask for either
+# the headline number or the per-platform breakdown without double counting.
+SOV_OVERALL_PLATFORM = 'Overall'
+
 
 def extract_competitor_citations(citation_list: list, competitor_name: str, competitor_url: str = None) -> list:
     """
@@ -880,39 +885,113 @@ class CompetitorProcessor:
 
     def recalculate_share_of_voice(self, domain_id: int, timestamp: date = None) -> Dict[str, Any]:
         """
-        Rewrite every player's share for one domain against a single denominator.
+        Rewrite share for one domain: an aggregate row per player, plus one row
+        per player per AI platform.
+
+        Every row used to be written with platform='ChatGPT' hardcoded, on all
+        8,634 rows in production, so share of voice existed for one platform out
+        of the four the product tracks. Anything reading the platform dimension —
+        the Share by Platform radar, the Platform-Specific Share list — had a
+        single value to draw and could say nothing.
+
+        Aggregate rows carry platform=SOV_OVERALL_PLATFORM. Consumers that want
+        one figure per brand must filter to it; consumers that want the breakdown
+        exclude it. Without that separation a query for "the latest rows" returns
+        each brand once per platform and counts it several times.
 
         Returns a summary dict so callers (and the backfill command) can report
         what changed.
         """
         today = timestamp or date.today()
 
-        # Own brand. Prompt has no domain field; it is reached through group.
-        own_mentions = PromptAnalytics.objects.filter(
+        own_qs = PromptAnalytics.objects.filter(
             prompt__group__domain_id=domain_id,
             prompt__track_status='COMP',
-            track_status='COMP'
-        ).aggregate(total=Sum('total_mentions'))['total'] or 0
-
-        # Every competitor's mentions read in one query, so all numerators come
-        # from the same moment as the denominator built from them.
-        #
-        # Deliberately not filtered to track_status='COMP'. That filter left
-        # competitors mid-processing out of the denominator while their existing
-        # share rows stayed on the books, so the set could not add up: domain 21
-        # has five competitors holding 218 mentions between them, all still PROC,
-        # and excluding them made the own brand 100% of a market it holds 2% of
-        # while an orphaned row claimed 780%. A competitor part-way through
-        # processing still has a real mention count; using it is closer to the
-        # truth than pretending the competitor is absent.
-        competitor_rows = list(
-            Competitor.objects.filter(domain_id=domain_id)
+            track_status='COMP',
         )
 
-        competitors_mentions = sum(int(c.total_mentions or 0) for c in competitor_rows)
-        total_market_mentions = own_mentions + competitors_mentions
+        competitor_rows = list(Competitor.objects.filter(domain_id=domain_id))
+        competitor_ids = [c.id for c in competitor_rows]
 
-        if total_market_mentions <= 0:
+        # Per-platform mentions for the brand and for each competitor. Both come
+        # from the analytics tables rather than the denormalised
+        # Competitor.total_mentions, because that field has no platform
+        # dimension to break down by.
+        own_by_platform = {
+            row['platform']: row['total'] or 0
+            for row in own_qs.exclude(platform__isnull=True).exclude(platform='')
+            .values('platform').annotate(total=Sum('total_mentions'))
+        }
+
+        comp_by_platform = {}
+        if competitor_ids:
+            for row in (
+                CompetitorPromptAnalytics.objects
+                .filter(competitor_id__in=competitor_ids)
+                .exclude(platform__isnull=True).exclude(platform='')
+                .values('competitor_id', 'platform')
+                .annotate(total=Sum('mention_count'))
+            ):
+                comp_by_platform.setdefault(row['platform'], {})[row['competitor_id']] = row['total'] or 0
+
+        platforms = sorted(set(own_by_platform) | set(comp_by_platform))
+
+        # Aggregate totals keep using Competitor.total_mentions so the headline
+        # figures stay consistent with the rest of the product, which reads that
+        # field directly.
+        own_total = own_qs.aggregate(total=Sum('total_mentions'))['total'] or 0
+        comp_totals = {c.id: int(c.total_mentions or 0) for c in competitor_rows}
+
+        written = 0
+        scopes = []
+
+        def _write_scope(platform_label, own_mentions, competitor_mentions):
+            """Write one player row per brand for a single platform scope."""
+            nonlocal written
+            market = own_mentions + sum(competitor_mentions.values())
+            if market <= 0:
+                return False
+
+            for comp in competitor_rows:
+                mentions = int(competitor_mentions.get(comp.id, 0) or 0)
+                share = round((mentions / market) * 100, 2)
+                _upsert_share_of_voice(
+                    domain_id=domain_id,
+                    competitor=comp,
+                    platform=platform_label,
+                    timestamp=today,
+                    defaults={
+                        'share_percentage': Decimal(str(share)),
+                        'mention_count': mentions,
+                        'market_position': None,
+                    },
+                )
+                written += 1
+                # The denormalised field on Competitor is a single number with no
+                # platform dimension, so only the aggregate scope may set it.
+                if platform_label == SOV_OVERALL_PLATFORM:
+                    Competitor.objects.filter(id=comp.id).update(
+                        share_of_voice_percentage=Decimal(str(share)),
+                        modified_at=timezone.now(),
+                    )
+
+            own_share = round((own_mentions / market) * 100, 2)
+            _upsert_share_of_voice(
+                domain_id=domain_id,
+                competitor=None,  # NULL = own brand
+                platform=platform_label,
+                timestamp=today,
+                defaults={
+                    'share_percentage': Decimal(str(own_share)),
+                    'mention_count': own_mentions,
+                    'market_position': None,
+                },
+            )
+            written += 1
+            scopes.append({'platform': platform_label, 'own_share': own_share, 'market': market})
+            return True
+
+        if not _write_scope(SOV_OVERALL_PLATFORM, own_total, comp_totals):
             logger.warning(
                 f"Share of voice: no mentions for domain {domain_id}, leaving shares untouched"
             )
@@ -920,62 +999,34 @@ class CompetitorProcessor:
                 'domain_id': domain_id,
                 'total_market_mentions': 0,
                 'players': 0,
+                'platforms': [],
                 'updated': False,
             }
 
-        written = 0
-
-        for comp in competitor_rows:
-            mentions = int(comp.total_mentions or 0)
-            share = round((mentions / total_market_mentions) * 100, 2)
-            _upsert_share_of_voice(
-                domain_id=domain_id,
-                competitor=comp,
-                platform='ChatGPT',
-                timestamp=today,
-                defaults={
-                    'share_percentage': Decimal(str(share)),
-                    'mention_count': mentions,
-                    'market_position': None,
-                }
+        for platform in platforms:
+            _write_scope(
+                platform,
+                own_by_platform.get(platform, 0),
+                comp_by_platform.get(platform, {}),
             )
-            # Keep the denormalised field on Competitor in step with the row just
-            # written; the UI reads both in different places.
-            Competitor.objects.filter(id=comp.id).update(
-                share_of_voice_percentage=Decimal(str(share)),
-                modified_at=timezone.now(),
-            )
-            written += 1
-
-        own_share = (own_mentions / total_market_mentions) * 100
-        _upsert_share_of_voice(
-            domain_id=domain_id,
-            competitor=None,  # NULL = own brand
-            platform='ChatGPT',
-            timestamp=today,
-            defaults={
-                'share_percentage': Decimal(str(round(own_share, 2))),
-                'mention_count': own_mentions,
-                'market_position': None,
-            }
-        )
-        written += 1
 
         domain = Domain.objects.filter(id=domain_id).first()
         if domain:
             self._calculate_market_positions(domain, today)
 
+        overall = scopes[0]
         logger.info(
-            f"Share of voice recalculated for domain {domain_id}: "
-            f"own={own_share:.2f}% of {total_market_mentions} mentions across {written} players"
+            f"Share of voice recalculated for domain {domain_id}: own={overall['own_share']:.2f}% "
+            f"of {overall['market']} mentions; {len(scopes) - 1} platform scope(s), {written} rows"
         )
 
         return {
             'domain_id': domain_id,
-            'total_market_mentions': total_market_mentions,
-            'own_mentions': own_mentions,
-            'own_share': round(own_share, 2),
+            'total_market_mentions': overall['market'],
+            'own_mentions': own_total,
+            'own_share': overall['own_share'],
             'players': written,
+            'platforms': [s['platform'] for s in scopes[1:]],
             'updated': True,
         }
 
@@ -989,18 +1040,30 @@ class CompetitorProcessor:
         """
         try:
             # Get all SOV records for this domain and timestamp, ordered by share
-            sov_records = ShareOfVoiceAnalytics.objects.filter(
+            # Rank within each platform scope separately. Ranking every row for
+            # the day in one pass would interleave the aggregate with the
+            # per-platform rows and produce positions like #7 in a five-brand
+            # market.
+            all_records = ShareOfVoiceAnalytics.objects.filter(
                 domain=domain,
-                platform='ChatGPT',
                 timestamp=timestamp
-            ).order_by('-share_percentage')
-            
-            # Assign ranks
-            for rank, sov in enumerate(sov_records, start=1):
-                sov.market_position = rank
-                sov.save(update_fields=['market_position'])
-            
-            logger.info(f"Updated market positions for domain {domain.id}, {len(sov_records)} players")
+            ).order_by('platform', '-share_percentage')
+
+            by_platform = {}
+            for record in all_records:
+                by_platform.setdefault(record.platform, []).append(record)
+
+            ranked = 0
+            for platform, records in by_platform.items():
+                for rank, sov in enumerate(records, start=1):
+                    sov.market_position = rank
+                    sov.save(update_fields=['market_position'])
+                    ranked += 1
+
+            logger.info(
+                f"Updated market positions for domain {domain.id}: "
+                f"{ranked} row(s) across {len(by_platform)} platform scope(s)"
+            )
         
         except Exception as e:
             logger.error(f"Error calculating market positions: {str(e)}")

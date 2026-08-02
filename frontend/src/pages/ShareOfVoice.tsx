@@ -47,6 +47,12 @@ type LatestSov = { domain_id: number; timestamp: string; platform: string; playe
 
 // Fallback minimal radar/matrix will be computed from latest share (visibility proxy)
 
+// Reserved platform label for the aggregate row written by the engine. Real
+// platform names ('ChatGPT', 'Claude', ...) sit beside it, so anything showing a
+// per-platform breakdown must filter this out and anything showing one figure
+// per brand must filter to it.
+const OVERALL_SCOPE = 'Overall';
+
 const ShareOfVoice = () => {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -159,7 +165,9 @@ const ShareOfVoice = () => {
   const shareHistory = useMemo(() => {
     if (!rows || rows.length === 0) return [] as any[];
     const byDate: Record<string, Record<string, number>> = {};
-    rows.forEach((r) => {
+    // Aggregate scope only — otherwise each brand contributes one point per
+    // platform per day and the line jumps between them.
+    rows.filter((r) => !r.platform || r.platform === OVERALL_SCOPE).forEach((r) => {
       const brand = (r as any).competitor_name || (r.competitor ? String(r.competitor) : ownBrandName);
       const date = r.timestamp;
       if (!byDate[date]) byDate[date] = {};
@@ -189,7 +197,12 @@ const ShareOfVoice = () => {
   const platformShare = useMemo(() => {
     if (!rows || rows.length === 0) return {} as Record<string, Array<{ brand: string; share: number }>>;
     const latestDate = rows.map(r=>r.timestamp).sort().pop();
-    const filtered = rows.filter(r => r.timestamp === latestDate);
+    // Exclude the aggregate scope: it is the all-platform total, not a platform,
+    // and drawing it alongside the real ones would add an axis that is by
+    // definition the sum of the others.
+    const filtered = rows.filter(
+      r => r.timestamp === latestDate && r.platform && r.platform !== OVERALL_SCOPE,
+    );
     const byPlatform: Record<string, Record<string, number>> = {};
     filtered.forEach((r) => {
       const plat = r.platform || 'Overall';
@@ -547,6 +560,11 @@ const ShareOfVoice = () => {
                   fontSize={12}
                   label={{ value: "Mentions", angle: -90, position: "left", fill: "hsl(var(--muted-foreground))" }}
                 />
+                {/* Points were the Recharts default size and effectively
+                    un-hoverable. ZAxis scales them by mention volume with a
+                    generous floor, so even a brand with almost no mentions is a
+                    target you can hit. */}
+                <ZAxis type="number" dataKey="mentions" range={[300, 1400]} name="Mentions" />
                 <Tooltip
                   cursor={{ strokeDasharray: "3 3" }}
                   contentStyle={{
@@ -554,8 +572,18 @@ const ShareOfVoice = () => {
                     border: "1px solid hsl(var(--border))",
                     borderRadius: "var(--radius)",
                   }}
-                  formatter={(value: any, name: any) => [value, name]}
-                  labelFormatter={() => ""}
+                  content={({ active, payload }: any) => {
+                    if (!active || !payload?.length) return null;
+                    const p = payload[0].payload;
+                    return (
+                      <div className="rounded-md border border-border bg-card px-3 py-2 shadow-md">
+                        <p className="text-sm font-medium">{p.brand}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {p.share}% share · {p.mentions.toLocaleString()} mentions
+                        </p>
+                      </div>
+                    );
+                  }}
                 />
                 <Scatter
                   name="Brands"
