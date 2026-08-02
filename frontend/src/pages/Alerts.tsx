@@ -610,86 +610,87 @@ const Alerts = () => {
         </TabsContent>
 
         <TabsContent value="rules" className="space-y-4">
-          <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-            {loading ? (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground">Loading rules...</p>
-              </div>
-            ) : alertRules.length === 0 ? (
-              <div className="text-center py-8">
-                <Bell className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground mb-4">No alert rules configured</p>
-                <Button onClick={handleNewAlertRule} className="gradient-primary">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create First Rule
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {alertRules.map((rule) => (
-                  <div key={rule.id} className="flex items-start justify-between p-4 rounded-lg transition-all duration-300 border border-border hover:border-primary">
-                    <div className="flex items-start gap-4 flex-1">
-                      <Switch 
-                        checked={rule.enabled} 
-                        onCheckedChange={(val) => handleRuleEnabledToggle(rule, Boolean(val))} 
-                      />
-                      <div className="flex-1">
-                        <h4 className="font-semibold mb-1">{rule.name}</h4>
-                        <p className="text-sm text-muted-foreground mb-3">{rule.description}</p>
-                        <div className="flex items-center gap-4 flex-wrap">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">Conditions:</span>
-                            <Badge className="text-xs font-mono bg-primary text-primary-foreground">
-                              {formatCondition(rule.conditions)}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">Channels:</span>
-                            {rule.notification_channel_list?.includes("email") && (
-                              <Mail className="h-4 w-4 text-muted-foreground" />
-                            )}
-                            {rule.notification_channel_list?.includes("slack") && (
-                              <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                            )}
-                            {rule.notification_channel_list?.includes("sms") && (
-                              <Smartphone className="h-4 w-4 text-muted-foreground" />
-                            )}
-                          </div>
-                          {rule.detection_count > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-muted-foreground">Detections:</span>
-                              <Badge variant="outline" className="text-xs">
-                                {rule.detection_count}
-                              </Badge>
-                            </div>
+          {/* One Card per rule, like the Active and Resolved tabs. These used to
+              be bordered divs nested inside a single outer Card, which produced
+              a box-inside-a-box and made the whole list light up on hover. */}
+          {loading ? (
+            <Card className="p-6 text-center">
+              <p className="text-muted-foreground">Loading rules...</p>
+            </Card>
+          ) : alertRules.length === 0 ? (
+            <Card className="p-6 text-center">
+              <Bell className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <p className="text-muted-foreground mb-4">No alert rules configured</p>
+              <Button onClick={handleNewAlertRule} className="gradient-primary">
+                <Plus className="h-4 w-4 mr-2" />
+                Create First Rule
+              </Button>
+            </Card>
+          ) : (
+            alertRules.map((rule) => (
+              <Card key={rule.id} className="p-6 transition-all duration-300 border border-border hover:border-primary">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start gap-4 flex-1">
+                    <Switch
+                      checked={rule.enabled}
+                      onCheckedChange={(val) => handleRuleEnabledToggle(rule, Boolean(val))}
+                    />
+                    <div className="flex-1">
+                      <h4 className="font-semibold mb-1">{rule.name}</h4>
+                      <p className="text-sm text-muted-foreground mb-3">{rule.description}</p>
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">Conditions:</span>
+                          <Badge className="text-xs font-mono bg-primary text-primary-foreground">
+                            {formatCondition(rule.conditions)}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">Channels:</span>
+                          {rule.notification_channel_list?.includes("email") && (
+                            <Mail className="h-4 w-4 text-muted-foreground" />
+                          )}
+                          {rule.notification_channel_list?.includes("slack") && (
+                            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                          )}
+                          {rule.notification_channel_list?.includes("sms") && (
+                            <Smartphone className="h-4 w-4 text-muted-foreground" />
                           )}
                         </div>
+                        {rule.detection_count > 0 && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">Detections:</span>
+                            <Badge variant="outline" className="text-xs">
+                              {rule.detection_count}
+                            </Badge>
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEditRule(rule)}
-                        title="Edit rule"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDeleteRule(rule.id)}
-                        className="text-destructive hover:text-destructive"
-                        title="Delete rule"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </Card>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleEditRule(rule)}
+                      title="Edit rule"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDeleteRule(rule.id)}
+                      className="text-destructive hover:text-destructive"
+                      title="Delete rule"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            ))
+          )}
         </TabsContent>
       </Tabs>
 
