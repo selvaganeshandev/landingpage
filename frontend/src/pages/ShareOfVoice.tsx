@@ -52,7 +52,10 @@ const ShareOfVoice = () => {
   const { user } = useAuth();
   const { selectedDomain } = useDomainStore();
   const [domainId, setDomainId] = useState<string | null>(null);
-  const [days, setDays] = useState<number>(30);
+  // Fixed 30-day window for the trends query. setDays was never called — there
+  // is no control for it — so the setter is dropped rather than left implying
+  // a range picker exists.
+  const days = 30;
 
   const [latest, setLatest] = useState<LatestSov | null>(null);
   const [rows, setRows] = useState<SovRow[]>([]);
@@ -426,10 +429,19 @@ const ShareOfVoice = () => {
                   borderRadius: "var(--radius)",
                 }}
               />
+              {/* One Cell per brand. Three were hardcoded, and Recharts maps
+                  Cells positionally, so on a domain with more than three
+                  players the rest rendered in the default colour and could not
+                  be told apart. Your own bar keeps the primary colour. */}
               <Bar dataKey="share" radius={[0, 8, 8, 0]}>
-                <Cell fill="hsl(var(--primary))" />
-                <Cell fill="hsl(var(--chart-2))" />
-                <Cell fill="hsl(var(--chart-3))" />
+                {overallShare.map((entry: any, index: number) => (
+                  <Cell
+                    key={`bar-${index}`}
+                    fill={entry.brand === ownBrandName
+                      ? "hsl(var(--primary))"
+                      : `hsl(var(--chart-${(index % 5) + 1}))`}
+                  />
+                ))}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -629,12 +641,15 @@ const ShareOfVoice = () => {
                   competitor: {opp.competitor?.name || opp.competitor_name || 'Unknown'}
                 </Badge>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-muted-foreground">Platforms:</span>
-                {(opp.platform ? [opp.platform] : (opp.citation_list || [])).slice(0,4).map((p:any,i:number)=>(
-                  <Badge key={i} variant="outline" className="text-xs">{String(p||'AI')}</Badge>
-                ))}
-              </div>
+              {/* Only the platform. This used to fall back to citation_list
+                  when platform was absent — a list of source URLs rendered as
+                  badges under a "Platforms:" label. */}
+              {opp.platform && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-muted-foreground">Platform:</span>
+                  <Badge variant="outline" className="text-xs">{String(opp.platform)}</Badge>
+                </div>
+              )}
             </div>
           )) : (
             <p className="text-sm text-muted-foreground">No opportunities detected yet.</p>

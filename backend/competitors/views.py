@@ -545,12 +545,24 @@ class CompetitorPromptAnalyticsViewSet(viewsets.ReadOnlyModelViewSet):
             is_mentioned=True,  # Competitor is mentioned
             position__lte=5  # In top 5
         )
-        
+
         if competitor_id:
             queryset = queryset.filter(competitor_id=competitor_id)
-        
-        # TODO: Add filter for "your brand not mentioned" by joining with PromptAnalytics
-        
+
+        # Exclude prompts where the brand is mentioned too. Without this the
+        # endpoint returned every prompt a competitor ranked top-5 on, whether or
+        # not the brand appeared — so the Market Opportunities section listed
+        # prompts the brand already wins. On Tata Motors all 9 rows it returned
+        # were prompts where the brand is mentioned: nothing it showed was a gap.
+        from prompts.models import PromptAnalytics
+        own_prompt_ids = PromptAnalytics.objects.filter(
+            prompt__group__domain_id=domain_id,
+            track_status='COMP',
+            is_mention=True,
+        ).values_list('prompt_id', flat=True)
+
+        queryset = queryset.exclude(prompt_id__in=own_prompt_ids)
+
         queryset = queryset.order_by('position')
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
