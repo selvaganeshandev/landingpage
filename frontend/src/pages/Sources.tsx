@@ -52,6 +52,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { InfoHint, MetricHint } from "@/components/InfoHint";
 
 type SourceUrlGroup = {
   domain: string;
@@ -403,6 +404,13 @@ const Sources = () => {
         <StatCard
           icon={<MessageSquare className="h-5 w-5" />}
           label="Prompt × Model"
+          hint={
+            <MetricHint
+              title="Prompt × Model"
+              plain="One row for every prompt you track, on every AI platform it was asked on. The same prompt across four models is four rows."
+              formula="Counts the rows currently in view, so it follows your filters, search and date range rather than the whole dataset."
+            />
+          }
           value={stats.total.toLocaleString()}
           sub={`${stats.activeModels} model${stats.activeModels === 1 ? "" : "s"} active`}
           tone="default"
@@ -410,6 +418,13 @@ const Sources = () => {
         <StatCard
           icon={<Link2 className="h-5 w-5" />}
           label="With Sources"
+          hint={
+            <MetricHint
+              title="With Sources"
+              plain="How many of those answers cited anything at all. The rest asserted things about your market without showing where it came from."
+              formula="Rows carrying at least one source URL, divided by the rows in view."
+            />
+          }
           value={stats.withSources.toLocaleString()}
           sub={
             stats.total > 0
@@ -421,6 +436,13 @@ const Sources = () => {
         <StatCard
           icon={<Smile className="h-5 w-5" />}
           label="Avg Sentiment"
+          hint={
+            <MetricHint
+              title="Avg Sentiment"
+              plain="How positively the AI answers speak about your brand, on a 0–100 scale. Above 66 is positive, below 33 negative."
+              formula="Averaged only over answers that actually mention your brand. Rows with no mention sit at the neutral default and would drag every score toward 50, so they are excluded — which is why this reads “—” when nothing was mentioned."
+            />
+          }
           value={stats.hasSentiment ? stats.avgSentiment.toFixed(1) : "—"}
           sub={
             !stats.hasSentiment
@@ -444,6 +466,13 @@ const Sources = () => {
         <StatCard
           icon={<TrendingUp className="h-5 w-5" />}
           label="Total Mentions"
+          hint={
+            <MetricHint
+              title="Total Mentions"
+              plain="How many times your brand was named across the answers in view."
+              formula="Sums the per-row mention counts. One answer naming you three times contributes three."
+            />
+          }
           value={stats.totalMentions.toLocaleString()}
           sub="Across filtered rows"
           tone="info"
@@ -928,12 +957,14 @@ function StatCard({
   label,
   value,
   sub,
+  hint,
   tone = "default",
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   sub?: string;
+  hint?: React.ReactNode;
   tone?: StatTone;
 }) {
   const t = TONE_CLASSES[tone];
@@ -941,7 +972,10 @@ function StatCard({
     <Card className="p-6 border border-border">
       <div className="flex items-center justify-between">
         <div className="min-w-0">
-          <p className="text-sm text-muted-foreground">{label}</p>
+          <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+            {label}
+            {hint && <InfoHint>{hint}</InfoHint>}
+          </p>
           <p className={`text-2xl font-bold mt-1 ${t.value}`}>{value}</p>
         </div>
         <div className={`flex-shrink-0 ${t.plainIcon}`}>{icon}</div>
