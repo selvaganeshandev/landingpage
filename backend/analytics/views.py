@@ -310,25 +310,33 @@ class ShareOfVoiceAnalyticsViewSet(viewsets.ModelViewSet):
         latest_date = queryset.values_list('timestamp', flat=True).order_by('-timestamp').first()
         if latest_date:
             latest_queryset = queryset.filter(timestamp=latest_date)
-            your_data = latest_queryset.filter(competitor__isnull=True).first()
-            competitors_data = latest_queryset.filter(competitor__isnull=False).order_by('market_position')
-            
-            # Build unified list with "You" first
+
+            # One own-brand row per platform scope, not one overall.
+            # `.filter(competitor__isnull=True).first()` returned a single row, so
+            # under scope=all the brand appeared in whichever platform sorted
+            # first and was absent from the others — Platform-Specific Share of
+            # Voice listed Claude and Gemini with competitors only, as if the
+            # brand had no presence there at all.
             result = []
-            if your_data:
-                you_dict = ShareOfVoiceAnalyticsSerializer(your_data).data
-                # Format as "Domain Name (You)" - get domain name from the data
-                domain_name = your_data.domain.name if hasattr(your_data, 'domain') and your_data.domain else 'You'
-                you_dict['brand_name'] = f'{domain_name} (You)'  # Format as "Brand Name (You)"
-                you_dict['domain_name'] = domain_name  # Include domain_name for reference
-                you_dict['is_you'] = True
-                result.append(you_dict)
-            
-            for comp_data in competitors_data:
-                comp_dict = ShareOfVoiceAnalyticsSerializer(comp_data).data
-                comp_dict['is_you'] = False
-                result.append(comp_dict)
-            
+            for row in latest_queryset.order_by('platform', 'market_position'):
+                row_dict = ShareOfVoiceAnalyticsSerializer(row).data
+                if row.competitor_id is None:
+                    domain_name = row.domain.name if row.domain else 'You'
+                    row_dict['brand_name'] = f'{domain_name} (You)'
+                    row_dict['domain_name'] = domain_name
+                    row_dict['is_you'] = True
+                else:
+                    row_dict['is_you'] = False
+                result.append(row_dict)
+
+            # Own brand first within each platform, then by market position, so a
+            # consumer rendering a single scope still leads with "You".
+            result.sort(key=lambda r: (
+                r.get('platform') or '',
+                not r.get('is_you'),
+                r.get('market_position') or 999,
+            ))
+
             return Response(result)
         
         serializer = self.get_serializer(queryset, many=True)

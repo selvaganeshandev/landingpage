@@ -419,7 +419,7 @@ const ShareOfVoice = () => {
             </div>
             <Award className="h-5 w-5 text-primary" />
           </div>
-          <Progress value={dominanceScore} className="mt-3 h-1.5" />
+          <Progress value={dominanceScore} className="mt-3 h-1.5 bg-muted" />
         </Card>
       </div>
 
@@ -643,7 +643,7 @@ const ShareOfVoice = () => {
                       </span>
                       <span className="font-bold">{brand.share}%</span>
                     </div>
-                    <Progress value={brand.share} className="h-2" />
+                    <Progress value={brand.share} className="h-2 bg-muted" />
                   </div>
                 ))}
               </div>
