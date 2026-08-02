@@ -12,6 +12,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
 import { useDomainStore } from "@/stores/domainStore";
@@ -30,7 +45,6 @@ import {
   MessageSquare,
   TrendingUp,
   Smile,
-  RefreshCw,
   CalendarIcon,
 } from "lucide-react";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
@@ -107,6 +121,12 @@ const Sources = () => {
   const [exporting, setExporting] = useState(false);
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+  // Row whose full source list is open in the dialog; null when closed.
+  const [sourcesModal, setSourcesModal] = useState<{
+    prompt: string;
+    model: string;
+    groups: SourceUrlGroup[];
+  } | null>(null);
 
   const dateRangeReady =
     (!startDate && !endDate) ||
@@ -114,7 +134,7 @@ const Sources = () => {
   const startStr = startDate ? format(startDate, "yyyy-MM-dd") : undefined;
   const endStr = endDate ? format(endDate, "yyyy-MM-dd") : undefined;
 
-  const { data, isLoading, isError, isFetching, refetch } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["promptSourcesData", domainId, startStr, endStr],
     queryFn: async () => {
       const res = await apiClient.getPromptSourcesData(domainId!, {
@@ -367,15 +387,6 @@ const Sources = () => {
               <X className="h-4 w-4" />
             </Button>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            title="Refresh data"
-          >
-            <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-          </Button>
           <Button variant="outline" onClick={handleExport} disabled={exporting || !totalRows}>
             {exporting ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -388,16 +399,16 @@ const Sources = () => {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <StatCard
-          icon={<MessageSquare className="h-4 w-4" />}
+          icon={<MessageSquare className="h-5 w-5" />}
           label="Prompt × Model"
           value={stats.total.toLocaleString()}
           sub={`${stats.activeModels} model${stats.activeModels === 1 ? "" : "s"} active`}
           tone="default"
         />
         <StatCard
-          icon={<Link2 className="h-4 w-4" />}
+          icon={<Link2 className="h-5 w-5" />}
           label="With Sources"
           value={stats.withSources.toLocaleString()}
           sub={
@@ -408,7 +419,7 @@ const Sources = () => {
           tone="info"
         />
         <StatCard
-          icon={<Smile className="h-4 w-4" />}
+          icon={<Smile className="h-5 w-5" />}
           label="Avg Sentiment"
           value={stats.hasSentiment ? stats.avgSentiment.toFixed(1) : "—"}
           sub={
@@ -431,7 +442,7 @@ const Sources = () => {
           }
         />
         <StatCard
-          icon={<TrendingUp className="h-4 w-4" />}
+          icon={<TrendingUp className="h-5 w-5" />}
           label="Total Mentions"
           value={stats.totalMentions.toLocaleString()}
           sub="Across filtered rows"
@@ -593,35 +604,34 @@ const Sources = () => {
         {!isLoading && !isError && totalRows > 0 && (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b" style={{ backgroundColor: "#f6f9fe" }}>
-                    <th className="px-4 py-3 text-left font-semibold text-xs whitespace-nowrap" style={{ minWidth: 320 }}>
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/30">
+                    <TableHead className="py-2 px-3 whitespace-nowrap" style={{ minWidth: 320 }}>
                       Source URLs
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-xs" style={{ minWidth: 280 }}>
+                    </TableHead>
+                    <TableHead className="py-2 px-3" style={{ minWidth: 280 }}>
                       Prompt Text
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-xs whitespace-nowrap" style={{ minWidth: 110 }}>
+                    </TableHead>
+                    <TableHead className="py-2 px-3 whitespace-nowrap" style={{ minWidth: 110 }}>
                       Model
-                    </th>
-                    <th className="px-4 py-3 text-center font-semibold text-xs whitespace-nowrap" style={{ minWidth: 130 }}>
+                    </TableHead>
+                    <TableHead className="py-2 px-3 text-center whitespace-nowrap" style={{ minWidth: 130 }}>
                       Avg Sentiment
-                    </th>
-                    <th className="px-4 py-3 text-center font-semibold text-xs whitespace-nowrap" style={{ minWidth: 110 }}>
+                    </TableHead>
+                    <TableHead className="py-2 px-3 text-center whitespace-nowrap" style={{ minWidth: 110 }}>
                       Avg Position
-                    </th>
-                    <th className="px-4 py-3 text-center font-semibold text-xs whitespace-nowrap" style={{ minWidth: 100 }}>
+                    </TableHead>
+                    <TableHead className="py-2 px-3 text-center whitespace-nowrap" style={{ minWidth: 100 }}>
                       Mentions
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-xs whitespace-nowrap" style={{ minWidth: 180 }}>
+                    </TableHead>
+                    <TableHead className="py-2 px-3 whitespace-nowrap" style={{ minWidth: 180 }}>
                       Created
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {pageRows.map((row, idx) => {
-                    const bg = idx % 2 === 0 ? "#fff" : "#faf8ff";
                     // Prefer the new grouped structure (domain + subpage URLs).
                     // Fall back to the legacy comma-separated domain string so
                     // older cached responses still render correctly.
@@ -636,8 +646,8 @@ const Sources = () => {
                               .map((d) => ({ domain: d, urls: [] }))
                           : [];
                     return (
-                      <tr key={page * rowsPerPage + idx} className="border-b hover:bg-muted/10 transition-colors" style={{ backgroundColor: bg }}>
-                        <td className="px-4 py-3 align-top">
+                      <TableRow key={page * rowsPerPage + idx} className="hover:bg-muted/20 transition-colors">
+                        <TableCell className="py-2 px-3 align-top">
                           {groups.length === 0 ? (
                             <span className="text-muted-foreground italic text-xs">
                               No sources available
@@ -675,8 +685,14 @@ const Sources = () => {
                                           </li>
                                         ))}
                                         {hiddenCount > 0 && (
-                                          <li className="text-[11px] text-muted-foreground italic" title={g.urls.slice(visibleUrls.length).join("\n")}>
-                                            + {hiddenCount} more page{hiddenCount === 1 ? "" : "s"}
+                                          <li>
+                                            <button
+                                              type="button"
+                                              onClick={() => setSourcesModal({ prompt: row.prompt_text, model: row.model, groups })}
+                                              className="text-[11px] text-muted-foreground italic hover:text-primary hover:underline"
+                                            >
+                                              + {hiddenCount} more page{hiddenCount === 1 ? "" : "s"}
+                                            </button>
                                           </li>
                                         )}
                                       </ul>
@@ -684,30 +700,35 @@ const Sources = () => {
                                   </div>
                                 );
                               })}
+                              {/* The overflow used to be a dead <span> whose only
+                                  affordance was a title tooltip listing domain
+                                  names — the URLs behind them were unreachable.
+                                  Opens the full list in a dialog instead. */}
                               {groups.length > 4 && (
-                                <span
-                                  className="inline-flex items-center px-2 py-0.5 rounded border border-border bg-muted/20 text-xs text-muted-foreground"
-                                  title={groups.slice(4).map((g) => g.domain).join(", ")}
+                                <button
+                                  type="button"
+                                  onClick={() => setSourcesModal({ prompt: row.prompt_text, model: row.model, groups })}
+                                  className="inline-flex items-center px-2 py-0.5 rounded border border-border bg-muted/20 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors"
                                 >
                                   +{groups.length - 4} more domain{groups.length - 4 === 1 ? "" : "s"}
-                                </span>
+                                </button>
                               )}
                             </div>
                           )}
-                        </td>
-                        <td className="px-4 py-3 align-top text-sm">
+                        </TableCell>
+                        <TableCell className="py-2 px-3 align-top text-sm">
                           <div className="max-w-[420px]" title={row.prompt_text}>
                             {row.prompt_text}
                           </div>
-                        </td>
-                        <td className="px-4 py-3 align-top whitespace-nowrap">
+                        </TableCell>
+                        <TableCell className="py-2 px-3 align-top whitespace-nowrap">
                           <span
                             className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${modelChipClass(row.model)}`}
                           >
                             {row.model || "—"}
                           </span>
-                        </td>
-                        <td className="px-4 py-3 align-top text-center whitespace-nowrap">
+                        </TableCell>
+                        <TableCell className="py-2 px-3 align-top text-center whitespace-nowrap">
                           {row.mentions > 0 ? (
                             <span
                               className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${sentimentChipClass(row.avg_sentiment)}`}
@@ -723,8 +744,8 @@ const Sources = () => {
                               —
                             </span>
                           )}
-                        </td>
-                        <td className="px-4 py-3 align-top text-center whitespace-nowrap">
+                        </TableCell>
+                        <TableCell className="py-2 px-3 align-top text-center whitespace-nowrap">
                           {row.avg_position > 0 ? (
                             <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 text-xs font-medium">
                               #{row.avg_position.toFixed(1)}
@@ -732,8 +753,8 @@ const Sources = () => {
                           ) : (
                             <span className="text-muted-foreground text-xs">—</span>
                           )}
-                        </td>
-                        <td className="px-4 py-3 align-top text-center whitespace-nowrap">
+                        </TableCell>
+                        <TableCell className="py-2 px-3 align-top text-center whitespace-nowrap">
                           {row.mentions > 0 ? (
                             <span className="inline-flex items-center justify-center min-w-[28px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 text-xs font-semibold">
                               {row.mentions}
@@ -741,15 +762,15 @@ const Sources = () => {
                           ) : (
                             <span className="text-muted-foreground text-xs">0</span>
                           )}
-                        </td>
-                        <td className="px-4 py-3 align-top whitespace-nowrap text-muted-foreground text-xs">
+                        </TableCell>
+                        <TableCell className="py-2 px-3 align-top whitespace-nowrap text-muted-foreground text-xs">
                           {row.created}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     );
                   })}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
 
             {/* Pagination */}
@@ -807,6 +828,77 @@ const Sources = () => {
           </>
         )}
       </Card>
+
+      {/* Every source for one prompt × model. The table can only show four
+          domains and three pages each before it would dominate the row, so the
+          rest live here rather than being unreachable. */}
+      <Dialog open={!!sourcesModal} onOpenChange={(open) => !open && setSourcesModal(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-lg">All Sources</DialogTitle>
+            <DialogDescription className="text-sm">
+              {sourcesModal
+                ? `${sourcesModal.groups.length} domain${sourcesModal.groups.length === 1 ? "" : "s"} · ${sourcesModal.groups.reduce((n, g) => n + g.urls.length, 0)} page${sourcesModal.groups.reduce((n, g) => n + g.urls.length, 0) === 1 ? "" : "s"} cited by ${sourcesModal.model}`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          {sourcesModal && (
+            <>
+              <p className="text-sm text-muted-foreground border-l-2 border-border pl-3">
+                {sourcesModal.prompt}
+              </p>
+              <div className="space-y-3">
+                {sourcesModal.groups.map((g) => {
+                  const domainHref = g.urls[0] || (g.domain.startsWith("http") ? g.domain : `https://${g.domain}`);
+                  return (
+                    <div key={g.domain} className="rounded-lg border border-border p-3">
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={getFaviconUrl(g.domain, 32)}
+                          alt=""
+                          className="w-4 h-4 flex-shrink-0"
+                          onError={(e) => handleFaviconError(e, g.domain, "", 32)}
+                        />
+                        <a
+                          href={domainHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm font-medium text-primary hover:underline inline-flex items-center gap-1"
+                        >
+                          {g.domain}
+                          <ExternalLink className="h-3 w-3 opacity-60" />
+                        </a>
+                        {g.urls.length > 0 && (
+                          <span className="text-xs text-muted-foreground ml-auto">
+                            {g.urls.length} page{g.urls.length === 1 ? "" : "s"}
+                          </span>
+                        )}
+                      </div>
+                      {g.urls.length > 0 && (
+                        <ul className="mt-2 space-y-1 pl-6">
+                          {g.urls.map((u) => (
+                            <li key={u}>
+                              <a
+                                href={u}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs text-muted-foreground hover:text-primary hover:underline break-all"
+                              >
+                                {u}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -815,14 +907,22 @@ const Sources = () => {
 
 type StatTone = "default" | "info" | "good" | "warn" | "bad";
 
-const TONE_CLASSES: Record<StatTone, { icon: string; value: string }> = {
-  default: { icon: "bg-slate-100 text-slate-600", value: "text-foreground" },
-  info: { icon: "bg-blue-50 text-blue-600", value: "text-foreground" },
-  good: { icon: "bg-emerald-50 text-emerald-600", value: "text-emerald-700" },
-  warn: { icon: "bg-amber-50 text-amber-600", value: "text-amber-700" },
-  bad: { icon: "bg-rose-50 text-rose-600", value: "text-rose-700" },
+// `plainIcon` is the bare glyph colour used by the shared card shape; `icon`
+// (the tinted tile) is kept for any caller still wanting the old treatment.
+const TONE_CLASSES: Record<StatTone, { icon: string; value: string; plainIcon: string }> = {
+  default: { icon: "bg-slate-100 text-slate-600", value: "text-foreground", plainIcon: "text-muted-foreground" },
+  info: { icon: "bg-blue-50 text-blue-600", value: "text-foreground", plainIcon: "text-primary" },
+  good: { icon: "bg-emerald-50 text-emerald-600", value: "text-emerald-700", plainIcon: "text-emerald-600" },
+  warn: { icon: "bg-amber-50 text-amber-600", value: "text-amber-700", plainIcon: "text-amber-600" },
+  bad: { icon: "bg-rose-50 text-rose-600", value: "text-rose-700", plainIcon: "text-rose-600" },
 };
 
+/**
+ * Same card shape as the metric cards on Citations and Insights: sentence-case
+ * label, text-2xl figure, plain icon, text-xs subtext. This page previously
+ * used an uppercase tracking-wider label and a tinted icon tile, which made it
+ * read as a different product surface.
+ */
 function StatCard({
   icon,
   label,
@@ -838,19 +938,15 @@ function StatCard({
 }) {
   const t = TONE_CLASSES[tone];
   return (
-    <Card className="p-4">
-      <div className="flex items-start justify-between gap-3">
+    <Card className="p-6 border border-border">
+      <div className="flex items-center justify-between">
         <div className="min-w-0">
-          <div className="text-xs text-muted-foreground uppercase tracking-wider">
-            {label}
-          </div>
-          <div className={`text-2xl font-bold mt-1 ${t.value}`}>{value}</div>
-          {sub && (
-            <div className="text-xs text-muted-foreground mt-1 truncate">{sub}</div>
-          )}
+          <p className="text-sm text-muted-foreground">{label}</p>
+          <p className={`text-2xl font-bold mt-1 ${t.value}`}>{value}</p>
         </div>
-        <div className={`p-2 rounded-lg flex-shrink-0 ${t.icon}`}>{icon}</div>
+        <div className={`flex-shrink-0 ${t.plainIcon}`}>{icon}</div>
       </div>
+      {sub && <p className="text-xs text-muted-foreground mt-2 truncate">{sub}</p>}
     </Card>
   );
 }
