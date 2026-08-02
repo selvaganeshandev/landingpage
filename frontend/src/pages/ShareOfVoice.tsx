@@ -40,6 +40,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getActiveDomainId } from "@/utils/activeDomain";
 import { PageLoader } from "@/components/PageLoader";
 import { useDomainStore } from "@/stores/domainStore";
+import { InfoHint, MetricHint } from "@/components/InfoHint";
 
 type SovRow = { domain: number; competitor: number | null; platform?: string | null; share_percentage: number; mention_count: number; market_position?: number | null; timestamp: string };
 type LatestSov = { domain_id: number; timestamp: string; platform: string; players: Array<{ competitor: any | null; share_percentage: number; mention_count: number; market_position: number | null }>; };
@@ -83,7 +84,11 @@ const ShareOfVoice = () => {
       if (!domainId) return;
       setIsLoadingCompetitors(true);
       try {
-        const response = await apiClient.getCompetitorsEngine({ domain_id: domainId });
+        // apiClient.getCompetitorsEngine does not exist — the call threw a
+        // TypeError on every load and the catch below swallowed it, so the
+        // competitor list was always empty and the "no competitors" empty state
+        // could show even when competitors were configured.
+        const response = await apiClient.getCompetitors({ domain_id: domainId });
         const competitorList = Array.isArray(response) ? response : response?.results || [];
         setCompetitors(competitorList);
       } catch (e: any) {
@@ -214,6 +219,27 @@ const ShareOfVoice = () => {
   }, [overallShare, ownBrandName]);
   const dominanceScore = useMemo(() => Math.round(marketShareValue), [marketShareValue]);
 
+  // Total tracked players and the leader, so the position card can describe
+  // where you actually sit instead of asserting "Market Leader" regardless.
+  const playerCount = overallShare.length;
+  const leaderName = useMemo(() => {
+    if (!overallShare.length) return null;
+    return [...overallShare].sort((a, b) => b.share - a.share)[0]?.brand ?? null;
+  }, [overallShare]);
+
+  // Change vs the previous snapshot, from shareHistory. The card used to print
+  // a hardcoded "+15%" in success green on every domain, on every load,
+  // regardless of whether share had risen, fallen or never been measured twice.
+  const marketShareChange = useMemo(() => {
+    if (!shareHistory || shareHistory.length < 2) return null;
+    const series = shareHistory.filter((point: any) => point[ownBrandName] !== undefined);
+    if (series.length < 2) return null;
+    const previous = Number(series[series.length - 2][ownBrandName]);
+    const current = Number(series[series.length - 1][ownBrandName]);
+    if (!Number.isFinite(previous) || !Number.isFinite(current)) return null;
+    return Number((current - previous).toFixed(1));
+  }, [shareHistory, ownBrandName]);
+
   // Show loading state while data is being fetched
   if (isLoadingCompetitors || isLoadingData) {
     return <PageLoader />;
@@ -268,51 +294,91 @@ const ShareOfVoice = () => {
         </div>
       </div>
 
-      {/* Key Metrics */}
+      {/* Key Metrics — shared metric-card shape used across the app:
+          text-2xl figure, plain icon, text-xs subtext. */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="flex items-start justify-between mb-4">
+        <Card className="p-6 border border-border">
+          <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Market Share</p>
-              <h3 className="text-4xl font-bold text-primary mt-2">{marketShareValue}%</h3>
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                Market Share
+                <InfoHint>
+                  <MetricHint
+                    title="Market Share"
+                    plain="Your slice of all brand mentions across the AI answers tracked for this domain — you and every competitor together make 100%."
+                    formula="Your mention count divided by the total for all tracked players in the most recent snapshot. It moves when a competitor gains ground even if your own mentions are unchanged."
+                  />
+                </InfoHint>
+              </p>
+              <p className="text-2xl font-bold text-primary mt-1">{marketShareValue}%</p>
             </div>
-            <div className="p-3 rounded-xl bg-gradient-to-br from-primary to-secondary text-primary-foreground">
-              <Target className="h-6 w-6" />
-            </div>
+            <Target className="h-5 w-5 text-primary" />
           </div>
-          <div className="flex items-center gap-2 text-sm">
-            <ArrowUpRight className="h-4 w-4 text-success" />
-            <span className="text-success font-medium">+15%</span>
-            <span className="text-muted-foreground">vs last period</span>
-          </div>
+          {/* Only claims a direction when two snapshots exist to compare. */}
+          {marketShareChange === null ? (
+            <p className="text-xs text-muted-foreground mt-2">No previous snapshot to compare</p>
+          ) : marketShareChange === 0 ? (
+            <p className="text-xs text-muted-foreground mt-2">Unchanged vs last snapshot</p>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+              {marketShareChange > 0 ? (
+                <ArrowUpRight className="h-3 w-3 text-success" />
+              ) : (
+                <ArrowDownRight className="h-3 w-3 text-destructive" />
+              )}
+              <span className={marketShareChange > 0 ? "text-success font-medium" : "text-destructive font-medium"}>
+                {marketShareChange > 0 ? "+" : ""}{marketShareChange} pts
+              </span>
+              vs last snapshot
+            </p>
+          )}
         </Card>
 
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="flex items-start justify-between mb-4">
+        <Card className="p-6 border border-border">
+          <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Market Position</p>
-              <h3 className="text-4xl font-bold text-primary mt-2">#{marketPosition}</h3>
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                Market Position
+                <InfoHint>
+                  <MetricHint
+                    title="Market Position"
+                    plain="Where you rank against the competitors tracked for this domain, by share of mentions."
+                    formula="Players sorted by share, highest first. Only brands configured as competitors are counted — this is your rank within that set, not within your whole industry."
+                  />
+                </InfoHint>
+              </p>
+              <p className="text-2xl font-bold text-primary mt-1">#{marketPosition}</p>
             </div>
-            <div className="p-3 rounded-xl bg-gradient-to-br from-primary to-secondary text-primary-foreground">
-              <Crown className="h-6 w-6" />
-            </div>
+            <Crown className="h-5 w-5 text-primary" />
           </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">Market Leader</span>
-          </div>
+          {/* Was a fixed "Market Leader" label, shown even when ranked last. */}
+          <p className="text-xs text-muted-foreground mt-2">
+            {playerCount === 0
+              ? "No players tracked"
+              : marketPosition === 1
+                ? `Leading ${playerCount - 1} tracked competitor${playerCount - 1 === 1 ? "" : "s"}`
+                : `of ${playerCount} tracked${leaderName ? ` · ${leaderName} leads` : ""}`}
+          </p>
         </Card>
 
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="flex items-start justify-between mb-4">
+        <Card className="p-6 border border-border">
+          <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Dominance Score</p>
-              <h3 className="text-4xl font-bold text-primary mt-2">{dominanceScore}</h3>
+              <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                Dominance Score
+                <InfoHint>
+                  <MetricHint
+                    title="Dominance Score"
+                    plain="How much of the conversation you hold, on a 0–100 scale."
+                    formula="Your market share rounded to a whole number — the same figure as the first card, so the two always move together."
+                  />
+                </InfoHint>
+              </p>
+              <p className="text-2xl font-bold text-primary mt-1">{dominanceScore}</p>
             </div>
-            <div className="p-3 rounded-xl bg-gradient-to-br from-primary to-secondary text-primary-foreground">
-              <Award className="h-6 w-6" />
-            </div>
+            <Award className="h-5 w-5 text-primary" />
           </div>
-          <Progress value={dominanceScore} className="mt-2" />
+          <Progress value={dominanceScore} className="mt-3 h-1.5" />
         </Card>
       </div>
 
