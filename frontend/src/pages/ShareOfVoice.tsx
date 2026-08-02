@@ -182,16 +182,26 @@ const ShareOfVoice = () => {
       if (!byDate[date]) byDate[date] = {};
       byDate[date][brand] = Number(r.share_percentage);
     });
+    // Every brand present, keyed by its real name. This used to take the first
+    // three in set order and pad the rest with the literals 'BrandA', 'BrandB'
+    // and 'BrandC', so a domain with two competitors drew a legend entry for a
+    // brand that did not exist, and a fourth competitor was silently dropped.
     const brands = new Set<string>();
     Object.values(byDate).forEach(map => Object.keys(map).forEach(b => brands.add(b)));
-    const [b1, b2, b3] = Array.from(brands).slice(0, 3);
-    return Object.entries(byDate).sort((a,b)=>a[0].localeCompare(b[0])).map(([date, v]) => ({
-      month: date,
-      [b1 || 'BrandA']: v[b1 || ''] || 0,
-      [b2 || 'BrandB']: v[b2 || ''] || 0,
-      [b3 || 'BrandC']: v[b3 || ''] || 0,
-    }));
+    const brandNames = Array.from(brands);
+    return Object.entries(byDate).sort((a,b)=>a[0].localeCompare(b[0])).map(([date, v]) => {
+      const point: Record<string, any> = { month: date };
+      brandNames.forEach((brand) => { point[brand] = v[brand] ?? 0; });
+      return point;
+    });
   }, [rows, ownBrandName]);
+
+  // Series actually present in the history, so the chart can render one line
+  // per real brand instead of a fixed three.
+  const historyBrands = useMemo(
+    () => (shareHistory.length ? Object.keys(shareHistory[0]).filter((k) => k !== 'month') : []),
+    [shareHistory],
+  );
 
   const platformShare = useMemo(() => {
     if (!rows || rows.length === 0) return {} as Record<string, Array<{ brand: string; share: number }>>;
@@ -226,6 +236,38 @@ const ShareOfVoice = () => {
     if (!overallShare.length) return null;
     return [...overallShare].sort((a, b) => b.share - a.share)[0]?.brand ?? null;
   }, [overallShare]);
+
+  // Radar axes are platforms, series are the real brands on them. The chart
+  // previously plotted a single 'Visibility' axis with two invented series —
+  // "Brand B" was 100 minus your own share and "Brand C" was the constant 50 —
+  // so it drew two competitors that do not exist and one axis, which a radar
+  // cannot render meaningfully.
+  const radarBrands = useMemo(() => {
+    const totals: Record<string, number> = {};
+    Object.values(platformShare).forEach((entries) =>
+      entries.forEach((e) => {
+        totals[e.brand] = (totals[e.brand] || 0) + e.share;
+      }),
+    );
+    const ranked = Object.entries(totals)
+      .sort((a, b) => b[1] - a[1])
+      .map(([brand]) => brand)
+      .filter((brand) => brand !== ownBrandName)
+      .slice(0, 2);
+    return [ownBrandName, ...ranked];
+  }, [platformShare, ownBrandName]);
+
+  const radarData = useMemo(
+    () =>
+      Object.entries(platformShare).map(([platform, entries]) => {
+        const point: Record<string, any> = { category: platform };
+        radarBrands.forEach((brand) => {
+          point[brand] = entries.find((e) => e.brand === brand)?.share ?? 0;
+        });
+        return point;
+      }),
+    [platformShare, radarBrands],
+  );
 
   // Change vs the previous snapshot, from shareHistory. The card used to print
   // a hardcoded "+15%" in success green on every domain, on every load,
@@ -305,8 +347,8 @@ const ShareOfVoice = () => {
                 <InfoHint>
                   <MetricHint
                     title="Market Share"
-                    plain="Your slice of all brand mentions across the AI answers tracked for this domain — you and every competitor together make 100%."
-                    formula="Your mention count divided by the total for all tracked players in the most recent snapshot. It moves when a competitor gains ground even if your own mentions are unchanged."
+                    plain="Your slice of brand mentions across the AI answers tracked for this domain."
+                    formula="Your mention count divided by the market total at the time the snapshot was written, so it moves when a competitor gains ground even if your own mentions do not. Each brand's share is recorded in a separate pass against a denominator captured at that moment, so the figures on this page do not always add to 100%."
                   />
                 </InfoHint>
               </p>
@@ -428,31 +470,21 @@ const ShareOfVoice = () => {
                 }}
               />
               <Legend />
-              {/* First three dynamic brands */}
-              <Line 
-                type="monotone" 
-                dataKey={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[0] : 'BrandA'} 
-                name={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[0] : 'Brand A'}
-                stroke="hsl(var(--primary))" 
-                strokeWidth={3}
-                dot={{ fill: "hsl(var(--primary))", r: 4 }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[1] : 'BrandB'} 
-                name={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[1] : 'Brand B'}
-                stroke="hsl(var(--chart-2))" 
-                strokeWidth={2}
-                dot={{ fill: "hsl(var(--chart-2))", r: 3 }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[2] : 'BrandC'} 
-                name={shareHistory[0] ? Object.keys(shareHistory[0]).filter(k=>k!=='month')[2] : 'Brand C'}
-                stroke="hsl(var(--chart-3))" 
-                strokeWidth={2}
-                dot={{ fill: "hsl(var(--chart-3))", r: 3 }}
-              />
+              {/* One line per brand actually present. Three <Line> elements
+                  were hardcoded, so a fourth competitor never appeared and a
+                  domain with fewer brands rendered a legend entry named
+                  "Brand B" or "Brand C" for nothing. */}
+              {historyBrands.map((brand, idx) => (
+                <Line
+                  key={brand}
+                  type="monotone"
+                  dataKey={brand}
+                  name={brand}
+                  stroke={idx === 0 ? "hsl(var(--primary))" : `hsl(var(--chart-${(idx % 5) + 1}))`}
+                  strokeWidth={idx === 0 ? 3 : 2}
+                  dot={{ fill: idx === 0 ? "hsl(var(--primary))" : `hsl(var(--chart-${(idx % 5) + 1}))`, r: idx === 0 ? 4 : 3 }}
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -461,107 +493,94 @@ const ShareOfVoice = () => {
       {/* Competitive Positioning */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="p-6 border border-border">
-          <h3 className="text-lg font-semibold mb-6">Competitive Strength Radar</h3>
-          <ResponsiveContainer width="100%" height={350}>
-            <RadarChart data={[{ category: 'Visibility', a: marketShareValue, b: 100-marketShareValue, c: 50 }]}>
-              <PolarGrid stroke="hsl(var(--border))" />
-              <PolarAngleAxis 
-                dataKey="category" 
-                stroke="hsl(var(--muted-foreground))"
-                fontSize={12}
-              />
-              <PolarRadiusAxis angle={90} domain={[0, 100]} stroke="hsl(var(--muted-foreground))" />
-              <Radar 
-                name={ownBrandName} 
-                dataKey="a" 
-                stroke="hsl(var(--primary))" 
-                fill="hsl(var(--primary))" 
-                fillOpacity={0.3}
-                strokeWidth={2}
-              />
-              <Radar 
-                name="Brand B" 
-                dataKey="b" 
-                stroke="hsl(var(--chart-2))" 
-                fill="hsl(var(--chart-2))" 
-                fillOpacity={0.2}
-              />
-              <Radar 
-                name="Brand C" 
-                dataKey="c" 
-                stroke="hsl(var(--chart-3))" 
-                fill="hsl(var(--chart-3))" 
-                fillOpacity={0.2}
-              />
-              <Legend />
-            </RadarChart>
-          </ResponsiveContainer>
+          <h3 className="text-lg font-semibold mb-6">Share by Platform</h3>
+          {radarData.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-16 text-center">
+              No platform share recorded yet.
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height={350}>
+              <RadarChart data={radarData}>
+                <PolarGrid stroke="hsl(var(--border))" />
+                <PolarAngleAxis dataKey="category" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                <PolarRadiusAxis angle={90} domain={[0, 100]} stroke="hsl(var(--muted-foreground))" />
+                {radarBrands.map((brand, idx) => (
+                  <Radar
+                    key={brand}
+                    name={brand}
+                    dataKey={brand}
+                    stroke={`hsl(var(--chart-${idx + 1}))`}
+                    fill={`hsl(var(--chart-${idx + 1}))`}
+                    fillOpacity={idx === 0 ? 0.3 : 0.15}
+                    strokeWidth={idx === 0 ? 2 : 1}
+                  />
+                ))}
+                <Legend />
+              </RadarChart>
+            </ResponsiveContainer>
+          )}
         </Card>
 
         <Card className="p-6 border border-border">
-          <h3 className="text-lg font-semibold mb-6">Brand Positioning Matrix</h3>
-          <ResponsiveContainer width="100%" height={350}>
-            <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-              <CartesianGrid stroke="hsl(var(--border))" />
-              <XAxis 
-                type="number" 
-                dataKey="visibility" 
-                name="Visibility Score"
-                domain={[70, 100]}
-                stroke="hsl(var(--muted-foreground))"
-                fontSize={12}
-                label={{ value: "Visibility Score", position: "bottom", fill: "hsl(var(--muted-foreground))" }}
-              />
-              <YAxis 
-                type="number" 
-                dataKey="sentiment" 
-                name="Sentiment %"
-                domain={[60, 80]}
-                stroke="hsl(var(--muted-foreground))"
-                fontSize={12}
-                label={{ value: "Sentiment %", angle: -90, position: "left", fill: "hsl(var(--muted-foreground))" }}
-              />
-              <ZAxis type="number" dataKey="mentions" range={[200, 1000]} />
-              <Tooltip 
-                cursor={{ strokeDasharray: "3 3" }}
-                contentStyle={{
-                  backgroundColor: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border))",
-                  borderRadius: "var(--radius)",
-                }}
-              />
-            <Scatter name="Brands" data={overallShare.map((b,idx)=>{
-              // Assign consistent colors from chart palette
-              const chartColors = [
-                'hsl(var(--chart-1))',
-                'hsl(var(--chart-2))',
-                'hsl(var(--chart-3))',
-                'hsl(var(--chart-4))',
-                'hsl(var(--chart-5))',
-              ];
-              return {
-                brand: b.brand,
-                visibility: b.share,
-                sentiment: b.share,
-                mentions: b.mentions,
-                color: chartColors[idx % chartColors.length]
-              };
-            })}>
-                {overallShare.map((entry, index) => {
-                  const chartColors = [
-                    'hsl(var(--chart-1))',
-                    'hsl(var(--chart-2))',
-                    'hsl(var(--chart-3))',
-                    'hsl(var(--chart-4))',
-                    'hsl(var(--chart-5))',
-                  ];
-                  return (
-                    <Cell key={`cell-${index}`} fill={chartColors[index % chartColors.length]} />
-                  );
-                })}
-              </Scatter>
-            </ScatterChart>
-          </ResponsiveContainer>
+          <h3 className="text-lg font-semibold mb-6">Share vs Mentions</h3>
+          {/* Was a "Brand Positioning Matrix" plotting Visibility against
+              Sentiment — but both axes read b.share, so every point sat on the
+              diagonal and neither axis showed what it claimed. The axes were
+              also fixed to [70,100] and [60,80]; with real shares of 88.5, 53.8,
+              2.2, 0.8 and 0.4 for Tata Motors, four of five brands fell off the
+              chart entirely. Now plots two distinct, real quantities on
+              auto-scaled axes. */}
+          {overallShare.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-16 text-center">
+              No share data recorded yet.
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height={350}>
+              <ScatterChart margin={{ top: 20, right: 20, bottom: 30, left: 20 }}>
+                <CartesianGrid stroke="hsl(var(--border))" />
+                <XAxis
+                  type="number"
+                  dataKey="share"
+                  name="Share of voice"
+                  unit="%"
+                  stroke="hsl(var(--muted-foreground))"
+                  fontSize={12}
+                  label={{ value: "Share of voice (%)", position: "bottom", fill: "hsl(var(--muted-foreground))" }}
+                />
+                <YAxis
+                  type="number"
+                  dataKey="mentions"
+                  name="Mentions"
+                  stroke="hsl(var(--muted-foreground))"
+                  fontSize={12}
+                  label={{ value: "Mentions", angle: -90, position: "left", fill: "hsl(var(--muted-foreground))" }}
+                />
+                <Tooltip
+                  cursor={{ strokeDasharray: "3 3" }}
+                  contentStyle={{
+                    backgroundColor: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: "var(--radius)",
+                  }}
+                  formatter={(value: any, name: any) => [value, name]}
+                  labelFormatter={() => ""}
+                />
+                <Scatter
+                  name="Brands"
+                  data={overallShare.map((b: any) => ({
+                    brand: b.brand,
+                    share: b.share,
+                    mentions: b.mentions,
+                  }))}
+                >
+                  {overallShare.map((_entry: any, index: number) => (
+                    <Cell key={`cell-${index}`} fill={`hsl(var(--chart-${(index % 5) + 1}))`} />
+                  ))}
+                </Scatter>
+              </ScatterChart>
+            </ResponsiveContainer>
+          )}
+
           <div className="mt-4 space-y-2">
             {overallShare.map((brand:any, idx:number) => {
               const chartColors = [
