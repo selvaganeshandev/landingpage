@@ -10,6 +10,10 @@ from .models import SentimentAnalytics, ShareOfVoiceAnalytics
 from .serializers import SentimentAnalyticsSerializer, ShareOfVoiceAnalyticsSerializer
 from core.queryset_scoping import filter_by_accessible_domains, user_can_access_domain
 
+# Reserved platform label for the aggregate row written by the engine's
+# competitor processor. Kept in sync with SOV_OVERALL_PLATFORM there.
+SOV_OVERALL_PLATFORM = 'Overall'
+
 
 class SentimentAnalyticsViewSet(viewsets.ModelViewSet):
     serializer_class = SentimentAnalyticsSerializer
@@ -278,9 +282,30 @@ class ShareOfVoiceAnalyticsViewSet(viewsets.ModelViewSet):
             timestamp__gte=start_date
         )
         
+        # Share is stored once per platform plus an aggregate row per brand under
+        # the reserved 'Overall' label. Without scoping, the latest timestamp
+        # returns each brand once per platform — Tata Motors came back four times
+        # over, so the chart legend listed "Tata 2179 mentions" beside "Tata 0
+        # mentions" and every figure below was a different platform's row.
+        #
+        # Defaults to the aggregate; ?platform=ChatGPT asks for one platform.
+        # scope=all returns every platform scope, which the page needs to build
+        # its per-platform breakdown. The default stays aggregate-only: two
+        # callers share this endpoint, and the one driving the headline figures
+        # must not receive a brand once per platform.
+        scope = request.query_params.get('scope')
+
         if platform:
             queryset = queryset.filter(platform=platform)
-        
+        elif scope == 'all':
+            pass
+        else:
+            overall = queryset.filter(platform=SOV_OVERALL_PLATFORM)
+            # Rows written before share was computed per platform carry the
+            # literal 'ChatGPT' for what was an all-platform total, so a domain
+            # that has not been recalculated still renders from them.
+            queryset = overall if overall.exists() else queryset
+
         # Get latest data point for "You" and competitors
         latest_date = queryset.values_list('timestamp', flat=True).order_by('-timestamp').first()
         if latest_date:

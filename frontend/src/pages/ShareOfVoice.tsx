@@ -100,7 +100,10 @@ const ShareOfVoice = () => {
       try {
         const [latestResp, byDomain, gaps] = await Promise.all([
           apiClient.getShareOfVoiceLatestEngine({ domain_id: domainId }),
-          apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days }),
+          // scope=all: this series drives the trend chart and the per-platform
+          // breakdown, both of which need every scope. The latest call above
+          // deliberately gets only the aggregate.
+          apiClient.getShareOfVoiceByDomain({ domain_id: domainId, days, scope: 'all' }),
           apiClient.getCompetitorGapsEngine({ domain_id: domainId })
         ]);
 

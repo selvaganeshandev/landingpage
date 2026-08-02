@@ -1145,11 +1145,15 @@ export const apiClient = {
   // Share of Voice helpers for ShareOfVoice page
   
 
-  getShareOfVoiceByDomain: (params: { domain_id: string; days?: number; platform?: string }, options?: RequestOptions) => {
+  getShareOfVoiceByDomain: (
+    params: { domain_id: string; days?: number; platform?: string; scope?: 'all' },
+    options?: RequestOptions,
+  ) => {
     const queryParams = `?${new URLSearchParams({
       domain_id: params.domain_id,
       ...(params.days ? { days: String(params.days) } : {}),
       ...(params.platform ? { platform: params.platform } : {}),
+      ...(params.scope ? { scope: params.scope } : {}),
     }).toString()}`;
     return apiRequest(`/analytics/share-of-voice/by_domain/${queryParams}`, options);
   },
