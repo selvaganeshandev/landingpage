@@ -383,17 +383,36 @@ def get_traffic_insights(request):
         )
     
     try:
-        # Get latest GA insight
-        ga_insight = GATrafficInsight.objects.filter(
-            domain_id=domain_id,
-            track_status='COMP'
-        ).order_by('-end_date', '-created_at').first()
-        
-        # Get latest GSC insight
-        gsc_insight = GSCTrafficInsight.objects.filter(
-            domain_id=domain_id,
-            track_status='COMP'
-        ).order_by('-end_date', '-created_at').first()
+        # Monthly insight rows are created at the start of the period they cover,
+        # so a row for August exists on 3 August with an end_date of the 31st and
+        # nothing in it yet. Ordering by -end_date picked that empty row over the
+        # rolling window sitting directly beneath it, which is why every one of
+        # the ten domains with Search Console connected reported "No Search
+        # Console data available" while holding 100 queries and 829 clicks.
+        #
+        # Preferring a row that has actually been populated fixes it without
+        # discarding the future row, which fills in as the month progresses.
+        from datetime import date as date_class
+        today = date_class.today()
+
+        def _pick(model, payload_field):
+            rows = model.objects.filter(
+                domain_id=domain_id,
+                track_status='COMP',
+            ).order_by('-end_date', '-created_at')
+
+            # A period that has started is the first candidate; among those,
+            # prefer one carrying data.
+            started = [r for r in rows if r.start_date <= today]
+            for row in started:
+                if getattr(row, payload_field, None):
+                    return row
+            # Nothing populated yet — fall back to the most recent row so the
+            # response still describes the period rather than returning null.
+            return started[0] if started else rows.first()
+
+        ga_insight = _pick(GATrafficInsight, 'platform_breakdown')
+        gsc_insight = _pick(GSCTrafficInsight, 'top_queries')
         
         # Format response
         response_data = {
