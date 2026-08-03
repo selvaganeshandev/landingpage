@@ -2645,12 +2645,18 @@ def prompt_analytics(request, prompt_id):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def get_historical_trends(request):
     """
     Get comprehensive historical trends data for the Historical Trends page
     Uses DomainMetricSnapshot for efficient time-series queries
     Returns: visibility progression, platform growth, competitor comparison, seasonal patterns, summary metrics
+
+    Was AllowAny with no tenant check, so any domain's mention volumes, position
+    history, sentiment and named competitors could be read by URL alone —
+    unauthenticated, from any organisation. Verified against production before
+    the change: the endpoint returned 200 with a full payload for domain 91 with
+    no credentials presented.
     """
     try:
         domain_id = request.GET.get('domain_id')
@@ -2660,6 +2666,11 @@ def get_historical_trends(request):
         
         if not domain_id:
             return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 404 rather than 403: a 403 confirms the domain exists, which is the
+        # question an enumeration probe is asking.
+        if not user_can_access_domain(request.user, domain_id, request):
+            return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
         
         # Calculate date range
         from datetime import date as date_class

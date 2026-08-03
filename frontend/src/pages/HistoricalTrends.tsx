@@ -128,6 +128,13 @@ const HistoricalTrends = () => {
   // Milestones - get from API
   const milestones = useMemo(() => trendsData?.milestones || [], [trendsData]);
 
+  // A trend needs two points. With one, every chart below draws a single dot
+  // and every growth figure is 0% — indistinguishable from a genuinely flat
+  // period, which is a different statement entirely.
+  const periodCount = visibilityTrend.length;
+  const hasComparablePeriods = periodCount >= 2;
+  const latestPeriodLabel = periodCount > 0 ? visibilityTrend[periodCount - 1]?.month : null;
+
   const handleExportReport = () => {
     const exportRows: Record<string, string | number>[] = [];
 
@@ -260,52 +267,90 @@ const HistoricalTrends = () => {
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {/* Summary Cards
+          Every card used to be hardcoded text-success with a rising arrow, so a
+          decline rendered as "-12%" in green beside an up arrow. Direction now
+          follows the value, and Position Improvement inverts because a lower
+          average position is the better outcome. */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground font-medium">Visibility Growth</p>
-            <h3 className="text-3xl font-bold text-success">{summary.visibility_growth >= 0 ? '+' : ''}{summary.visibility_growth}%</h3>
-            <div className="flex items-center gap-2 text-sm">
-              <TrendingUp className="h-4 w-4 text-success" />
-              <span className="text-muted-foreground">Over period</span>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground font-medium">Mention Growth</p>
-            <h3 className="text-3xl font-bold text-success">{summary.mention_growth >= 0 ? '+' : ''}{summary.mention_growth}%</h3>
-            <div className="flex items-center gap-2 text-sm">
-              <TrendingUp className="h-4 w-4 text-success" />
-              <span className="text-muted-foreground">Over period</span>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground font-medium">Position Improvement</p>
-            <h3 className="text-3xl font-bold text-success">{summary.position_improvement >= 0 ? '+' : ''}{summary.position_improvement}%</h3>
-            <div className="flex items-center gap-2 text-sm">
-              <TrendingDown className="h-4 w-4 text-success" />
-              <span className="text-muted-foreground">Lower is better</span>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="p-6 transition-all duration-300 border border-border hover:border-primary">
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground font-medium">Market Share Gain</p>
-            <h3 className="text-3xl font-bold text-success">{summary.market_share_gain >= 0 ? '+' : ''}{summary.market_share_gain}%</h3>
-            <div className="flex items-center gap-2 text-sm">
-              <TrendingUp className="h-4 w-4 text-success" />
-              <span className="text-muted-foreground">Over period</span>
-            </div>
-          </div>
-        </Card>
+        {[
+          {
+            label: "Visibility Growth",
+            value: summary.visibility_growth,
+            caption: "Over period",
+            goodWhenPositive: true,
+          },
+          {
+            label: "Mention Growth",
+            value: summary.mention_growth,
+            caption: "Over period",
+            goodWhenPositive: true,
+          },
+          {
+            label: "Position Improvement",
+            value: summary.position_improvement,
+            caption: "Lower average position is better",
+            goodWhenPositive: true,
+          },
+          {
+            label: "Market Share Gain",
+            value: summary.market_share_gain,
+            caption: "Over period",
+            goodWhenPositive: true,
+          },
+        ].map((card) => {
+          const rising = card.value > 0;
+          const flat = card.value === 0;
+          const good = card.goodWhenPositive ? rising : !rising;
+          const tone = flat ? "text-muted-foreground" : good ? "text-success" : "text-destructive";
+          return (
+            <Card key={card.label} className="p-6 border border-border">
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">{card.label}</p>
+                <h3 className={`text-2xl font-bold ${tone}`}>
+                  {rising ? "+" : ""}{card.value}%
+                </h3>
+                <div className="flex items-center gap-2 text-xs">
+                  {flat ? (
+                    <span className="text-muted-foreground">
+                      {hasComparablePeriods ? "No change over period" : "Not enough history to compare"}
+                    </span>
+                  ) : (
+                    <>
+                      {rising
+                        ? <TrendingUp className={`h-3 w-3 ${tone}`} />
+                        : <TrendingDown className={`h-3 w-3 ${tone}`} />}
+                      <span className="text-muted-foreground">{card.caption}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </Card>
+          );
+        })}
       </div>
+
+      {/* A single data point is not a trend. Every chart below plots a series
+          that needs at least two periods, so say so once rather than drawing
+          five charts each showing one dot. */}
+      {!hasComparablePeriods && (
+        <Card className="p-6 border border-dashed border-border bg-card/70">
+          <div className="flex gap-4 items-start">
+            <div className="p-3 rounded-full bg-muted text-muted-foreground">
+              <TrendingUp className="h-5 w-5" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="font-semibold">Not enough history yet</h3>
+              <p className="text-sm text-muted-foreground">
+                {periodCount === 0
+                  ? "No metric snapshots have been recorded for this domain yet. Trends appear once tracking has run."
+                  : `Only one period of data has been recorded so far${latestPeriodLabel ? ` (${latestPeriodLabel})` : ""}. Charts below will fill in as tracking continues — a trend needs at least two.`}
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
+
 
       {/* Visibility Score Over Time */}
       <Card className="p-6 border border-border">
