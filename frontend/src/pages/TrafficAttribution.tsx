@@ -95,6 +95,11 @@ export default function TrafficAttribution() {
   const [gscPage, setGscPage] = useState(1);
   const [gscSort, setGscSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "clicks", dir: "desc" });
   const GSC_PAGE_SIZE = 15;
+  // Landing pages: same table treatment as Search Console.
+  const [lpSearch, setLpSearch] = useState("");
+  const [lpPage, setLpPage] = useState(1);
+  const [lpSort, setLpSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "sessions", dir: "desc" });
+  const LP_PAGE_SIZE = 15;
   // Both date popovers are controlled so selecting a start can close its own
   // calendar and open the end one, rather than leaving the user to find and
   // click the second field themselves.
@@ -640,6 +645,54 @@ export default function TrafficAttribution() {
         : { key, dir: key === "query" || key === "position" ? "asc" : "desc" },
     );
     setGscPage(1);
+  };
+
+  // Landing pages, filtered/sorted/paged in memory like the GSC table above.
+  // Not useMemo — see the note there; this block is below the early return.
+  const lpFiltered = (() => {
+    const q = lpSearch.trim().toLowerCase();
+    const rows = q
+      ? topLandingPages.filter((r: any) => String(r.page || "").toLowerCase().includes(q))
+      : topLandingPages;
+
+    const numeric = (key: string, row: any) => {
+      const v = row?.[key];
+      if (typeof v === "number") return v;
+      const s = String(v ?? "");
+      // avgDuration is "m:ss", so parsing it as a float would read "3:07" as 3
+      // and sort a three-minute visit below a nine-second one.
+      if (key === "avgDuration" && s.includes(":")) {
+        const [m, sec] = s.split(":").map((x) => parseInt(x, 10) || 0);
+        return m * 60 + sec;
+      }
+      const parsed = parseFloat(s.replace("%", ""));
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    return [...rows].sort((a: any, b: any) => {
+      if (lpSort.key === "page") {
+        const cmp = String(a.page || "").localeCompare(String(b.page || ""));
+        return lpSort.dir === "asc" ? cmp : -cmp;
+      }
+      const av = numeric(lpSort.key, a);
+      const bv = numeric(lpSort.key, b);
+      return lpSort.dir === "asc" ? av - bv : bv - av;
+    });
+  })();
+
+  const lpTotalPages = Math.max(1, Math.ceil(lpFiltered.length / LP_PAGE_SIZE));
+  const lpCurrentPage = Math.min(lpPage, lpTotalPages);
+  const lpPageRows = lpFiltered.slice((lpCurrentPage - 1) * LP_PAGE_SIZE, lpCurrentPage * LP_PAGE_SIZE);
+
+  const toggleLpSort = (key: string) => {
+    setLpSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === "desc" ? "asc" : "desc" }
+        // Text and bounce rate read best ascending; counts and duration
+        // descending.
+        : { key, dir: key === "page" || key === "bounceRate" ? "asc" : "desc" },
+    );
+    setLpPage(1);
   };
 
   const deviceDonut = deviceBreakdown.map((d) => ({
@@ -1579,38 +1632,116 @@ export default function TrafficAttribution() {
         <TabsContent value="pages" className="space-y-6">
           <Card className="border border-border">
             <CardHeader>
-              <CardTitle>Top Landing Pages</CardTitle>
-              <CardDescription>Performance metrics for top landing pages from AI traffic</CardDescription>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <CardTitle>Top Landing Pages</CardTitle>
+                  <CardDescription>
+                    Where AI traffic arrives on your site
+                    {topLandingPages.length > 0 && ` · ${topLandingPages.length} pages`}
+                  </CardDescription>
+                </div>
+                {topLandingPages.length > 0 && (
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Filter pages..."
+                      value={lpSearch}
+                      onChange={(e) => { setLpSearch(e.target.value); setLpPage(1); }}
+                      className="pl-9"
+                    />
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
-              {topLandingPages.length > 0 ? (
-                <div className="space-y-4">
-                  {topLandingPages.map((item: any, index: number) => (
-                    <div key={index} className="p-4 border rounded-lg">
-                      <div className="font-medium mb-3">{item.page}</div>
-                      <div className="grid grid-cols-4 gap-4">
-                        <div>
-                          <div className="text-sm text-muted-foreground">Sessions</div>
-                          <div className="text-lg font-bold">{(item.sessions || 0).toLocaleString()}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm text-muted-foreground">Bounce Rate</div>
-                          <div className="text-lg font-bold">{item.bounceRate || '0%'}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm text-muted-foreground">Avg Duration</div>
-                          <div className="text-lg font-bold">{item.avgDuration || '0:00'}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm text-muted-foreground">Conversions</div>
-                          <div className="text-lg font-bold">{item.conversions || 0}</div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {/* Same treatment as the Search Console tab: a stacked card per
+                  page made finding a specific URL or ranking by engagement
+                  impossible. */}
+              {topLandingPages.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No landing page data available.
+                </p>
+              ) : lpFiltered.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No pages match “{lpSearch}”.
+                </p>
               ) : (
-                <p className="text-sm text-muted-foreground text-center py-8">No landing page data available.</p>
+                <>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/30">
+                          {[
+                            { key: "page", label: "Page", align: "text-left" },
+                            { key: "sessions", label: "Sessions", align: "text-right" },
+                            { key: "bounceRate", label: "Bounce Rate", align: "text-right" },
+                            { key: "avgDuration", label: "Avg Duration", align: "text-right" },
+                            { key: "conversions", label: "Conversions", align: "text-right" },
+                          ].map((col) => (
+                            <TableHead
+                              key={col.key}
+                              className={`py-2 px-3 cursor-pointer select-none hover:text-foreground ${col.align}`}
+                              onClick={() => toggleLpSort(col.key)}
+                            >
+                              <span className={`inline-flex items-center gap-1 ${col.align === "text-right" ? "flex-row-reverse" : ""}`}>
+                                {col.label}
+                                <ArrowUpDown
+                                  className={`h-3 w-3 ${lpSort.key === col.key ? "text-primary" : "opacity-30"}`}
+                                />
+                              </span>
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {lpPageRows.map((item: any, index: number) => (
+                          <TableRow key={`${item.page}-${index}`} className="hover:bg-muted/20 transition-colors">
+                            <TableCell className="py-2 px-3 font-medium max-w-[380px]">
+                              <span className="block truncate" title={item.page}>{item.page}</span>
+                            </TableCell>
+                            <TableCell className="py-2 px-3 text-right font-medium">
+                              {(item.sessions || 0).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="py-2 px-3 text-right">{item.bounceRate || "0%"}</TableCell>
+                            <TableCell className="py-2 px-3 text-right">{item.avgDuration || "0:00"}</TableCell>
+                            <TableCell className="py-2 px-3 text-right">
+                              {(item.conversions || 0).toLocaleString()}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 pt-4">
+                    <p className="text-sm text-muted-foreground">
+                      Showing {(lpCurrentPage - 1) * LP_PAGE_SIZE + 1}–
+                      {Math.min(lpCurrentPage * LP_PAGE_SIZE, lpFiltered.length)} of {lpFiltered.length}
+                      {lpSearch && ` (filtered from ${topLandingPages.length})`}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={lpCurrentPage <= 1}
+                        onClick={() => setLpPage(lpCurrentPage - 1)}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="text-sm text-muted-foreground min-w-[80px] text-center">
+                        Page {lpCurrentPage} of {lpTotalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={lpCurrentPage >= lpTotalPages}
+                        onClick={() => setLpPage(lpCurrentPage + 1)}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
