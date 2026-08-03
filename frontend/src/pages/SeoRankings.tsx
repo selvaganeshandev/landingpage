@@ -2254,7 +2254,7 @@ const SeoRankings = () => {
                               disabled={!!keyword.favour}
                             />
                           </TableCell>
-                          <TableCell className="py-3">
+                          <TableCell className="py-3 max-w-[340px]">
                             <div className="flex items-center gap-1.5">
                               {/* Hidden — see the note on the main table. */}
                               {false && (
@@ -2275,21 +2275,24 @@ const SeoRankings = () => {
                                 className="w-5 h-5 object-cover rounded-full shadow-sm flex-shrink-0"
                               />
                               <div className="min-w-0">
-                                <p className="font-medium text-xs truncate">{keyword.keyword}</p>
+                                {/* text-sm / text-xs to match the main table. The
+                                    grid used text-xs / text-[10px], so the same
+                                    keyword rendered smaller depending on which
+                                    view you were in. */}
+                                <p className="font-medium text-sm truncate">{keyword.keyword}</p>
                                 {keyword.url ? (
                                   <a
                                     href={keyword.url.startsWith('http') ? keyword.url : `https://${keyword.url}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     title={keyword.url}
-                                    className="text-[10px] text-muted-foreground flex items-center gap-0.5 min-w-0 hover:text-primary hover:underline"
+                                    className="text-xs text-muted-foreground flex items-center gap-1 min-w-0 hover:text-primary hover:underline"
                                   >
-                                    {/* Same fix as the main table above. */}
                                     <span className="truncate">{keyword.url}</span>
-                                    <ExternalLink className="h-2 w-2 flex-shrink-0" />
+                                    <ExternalLink className="h-2.5 w-2.5 flex-shrink-0" />
                                   </a>
                                 ) : (
-                                  <p className="text-[10px] text-muted-foreground flex items-center gap-0.5 truncate">
+                                  <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
                                     —
                                   </p>
                                 )}
