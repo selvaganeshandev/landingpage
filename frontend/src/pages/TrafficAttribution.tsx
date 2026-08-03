@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3, CalendarIcon, Sparkles, Link as LinkIcon, Download, Loader2 } from "lucide-react";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
+import { InfoHint, MetricHint } from "@/components/InfoHint";
 import { PageLoader } from "@/components/PageLoader";
 import { useDomainStore } from "@/stores/domainStore";
 import { useNavigate } from "react-router-dom";
@@ -521,9 +522,33 @@ export default function TrafficAttribution() {
   };
 
   const roiMetrics = [
-    { metric: "Total Traffic from AI", value: totalTraffic.toLocaleString(), unit: "visits" },
-    { metric: "Conversion Rate", value: conversionRate, unit: "%" },
-    { metric: "Total Revenue", value: formatCurrency(totalRevenue), unit: "" },
+    {
+      metric: "Total Traffic from AI",
+      value: totalTraffic.toLocaleString(),
+      unit: "visits",
+      hint: {
+        plain: "Sessions that arrived from an AI platform — someone read an answer mentioning you and clicked through.",
+        formula: "GA4 sessions whose source matches a known AI platform (ChatGPT, Claude, Gemini, Perplexity, Grok, DeepSeek). Deliberately not your site's total sessions, which would include organic, direct and paid.",
+      },
+    },
+    {
+      metric: "Conversion Rate",
+      value: conversionRate,
+      unit: "%",
+      hint: {
+        plain: "How often a visit from an AI platform completes a conversion you track in GA4.",
+        formula: "Conversions from AI sources ÷ visits from AI sources. Uses whatever events you have marked as conversions in GA4, so it moves if that configuration changes.",
+      },
+    },
+    {
+      metric: "Total Revenue",
+      value: formatCurrency(totalRevenue),
+      unit: "",
+      hint: {
+        plain: "Revenue GA4 credits to sessions that came from an AI platform.",
+        formula: "Summed across AI sources for this window. This is last-touch: the platform that brought the converting session gets the credit, so a visitor introduced by AI who returns later via search is counted under search.",
+      },
+    },
     {
       metric: "Value per Visit",
       value: totalTraffic > 0 ? formatCurrency(totalRevenue / totalTraffic) : "—",
@@ -531,6 +556,10 @@ export default function TrafficAttribution() {
       caption: totalTraffic > 0
         ? `${totalConversions.toLocaleString()} conversion${totalConversions === 1 ? "" : "s"} from ${totalTraffic.toLocaleString()} visits`
         : "No AI traffic in this window",
+      hint: {
+        plain: "What one visit from an AI platform is worth on average.",
+        formula: "Revenue ÷ visits, both AI-sourced. Unlike total revenue this stays comparable as traffic grows, which makes it the closest figure to ROI available — true ROI would need your ad spend or content cost, which GA4 does not carry.",
+      },
     },
     {
       metric: "Top AI Source",
@@ -539,6 +568,10 @@ export default function TrafficAttribution() {
       caption: topSource && sourceTotal > 0
         ? `${topSource.visits.toLocaleString()} visits · ${Math.round((topSource.visits / sourceTotal) * 100)}% of AI traffic`
         : "No AI traffic in this window",
+      hint: {
+        plain: "The AI platform sending you the most traffic in this window.",
+        formula: "Ranked by visits, not revenue. The split is rarely even — one platform commonly accounts for most AI traffic — so the four totals beside this can hide where it is actually coming from.",
+      },
     },
   ];
 
@@ -741,7 +774,18 @@ export default function TrafficAttribution() {
         {roiMetrics.map((item, index) => (
           <Card key={index} className="transition-all duration-300 border border-border hover:border-primary">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">{item.metric}</CardTitle>
+              <CardTitle className="text-sm font-medium flex items-center gap-1.5">
+                {item.metric}
+                {(item as any).hint && (
+                  <InfoHint>
+                    <MetricHint
+                      title={item.metric}
+                      plain={(item as any).hint.plain}
+                      formula={(item as any).hint.formula}
+                    />
+                  </InfoHint>
+                )}
+              </CardTitle>
               {index === 0 && <MousePointerClick className="h-4 w-4 text-muted-foreground" />}
               {index === 1 && <TrendingUp className="h-4 w-4 text-muted-foreground" />}
               {index === 2 && <DollarSign className="h-4 w-4 text-muted-foreground" />}

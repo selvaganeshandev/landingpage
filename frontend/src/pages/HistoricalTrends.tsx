@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/PageLoader";
+import { InfoHint, MetricHint } from "@/components/InfoHint";
 import { useToast } from "@/hooks/use-toast";
 import {
   Select,
@@ -348,24 +349,40 @@ const HistoricalTrends = () => {
             value: summary.visibility_growth,
             caption: "Over period",
             goodWhenPositive: true,
+            hint: {
+              plain: "How much more visible your brand is in AI answers now than at the start of the period.",
+              formula: "First period compared with the last, using the mention-weighted visibility score from the metric snapshots behind the chart below. Needs at least two periods on record — with one, this reads 0% because there is nothing to compare, not because nothing moved.",
+            },
           },
           {
             label: "Mention Growth",
             value: summary.mention_growth,
             caption: "Over period",
             goodWhenPositive: true,
+            hint: {
+              plain: "The change in how often AI answers name your brand.",
+              formula: "Mentions in the last period against the first, as a percentage. Rising mentions with flat visibility usually means you are being named more often but placed lower in the answer.",
+            },
           },
           {
             label: "Position Improvement",
             value: summary.position_improvement,
             caption: "Lower average position is better",
             goodWhenPositive: true,
+            hint: {
+              plain: "Whether your brand is being named earlier in AI answers than it was.",
+              formula: "Change in average position across the period, inverted so a positive figure always means improvement — position 5 moving to position 2 is progress, even though the number fell.",
+            },
           },
           {
             label: "Market Share Gain",
             value: summary.market_share_gain,
             caption: "Over period",
             goodWhenPositive: true,
+            hint: {
+              plain: "How your slice of AI attention has shifted against the competitors tracked for this domain.",
+              formula: "Change in share of total mentions across all tracked players. It can fall while your own mentions rise, if a competitor gained faster.",
+            },
           },
         ].map((card) => {
           const rising = card.value > 0;
@@ -375,7 +392,16 @@ const HistoricalTrends = () => {
           return (
             <Card key={card.label} className="p-6 border border-border">
               <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">{card.label}</p>
+                <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                  {card.label}
+                  <InfoHint>
+                    <MetricHint
+                      title={card.label}
+                      plain={card.hint.plain}
+                      formula={card.hint.formula}
+                    />
+                  </InfoHint>
+                </p>
                 <h3 className={`text-2xl font-bold ${tone}`}>
                   {rising ? "+" : ""}{card.value}%
                 </h3>
