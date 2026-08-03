@@ -6,10 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3, CalendarIcon, Sparkles, Link as LinkIcon, Download, Loader2 } from "lucide-react";
+import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3, CalendarIcon, Sparkles, Link as LinkIcon, Download, Loader2, Search, ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 import { InfoHint, MetricHint } from "@/components/InfoHint";
@@ -80,6 +89,12 @@ export default function TrafficAttribution() {
   // the switch only shows/hides the GA4-reconciliation context. Display-only.
   const [gaClientView, setGaClientView] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  // Search Console table: 100 queries arrive at once, so the view paginates and
+  // sorts client-side rather than re-querying.
+  const [gscSearch, setGscSearch] = useState("");
+  const [gscPage, setGscPage] = useState(1);
+  const [gscSort, setGscSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "clicks", dir: "desc" });
+  const GSC_PAGE_SIZE = 15;
   // Both date popovers are controlled so selecting a start can close its own
   // calendar and open the end one, rather than leaving the user to find and
   // click the second field themselves.
@@ -574,6 +589,58 @@ export default function TrafficAttribution() {
       },
     },
   ];
+
+  // GSC rows filtered, sorted and paged in memory. The API returns the full 100
+  // in one payload, so there is nothing to gain from server-side paging here —
+  // and sorting locally keeps the position column honest, since GSC reports it
+  // as a decimal average that a database sort would round differently.
+  // Deliberately not useMemo: this block sits below the `if (loading)` early
+  // return, and a hook there changes hook order between renders — the fault
+  // that blanked this page when the export flag was added. The list is 100 rows
+  // and the work is a filter plus a sort, so recomputing per render is free.
+  const gscFiltered = (() => {
+    const q = gscSearch.trim().toLowerCase();
+    const rows = q
+      ? searchConsoleData.filter((r: any) => String(r.query || "").toLowerCase().includes(q))
+      : searchConsoleData;
+
+    const numeric = (v: any) => {
+      if (typeof v === "number") return v;
+      // CTR arrives as "50.5%"; strip the sign so it sorts as a number.
+      const parsed = parseFloat(String(v ?? "").replace("%", ""));
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    return [...rows].sort((a: any, b: any) => {
+      if (gscSort.key === "query") {
+        const cmp = String(a.query || "").localeCompare(String(b.query || ""));
+        return gscSort.dir === "asc" ? cmp : -cmp;
+      }
+      const av = numeric(a[gscSort.key]);
+      const bv = numeric(b[gscSort.key]);
+      return gscSort.dir === "asc" ? av - bv : bv - av;
+    });
+  })();
+
+  const gscTotalPages = Math.max(1, Math.ceil(gscFiltered.length / GSC_PAGE_SIZE));
+  // Clamp rather than reset: narrowing the search while on page 6 should land
+  // on the last page of results, not silently show an empty table.
+  const gscCurrentPage = Math.min(gscPage, gscTotalPages);
+  const gscPageRows = gscFiltered.slice(
+    (gscCurrentPage - 1) * GSC_PAGE_SIZE,
+    gscCurrentPage * GSC_PAGE_SIZE,
+  );
+
+  const toggleGscSort = (key: string) => {
+    setGscSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === "desc" ? "asc" : "desc" }
+        // A new column starts descending for counts and ascending for text and
+        // position, which is the useful direction in each case.
+        : { key, dir: key === "query" || key === "position" ? "asc" : "desc" },
+    );
+    setGscPage(1);
+  };
 
   const deviceDonut = deviceBreakdown.map((d) => ({
     name: d.device,
@@ -1311,38 +1378,120 @@ export default function TrafficAttribution() {
         <TabsContent value="search" className="space-y-6">
           <Card className="border border-border">
             <CardHeader>
-              <CardTitle>Google Search Console Data</CardTitle>
-              <CardDescription>Top search queries driving traffic from AI platforms</CardDescription>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <CardTitle>Google Search Console Data</CardTitle>
+                  <CardDescription>
+                    Search queries bringing visitors to your site
+                    {searchConsoleData.length > 0 && ` · ${searchConsoleData.length} queries`}
+                  </CardDescription>
+                </div>
+                {searchConsoleData.length > 0 && (
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Filter queries..."
+                      value={gscSearch}
+                      onChange={(e) => { setGscSearch(e.target.value); setGscPage(1); }}
+                      className="pl-9"
+                    />
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
-              {searchConsoleData.length > 0 ? (
-                <div className="space-y-4">
-                  {searchConsoleData.map((item: any, index: number) => (
-                    <div key={index} className="p-4 border rounded-lg">
-                      <div className="font-medium mb-3">{item.query}</div>
-                      <div className="grid grid-cols-4 gap-4">
-                        <div>
-                          <div className="text-sm text-muted-foreground">Impressions</div>
-                          <div className="text-lg font-bold">{(item.impressions || 0).toLocaleString()}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm text-muted-foreground">Clicks</div>
-                          <div className="text-lg font-bold">{(item.clicks || 0).toLocaleString()}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm text-muted-foreground">CTR</div>
-                          <div className="text-lg font-bold">{item.ctr || '0%'}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm text-muted-foreground">Avg Position</div>
-                          <div className="text-lg font-bold">{item.position || 0}</div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {/* 100 queries rendered as stacked cards made this tab a very long
+                  scroll with no way to find a specific term. A sortable, paged
+                  table shows the same data in a screenful. */}
+              {searchConsoleData.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No Search Console data available. Connect Google Search Console to view search query data.
+                </p>
+              ) : gscFiltered.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No queries match “{gscSearch}”.
+                </p>
               ) : (
-                <p className="text-sm text-muted-foreground text-center py-8">No Search Console data available. Connect Google Search Console to view search query data.</p>
+                <>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/30">
+                          {[
+                            { key: "query", label: "Query", align: "text-left" },
+                            { key: "impressions", label: "Impressions", align: "text-right" },
+                            { key: "clicks", label: "Clicks", align: "text-right" },
+                            { key: "ctr", label: "CTR", align: "text-right" },
+                            { key: "position", label: "Avg Position", align: "text-right" },
+                          ].map((col) => (
+                            <TableHead
+                              key={col.key}
+                              className={`py-2 px-3 cursor-pointer select-none hover:text-foreground ${col.align}`}
+                              onClick={() => toggleGscSort(col.key)}
+                            >
+                              <span className={`inline-flex items-center gap-1 ${col.align === "text-right" ? "flex-row-reverse" : ""}`}>
+                                {col.label}
+                                <ArrowUpDown
+                                  className={`h-3 w-3 ${gscSort.key === col.key ? "text-primary" : "opacity-30"}`}
+                                />
+                              </span>
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {gscPageRows.map((item: any, index: number) => (
+                          <TableRow key={`${item.query}-${index}`} className="hover:bg-muted/20 transition-colors">
+                            <TableCell className="py-2 px-3 font-medium max-w-[380px]">
+                              <span className="block truncate" title={item.query}>{item.query}</span>
+                            </TableCell>
+                            <TableCell className="py-2 px-3 text-right">
+                              {(item.impressions || 0).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="py-2 px-3 text-right font-medium">
+                              {(item.clicks || 0).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="py-2 px-3 text-right">{item.ctr || "0%"}</TableCell>
+                            <TableCell className="py-2 px-3 text-right">
+                              {/* Position is an average, so 1 and 1.0 mean different
+                                  things once several impressions are involved. */}
+                              {typeof item.position === "number" ? item.position.toFixed(1) : (item.position || "—")}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 pt-4">
+                    <p className="text-sm text-muted-foreground">
+                      Showing {(gscCurrentPage - 1) * GSC_PAGE_SIZE + 1}–
+                      {Math.min(gscCurrentPage * GSC_PAGE_SIZE, gscFiltered.length)} of {gscFiltered.length}
+                      {gscSearch && ` (filtered from ${searchConsoleData.length})`}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={gscCurrentPage <= 1}
+                        onClick={() => setGscPage(gscCurrentPage - 1)}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="text-sm text-muted-foreground min-w-[80px] text-center">
+                        Page {gscCurrentPage} of {gscTotalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={gscCurrentPage >= gscTotalPages}
+                        onClick={() => setGscPage(gscCurrentPage + 1)}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
