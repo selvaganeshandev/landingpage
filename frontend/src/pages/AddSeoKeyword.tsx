@@ -62,6 +62,65 @@ const regionFlagMap: Record<string, string> = {
   'google.com.sa': 'sa', 'google.co.ke': 'ke',
 };
 
+// The domain records the country it was set up for, but this form always opened
+// on google.com — so 51 of the 63 domains, all set to India, had to have their
+// country re-picked on every visit, and a missed pick silently tracked rankings
+// from the wrong country.
+//
+// Keyed on the country name Domain.country stores, which is a display string
+// ("United States", not "US"), so the lookup matches on exactly that.
+const countryToRegion: Record<string, string> = {
+  'India': 'google.co.in',
+  'United States': 'google.com',
+  'United Kingdom': 'google.co.uk',
+  'Canada': 'google.ca',
+  'Australia': 'google.com.au',
+  'Germany': 'google.de',
+  'France': 'google.fr',
+  'Spain': 'google.es',
+  'Italy': 'google.it',
+  'Japan': 'google.co.jp',
+  'Brazil': 'google.com.br',
+  'Mexico': 'google.com.mx',
+  'Netherlands': 'google.nl',
+  'Poland': 'google.pl',
+  'Sweden': 'google.se',
+  'Singapore': 'google.com.sg',
+  'South Africa': 'google.co.za',
+  'Nigeria': 'google.com.ng',
+  'New Zealand': 'google.co.nz',
+  'Ireland': 'google.ie',
+  'Austria': 'google.at',
+  'Belgium': 'google.be',
+  'Switzerland': 'google.ch',
+  'Denmark': 'google.dk',
+  'Finland': 'google.fi',
+  'Norway': 'google.no',
+  'Portugal': 'google.pt',
+  'Argentina': 'google.com.ar',
+  'Chile': 'google.cl',
+  'Israel': 'google.co.il',
+  'Philippines': 'google.com.ph',
+  'Pakistan': 'google.com.pk',
+  'Egypt': 'google.com.eg',
+  'United Arab Emirates': 'google.ae',
+  'Thailand': 'google.co.th',
+  'Malaysia': 'google.com.my',
+  'Indonesia': 'google.co.id',
+  'Vietnam': 'google.com.vn',
+  'South Korea': 'google.co.kr',
+  'Taiwan': 'google.com.tw',
+  'Hong Kong': 'google.com.hk',
+  'Russia': 'google.ru',
+  'Ukraine': 'google.com.ua',
+  'Turkey': 'google.com.tr',
+  'Saudi Arabia': 'google.com.sa',
+  'Kenya': 'google.co.ke',
+};
+
+const regionForCountry = (country?: string | null): string =>
+  (country && countryToRegion[country.trim()]) || 'google.com';
+
 const AddSeoKeyword = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -76,7 +135,7 @@ const AddSeoKeyword = () => {
   const [inputMode, setInputMode] = useState<"text" | "csv">("text");
   const [file, setFile] = useState<File | null>(null);
   const [urlSlug, setUrlSlug] = useState("");
-  const [region, setRegion] = useState("google.com");
+  const [region, setRegion] = useState(() => regionForCountry(selectedDomain?.country));
   const [language, setLanguage] = useState("en");
   const [platform, setPlatform] = useState("desktop");
   const [tagsEnabled, setTagsEnabled] = useState(true);
@@ -100,6 +159,17 @@ const AddSeoKeyword = () => {
         .catch(() => {});
     }
   }, [activeDomainId]);
+
+  // Follow the domain's country until the user picks a region themselves.
+  // useState's initialiser runs once, so without this the default is wrong
+  // whenever the domain resolves after mount — a page refresh, or switching
+  // domains from the sidebar with this form already open.
+  const [regionTouched, setRegionTouched] = useState(false);
+  useEffect(() => {
+    if (!regionTouched) {
+      setRegion(regionForCountry(selectedDomain?.country));
+    }
+  }, [selectedDomain?.country, regionTouched]);
 
 
   const handleKeywordInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -329,7 +399,7 @@ const AddSeoKeyword = () => {
               <select
                 className="w-full rounded-md border border-input bg-background pl-10 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring appearance-none"
                 value={region}
-                onChange={(e) => setRegion(e.target.value)}
+                onChange={(e) => { setRegion(e.target.value); setRegionTouched(true); }}
               >
                 <option value="google.com">google.com (United States)</option>
                 <option value="google.co.uk">google.co.uk (United Kingdom)</option>
