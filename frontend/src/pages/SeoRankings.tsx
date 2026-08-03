@@ -1427,7 +1427,19 @@ const SeoRankings = () => {
               </Card>
             </div>
 
-            {/* Second Row - SERP Features & Google Ads */}
+            {/* SERP Features and Google Search Ads are hidden until DataBlue
+                supplies the data behind them. The SERP endpoint we query returns
+                organic results only, so every figure in these two cards resolves
+                to 0 or an empty list — and a card reading "0 placements" is read
+                as "no ads are competing with you", which is a claim we cannot
+                make from an absence of data.
+
+                Held behind `false &&` rather than deleted: the markup is correct
+                and still type-checks against the API shape, so it cannot rot
+                while hidden. Flip to a real condition once the SERP response
+                carries serp_features and ad placements. */}
+            {false && (
+              <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
               {/* SERP Features Card */}
               <Card className="p-4 transition-all duration-300 backdrop-blur-sm bg-card/80 border border-border hover:border-primary">
@@ -1533,6 +1545,8 @@ const SeoRankings = () => {
                 </div>
               </Card>
             </div>
+              </>
+            )}
           </CardContent>
         )}
       </Card>
