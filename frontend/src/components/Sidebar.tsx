@@ -76,13 +76,13 @@ import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
    only the label weight changes when active, which keeps the column quiet and
    the eye on the content. */
 const ROW_BASE =
-  "relative flex items-center gap-3 rounded-md text-sm transition-colors";
-const ROW_OPEN = "px-3 py-2 w-full";
-const ROW_COLLAPSED = "justify-center aspect-square w-10 h-10 p-0 mx-auto";
+  "relative flex items-center gap-2.5 rounded-md text-sm transition-colors";
+const ROW_OPEN = "px-2.5 py-1.5 w-full";
+const ROW_COLLAPSED = "justify-center aspect-square w-9 h-9 p-0 mx-auto";
 const ROW_ACTIVE = "bg-accent text-foreground font-medium";
 const ROW_IDLE =
   "text-muted-foreground font-normal hover:bg-accent/60 hover:text-foreground";
-const ICON_BASE = "h-[18px] w-[18px] flex-shrink-0";
+const ICON_BASE = "h-4 w-4 flex-shrink-0";
 
 const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDomainProcessing }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void; navigate: any; isDomainProcessing?: boolean }) => {
   const [submenuOpen, setSubmenuOpen] = useState(false);
@@ -97,8 +97,8 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
       return <Separator className="my-1.5" />;
     }
     return (
-      <div className="px-3 pt-3 pb-1">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <div className="px-2.5 pt-2.5 pb-0.5">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           {group.name}
         </p>
       </div>
@@ -182,9 +182,11 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
           </button>
         )}
       </PopoverTrigger>
-      <PopoverContent className="w-[200px] p-2" side="right" align="start">
-        <div className="space-y-1">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-1">{group.name}</p>
+      {/* Same rhythm as the nav column: 0.5 row gap, and a heading matching
+          the section labels so the flyout reads as a continuation of it. */}
+      <PopoverContent className="w-[200px] p-1.5" side="right" align="start">
+        <div className="space-y-0.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-2.5 pt-1 pb-1">{group.name}</p>
           {group.items.map((item: any) => {
             const Icon = (item.icon as any) || LayoutDashboard;
             const isActive = location.pathname === item.path;
@@ -306,7 +308,7 @@ export const Sidebar = () => {
         "bg-card border-r border-border h-screen sticky top-0 overflow-y-auto flex flex-col transition-all duration-150",
         isOpen ? "w-64" : "w-16"
       )}>
-        <div className={cn("border-b border-border transition-all duration-150", isOpen ? "px-4 pt-4 pb-3" : "px-3 py-4")}>
+        <div className={cn("border-b border-border transition-all duration-150", isOpen ? "px-3 pt-3 pb-2" : "px-2 py-3")}>
           <div className="flex items-center justify-between">
           {isOpen ? (
             <>
@@ -478,7 +480,7 @@ export const Sidebar = () => {
           )}
         </div>
         {isOpen && (
-          <div className="mt-4">
+          <div className="mt-2.5">
             <DomainSelector />
           </div>
         )}
@@ -486,7 +488,7 @@ export const Sidebar = () => {
 
       {/* Tighter rhythm: the section labels already mark the boundaries, so the
           horizontal rules between them were redundant and cost ~16px each. */}
-      <nav className={cn("space-y-0.5 flex-1", isOpen ? "px-4 py-2" : "px-3 py-2")}>
+      <nav className={cn("space-y-0.5 flex-1", isOpen ? "px-3 py-1" : "px-2 py-1")}>
           {filteredNavGroups.map((group, index) => (
             <div key={index}>
               <NavGroup
@@ -502,7 +504,7 @@ export const Sidebar = () => {
 
       </nav>
 
-      <div className={cn("border-t border-border mt-auto space-y-0.5 pt-0", isOpen ? "px-4 pb-3" : "px-3 pb-3")}>
+      <div className={cn("border-t border-border mt-auto space-y-0.5 pt-0", isOpen ? "px-3 pb-2" : "px-2 pb-2")}>
           {/* Organization and Profile collapsed into one "Settings" entry —
               two near-identical cog/person rows in the footer read as clutter,
               and both are settings. Rendered through NavGroup so the flyout is
@@ -511,7 +513,7 @@ export const Sidebar = () => {
               item. isDomainProcessing is passed false deliberately: settings
               must stay reachable while a domain is being processed. */}
           {user && (
-            <div className="space-y-0.5 mt-2">
+            <div className="space-y-0.5 mt-1.5">
               <NavGroup
                 group={{
                   name: "Settings",
@@ -537,12 +539,9 @@ export const Sidebar = () => {
               <TooltipTrigger asChild>
                 <button
                   onClick={handleLogoutClick}
-                  className={cn(
-                    "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
-                  )}
+                  className={cn(ROW_BASE, ROW_COLLAPSED, ROW_IDLE)}
                 >
-                  <LogOut className="h-5 w-5 flex-shrink-0" />
+                  <LogOut className="h-4 w-4 flex-shrink-0" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right">
@@ -552,12 +551,9 @@ export const Sidebar = () => {
           ) : (
             <button
               onClick={handleLogoutClick}
-              className={cn(
-                "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                "w-full gap-3 px-3 py-1.5 text-sm font-medium rounded-lg"
-              )}
+              className={cn(ROW_BASE, ROW_OPEN, ROW_IDLE)}
             >
-              <LogOut className="h-5 w-5 flex-shrink-0" />
+              <LogOut className="h-4 w-4 flex-shrink-0" />
               <span>Sign Out</span>
             </button>
           )}
