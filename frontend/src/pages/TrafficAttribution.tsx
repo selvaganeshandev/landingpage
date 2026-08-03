@@ -78,6 +78,7 @@ export default function TrafficAttribution() {
   // "matches GA4" note on every LLM card. Numbers are identical either way —
   // the switch only shows/hides the GA4-reconciliation context. Display-only.
   const [gaClientView, setGaClientView] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     const ensureDomain = async () => {
@@ -377,8 +378,6 @@ export default function TrafficAttribution() {
   // rarely even, and the four headline totals hide it entirely. On Fnp a single
   // platform accounts for 98% of AI visits.
   const topSource = sourceSummary[0];
-
-  const [isExporting, setIsExporting] = useState(false);
 
   /**
    * Export the AI-traffic view as a multi-sheet workbook.
