@@ -801,7 +801,12 @@ const SeoRankings = () => {
     "1d": true,
     "7d": true,
     "15d": true,
-    serp: true,
+    // SERP reads featured_snippet, knowledge_panel and ads — all three are unset
+    // on every one of the 3,140 keyword rows, because the SERP provider returns
+    // organic results only. Defaulted off and dropped from the column picker
+    // below, so it cannot be switched on to reveal a column of dashes. The
+    // field and its rendering stay in place for when the data arrives.
+    serp: false,
     tags: true,
     date: true,
   });
@@ -848,12 +853,11 @@ const SeoRankings = () => {
     return `"${str.replace(/"/g, '""')}"`;
   };
 
-  const computeCompetition = (volume: number | null | undefined) => {
-    if (volume === null || volume === undefined) return '';
-    if (volume < 1000) return 'Low';
-    if (volume < 10000) return 'Med';
-    return 'High';
-  };
+  // computeCompetition was removed. It bucketed search volume into Low/Med/High
+  // and exported the result in a column headed "Comp", so a reader saw two
+  // columns — Volume and Competition — that were the same number twice, one of
+  // them relabelled as a metric the provider does not supply.
+
 
   const generateKeywordCsv = () => {
     const headers = [
@@ -863,16 +867,23 @@ const SeoRankings = () => {
       'Best rank',
       '1d',
       '7d',
-      'Volume',
-      'Comp',
-      'URL',
+      '15d',
+      'Clicks',
+      'Impressions',
+      'Search volume',
+      // Named for what it is: the page that ranks, not a target the user set.
+      // target_url is unset on all 3,140 rows; site_url is what the scrape
+      // returns and is populated wherever a rank exists.
+      'Ranking URL',
       'Region',
-      'Date added',
+      'Tags',
+      'Last ranked',
     ];
 
     const rows = filteredKeywords.map((kw, idx) => {
       const change1d = kw.change1d ? kw.change1d.value : '-';
       const change7d = kw.change7d ? kw.change7d.value : '-';
+      const change15d = kw.change15d ? kw.change15d.value : '-';
       return [
         idx + 1,
         kw.keyword,
@@ -880,10 +891,13 @@ const SeoRankings = () => {
         kw.best || '',
         change1d,
         change7d,
+        change15d,
+        kw.clicks ?? '',
+        kw.impressions ?? '',
         kw.volume ?? '',
-        computeCompetition(kw.volume),
         kw.url || '',
         kw.region || '',
+        Array.isArray(kw.tags) ? kw.tags.join('; ') : (kw.tags || ''),
         kw.date || '',
       ];
     });
@@ -1657,7 +1671,6 @@ const SeoRankings = () => {
                         { key: "1d", label: "1D" },
                         { key: "7d", label: "7d" },
                         { key: "15d", label: "15d" },
-                        { key: "serp", label: "SERP" },
                         { key: "tags", label: "Tags" },
                         { key: "date", label: "Date" },
                       ] as { key: keyof ColumnVisibility; label: string }[]
