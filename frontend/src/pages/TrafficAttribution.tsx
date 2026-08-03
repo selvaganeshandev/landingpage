@@ -345,25 +345,10 @@ export default function TrafficAttribution() {
   const hasAiUsers = aiBreakdown.some((p: any) => p?.users != null);
   const hasAiPageViews = aiBreakdown.some((p: any) => p?.pageViews != null);
 
-  // ROI needs a cost figure — ad spend or content investment — which GA4 does
-  // not carry and the product does not collect, so the card was hardcoded to
-  // "N/A" and could never show anything. Revenue per Session is the same
-  // question GA can actually answer: what a visit from an AI platform is worth.
   // Whether GA is connected at all, as distinct from connected-but-quiet. Only
   // 10 of 63 domains have an integration, and without this the other 53 saw
   // zeros everywhere with nothing explaining why.
   const hasGaConnected = Boolean(gaData) || aiBreakdown.length > 0;
-
-  const roiMetrics = [
-    { metric: "Total Traffic from AI", value: totalTraffic.toLocaleString(), unit: "visits" },
-    { metric: "Conversion Rate", value: conversionRate, unit: "%" },
-    { metric: "Total Revenue", value: formatCurrency(totalRevenue), unit: "" },
-    {
-      metric: "Revenue per Session",
-      value: totalTraffic > 0 ? formatCurrency(totalRevenue / totalTraffic) : "—",
-      unit: "",
-    },
-  ];
 
   // ===== Derived data for the Overview tab (all AI-referral scoped) =====
   const totalPageViews = aiPageViews;
@@ -379,6 +364,41 @@ export default function TrafficAttribution() {
     .slice()
     .sort((a, b) => b.visits - a.visits);
   const sourceTotal = sourceSummary.reduce((s, p) => s + p.visits, 0) || 1;
+
+  // The ROI card was the literal string "N/A" — it needs a cost figure (ad spend
+  // or content investment) that neither GA4 nor this product carries, so it
+  // could never display anything. Replaced with two metrics GA can answer.
+  //
+  // Value per Visit is what ROI was reaching for: what one visit from an AI
+  // platform is worth. It needs no cost input, and unlike Total Revenue it stays
+  // comparable as traffic grows.
+  //
+  // Top AI Source names the platform sending the most traffic — the split is
+  // rarely even, and the four headline totals hide it entirely. On Fnp a single
+  // platform accounts for 98% of AI visits.
+  const topSource = sourceSummary[0];
+
+  const roiMetrics = [
+    { metric: "Total Traffic from AI", value: totalTraffic.toLocaleString(), unit: "visits" },
+    { metric: "Conversion Rate", value: conversionRate, unit: "%" },
+    { metric: "Total Revenue", value: formatCurrency(totalRevenue), unit: "" },
+    {
+      metric: "Value per Visit",
+      value: totalTraffic > 0 ? formatCurrency(totalRevenue / totalTraffic) : "—",
+      unit: "",
+      caption: totalTraffic > 0
+        ? `${totalConversions.toLocaleString()} conversion${totalConversions === 1 ? "" : "s"} from ${totalTraffic.toLocaleString()} visits`
+        : "No AI traffic in this window",
+    },
+    {
+      metric: "Top AI Source",
+      value: topSource ? topSource.platform : "—",
+      unit: "",
+      caption: topSource && sourceTotal > 0
+        ? `${topSource.visits.toLocaleString()} visits · ${Math.round((topSource.visits / sourceTotal) * 100)}% of AI traffic`
+        : "No AI traffic in this window",
+    },
+  ];
 
   const deviceDonut = deviceBreakdown.map((d) => ({
     name: d.device,
@@ -542,7 +562,7 @@ export default function TrafficAttribution() {
         )}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         {roiMetrics.map((item, index) => (
           <Card key={index} className="transition-all duration-300 border border-border hover:border-primary">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -550,13 +570,17 @@ export default function TrafficAttribution() {
               {index === 0 && <MousePointerClick className="h-4 w-4 text-muted-foreground" />}
               {index === 1 && <TrendingUp className="h-4 w-4 text-muted-foreground" />}
               {index === 2 && <DollarSign className="h-4 w-4 text-muted-foreground" />}
-              {index === 3 && <TrendingUp className="h-4 w-4 text-muted-foreground" />}
+              {index === 3 && <DollarSign className="h-4 w-4 text-muted-foreground" />}
+              {index === 4 && <Sparkles className="h-4 w-4 text-muted-foreground" />}
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
                 {item.value}
                 {item.unit && <span className="text-sm font-normal ml-1">{item.unit}</span>}
               </div>
+              {(item as any).caption && (
+                <p className="text-xs text-muted-foreground mt-1">{(item as any).caption}</p>
+              )}
             </CardContent>
           </Card>
         ))}
@@ -569,7 +593,13 @@ export default function TrafficAttribution() {
           <TabsTrigger value="search" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Search Console</TabsTrigger>
           <TabsTrigger value="devices" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Devices & Geo</TabsTrigger>
           <TabsTrigger value="pages" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Landing Pages</TabsTrigger>
-          <TabsTrigger value="attribution" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">Attribution Models</TabsTrigger>
+          {/* Attribution Models tab hidden. Its one real component — last-touch
+              revenue per AI platform — is already on Traffic Sources, which
+              shows visits, conversions and revenue for each platform from the
+              same GA figures. The multi-touch models it also promised need
+              touchpoint sequences GA4's Data API does not expose. The
+              TabsContent below is left in place so the tab can be restored if
+              firstUserSource is ever wired up. */}
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
