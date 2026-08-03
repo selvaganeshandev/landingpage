@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3, CalendarIcon, Sparkles } from "lucide-react";
+import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3, CalendarIcon, Sparkles, Link as LinkIcon } from "lucide-react";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/PageLoader";
@@ -345,11 +345,24 @@ export default function TrafficAttribution() {
   const hasAiUsers = aiBreakdown.some((p: any) => p?.users != null);
   const hasAiPageViews = aiBreakdown.some((p: any) => p?.pageViews != null);
 
+  // ROI needs a cost figure — ad spend or content investment — which GA4 does
+  // not carry and the product does not collect, so the card was hardcoded to
+  // "N/A" and could never show anything. Revenue per Session is the same
+  // question GA can actually answer: what a visit from an AI platform is worth.
+  // Whether GA is connected at all, as distinct from connected-but-quiet. Only
+  // 10 of 63 domains have an integration, and without this the other 53 saw
+  // zeros everywhere with nothing explaining why.
+  const hasGaConnected = Boolean(gaData) || aiBreakdown.length > 0;
+
   const roiMetrics = [
     { metric: "Total Traffic from AI", value: totalTraffic.toLocaleString(), unit: "visits" },
     { metric: "Conversion Rate", value: conversionRate, unit: "%" },
     { metric: "Total Revenue", value: formatCurrency(totalRevenue), unit: "" },
-    { metric: "ROI", value: "N/A", unit: "%" },
+    {
+      metric: "Revenue per Session",
+      value: totalTraffic > 0 ? formatCurrency(totalRevenue / totalTraffic) : "—",
+      unit: "",
+    },
   ];
 
   // ===== Derived data for the Overview tab (all AI-referral scoped) =====
@@ -382,22 +395,44 @@ export default function TrafficAttribution() {
     .filter((r) => r.revenue > 0);
   const revenueTotal = revenueBySource.reduce((s, r) => s + r.revenue, 0) || totalRevenue;
 
-  // Derive attribution model estimates from conversion paths if available, otherwise use industry defaults
-  const conversionPathTotal = conversionPaths.reduce((sum: number, p: any) => sum + (p.value || 0), 0);
-  const hasConversionData = conversionPathTotal > 0;
-  const attributionModels = hasConversionData
-    ? [
-        { model: "First Touch", value: Math.round(conversionPathTotal * 0.35), percentage: 35 },
-        { model: "Last Touch", value: Math.round(conversionPathTotal * 0.29), percentage: 29 },
-        { model: "Linear", value: Math.round(conversionPathTotal * 0.21), percentage: 21 },
-        { model: "Time Decay", value: Math.round(conversionPathTotal * 0.15), percentage: 15 },
-      ]
-    : [
-        { model: "First Touch", value: Math.round(totalRevenue * 0.35), percentage: 35 },
-        { model: "Last Touch", value: Math.round(totalRevenue * 0.29), percentage: 29 },
-        { model: "Linear", value: Math.round(totalRevenue * 0.21), percentage: 21 },
-        { model: "Time Decay", value: Math.round(totalRevenue * 0.15), percentage: 15 },
-      ];
+  // Attribution by AI source, from GA4's own numbers.
+  //
+  // This tab used to show First Touch / Last Touch / Linear / Time Decay as
+  // revenue figures derived from fixed constants — totalRevenue x 0.35, x 0.29,
+  // x 0.21, x 0.15 — described in a comment as "industry defaults". The split
+  // never moved, because nothing measured it: no attribution modelling exists in
+  // the codebase, and conversion_paths is empty on all 180 GA insight rows.
+  //
+  // The three multi-touch models cannot be computed from what GA4 exposes. They
+  // need the full sequence of touchpoints before each conversion, and the Data
+  // API has no dimension for it — the conversion-path report exists only inside
+  // the GA4 interface. Rather than keep inventing them, the tab now shows the
+  // one model GA4 does answer: last-touch revenue per AI platform, which is
+  // what GA4 attributes by default and what platform_breakdown already carries.
+  const lastTouchBySource = sourceSummary
+    .map((s) => ({
+      model: s.platform,
+      value: s.revenue || 0,
+      conversions: s.conversions || 0,
+      visits: s.visits || 0,
+    }))
+    .filter((r) => r.value > 0 || r.conversions > 0)
+    .sort((a, b) => b.value - a.value);
+
+  const lastTouchTotal = lastTouchBySource.reduce((sum, r) => sum + r.value, 0);
+  const attributionModels = lastTouchBySource.map((r) => ({
+    ...r,
+    percentage: lastTouchTotal > 0 ? Math.round((r.value / lastTouchTotal) * 100) : 0,
+  }));
+
+  // Models GA4's Data API cannot supply. Named rather than hidden, so the gap is
+  // visible instead of being filled with a plausible number.
+  const UNAVAILABLE_MODELS = [
+    "First Touch",
+    "Linear",
+    "Time Decay",
+    "Position Based",
+  ];
 
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
@@ -407,6 +442,37 @@ export default function TrafficAttribution() {
           Track and attribute traffic from AI platforms to measure ROI
         </p>
       </div>
+
+      {/* Only 10 of 63 domains have a Google Analytics integration. Without one
+          this page renders zeros in every card and empty charts throughout, with
+          nothing to distinguish "no AI traffic" from "no data source connected".
+          Says which it is, and where to fix it. */}
+      {!loading && !hasGaConnected && (
+        <Card className="border border-dashed border-primary/40 bg-card/70">
+          <CardContent className="pt-6">
+            <div className="flex flex-col md:flex-row gap-4 items-start">
+              <div className="p-3 rounded-full bg-primary/10 text-primary">
+                <LinkIcon className="h-5 w-5" />
+              </div>
+              <div className="flex-1 space-y-1">
+                <h3 className="font-semibold">Google Analytics not connected</h3>
+                <p className="text-sm text-muted-foreground">
+                  This page measures visitors arriving from AI platforms, which comes from
+                  Google Analytics. Connect a GA4 property for this domain and traffic,
+                  conversions and revenue will populate on the next sync.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => navigate("/organization-settings")}
+                className="shrink-0"
+              >
+                Connect Google Analytics
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* AI-traffic date range — fetches a live GA4 window for the exact dates
           (same sessionSource regex as the client's GA view). Leave blank for the
@@ -1155,32 +1221,67 @@ export default function TrafficAttribution() {
         <TabsContent value="attribution" className="space-y-6">
           <Card className="border border-border">
             <CardHeader>
-              <CardTitle>Attribution Model Comparison</CardTitle>
-              <CardDescription>Revenue attribution across different models</CardDescription>
+              <CardTitle>Last-Touch Attribution by AI Source</CardTitle>
+              <CardDescription>
+                Revenue GA4 credits to each AI platform as the session source. This is GA4's
+                default attribution — the platform that brought the visit which converted.
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {attributionModels.map((item, index) => (
-                  <div key={index} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">{item.model}</span>
-                      <span className="text-sm font-medium">{formatCurrency(item.value)}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 bg-secondary rounded-full h-2">
-                        <div
-                          className="bg-primary h-2 rounded-full transition-all"
-                          style={{ width: `${item.percentage}%` }}
-                        />
+              {attributionModels.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">
+                  {hasGaConnected
+                    ? "No revenue or conversions recorded from AI sources in this window."
+                    : "Connect Google Analytics to attribute revenue to AI platforms."}
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {attributionModels.map((item, index) => (
+                    <div key={index} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium capitalize">{item.model}</span>
+                        <div className="text-right">
+                          <span className="text-sm font-medium">{formatCurrency(item.value)}</span>
+                          {/* Revenue alone cannot be judged: a large figure from a
+                              handful of conversions is a different claim from the
+                              same figure spread over thousands. */}
+                          <p className="text-xs text-muted-foreground">
+                            {item.conversions.toLocaleString()} conversion{item.conversions === 1 ? "" : "s"}
+                            {item.visits > 0 ? ` · ${item.visits.toLocaleString()} visits` : ""}
+                          </p>
+                        </div>
                       </div>
-                      <span className="text-sm font-medium min-w-[45px] text-right">
-                        {item.percentage}%
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 bg-muted rounded-full h-2">
+                          <div
+                            className="bg-primary h-2 rounded-full transition-all"
+                            style={{ width: `${item.percentage}%` }}
+                          />
+                        </div>
+                        <span className="text-sm font-medium min-w-[45px] text-right">
+                          {item.percentage}%
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
+          </Card>
+
+          {/* The multi-touch models this tab used to show were fixed fractions of
+              total revenue, not measurements. They are named here so the gap is
+              explicit rather than filled with a plausible-looking number. */}
+          <Card className="border border-dashed border-border bg-card/70">
+            <CardHeader>
+              <CardTitle className="text-base">Multi-touch models</CardTitle>
+              <CardDescription>
+                {UNAVAILABLE_MODELS.join(", ")} need the full sequence of touchpoints before
+                each conversion. GA4's Data API exposes no dimension for that — the conversion
+                path report exists only inside the GA4 interface — so these cannot be computed
+                here. View them in GA4 under Advertising → Attribution → Conversion paths.
+              </CardDescription>
+            </CardHeader>
           </Card>
         </TabsContent>
       </Tabs>
