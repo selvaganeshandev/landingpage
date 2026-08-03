@@ -160,16 +160,13 @@ const AddSeoKeyword = () => {
     }
   }, [activeDomainId]);
 
-  // Follow the domain's country until the user picks a region themselves.
-  // useState's initialiser runs once, so without this the default is wrong
-  // whenever the domain resolves after mount — a page refresh, or switching
-  // domains from the sidebar with this form already open.
-  const [regionTouched, setRegionTouched] = useState(false);
+  // Track the domain's country. useState's initialiser runs once, so without
+  // this the region is wrong whenever the domain resolves after mount — a page
+  // refresh, or switching domains from the sidebar with this form open. The
+  // select is disabled, so there is no user choice to preserve.
   useEffect(() => {
-    if (!regionTouched) {
-      setRegion(regionForCountry(selectedDomain?.country));
-    }
-  }, [selectedDomain?.country, regionTouched]);
+    setRegion(regionForCountry(selectedDomain?.country));
+  }, [selectedDomain?.country]);
 
 
   const handleKeywordInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -387,7 +384,7 @@ const AddSeoKeyword = () => {
 
           <div>
             <Label className="text-sm font-medium">
-              Region <span className="text-destructive">*</span>
+              Region
             </Label>
             <div className="relative mt-1.5">
               <img
@@ -397,9 +394,11 @@ const AddSeoKeyword = () => {
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
               />
               <select
-                className="w-full rounded-md border border-input bg-background pl-10 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring appearance-none"
+                className="w-full rounded-md border border-input bg-muted/40 pl-10 pr-3 py-2 text-sm text-muted-foreground focus:outline-none appearance-none cursor-not-allowed"
                 value={region}
-                onChange={(e) => { setRegion(e.target.value); setRegionTouched(true); }}
+                disabled
+                title="Set from this domain's country"
+                onChange={(e) => setRegion(e.target.value)}
               >
                 <option value="google.com">google.com (United States)</option>
                 <option value="google.co.uk">google.co.uk (United Kingdom)</option>
@@ -448,10 +447,11 @@ const AddSeoKeyword = () => {
                 <option value="google.co.il">google.co.il (Israel)</option>
                 <option value="google.com.ua">google.com.ua (Ukraine)</option>
               </select>
-              <svg className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-              </svg>
             </div>
+            <p className="text-xs text-muted-foreground mt-1.5">
+              Set from this domain's country. Change it in the domain settings to
+              track a different region.
+            </p>
           </div>
 
           <div>
