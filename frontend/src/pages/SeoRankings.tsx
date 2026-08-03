@@ -1877,7 +1877,7 @@ const SeoRankings = () => {
                           </TooltipProvider>
                         </div>
                       </TableCell>
-                      <TableCell className="py-3">
+                      <TableCell className="py-3 max-w-[420px]">
                         <div className="flex items-center gap-2">
                           <img
                             src={`https://flagcdn.com/16x12/${keyword.country.toLowerCase()}.png`}
@@ -1896,9 +1896,16 @@ const SeoRankings = () => {
                                 href={keyword.url.startsWith('http') ? keyword.url : `https://${keyword.url}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-xs text-muted-foreground flex items-center gap-1 truncate hover:text-primary hover:underline"
+                                title={keyword.url}
+                                className="text-xs text-muted-foreground flex items-center gap-1 min-w-0 hover:text-primary hover:underline"
                               >
-                                {keyword.url}
+                                {/* The truncate class was on the anchor itself,
+                                    which is a flex container — text-overflow does
+                                    not apply to its anonymous text child, so long
+                                    ranking URLs rendered in full and pushed the
+                                    rank columns off screen. The text needs its own
+                                    element to truncate within. */}
+                                <span className="truncate">{keyword.url}</span>
                                 <ExternalLink className="h-2.5 w-2.5 flex-shrink-0" />
                               </a>
                             ) : (
@@ -2274,9 +2281,11 @@ const SeoRankings = () => {
                                     href={keyword.url.startsWith('http') ? keyword.url : `https://${keyword.url}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-[10px] text-muted-foreground flex items-center gap-0.5 truncate hover:text-primary hover:underline"
+                                    title={keyword.url}
+                                    className="text-[10px] text-muted-foreground flex items-center gap-0.5 min-w-0 hover:text-primary hover:underline"
                                   >
-                                    {keyword.url}
+                                    {/* Same fix as the main table above. */}
+                                    <span className="truncate">{keyword.url}</span>
                                     <ExternalLink className="h-2 w-2 flex-shrink-0" />
                                   </a>
                                 ) : (
