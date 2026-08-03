@@ -1816,15 +1816,24 @@ const SeoRankings = () => {
                         />
                       </TableCell>
                       <TableCell className="py-1.5">
+                        {/* The G shortcut is hidden. It opened a live Google
+                            search for the keyword, which shows today's SERP from
+                            the viewer's own location and history — not the
+                            ranking this row records, which was measured from a
+                            configured region on a specific date. Two different
+                            results side by side read as a discrepancy in our
+                            data. */}
                         <div className="flex items-center gap-0">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(keyword.keyword)}`, '_blank')}
-                          >
-                            <span className="text-red-500 font-bold text-xs">G</span>
-                          </Button>
+                          {false && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(keyword.keyword)}`, '_blank')}
+                            >
+                              <span className="text-red-500 font-bold text-xs">G</span>
+                            </Button>
+                          )}
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
@@ -2206,16 +2215,19 @@ const SeoRankings = () => {
                           </TableCell>
                           <TableCell className="py-1.5">
                             <div className="flex items-center gap-1.5">
-                              <div className="flex items-center gap-0 flex-shrink-0">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-5 w-5"
-                                  onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(keyword.keyword)}`, '_blank')}
-                                >
-                                  <span className="text-red-500 font-bold text-[10px]">G</span>
-                                </Button>
-                              </div>
+                              {/* Hidden — see the note on the main table. */}
+                              {false && (
+                                <div className="flex items-center gap-0 flex-shrink-0">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5"
+                                    onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(keyword.keyword)}`, '_blank')}
+                                  >
+                                    <span className="text-red-500 font-bold text-[10px]">G</span>
+                                  </Button>
+                                </div>
+                              )}
                               <img
                                 src={`https://flagcdn.com/16x12/${keyword.country.toLowerCase()}.png`}
                                 alt={keyword.country}
