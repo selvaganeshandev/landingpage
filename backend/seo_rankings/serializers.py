@@ -53,6 +53,41 @@ class SeoKeywordRankSerializer(serializers.ModelSerializer):
         ]
 
 
+class SeoKeywordRankListSerializer(SeoKeywordRankSerializer):
+    """The rankings list, without the per-keyword SERP blobs.
+
+    Identical to SeoKeywordRankSerializer minus three fields the list page
+    never reads — it declares them in its TypeScript interface but accesses
+    none of them; only the keyword detail page does.
+
+    They dominate the response. Measured on the largest domain (1,765
+    keywords): 3.4 KB per row, of which
+
+        snippets_details  1,841 B   (~9.4 competitors at ~193 B each)
+        keyword_snippet     529 B
+        cannibalisation       5 B
+
+    is 70% sent and thrown away — 5.87 MB for one page load. Dropping them
+    takes a row to roughly 1 KB, so 3,000 keywords is ~3 MB rather than ~10 MB.
+
+    This also decouples the list from competitor storage depth. Competitors
+    used to be capped at rank 10; they are now stored to the full scraped depth
+    (DATABLUE_PAGES x ~10) so the detail page's "After You" filter works, which
+    would have grown snippets_details to ~5.8 KB per row and taken a
+    3,000-keyword domain past 20 MB. The list no longer sends the field at all,
+    so scrape depth can grow without touching this page.
+
+    Anything needing these fields should call the keyword detail endpoint,
+    which still uses the full serializer.
+    """
+
+    class Meta(SeoKeywordRankSerializer.Meta):
+        fields = [
+            f for f in SeoKeywordRankSerializer.Meta.fields
+            if f not in ('snippets_details', 'keyword_snippet', 'cannibalisation')
+        ]
+
+
 class SeoKeywordRankCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating/adding keywords to SEO tracking."""
 

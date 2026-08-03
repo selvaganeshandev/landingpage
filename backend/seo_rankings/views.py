@@ -20,6 +20,7 @@ from .models import (
 )
 from .serializers import (
     SeoKeywordRankSerializer,
+    SeoKeywordRankListSerializer,
     SeoKeywordRankCreateSerializer,
     SeoRankHistorySerializer,
     SeoSerpFeatureHistorySerializer,
@@ -101,7 +102,9 @@ def seo_keyword_list(request):
         qs = qs.filter(keyword__keyword__icontains=search)
 
     qs = qs.order_by('-rank_now')
-    serializer = SeoKeywordRankSerializer(qs, many=True)
+    # List serializer: omits the SERP blobs this page never reads. See
+    # SeoKeywordRankListSerializer — they were 70% of the response.
+    serializer = SeoKeywordRankListSerializer(qs, many=True)
     return Response(serializer.data)
 
 

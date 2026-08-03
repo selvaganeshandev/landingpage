@@ -121,8 +121,10 @@ interface SeoKeyword {
   review: boolean;
   total_rating: string;
   total_review: string;
-  snippets_details: Record<string, any>;
-  keyword_snippet: Record<string, any>;
+  // Not sent by the list endpoint — they were 70% of the payload and nothing
+  // here reads them. Fetch the keyword detail endpoint if you need them.
+  snippets_details?: Record<string, any>;
+  keyword_snippet?: Record<string, any>;
   gsc_clicks: number;
   gsc_impressions: number;
   site_url: string;
@@ -135,7 +137,7 @@ interface SeoKeyword {
   auto_call_status: string;
   auto_refresh_count: number;
   last_ranked_date: string | null;
-  cannibalisation: any[];
+  cannibalisation?: any[];
   tags: string[];
   favour: number;
   created_at: string;
