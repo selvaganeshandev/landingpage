@@ -109,27 +109,35 @@ export default function TrafficAttribution() {
   // stale, differently-dated cached snapshot. Both paths use the shared
   // sessionSource regex on the backend. Other tabs (devices, geo, pages, search)
   // keep using the snapshot — only the AI-platform numbers re-window.
+  // Keyed on the resolved window rather than on the two dates. Depending on
+  // aiStartDate directly meant choosing a start — with no end yet — re-ran this
+  // with hasRange false and refetched the 28-day default, so the whole page
+  // visibly reloaded to the same numbers it already showed, mid-selection.
+  // A half-picked range is not a window, so it requests nothing new.
+  const aiRangeKey = aiStartDate && aiEndDate
+    ? `${format(aiStartDate, 'yyyy-MM-dd')}:${format(aiEndDate, 'yyyy-MM-dd')}`
+    : 'default-28d';
+
   useEffect(() => {
     if (!selectedDomain?.id) {
       setAiWindowData(null);
       return;
     }
-    const hasRange = Boolean(aiStartDate && aiEndDate);
+    const [rangeStart, rangeEnd] = aiRangeKey === 'default-28d'
+      ? [undefined, undefined]
+      : aiRangeKey.split(':');
+
     let cancelled = false;
     setAiWindowLoading(true);
-    const request = hasRange
-      ? apiClient.getAIReferralData(
-          selectedDomain.id,
-          format(aiStartDate!, 'yyyy-MM-dd'),
-          format(aiEndDate!, 'yyyy-MM-dd'),
-        )
+    const request = rangeStart && rangeEnd
+      ? apiClient.getAIReferralData(selectedDomain.id, rangeStart, rangeEnd)
       : apiClient.getAIReferralData(selectedDomain.id, undefined, undefined, 28);
     request
       .then((res: any) => { if (!cancelled) setAiWindowData(res || null); })
       .catch(() => { if (!cancelled) setAiWindowData(null); })
       .finally(() => { if (!cancelled) setAiWindowLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedDomain?.id, aiStartDate, aiEndDate]);
+  }, [selectedDomain?.id, aiRangeKey]);
 
   const loadTrafficData = async () => {
     if (!selectedDomain?.id) return;
