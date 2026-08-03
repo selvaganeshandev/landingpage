@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3, CalendarIcon, Sparkles, Link as LinkIcon } from "lucide-react";
+import { ExternalLink, TrendingUp, DollarSign, MousePointerClick, Users, Eye, ShoppingCart, BarChart3, CalendarIcon, Sparkles, Link as LinkIcon, Download, Loader2 } from "lucide-react";
 import { apiClient } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/PageLoader";
@@ -378,6 +378,136 @@ export default function TrafficAttribution() {
   // platform accounts for 98% of AI visits.
   const topSource = sourceSummary[0];
 
+  const [isExporting, setIsExporting] = useState(false);
+
+  /**
+   * Export the AI-traffic view as a multi-sheet workbook.
+   *
+   * Written from what is already on screen rather than re-fetching, so the file
+   * always matches the window the user is looking at — including a custom date
+   * range, which a server-side export would have to be told about separately.
+   *
+   * Sheets follow the tabs: summary, per-platform sources, devices, geography,
+   * landing pages and the daily series. Empty sections are skipped rather than
+   * written as headers with no rows.
+   */
+  const handleExportTraffic = async () => {
+    if (!hasGaConnected) return;
+    setIsExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.utils.book_new();
+      const rangeLabel = aiDateRange ? `${aiDateRange.start} to ${aiDateRange.end}` : "Latest snapshot";
+
+      const summary = [
+        ["Traffic Attribution — AI platform referrals", ""],
+        ["Domain", selectedDomain?.name || ""],
+        ["Window", rangeLabel],
+        ["Generated", format(new Date(), "dd MMM yyyy HH:mm")],
+        ["", ""],
+        ["Metric", "Value"],
+        ["Total visits from AI", totalTraffic],
+        ["Conversions", totalConversions],
+        ["Conversion rate (%)", conversionRate],
+        ["Total revenue", totalRevenue],
+        ["Value per visit", totalTraffic > 0 ? Number((totalRevenue / totalTraffic).toFixed(2)) : 0],
+        ["Top AI source", topSource ? topSource.platform : "—"],
+        ["Engaged sessions", engagedSessions],
+        ["Bounce rate (%)", Number((bounceRate * 100).toFixed(1))],
+        ["Avg session duration (s)", Number(avgSessionDuration.toFixed(1))],
+        ["Page views", hasAiPageViews ? totalPageViews : "Not available for this window"],
+        ["Users", hasAiUsers ? aiUsers : "Not available for this window"],
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), "Summary");
+
+      if (sourceSummary.length) {
+        const rows = sourceSummary.map((s: any) => ({
+          Platform: s.platform,
+          Visits: s.visits,
+          "Share of AI traffic (%)": sourceTotal > 0 ? Number(((s.visits / sourceTotal) * 100).toFixed(1)) : 0,
+          Conversions: s.conversions,
+          Revenue: s.revenue,
+          "Revenue per visit": s.visits > 0 ? Number((s.revenue / s.visits).toFixed(2)) : 0,
+          "Bounce rate": s.bounceRate,
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "AI Sources");
+      }
+
+      if (deviceBreakdown.length) {
+        const rows = deviceBreakdown.map((d: any) => ({
+          Device: d.device,
+          Sessions: d.sessions,
+          "Share (%)": d.percentage,
+          Conversions: d.conversions,
+          Revenue: d.revenue,
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Devices");
+      }
+
+      if (countryMetrics.length) {
+        const rows = countryMetrics.map((c: any) => ({
+          Country: c.country,
+          Sessions: c.sessions,
+          "Share (%)": c.percentage,
+          Revenue: c.revenue,
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Geography");
+      }
+
+      if (topLandingPages.length) {
+        const rows = topLandingPages.map((p: any) => ({
+          Page: p.page || p.landing_page || p.path || "",
+          Sessions: p.sessions ?? p.visits ?? 0,
+          Conversions: p.conversions ?? 0,
+          Revenue: p.revenue ?? 0,
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Landing Pages");
+      }
+
+      if (dailySeries.length) {
+        const rows = dailySeries.map((d: any) => ({
+          Date: d.date,
+          Sessions: d.sessions,
+          Users: d.totalUsers,
+          "Page views": d.screenPageViews,
+          "Bounce rate": d.bounceRate,
+          "Avg duration (s)": d.avgDuration,
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Daily Series");
+      }
+
+      if (searchConsoleData.length) {
+        const rows = searchConsoleData.map((q: any) => ({
+          Query: q.query,
+          Clicks: q.clicks,
+          Impressions: q.impressions,
+          CTR: q.ctr,
+          Position: q.position,
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Search Queries");
+      }
+
+      const safeName = (selectedDomain?.name || "domain").replace(/[^a-z0-9]+/gi, "_");
+      const stamp = aiDateRange
+        ? `${aiDateRange.start}_${aiDateRange.end}`
+        : format(new Date(), "yyyy-MM-dd");
+      XLSX.writeFile(wb, `traffic_attribution_${safeName}_${stamp}.xlsx`);
+
+      toast({
+        title: "Export ready",
+        description: `Downloaded ${wb.SheetNames.length} sheet${wb.SheetNames.length === 1 ? "" : "s"} for ${rangeLabel}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export failed",
+        description: error?.message || "Could not build the workbook.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const roiMetrics = [
     { metric: "Total Traffic from AI", value: totalTraffic.toLocaleString(), unit: "visits" },
     { metric: "Conversion Rate", value: conversionRate, unit: "%" },
@@ -457,10 +587,94 @@ export default function TrafficAttribution() {
   return (
     <div className="p-8 space-y-6 bg-background animate-fade-in">
       <div>
-        <h1 className="text-3xl font-bold">Traffic Attribution</h1>
-        <p className="text-muted-foreground mt-2">
-          Track and attribute traffic from AI platforms to measure ROI
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">Traffic Attribution</h1>
+            <p className="text-muted-foreground mt-2">
+              Track and attribute traffic from AI platforms to measure ROI
+            </p>
+            {/* The applied window sits with the title rather than beside the
+                pickers: it describes what every figure below covers, so it
+                belongs to the page, not to the control that set it. */}
+            {aiDateRange && !aiWindowLoading && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {aiDateRange.start} → {aiDateRange.end} (GA4-matched)
+              </p>
+            )}
+          </div>
+
+          {/* Range picker and export, top right — the same placement every other
+              page uses for its export action. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn("justify-start text-left font-normal", !aiStartDate && "text-muted-foreground")}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {aiStartDate ? format(aiStartDate, "MMM d, yyyy") : <span>Start date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={aiStartDate}
+                  onSelect={setAiStartDate}
+                  disabled={(date) => date > new Date()}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn("justify-start text-left font-normal", !aiEndDate && "text-muted-foreground")}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {aiEndDate ? format(aiEndDate, "MMM d, yyyy") : <span>End date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={aiEndDate}
+                  onSelect={setAiEndDate}
+                  disabled={(date) => date > new Date() || (aiStartDate ? date < aiStartDate : false)}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+            {(aiStartDate || aiEndDate) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setAiStartDate(undefined); setAiEndDate(undefined); }}
+              >
+                Clear
+              </Button>
+            )}
+            {aiWindowLoading && <span className="text-sm text-muted-foreground">Loading…</span>}
+            {/* Only one of the two dates picked — the range isn't applied yet. */}
+            {Boolean(aiStartDate) !== Boolean(aiEndDate) && !aiWindowLoading && (
+              <span className="text-sm text-muted-foreground">Pick both dates to apply the range.</span>
+            )}
+            <Button
+              variant="outline"
+              onClick={handleExportTraffic}
+              disabled={isExporting || !hasGaConnected}
+              title={hasGaConnected ? "Download this view as an Excel workbook" : "Connect Google Analytics to export"}
+            >
+              {isExporting
+                ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                : <Download className="h-4 w-4 mr-2" />}
+              {isExporting ? "Exporting..." : "Export"}
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Only 10 of 63 domains have a Google Analytics integration. Without one
@@ -493,74 +707,6 @@ export default function TrafficAttribution() {
           </CardContent>
         </Card>
       )}
-
-      {/* AI-traffic date range — fetches a live GA4 window for the exact dates
-          (same sessionSource regex as the client's GA view). Leave blank for the
-          latest cached snapshot. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-muted-foreground mr-1">AI traffic range:</span>
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn("justify-start text-left font-normal", !aiStartDate && "text-muted-foreground")}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {aiStartDate ? format(aiStartDate, "MMM d, yyyy") : <span>Start date</span>}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              mode="single"
-              selected={aiStartDate}
-              onSelect={setAiStartDate}
-              disabled={(date) => date > new Date()}
-              initialFocus
-            />
-          </PopoverContent>
-        </Popover>
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn("justify-start text-left font-normal", !aiEndDate && "text-muted-foreground")}
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {aiEndDate ? format(aiEndDate, "MMM d, yyyy") : <span>End date</span>}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              mode="single"
-              selected={aiEndDate}
-              onSelect={setAiEndDate}
-              disabled={(date) => date > new Date() || (aiStartDate ? date < aiStartDate : false)}
-              initialFocus
-            />
-          </PopoverContent>
-        </Popover>
-        {(aiStartDate || aiEndDate) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => { setAiStartDate(undefined); setAiEndDate(undefined); }}
-          >
-            Clear
-          </Button>
-        )}
-        {aiWindowLoading && <span className="text-sm text-muted-foreground">Loading…</span>}
-        {/* Only one of the two dates picked — the range isn't applied yet. */}
-        {Boolean(aiStartDate) !== Boolean(aiEndDate) && !aiWindowLoading && (
-          <span className="text-sm text-muted-foreground">Pick both dates to apply the range.</span>
-        )}
-        {aiDateRange && !aiWindowLoading && (
-          <span className="text-sm text-muted-foreground">
-            {aiDateRange.start} → {aiDateRange.end} (GA4-matched)
-          </span>
-        )}
-      </div>
 
       <div className="grid gap-4 md:grid-cols-5">
         {roiMetrics.map((item, index) => (
