@@ -128,6 +128,11 @@ const Sources = () => {
   const [exporting, setExporting] = useState(false);
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+  // Controlled so picking a start hands straight to the end picker, matching
+  // Traffic Attribution. Uncontrolled popovers left the user to close one
+  // calendar and hunt for the second field before the range would apply.
+  const [startPickerOpen, setStartPickerOpen] = useState(false);
+  const [endPickerOpen, setEndPickerOpen] = useState(false);
   // Row whose full source list is open in the dialog; null when closed.
   const [sourcesModal, setSourcesModal] = useState<{
     prompt: string;
@@ -343,7 +348,7 @@ const Sources = () => {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Popover>
+          <Popover open={startPickerOpen} onOpenChange={setStartPickerOpen}>
             <PopoverTrigger asChild>
               <Button
                 variant="outline"
@@ -358,13 +363,22 @@ const Sources = () => {
               <Calendar
                 mode="single"
                 selected={startDate}
-                onSelect={setStartDate}
+                onSelect={(date) => {
+                  setStartDate(date);
+                  setStartPickerOpen(false);
+                  if (date) {
+                    // Drop an end date that now precedes the start, rather than
+                    // leaving an impossible range on screen.
+                    if (endDate && endDate < date) setEndDate(undefined);
+                    setEndPickerOpen(true);
+                  }
+                }}
                 disabled={(date) => date > new Date()}
                 initialFocus
               />
             </PopoverContent>
           </Popover>
-          <Popover>
+          <Popover open={endPickerOpen} onOpenChange={setEndPickerOpen}>
             <PopoverTrigger asChild>
               <Button
                 variant="outline"
@@ -379,7 +393,11 @@ const Sources = () => {
               <Calendar
                 mode="single"
                 selected={endDate}
-                onSelect={setEndDate}
+                defaultMonth={startDate}
+                onSelect={(date) => {
+                  setEndDate(date);
+                  if (date) setEndPickerOpen(false);
+                }}
                 disabled={(date) => date > new Date() || (startDate ? date < startDate : false)}
                 initialFocus
               />

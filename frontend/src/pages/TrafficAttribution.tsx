@@ -79,6 +79,11 @@ export default function TrafficAttribution() {
   // the switch only shows/hides the GA4-reconciliation context. Display-only.
   const [gaClientView, setGaClientView] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  // Both date popovers are controlled so selecting a start can close its own
+  // calendar and open the end one, rather than leaving the user to find and
+  // click the second field themselves.
+  const [startPickerOpen, setStartPickerOpen] = useState(false);
+  const [endPickerOpen, setEndPickerOpen] = useState(false);
 
   useEffect(() => {
     const ensureDomain = async () => {
@@ -605,7 +610,7 @@ export default function TrafficAttribution() {
           {/* Range picker and export, top right — the same placement every other
               page uses for its export action. */}
           <div className="flex flex-wrap items-center gap-2">
-            <Popover>
+            <Popover open={startPickerOpen} onOpenChange={setStartPickerOpen}>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
@@ -622,12 +627,18 @@ export default function TrafficAttribution() {
                   selected={aiStartDate}
                   onSelect={(date) => {
                     setAiStartDate(date);
-                    // Default the end to today so one click applies a usable
-                    // range. Picking a start alone left the page waiting on a
-                    // second selection, which is what the hint text existed to
-                    // explain — filling it in removes the need for the hint.
-                    if (date && !aiEndDate) {
-                      setAiEndDate(new Date());
+                    setStartPickerOpen(false);
+                    // Hand straight to the end picker. The range needs both
+                    // dates, and choosing one then hunting for the second field
+                    // is the step worth removing — the end date itself stays the
+                    // user's choice rather than being guessed.
+                    if (date) {
+                      // Drop an end date that now precedes the start, rather
+                      // than leaving an impossible range on screen.
+                      if (aiEndDate && aiEndDate < date) {
+                        setAiEndDate(undefined);
+                      }
+                      setEndPickerOpen(true);
                     }
                   }}
                   disabled={(date) => date > new Date()}
@@ -635,7 +646,7 @@ export default function TrafficAttribution() {
                 />
               </PopoverContent>
             </Popover>
-            <Popover>
+            <Popover open={endPickerOpen} onOpenChange={setEndPickerOpen}>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
@@ -650,31 +661,27 @@ export default function TrafficAttribution() {
                 <Calendar
                   mode="single"
                   selected={aiEndDate}
-                  onSelect={setAiEndDate}
+                  defaultMonth={aiStartDate}
+                  onSelect={(date) => {
+                    setAiEndDate(date);
+                    if (date) setEndPickerOpen(false);
+                  }}
                   disabled={(date) => date > new Date() || (aiStartDate ? date < aiStartDate : false)}
                   initialFocus
                 />
               </PopoverContent>
             </Popover>
-            {/* One slot for both states: the button becomes the loading
-                indicator while a window is fetching, so nothing is appended to
-                the row and Export never shifts under the pointer. Always
-                rendered, disabled when there is nothing to clear. */}
+            {/* No loading indicator in this row. Anything that appears and
+                disappears here resizes the header while a window fetches, which
+                moves Export under the pointer. Progress belongs with the data
+                being fetched, not with the control that requested it. */}
             <Button
               variant="ghost"
               size="sm"
-              disabled={aiWindowLoading || (!aiStartDate && !aiEndDate)}
+              disabled={!aiStartDate && !aiEndDate}
               onClick={() => { setAiStartDate(undefined); setAiEndDate(undefined); }}
-              className="min-w-[84px]"
             >
-              {aiWindowLoading ? (
-                <>
-                  <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-                  Loading
-                </>
-              ) : (
-                "Clear"
-              )}
+              Clear
             </Button>
             <Button
               variant="outline"
