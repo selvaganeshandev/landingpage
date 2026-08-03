@@ -512,26 +512,17 @@ const MisinformationAlerts = () => {
             Detect and correct AI hallucinations about your brand
           </p>
         </div>
-        {/* Both handlers existed but were reachable from nowhere: there was no
-            way to run a scan or export from this page. */}
-        <div className="flex items-center gap-3">
-          <Button variant="outline" onClick={handleExportReport} disabled={isExporting}>
-            {isExporting
-              ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              : <Download className="h-4 w-4 mr-2" />}
-            {isExporting ? "Exporting..." : "Export"}
-          </Button>
-          <Button
-            onClick={handleTriggerScan}
-            disabled={scanning}
-            className="gradient-primary shadow-md shadow-primary/20 text-primary-foreground"
-          >
-            {scanning
-              ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              : <RefreshCw className="h-4 w-4 mr-2" />}
-            {scanning ? "Scanning..." : "Run Scan"}
-          </Button>
-        </div>
+        {/* Export only. A Run Scan button was added here and removed: the scan
+            fires automatically when a domain finishes processing, and the
+            Validate Citations button on the Citations page already covers the
+            manual case for the crawl this depends on. handleTriggerScan is left
+            in place for the NOT_READY empty state below, which does offer it. */}
+        <Button variant="outline" onClick={handleExportReport} disabled={isExporting}>
+          {isExporting
+            ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            : <Download className="h-4 w-4 mr-2" />}
+          {isExporting ? "Exporting..." : "Export"}
+        </Button>
       </div>
 
       {/* Detection Metrics - Summary Cards */}
@@ -539,31 +530,33 @@ const MisinformationAlerts = () => {
         {detectionMetrics.map((metric) => {
           const IconComponent = metric.icon;
           return (
-            <Card key={metric.name} className="transition-all duration-300 border border-border hover:border-primary">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium flex items-center gap-1.5">
-                  {metric.name}
-                  <InfoHint>
-                    <MetricHint
-                      title={metric.name}
-                      plain={METRIC_HINTS[metric.name]?.plain || ""}
-                      formula={METRIC_HINTS[metric.name]?.formula || ""}
-                    />
-                  </InfoHint>
-                </CardTitle>
-                <div className={`p-2 rounded-lg bg-muted/50`}>
-                  <IconComponent className={`h-4 w-4 ${metric.color}`} />
+            /* Shared metric-card shape: p-6, text-2xl figure, plain icon,
+               text-xs subtext — the same as Citations, Sources, Sentiment and
+               Share of Voice. These were text-3xl inside a tinted icon tile,
+               which made the row taller than every other page's. */
+            <Card key={metric.name} className="p-6 border border-border">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    {metric.name}
+                    <InfoHint>
+                      <MetricHint
+                        title={metric.name}
+                        plain={METRIC_HINTS[metric.name]?.plain || ""}
+                        formula={METRIC_HINTS[metric.name]?.formula || ""}
+                      />
+                    </InfoHint>
+                  </p>
+                  <p className={`text-2xl font-bold mt-1 ${metric.color}`}>{metric.value}</p>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">{metric.value}</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {metric.name === "Total Detected" && "All issues found"}
-                  {metric.name === "Broken Links" && "Invalid citations"}
-                  {metric.name === "Misinformation" && "Factual errors"}
-                  {metric.name === "Outdated Info" && "Stale content"}
-                </p>
-              </CardContent>
+                <IconComponent className={`h-5 w-5 ${metric.color}`} />
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                {metric.name === "Total Detected" && "All issues found"}
+                {metric.name === "Broken Links" && "Invalid citations"}
+                {metric.name === "Misinformation" && "Factual errors"}
+                {metric.name === "Outdated Info" && "Stale content"}
+              </p>
             </Card>
           );
         })}
