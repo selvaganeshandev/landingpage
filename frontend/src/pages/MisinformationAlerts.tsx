@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
 import { PageLoader } from "@/components/PageLoader";
+import { InfoHint, MetricHint } from "@/components/InfoHint";
 import { ProcessingStateCard } from "@/components/ProcessingStateCard";
 import { MisinformationDetailDialog } from "@/components/MisinformationDetailDialog";
 import { isDomainProcessing, isMisinformationProcessing } from "@/utils/processingStatus";
@@ -34,7 +35,9 @@ import {
   Info,
   Globe,
   FileSearch,
-  Zap
+  Zap,
+  CheckCircle2,
+  Download
 } from "lucide-react";
 
 // Types for API responses
@@ -170,6 +173,8 @@ const MisinformationAlerts = () => {
   // Data state
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
+  const [updatingAlertId, setUpdatingAlertId] = useState<number | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [activeAlerts, setActiveAlerts] = useState<MisinformationAlert[]>([]);
   const [resolvedAlerts, setResolvedAlerts] = useState<MisinformationAlert[]>([]);
@@ -251,6 +256,7 @@ const MisinformationAlerts = () => {
   };
 
   const handleUpdateAlertStatus = async (alertId: number, status: string) => {
+    setUpdatingAlertId(alertId);
     try {
       await apiClient.updateMisinformationAlert(alertId, { status });
       toast({
@@ -264,11 +270,34 @@ const MisinformationAlerts = () => {
         description: err.message || 'Failed to update alert status',
         variant: "destructive"
       });
+    } finally {
+      setUpdatingAlertId(null);
     }
   };
 
   // Generate detection metrics from dashboard data
   // Summary Cards: Total Detected, Broken Links, Misinformation, Outdated Information
+  // Written against what the scanner actually flags, so the cards can be read
+  // without opening the code that produced them.
+  const METRIC_HINTS: Record<string, { plain: string; formula: string }> = {
+    "Total Detected": {
+      plain: "Every issue the scan has raised about your brand across all AI platforms.",
+      formula: "Broken links, misinformation and outdated info combined, all-time rather than for the current window. Alerts stay counted here after they are resolved.",
+    },
+    "Broken Links": {
+      plain: "AI answers citing a page that no longer loads — a reader following that link reaches nothing.",
+      formula: "Raised when a cited URL on your own domain returns 404 or 410. Sites that merely refuse our crawler (403) are not counted, since the page is usually fine for a real visitor.",
+    },
+    "Misinformation": {
+      plain: "Cases where an AI answer states something your own cited page does not support.",
+      formula: "The cited page is fetched and its text compared against the claim in the answer. A mismatch on a fact the source should confirm is raised here, with both texts kept for review.",
+    },
+    "Outdated Info": {
+      plain: "Answers repeating details your site has since changed — old pricing, discontinued products, superseded figures.",
+      formula: "Raised when the cited page still exists but its current content contradicts what the answer says, in a way that reads as staleness rather than error.",
+    },
+  };
+
   const defaultMetrics = [
     { name: "Total Detected", value: "0", icon: AlertTriangle, color: "text-destructive" },
     { name: "Broken Links", value: "0", icon: LinkIcon, color: "text-warning" },
@@ -315,6 +344,108 @@ const MisinformationAlerts = () => {
   const handleStartMonitoring = () => {
     handleTriggerScan();
   };
+  /**
+   * Export the alert set as a multi-sheet workbook.
+   *
+   * Replaces a handler that raised a "Generating misinformation report..." toast
+   * and produced no file — and which was attached to no button, so it would have
+   * misled the first time anyone wired it up.
+   */
+  const handleExportReport = async () => {
+    setIsExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.utils.book_new();
+
+      const summary = [
+        ["Misinformation Alerts", ""],
+        ["Domain", selectedDomain?.name || ""],
+        ["Generated", new Date().toLocaleString()],
+        ["", ""],
+        ["Metric", "Count"],
+        ["Total detected", dashboardData?.total_detected ?? 0],
+        ["Broken links", dashboardData?.broken_links ?? 0],
+        ["Misinformation", dashboardData?.misinformation ?? 0],
+        ["Outdated info", dashboardData?.outdated_content ?? 0],
+        ["", ""],
+        ["Active cases", activeAlerts.length],
+        ["Resolved cases", resolvedAlerts.length],
+      ];
+      if ((dashboardData as any)?.by_severity) {
+        summary.push(["", ""], ["Severity (active)", "Count"]);
+        Object.entries((dashboardData as any).by_severity).forEach(([level, count]) => {
+          summary.push([level, count as number]);
+        });
+      }
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), "Summary");
+
+      // Both tabs share a shape, so one mapper keeps the two sheets identical
+      // in structure and comparable side by side.
+      const toRow = (a: any) => ({
+        ID: a.id,
+        Type: a.alert_type,
+        Severity: a.severity,
+        Status: a.status,
+        Platform: a.platform || "",
+        "AI claim": a.llm_claim || "",
+        "Source says": a.source_content || "",
+        Explanation: a.explanation || "",
+        "Source URL": a.citation_url?.url || a.source_url || "",
+        Prompt: a.prompt_text || a.prompt?.prompt || "",
+        Detected: a.created_at || "",
+        Reviewed: a.reviewed_at || "",
+      });
+
+      if (activeAlerts.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(activeAlerts.map(toRow)), "Active Alerts");
+      }
+      if (resolvedAlerts.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resolvedAlerts.map(toRow)), "Resolved");
+      }
+
+      const all = [...activeAlerts, ...resolvedAlerts];
+      if (all.length) {
+        const byType: Record<string, { type: string; total: number; low: number; medium: number; high: number; critical: number }> = {};
+        all.forEach((a: any) => {
+          const key = a.alert_type || "unknown";
+          byType[key] = byType[key] || { type: key, total: 0, low: 0, medium: 0, high: 0, critical: 0 };
+          byType[key].total += 1;
+          const sev = (a.severity || "low") as "low" | "medium" | "high" | "critical";
+          if (sev in byType[key]) byType[key][sev] += 1;
+        });
+        XLSX.utils.book_append_sheet(
+          wb,
+          XLSX.utils.json_to_sheet(Object.values(byType).map((r) => ({
+            Type: r.type,
+            Total: r.total,
+            Low: r.low,
+            Medium: r.medium,
+            High: r.high,
+            Critical: r.critical,
+          }))),
+          "By Type",
+        );
+      }
+
+      const safeName = (selectedDomain?.name || "domain").replace(/[^a-z0-9]+/gi, "_");
+      const today = new Date().toISOString().split("T")[0];
+      XLSX.writeFile(wb, `misinformation_${safeName}_${today}.xlsx`);
+
+      toast({
+        title: "Export ready",
+        description: `Downloaded ${wb.SheetNames.length} sheet${wb.SheetNames.length === 1 ? "" : "s"}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export failed",
+        description: error?.message || "Could not build the workbook.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
 
   // Show loading state
   if (loading && !dashboardData) {
@@ -326,12 +457,6 @@ const MisinformationAlerts = () => {
     return <ProcessingStateCard domain={selectedDomain!} />;
   }
 
-  const handleExportReport = () => {
-    toast({
-      title: "Exporting Report",
-      description: "Generating misinformation report...",
-    });
-  };
 
   // Misinformation scan runs automatically after prompt processing
   // No manual "Start Scan" needed - just show appropriate message if not ready
@@ -387,6 +512,26 @@ const MisinformationAlerts = () => {
             Detect and correct AI hallucinations about your brand
           </p>
         </div>
+        {/* Both handlers existed but were reachable from nowhere: there was no
+            way to run a scan or export from this page. */}
+        <div className="flex items-center gap-3">
+          <Button variant="outline" onClick={handleExportReport} disabled={isExporting}>
+            {isExporting
+              ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              : <Download className="h-4 w-4 mr-2" />}
+            {isExporting ? "Exporting..." : "Export"}
+          </Button>
+          <Button
+            onClick={handleTriggerScan}
+            disabled={scanning}
+            className="gradient-primary shadow-md shadow-primary/20 text-primary-foreground"
+          >
+            {scanning
+              ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              : <RefreshCw className="h-4 w-4 mr-2" />}
+            {scanning ? "Scanning..." : "Run Scan"}
+          </Button>
+        </div>
       </div>
 
       {/* Detection Metrics - Summary Cards */}
@@ -396,8 +541,15 @@ const MisinformationAlerts = () => {
           return (
             <Card key={metric.name} className="transition-all duration-300 border border-border hover:border-primary">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
+                <CardTitle className="text-sm font-medium flex items-center gap-1.5">
                   {metric.name}
+                  <InfoHint>
+                    <MetricHint
+                      title={metric.name}
+                      plain={METRIC_HINTS[metric.name]?.plain || ""}
+                      formula={METRIC_HINTS[metric.name]?.formula || ""}
+                    />
+                  </InfoHint>
                 </CardTitle>
                 <div className={`p-2 rounded-lg bg-muted/50`}>
                   <IconComponent className={`h-4 w-4 ${metric.color}`} />
@@ -530,7 +682,11 @@ const MisinformationAlerts = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="flex gap-2 pt-3 border-t border-border">
+                      {/* Resolve and Investigate were missing entirely, which is
+                          why every alert in the database sits at status 'new'
+                          and the Resolved tab can never populate — the handler
+                          existed but nothing called it. */}
+                      <div className="flex gap-2 pt-3 border-t border-border flex-wrap">
                         <Button size="sm" onClick={() => handleViewDetails(item)}>
                           <Eye className="h-3 w-3 mr-1" />
                           View Details
@@ -545,6 +701,42 @@ const MisinformationAlerts = () => {
                             View Source
                           </Button>
                         )}
+                        <div className="ml-auto flex gap-2">
+                          {item.status !== 'reviewed' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={updatingAlertId === item.id}
+                              onClick={() => handleUpdateAlertStatus(item.id, 'reviewed')}
+                            >
+                              {updatingAlertId === item.id
+                                ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                : <Search className="h-3 w-3 mr-1" />}
+                              Mark Reviewed
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-success hover:text-success"
+                            disabled={updatingAlertId === item.id}
+                            onClick={() => handleUpdateAlertStatus(item.id, 'resolved')}
+                          >
+                            {updatingAlertId === item.id
+                              ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              : <CheckCircle2 className="h-3 w-3 mr-1" />}
+                            Resolve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-muted-foreground"
+                            disabled={updatingAlertId === item.id}
+                            onClick={() => handleUpdateAlertStatus(item.id, 'dismissed')}
+                          >
+                            Dismiss
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   );
