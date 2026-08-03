@@ -620,7 +620,16 @@ export default function TrafficAttribution() {
                 <Calendar
                   mode="single"
                   selected={aiStartDate}
-                  onSelect={setAiStartDate}
+                  onSelect={(date) => {
+                    setAiStartDate(date);
+                    // Default the end to today so one click applies a usable
+                    // range. Picking a start alone left the page waiting on a
+                    // second selection, which is what the hint text existed to
+                    // explain — filling it in removes the need for the hint.
+                    if (date && !aiEndDate) {
+                      setAiEndDate(new Date());
+                    }
+                  }}
                   disabled={(date) => date > new Date()}
                   initialFocus
                 />
@@ -647,20 +656,17 @@ export default function TrafficAttribution() {
                 />
               </PopoverContent>
             </Popover>
-            {(aiStartDate || aiEndDate) && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => { setAiStartDate(undefined); setAiEndDate(undefined); }}
-              >
-                Clear
-              </Button>
-            )}
+            {/* Always rendered, disabled when there is nothing to clear, so the
+                row keeps its width instead of shifting as dates are picked. */}
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!aiStartDate && !aiEndDate}
+              onClick={() => { setAiStartDate(undefined); setAiEndDate(undefined); }}
+            >
+              Clear
+            </Button>
             {aiWindowLoading && <span className="text-sm text-muted-foreground">Loading…</span>}
-            {/* Only one of the two dates picked — the range isn't applied yet. */}
-            {Boolean(aiStartDate) !== Boolean(aiEndDate) && !aiWindowLoading && (
-              <span className="text-sm text-muted-foreground">Pick both dates to apply the range.</span>
-            )}
             <Button
               variant="outline"
               onClick={handleExportTraffic}
