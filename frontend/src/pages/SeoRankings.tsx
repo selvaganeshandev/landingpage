@@ -699,7 +699,20 @@ const SeoRankings = () => {
   // letting them lead an ascending sort would bury the rows the user wants.
   const sortedKeywords = (() => {
     const rows = seoKeywords.filter(kw => matchesSearch(kw) && matchesRankFilter(kw));
-    if (!sortKey) return rows;
+
+    // Favourites lead, whatever else is happening. A starred keyword is one the
+    // user has said they want to watch, and with 154 keywords over 16 pages it
+    // was landing wherever the sort put it — often several pages in, which
+    // defeats the point of starring it. Applied before the column sort so it
+    // survives sorting, and inside it so favourites are still ordered by the
+    // chosen column among themselves.
+    const favouriteFirst = (a: typeof rows[number], b: typeof rows[number]) =>
+      Number(Boolean(b.favour)) - Number(Boolean(a.favour));
+
+    if (!sortKey) {
+      // No column sort: keep the API's order within each group.
+      return [...rows].sort(favouriteFirst);
+    }
 
     const valueOf = (kw: typeof seoKeywords[number]) => {
       switch (sortKey) {
@@ -713,6 +726,9 @@ const SeoRankings = () => {
     };
 
     return [...rows].sort((a, b) => {
+      const byFavourite = favouriteFirst(a, b);
+      if (byFavourite !== 0) return byFavourite;
+
       const av = valueOf(a);
       const bv = valueOf(b);
       const aMissing = av == null;
