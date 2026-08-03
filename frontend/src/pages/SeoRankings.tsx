@@ -10,6 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -225,7 +232,11 @@ const SeoRankings = () => {
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [gridTagPages, setGridTagPages] = useState<Record<string, number>>({});
-  const KEYWORDS_PER_PAGE = 10;
+  // Selectable page size. Was a fixed 10, which meant a domain with 200
+  // keywords took twenty clicks to review.
+  const [keywordsPerPage, setKeywordsPerPage] = useState(25);
+  const KEYWORDS_PER_PAGE = keywordsPerPage;
+  const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeDomainRef = useRef<string>("");
 
@@ -790,7 +801,7 @@ const SeoRankings = () => {
   useEffect(() => {
     setCurrentPage(1);
     setGridTagPages({});
-  }, [searchQuery, rankFilter]);
+  }, [searchQuery, rankFilter, keywordsPerPage]);
 
   // Column visibility state
   const [visibleColumns, setVisibleColumns] = useState<ColumnVisibility>({
@@ -1808,14 +1819,14 @@ const SeoRankings = () => {
                   )}
                   {paginatedKeywords.map((keyword) => (
                     <TableRow key={keyword.id} className="hover:bg-muted/30">
-                      <TableCell className="py-1.5">
+                      <TableCell className="py-3">
                         <Checkbox
                           checked={selectedKeywords.includes(keyword.id)}
                           onCheckedChange={() => toggleKeywordSelection(keyword.id)}
                           disabled={!!keyword.favour}
                         />
                       </TableCell>
-                      <TableCell className="py-1.5">
+                      <TableCell className="py-3">
                         {/* The G shortcut is hidden. It opened a live Google
                             search for the keyword, which shows today's SERP from
                             the viewer's own location and history — not the
@@ -1866,7 +1877,7 @@ const SeoRankings = () => {
                           </TooltipProvider>
                         </div>
                       </TableCell>
-                      <TableCell className="py-1.5">
+                      <TableCell className="py-3">
                         <div className="flex items-center gap-2">
                           <img
                             src={`https://flagcdn.com/16x12/${keyword.country.toLowerCase()}.png`}
@@ -1898,7 +1909,7 @@ const SeoRankings = () => {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-center py-1.5">
+                      <TableCell className="text-center py-3">
                         {keyword.rankDisplay ? (
                           <span className="text-muted-foreground text-sm">{keyword.rankDisplay}</span>
                         ) : (
@@ -1906,23 +1917,23 @@ const SeoRankings = () => {
                         )}
                       </TableCell>
                       {visibleColumns.volume && (
-                        <TableCell className="text-center py-1.5">
+                        <TableCell className="text-center py-3">
                           <div className="flex items-center justify-center gap-0.5">
                             <span className="text-sm">{formatVolume(keyword.volume)}</span>
                           </div>
                         </TableCell>
                       )}
                       {visibleColumns.best && (
-                        <TableCell className="text-center font-semibold py-1.5 text-sm">{keyword.best}</TableCell>
+                        <TableCell className="text-center font-semibold py-3 text-sm">{keyword.best}</TableCell>
                       )}
                       {visibleColumns.clicks && (
-                        <TableCell className="text-center py-1.5 text-sm">{keyword.clicks}</TableCell>
+                        <TableCell className="text-center py-3 text-sm">{keyword.clicks}</TableCell>
                       )}
                       {visibleColumns.impressions && (
-                        <TableCell className="text-center py-1.5 text-sm">{keyword.impressions}</TableCell>
+                        <TableCell className="text-center py-3 text-sm">{keyword.impressions}</TableCell>
                       )}
                       {visibleColumns["1d"] && (
-                        <TableCell className="text-center py-1.5">
+                        <TableCell className="text-center py-3">
                           {keyword.change1d ? (
                             <div className="flex items-center justify-center gap-0.5">
                               <span className={`text-sm ${keyword.change1d.direction === "down" ? "text-red-500 font-medium" : "text-green-500 font-medium"}`}>
@@ -1940,7 +1951,7 @@ const SeoRankings = () => {
                         </TableCell>
                       )}
                       {visibleColumns["7d"] && (
-                        <TableCell className="text-center py-1.5">
+                        <TableCell className="text-center py-3">
                           {keyword.change7d ? (
                             <div className="flex items-center justify-center gap-0.5">
                               <span className={`text-sm ${keyword.change7d.direction === "down" ? "text-red-500 font-medium" : "text-green-500 font-medium"}`}>
@@ -1958,7 +1969,7 @@ const SeoRankings = () => {
                         </TableCell>
                       )}
                       {visibleColumns["15d"] && (
-                        <TableCell className="text-center py-1.5">
+                        <TableCell className="text-center py-3">
                           {keyword.change15d ? (
                             <div className="flex items-center justify-center gap-0.5">
                               <span className={`text-sm ${keyword.change15d.direction === "down" ? "text-red-500 font-medium" : "text-green-500 font-medium"}`}>
@@ -1976,7 +1987,7 @@ const SeoRankings = () => {
                         </TableCell>
                       )}
                       {visibleColumns.serp && (
-                        <TableCell className="text-center py-1.5 text-sm">
+                        <TableCell className="text-center py-3 text-sm">
                           {keyword.serp ? (
                             <span className="text-green-500 font-medium">{keyword.serp}</span>
                           ) : (
@@ -1985,7 +1996,7 @@ const SeoRankings = () => {
                         </TableCell>
                       )}
                       {visibleColumns.tags && (
-                        <TableCell className="text-center py-1.5 text-sm">
+                        <TableCell className="text-center py-3 text-sm">
                           {keyword.tags.length > 0 ? (
                             <TooltipProvider>
                               <Tooltip>
@@ -2026,14 +2037,14 @@ const SeoRankings = () => {
                         </TableCell>
                       )}
                       {visibleColumns.date && (
-                        <TableCell className="py-1.5">
+                        <TableCell className="py-3">
                           <div>
                             <p className="text-xs text-muted-foreground whitespace-nowrap">{keyword.date}</p>
                             <p className="text-xs text-muted-foreground/60 whitespace-nowrap">{keyword.timeAgo}</p>
                           </div>
                         </TableCell>
                       )}
-                      <TableCell className="py-1.5 w-8">
+                      <TableCell className="py-3 w-8">
                         <Button
                           variant="ghost"
                           size="icon"
@@ -2047,12 +2058,31 @@ const SeoRankings = () => {
                   ))}
                 </TableBody>
               </Table>
-              {/* Pagination Controls */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-                  <p className="text-sm text-muted-foreground">
-                    Showing {(currentPage - 1) * KEYWORDS_PER_PAGE + 1}-{Math.min(currentPage * KEYWORDS_PER_PAGE, filteredKeywords.length)} of {filteredKeywords.length} keywords
-                  </p>
+              {/* Pagination Controls. Rendered whenever there are rows, not only
+                  past two pages — the page-size selector has to be reachable
+                  even when everything already fits on one. */}
+              {filteredKeywords.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-border">
+                  <div className="flex items-center gap-3">
+                    <p className="text-sm text-muted-foreground">
+                      Showing {(currentPage - 1) * KEYWORDS_PER_PAGE + 1}-{Math.min(currentPage * KEYWORDS_PER_PAGE, filteredKeywords.length)} of {filteredKeywords.length} keywords
+                    </p>
+                    <Select
+                      value={String(keywordsPerPage)}
+                      onValueChange={(v) => setKeywordsPerPage(Number(v))}
+                    >
+                      <SelectTrigger className="h-8 w-[110px] text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAGE_SIZE_OPTIONS.map((size) => (
+                          <SelectItem key={size} value={String(size)}>
+                            {size} per page
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="flex items-center gap-1">
                     <Button
                       variant="outline"
@@ -2190,30 +2220,30 @@ const SeoRankings = () => {
                   <Table className="min-w-[350px]">
                     <TableHeader>
                       <TableRow className="bg-muted/20 hover:bg-muted/20">
-                        <TableHead className="w-8 py-1.5">
+                        <TableHead className="w-8 py-3">
                           <Checkbox
                             checked={keywords.filter((kw) => !kw.favour).length > 0 && keywords.filter((kw) => !kw.favour).every((kw) => selectedKeywords.includes(kw.id))}
                             onCheckedChange={() => toggleGroupKeywords(keywords.map((kw) => kw.id))}
                             disabled={keywords.every((kw) => !!kw.favour)}
                           />
                         </TableHead>
-                        <TableHead className="text-xs font-semibold py-1.5">KEYWORD</TableHead>
-                        <SortableHead label="RANK" sortId="rank" className="text-center text-xs font-semibold py-1.5 w-14" />
-                        <TableHead className="text-center text-xs font-semibold py-1.5 w-14">TAGS</TableHead>
-                        <TableHead className="w-8 py-1.5"></TableHead>
+                        <TableHead className="text-xs font-semibold py-3">KEYWORD</TableHead>
+                        <SortableHead label="RANK" sortId="rank" className="text-center text-xs font-semibold py-3 w-14" />
+                        <TableHead className="text-center text-xs font-semibold py-3 w-14">TAGS</TableHead>
+                        <TableHead className="w-8 py-3"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {tagPaginatedKws.map((keyword) => (
                         <TableRow key={keyword.id} className="hover:bg-muted/30">
-                          <TableCell className="py-1.5">
+                          <TableCell className="py-3">
                             <Checkbox
                               checked={selectedKeywords.includes(keyword.id)}
                               onCheckedChange={() => toggleKeywordSelection(keyword.id)}
                               disabled={!!keyword.favour}
                             />
                           </TableCell>
-                          <TableCell className="py-1.5">
+                          <TableCell className="py-3">
                             <div className="flex items-center gap-1.5">
                               {/* Hidden — see the note on the main table. */}
                               {false && (
@@ -2253,14 +2283,14 @@ const SeoRankings = () => {
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="text-center py-1.5">
+                          <TableCell className="text-center py-3">
                             {keyword.rankDisplay ? (
                               <span className="text-muted-foreground text-xs">{keyword.rankDisplay}</span>
                             ) : (
                               <span className="font-semibold text-xs">{keyword.rank}</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-center py-1.5">
+                          <TableCell className="text-center py-3">
                             {keyword.tags.length > 0 ? (
                               <TooltipProvider>
                                 <Tooltip>
@@ -2296,7 +2326,7 @@ const SeoRankings = () => {
                               </span>
                             )}
                           </TableCell>
-                          <TableCell className="py-1.5 w-8">
+                          <TableCell className="py-3 w-8">
                             <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -2625,7 +2655,7 @@ const SeoRankings = () => {
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Platform</Label>
                 <select
-                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+                  className="w-full rounded-md border border-input bg-background px-3 py-3 text-sm"
                   value={importPlatform}
                   onChange={(e) => setImportPlatform(e.target.value)}
                 >
