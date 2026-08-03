@@ -2058,32 +2058,35 @@ const SeoRankings = () => {
                   ))}
                 </TableBody>
               </Table>
-              {/* Pagination Controls. Rendered whenever there are rows, not only
-                  past two pages — the page-size selector has to be reachable
-                  even when everything already fits on one. */}
+              {/* Pagination Controls. The count is always shown; the page-size
+                  selector appears only once the list exceeds the smallest option,
+                  since below that every choice shows the same rows and the
+                  control does nothing. It sits with the page buttons on the
+                  right, where the other paging controls are. */}
               {filteredKeywords.length > 0 && (
                 <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-border">
-                  <div className="flex items-center gap-3">
-                    <p className="text-sm text-muted-foreground">
-                      Showing {(currentPage - 1) * KEYWORDS_PER_PAGE + 1}-{Math.min(currentPage * KEYWORDS_PER_PAGE, filteredKeywords.length)} of {filteredKeywords.length} keywords
-                    </p>
-                    <Select
-                      value={String(keywordsPerPage)}
-                      onValueChange={(v) => setKeywordsPerPage(Number(v))}
-                    >
-                      <SelectTrigger className="h-8 w-[110px] text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PAGE_SIZE_OPTIONS.map((size) => (
-                          <SelectItem key={size} value={String(size)}>
-                            {size} per page
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-1">
+                  <p className="text-sm text-muted-foreground">
+                    Showing {(currentPage - 1) * KEYWORDS_PER_PAGE + 1}-{Math.min(currentPage * KEYWORDS_PER_PAGE, filteredKeywords.length)} of {filteredKeywords.length} keywords
+                  </p>
+                  <div className="flex items-center gap-2">
+                    {filteredKeywords.length > PAGE_SIZE_OPTIONS[0] && (
+                      <Select
+                        value={String(keywordsPerPage)}
+                        onValueChange={(v) => setKeywordsPerPage(Number(v))}
+                      >
+                        <SelectTrigger className="h-8 w-[120px] text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PAGE_SIZE_OPTIONS.map((size) => (
+                            <SelectItem key={size} value={String(size)}>
+                              {size} per page
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <div className="flex items-center gap-1">
                     <Button
                       variant="outline"
                       size="sm"
@@ -2138,6 +2141,7 @@ const SeoRankings = () => {
                     >
                       Last
                     </Button>
+                    </div>
                   </div>
                 </div>
               )}
