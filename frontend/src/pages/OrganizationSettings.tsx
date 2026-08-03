@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import Clients from "@/pages/Clients";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
@@ -1948,6 +1949,12 @@ export default function OrganizationSettings() {
             {(!isTeamMember || hasTeamManagement) && (
               <TabsTrigger value="team" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Team Members</TabsTrigger>
             )}
+            {/* Clients moved here from its own sidebar entry — it is org
+                administration, and it sits next to Team Members because both
+                are about who can log in. Same permission as this page. */}
+            {!isTeamMember && (
+              <TabsTrigger value="clients" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Clients</TabsTrigger>
+            )}
             {user?.role === 'super_admin' && (
               <TabsTrigger value="api-keys" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
                 <Key className="h-3.5 w-3.5 mr-1.5" />API Keys
@@ -2331,6 +2338,13 @@ export default function OrganizationSettings() {
           </Card>
           )}
         </TabsContent>
+
+        {/* ─────────── CLIENTS TAB ─────────── */}
+        {!isTeamMember && (
+          <TabsContent value="clients" className="space-y-6">
+            <Clients embedded />
+          </TabsContent>
+        )}
 
         {/* ─────────── API KEYS TAB ─────────── */}
         {user?.role === 'super_admin' && (

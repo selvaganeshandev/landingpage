@@ -14,7 +14,12 @@ interface DomainRow {
   url: string;
 }
 
-export default function Clients() {
+/**
+ * `embedded` drops the page chrome — outer padding, width cap and the h1 —
+ * so this can render inside the Organization Settings tab bar, which supplies
+ * its own heading, without stacking two page titles.
+ */
+export default function Clients({ embedded = false }: { embedded?: boolean } = {}) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [domains, setDomains] = useState<DomainRow[]>([]);
@@ -48,16 +53,22 @@ export default function Clients() {
   if (loading) return <PageLoader />;
 
   return (
-    <div className="p-6 space-y-6 max-w-4xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Users className="h-6 w-6 text-primary" />
-          Clients
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
+    <div className={embedded ? "space-y-6" : "p-6 space-y-6 max-w-4xl mx-auto"}>
+      {embedded ? (
+        <p className="text-sm text-muted-foreground">
           Each domain is a client. Give a client a read-only login to view their own domain.
         </p>
-      </div>
+      ) : (
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+            <Users className="h-6 w-6 text-primary" />
+            Clients
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Each domain is a client. Give a client a read-only login to view their own domain.
+          </p>
+        </div>
+      )}
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

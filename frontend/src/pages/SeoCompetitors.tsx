@@ -1,7 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ExternalLink, Plus, Trash2, ChevronLeft, Search, ChevronRight, RefreshCw, MoreVertical, X, Loader2 } from "lucide-react";
+import { ExternalLink, Plus, Trash2, ChevronLeft, Search, ChevronRight, RefreshCw, MoreVertical, X, Loader2, ArrowUp, ArrowDown, ArrowUpDown, Users, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -13,8 +20,6 @@ import { useDomainStore } from "@/stores/domainStore";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/services/api";
-import Lottie from "lottie-react";
-import CompLottie from "@/assets/animations/compLottie.json";
 
 /* ─── Progress bar keyframes (matches RankMax: 10s per bar, sequential) ──── */
 if (typeof document !== "undefined" && !document.getElementById("comp-pb-style")) {
@@ -37,6 +42,17 @@ function projectName(domain: string): string {
   }
 }
 
+/* ─── Helper: bare hostname ───────────────────────────────────────────────────
+   Strips scheme, www and any path so a stored URL like
+   "https://www.keralatourism.org/" reads as "keralatourism.org". */
+function bareDomain(url?: string): string {
+  return (url || "")
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/[/?#].*$/, "");
+}
+
 /* ─── Helper: favicon URL ─────────────────────────────────────────────────── */
 function favUrl(domain: string, sz = 64): string {
   return `https://www.google.com/s2/favicons?sz=${sz}&domain_url=${domain}`;
@@ -56,20 +72,25 @@ interface CompKeyword {
   featured_snippet: boolean; knowledge_panel: boolean; ads: boolean;
 }
 
-/* ─── Rank badge ──────────────────────────────────────────────────────────── */
-function RankBadge({ rank }: { rank: number }) {
-  if (!rank || rank === 0)
+/* ─── Sorting ─────────────────────────────────────────────────────────────────
+   Matches the primary keyword table: click cycles asc -> desc -> off, and the
+   first click uses whichever direction is actually useful for that column —
+   rank 1 is the best rank, so ranks open ascending, while volume and date open
+   with the largest first. */
+type CompSortKey = "keyword" | "their_rank" | "our_rank" | "best_rank" | "volume" | "date";
+const COMP_ASCENDING_FIRST: CompSortKey[] = ["keyword", "their_rank", "our_rank", "best_rank"];
+
+/* Page sizes, matching the primary keyword table. */
+const KW_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+/* ─── Rank cell ───────────────────────────────────────────────────────────────
+   Plain number, exactly as the primary keyword table renders a rank. This was
+   a coloured, bordered badge — the only place in the app that boxed a rank,
+   which made the competitor column read as a tag rather than a position. */
+function RankCell({ rank }: { rank: number }) {
+  if (!rank || rank <= 0)
     return <span className="text-muted-foreground text-sm">-</span>;
-  const color =
-    rank <= 3 ? "bg-emerald-500/10 text-emerald-600 border-emerald-300/40" :
-    rank <= 10 ? "bg-blue-500/10 text-blue-600 border-blue-300/40" :
-    rank <= 50 ? "bg-yellow-500/10 text-yellow-600 border-yellow-300/40" :
-    "bg-muted text-muted-foreground border-border";
-  return (
-    <span className={`inline-flex items-center justify-center min-w-[2.5rem] h-7 rounded text-xs font-bold border ${color}`}>
-      {rank}
-    </span>
-  );
+  return <span className="font-semibold text-sm">{rank}</span>;
 }
 
 /* ═════════════════════════════════════════════════════════════════════════════
@@ -107,6 +128,10 @@ const SeoCompetitors = () => {
   const [selectedProject, setSelectedProject] = useState<CompProject | null>(null);
   const [keywords, setKeywords] = useState<CompKeyword[]>([]);
   const [kwSearch, setKwSearch] = useState("");
+  const [sortKey, setSortKey] = useState<CompSortKey | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [kwPerPage, setKwPerPage] = useState(25);
 
   // Wait state (after analysis completes, show "View Analysis" before transitioning)
   const [waitReady, setWaitReady] = useState(false);
@@ -314,11 +339,84 @@ const SeoCompetitors = () => {
     !kwSearch || k.keyword.toLowerCase().includes(kwSearch.toLowerCase())
   );
 
+  /* ── Sorting ────────────────────────────────────────────────────────────── */
+  const handleSort = (key: CompSortKey) => {
+    if (sortKey === key) {
+      // Third click clears the sort and restores the API's ordering.
+      if (sortDir === "asc") setSortDir("desc");
+      else { setSortKey(null); setSortDir("asc"); }
+    } else {
+      setSortKey(key);
+      setSortDir(COMP_ASCENDING_FIRST.includes(key) ? "asc" : "desc");
+    }
+  };
+
+  const sortedKws = (() => {
+    if (!sortKey) return filteredKws;
+
+    // A rank of 0 means "not ranking", not "rank zero" — it has to sort as
+    // absent, otherwise every keyword nobody ranks for floods the top of an
+    // ascending sort and buries the actual positions.
+    const valueOf = (kw: CompKeyword): number | string | null => {
+      switch (sortKey) {
+        case "keyword": return kw.keyword || "";
+        case "their_rank": return kw.their_rank > 0 ? kw.their_rank : null;
+        case "our_rank": return kw.our_rank > 0 ? kw.our_rank : null;
+        case "best_rank": return kw.best_rank > 0 ? kw.best_rank : null;
+        case "volume": return kw.search_volume != null && kw.search_volume > 0 ? kw.search_volume : null;
+        case "date": return kw.last_ranked_date ? new Date(kw.last_ranked_date).getTime() : null;
+        default: return null;
+      }
+    };
+
+    return [...filteredKws].sort((a, b) => {
+      const av = valueOf(a);
+      const bv = valueOf(b);
+      // Missing values stay at the bottom in both directions.
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "string" || typeof bv === "string") {
+        const cmp = String(av).localeCompare(String(bv));
+        return sortDir === "asc" ? cmp : -cmp;
+      }
+      return sortDir === "asc" ? Number(av) - Number(bv) : Number(bv) - Number(av);
+    });
+  })();
+
+  /* ── Pagination ─────────────────────────────────────────────────────────── */
+  const totalKwPages = Math.max(1, Math.ceil(sortedKws.length / kwPerPage));
+  const pagedKws = sortedKws.slice((currentPage - 1) * kwPerPage, currentPage * kwPerPage);
+
+  // Searching, sorting or resizing the page can leave you on a page that no
+  // longer exists — snap back to the first one.
+  useEffect(() => { setCurrentPage(1); }, [kwSearch, sortKey, sortDir, kwPerPage, selectedProject?.id]);
+
+  const SortableCompHead = ({ label, sortId, className }: {
+    label: string; sortId: CompSortKey; className?: string;
+  }) => (
+    <TableHead className={className}>
+      <button
+        type="button"
+        onClick={() => handleSort(sortId)}
+        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+        aria-label={`Sort by ${label}`}
+      >
+        {label}
+        {sortKey === sortId ? (
+          sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-40" />
+        )}
+      </button>
+    </TableHead>
+  );
+
   /* ── Shared header (like RankMax competitor_header.js) ───────────────────── */
   const Header = ({ title, subtitle, extra }: { title?: string; subtitle?: string; extra?: React.ReactNode }) => (
     <div className="flex items-center justify-between flex-wrap gap-3">
       <div className="flex items-center gap-3">
-        <div className="w-12 h-12 rounded-lg border border-border bg-white flex items-center justify-center flex-shrink-0 overflow-hidden p-1">
+        <div className="w-12 h-12 rounded-lg border border-border bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden p-1">
           {selectedDomain?.url ? (
             <img src={favUrl(selectedDomain.url)} alt="" className="w-8 h-8 object-contain rounded"
               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
@@ -396,154 +494,107 @@ const SeoCompetitors = () => {
   if (view === "init" || view === "analyzing") {
     const isRunning = view === "analyzing" && !waitReady;
     const isReady = waitReady;
-    const showCards = view === "analyzing";
+    const showSteps = view === "analyzing";
 
-    const cardData = [
-      { label: "Analyzing your keywords", bg: "#fffec4" },
-      { label: "Finding the competitors", bg: "#ffc4e7" },
-      { label: "Filtering the competitors", bg: "#c4fff9" },
-      { label: "Collecting information", bg: "#ffd6c4" },
+    /* The RankMax robot animation and its four floating pastel cards are gone.
+       They were the only illustration of their kind in the app, used fixed hex
+       colours that ignored the theme, and positioned the cards with hand-tuned
+       pixel margins. This is the same dashed-card empty state the Topics page
+       uses for its "Start Analysing" flow. */
+    const steps = [
+      "Analysing your keywords",
+      "Finding the competitors",
+      "Filtering the competitors",
+      "Collecting information",
     ];
 
-    /* Progress bar: each bar runs 10s, sequential (0s, 10s, 20s, 30s delays) */
-    const ProgressBar = ({ index, active }: { index: number; active: boolean }) => (
-      <div className="w-full rounded-full overflow-hidden" style={{ height: 6, background: "#f2e9ff", position: "relative", bottom: 4 }}>
-        {active ? (
-          <div className="rounded-full" style={{
-            height: 6, background: "rgb(137, 89, 207)", width: 0,
-            animation: "comp-pb 10s linear forwards",
-            animationDelay: `${index * 10}s`,
-          }} />
-        ) : (
-          <div className="rounded-full" style={{ height: 6, background: "rgb(137, 89, 207)", width: "100%" }} />
-        )}
-      </div>
-    );
+    const heading = isReady
+      ? "Analysis complete"
+      : isRunning
+      ? "Finding your competitors..."
+      : analysisStatus === "FAIL"
+      ? "Analysis failed"
+      : "No competitor analysis yet";
 
-    /* Button: matches RankMax state machine exactly */
-    const ActionButton = () => {
-      if (isRunning) {
-        return (
-          <Button className="gradient-primary shadow-md shadow-primary/20 h-10 min-w-[140px]" disabled>
-            <Loader2 className="w-4 h-4 animate-spin" />
-          </Button>
-        );
-      }
-      if (isReady) {
-        return (
-          <Button className="gradient-primary shadow-md shadow-primary/20 h-10 min-w-[140px]" onClick={handleViewAnalysis}>
-            View Analysis
-          </Button>
-        );
-      }
-      if (analysisStatus === "FAIL") {
-        return (
-          <Button className="gradient-primary shadow-md shadow-primary/20 h-10 min-w-[140px]" onClick={handleStartAnalysis}>
-            Reanalysis
-          </Button>
-        );
-      }
-      return (
-        <Button className="gradient-primary shadow-md shadow-primary/20 h-10 min-w-[140px]"
-          onClick={handleStartAnalysis} disabled={!domainId}>
-          Start Analysis
-        </Button>
-      );
-    };
+    const blurb = isReady
+      ? `${totalKeywords} keywords matched across ${uniqueDomains} domains. Open the list to choose which competitors to track.`
+      : isRunning
+      ? "We're scanning the search results for every keyword you track to find the domains ranking alongside you. This runs in the background — you can leave this page and come back."
+      : analysisStatus === "FAIL"
+      ? "The last run didn't finish. Starting it again will pick up from your current keyword list."
+      : "Competitor AI scans the search results for the keywords you track and finds the domains ranking alongside you. Start the analysis to discover them for this domain.";
 
     return (
-      <div className="p-6 sm:p-8 bg-background animate-fade-in">
+      <div className="p-6 sm:p-8 space-y-5 bg-background animate-fade-in">
         <Header />
-        <div className="flex flex-col items-center justify-center pt-4">
 
-          {/* Cards + Robot layout (cards only visible during analysis) */}
-          <div className="flex items-center justify-center w-full max-w-3xl">
-
-            {/* Left cards */}
-            {showCards && (
-              <div className="hidden md:flex flex-col flex-shrink-0" style={{ width: 176 }}>
-                <div style={{ marginBottom: 100 }}>
-                  <div className="w-full flex items-center justify-center text-center rounded-md px-3 font-bold text-sm leading-7"
-                    style={{ background: cardData[0].bg, color: "#34234f", height: 80 }}>
-                    {cardData[0].label}
-                  </div>
-                  <ProgressBar index={0} active={isRunning} />
-                </div>
-                <div>
-                  <div className="w-full flex items-center justify-center text-center rounded-md px-3 font-bold text-sm leading-7"
-                    style={{ background: cardData[1].bg, color: "#34234f", height: 80 }}>
-                    {cardData[1].label}
-                  </div>
-                  <ProgressBar index={1} active={isRunning} />
-                </div>
-              </div>
-            )}
-
-            {/* Robot center — Lottie animation (same as RankMax) */}
-            <div className="flex-shrink-0 mx-2 sm:mx-6" style={{ width: showCards ? 220 : 280 }}>
-              <Lottie animationData={CompLottie} loop />
+        <Card className="p-6 border-dashed border-primary/40 bg-card/70">
+          <div className="flex flex-col md:flex-row gap-4 items-start">
+            <div className="p-3 rounded-full bg-primary/10 text-primary shrink-0">
+              {isRunning
+                ? <Loader2 className="h-6 w-6 animate-spin" />
+                : <Users className="h-6 w-6" />}
             </div>
+            <div className="flex-1 space-y-2 min-w-0">
+              <h3 className="text-lg font-semibold">{heading}</h3>
+              <p className="text-sm text-muted-foreground">{blurb}</p>
 
-            {/* Right cards */}
-            {showCards && (
-              <div className="hidden md:flex flex-col flex-shrink-0" style={{ width: 176 }}>
-                <div style={{ marginBottom: 100, marginTop: 30 }}>
-                  <div className="w-full flex items-center justify-center text-center rounded-md px-3 font-bold text-sm leading-7"
-                    style={{ background: cardData[2].bg, color: "#34234f", height: 80 }}>
-                    {cardData[2].label}
-                  </div>
-                  <ProgressBar index={2} active={isRunning} />
+              {/* Progress steps, shown only while a run is in flight. Each bar
+                  fills over 10s in sequence — the same pacing as before, now in
+                  theme colours instead of #f2e9ff / rgb(137,89,207). */}
+              {showSteps && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-3 max-w-2xl">
+                  {steps.map((label, i) => (
+                    <div key={label} className="space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+                      <div className="w-full rounded-full overflow-hidden bg-muted" style={{ height: 4 }}>
+                        <div
+                          className="rounded-full bg-primary h-full"
+                          style={isRunning
+                            ? { width: 0, animation: "comp-pb 10s linear forwards", animationDelay: `${i * 10}s` }
+                            : { width: "100%" }}
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div style={{ marginLeft: -25 }}>
-                  <div className="w-full flex items-center justify-center text-center rounded-md px-3 font-bold text-sm leading-7"
-                    style={{ background: cardData[3].bg, color: "#34234f", height: 80 }}>
-                    {cardData[3].label}
-                  </div>
-                  <ProgressBar index={3} active={isRunning} />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Mobile: show cards in grid */}
-          {showCards && (
-            <div className="grid grid-cols-2 gap-3 w-full max-w-sm mt-4 md:hidden">
-              {cardData.map((c, i) => (
-                <div key={i}>
-                  <div className="flex items-center justify-center text-center rounded-md px-2 font-bold text-xs leading-5"
-                    style={{ background: c.bg, color: "#34234f", height: 60 }}>
-                    {c.label}
-                  </div>
-                  <div className="w-full rounded-full overflow-hidden" style={{ height: 4, background: "#f2e9ff" }}>
-                    <div className="rounded-full" style={{
-                      height: 4, background: "rgb(137, 89, 207)", width: 0,
-                      animation: isRunning ? "comp-pb 10s linear forwards" : "none",
-                      animationDelay: `${i * 10}s`,
-                      ...(isRunning ? {} : { width: "100%" }),
-                    }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Bottom: title + status text + button */}
-          <div className="text-center mt-6 space-y-2">
-            <h2 className="text-xl font-bold">Competitor AI</h2>
-            <p className="text-sm text-muted-foreground max-w-md leading-relaxed">
-              {showCards && totalKeywords > 0 ? (
-                <><span className="text-primary font-semibold">{totalKeywords}</span>/{totalKeywords} keywords match identified and <span className="text-primary font-semibold">{uniqueDomains}</span> domains tracked</>
-              ) : showCards ? (
-                "Analyzing your keywords and finding competitors…"
-              ) : (
-                "Hey, this is PromptMaxxBot and I'm here to assist you with tracking your Competitors' SEO Progress."
               )}
-            </p>
-            <div className="pt-2 flex justify-center">
-              <ActionButton />
+
+              {showSteps && totalKeywords > 0 && (
+                <p className="text-sm text-muted-foreground pt-1">
+                  <span className="text-primary font-semibold">{totalKeywords}</span> keywords matched and{" "}
+                  <span className="text-primary font-semibold">{uniqueDomains}</span> domains tracked
+                </p>
+              )}
+
+              <div className="flex flex-wrap gap-3 pt-2">
+                {isRunning ? (
+                  <Button disabled className="gradient-primary shadow-md shadow-primary/20 text-primary-foreground">
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Analysing...
+                  </Button>
+                ) : isReady ? (
+                  <Button onClick={handleViewAnalysis}
+                    className="gradient-primary shadow-md shadow-primary/20 text-primary-foreground">
+                    <Users className="h-4 w-4 mr-2" />
+                    View Competitors
+                  </Button>
+                ) : (
+                  <Button onClick={handleStartAnalysis} disabled={!domainId}
+                    className="gradient-primary shadow-md shadow-primary/20 text-primary-foreground">
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    {analysisStatus === "FAIL" ? "Retry Analysis" : "Start Analysis"}
+                  </Button>
+                )}
+                {projects.length > 0 && !isRunning && (
+                  <Button variant="outline" onClick={() => setView("direct")}>
+                    View tracked competitors
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        </Card>
       </div>
     );
   }
@@ -591,11 +642,11 @@ const SeoCompetitors = () => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {filteredCandidates.map(c => (
-                <div key={c.domain}
-                  className={`rounded-md border p-4 flex items-center gap-3 transition-all
-                    ${c.tracked ? "bg-primary/5 border-primary/20" : "bg-card border-border"}`}>
+                <Card key={c.domain}
+                  className={`p-4 flex items-center gap-3 transition-all hover:border-primary/40
+                    ${c.tracked ? "bg-primary/5 border-primary/30" : "border-border"}`}>
                   {/* Favicon */}
-                  <div className="w-9 h-9 rounded border border-border bg-white flex items-center justify-center flex-shrink-0 overflow-hidden p-0.5">
+                  <div className="w-9 h-9 rounded border border-border bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden p-0.5">
                     <img src={favUrl(c.domain)} alt="" className="w-7 h-7 rounded object-contain"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                   </div>
@@ -616,7 +667,7 @@ const SeoCompetitors = () => {
                   <div className="flex-shrink-0">
                     {c.tracked ? (
                       <button onClick={() => handleRemoveCandidate(c.domain)}
-                        className="text-xs font-medium text-red-500 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2.5 py-1.5 transition-colors flex items-center gap-1">
+                        className="text-xs font-medium text-destructive bg-destructive/10 hover:bg-destructive/20 rounded px-2.5 py-1.5 transition-colors flex items-center gap-1">
                         <X className="w-3 h-3" />
                       </button>
                     ) : (
@@ -627,7 +678,7 @@ const SeoCompetitors = () => {
                       </Button>
                     )}
                   </div>
-                </div>
+                </Card>
               ))}
             </div>
           )}
@@ -687,6 +738,9 @@ const SeoCompetitors = () => {
           }
         />
 
+        {/* Project cards use single-width border-border like every other card
+            in the app. They were border-2 border-primary/20 — a double-weight
+            purple outline used nowhere else. */}
         {projects.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-[50vh] gap-4">
             <p className="text-muted-foreground">No competitor project found</p>
@@ -695,10 +749,10 @@ const SeoCompetitors = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {projects.map(p => (
-              <div key={p.id} className="rounded-lg border-2 border-primary/20 bg-card p-4 hover:border-primary/40 hover:shadow-sm transition-all">
+              <Card key={p.id} className="border-border p-4 hover:border-primary/40 hover:shadow-md transition-all">
                 <div className="flex items-start gap-3">
                   {/* Favicon */}
-                  <div className="w-10 h-10 rounded border border-border bg-white flex items-center justify-center flex-shrink-0 overflow-hidden p-0.5">
+                  <div className="w-10 h-10 rounded border border-border bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden p-0.5">
                     <img src={favUrl(p.competitor_domain)} alt="" className="w-7 h-7 rounded object-contain"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                   </div>
@@ -748,7 +802,7 @@ const SeoCompetitors = () => {
                     </span>
                   </button>
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
         )}
@@ -794,17 +848,23 @@ const SeoCompetitors = () => {
               onClick={() => setView("direct")}>
               <ChevronLeft className="w-4 h-4" />
             </Button>
+            {/* The matchup is what this view is about; "Competitors Analysis"
+                is the section it lives in, so it reads as the subtitle. */}
             <div>
-              <h1 className="text-xl font-bold leading-tight">Competitors Analysis</h1>
+              <h1 className="text-xl font-bold leading-tight">
+                {selectedDomain?.name || "Your site"} <span className="text-primary">vs</span> {projectName(selectedProject.competitor_domain)}
+              </h1>
+              {/* The actual hostnames, so it is unambiguous which properties
+                  are being compared — brand names alone can be shared across
+                  several domains. */}
               <p className="text-sm text-muted-foreground mt-0.5">
-                {selectedDomain?.name || "Your site"} <span className="text-primary font-semibold">vs</span> {projectName(selectedProject.competitor_domain)}
+                {bareDomain(selectedDomain?.url) || "your site"} vs {bareDomain(selectedProject.competitor_domain)}
               </p>
             </div>
           </div>
-          <Button size="sm" className="gradient-primary gap-1.5"
-            onClick={() => { if (analysisStatus === "COMP") setView("selecting"); else handleStartAnalysis(); }}>
-            <Plus className="w-4 h-4" /> Add Competitor
-          </Button>
+          {/* "Add Competitor" removed — this view is a head-to-head against one
+              competitor, not a place to manage the list. Adding is still on the
+              Direct Competitors screen behind the back arrow. */}
         </div>
 
         {/* Total keywords + Search */}
@@ -818,69 +878,157 @@ const SeoCompetitors = () => {
         </div>
 
         {/* Table — all RankMax columns */}
-        <div className="rounded-lg border border-border overflow-x-auto">
-          <table className="w-full text-sm min-w-[900px]">
-            <thead>
-              <tr className="border-b border-border bg-muted/30 text-xs uppercase tracking-wider">
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Keyword</th>
-                <th className="text-center px-3 py-3 font-semibold text-muted-foreground w-24">My Rank</th>
-                <th className="text-center px-3 py-3 font-semibold text-muted-foreground w-32">Competitor Rank</th>
-                <th className="text-center px-3 py-3 font-semibold text-muted-foreground w-20">Best</th>
-                <th className="text-center px-3 py-3 font-semibold text-muted-foreground w-20">SERP</th>
-                <th className="text-center px-3 py-3 font-semibold text-muted-foreground w-20">Volume</th>
-                <th className="text-right px-4 py-3 font-semibold text-muted-foreground w-32">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {keywords.length === 0 && (
-                <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">Loading keywords...</td></tr>
-              )}
-              {filteredKws.map((kw, i) => (
-                <tr key={kw.id} className={`border-b border-border last:border-0 ${i % 2 ? "bg-muted/10" : ""}`}>
-                  <td className="px-4 py-3">
-                    <span className="font-medium">{kw.keyword}</span>
-                    {kw.our_url && (
-                      <a href={kw.our_url} target="_blank" rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary mt-0.5 truncate max-w-[280px]">
-                        {new URL(kw.our_url).pathname}
-                        <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-                      </a>
-                    )}
-                  </td>
-                  <td className="px-3 py-3 text-center"><RankBadge rank={kw.our_rank} /></td>
-                  <td className="px-3 py-3 text-center">
-                    <span className={kw.their_rank > 0 ? "inline-flex items-center justify-center min-w-[2.5rem] h-7 rounded text-xs font-bold bg-pink-50 text-pink-700 border border-pink-200" : ""}>
-                      {kw.their_rank > 0 ? kw.their_rank : <span className="text-muted-foreground text-sm">-</span>}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 text-center">
-                    {kw.best_rank > 0 ? (
-                      <span className="text-xs font-bold">{kw.best_rank}</span>
-                    ) : (
-                      <span className="text-muted-foreground text-xs">-</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-3 text-center">
-                    <span className={`text-xs ${serpLabel(kw) !== "NA" ? "font-semibold text-primary" : "text-muted-foreground"}`}>
-                      {serpLabel(kw)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 text-center">
-                    {kw.search_volume != null && kw.search_volume > 0 ? (
-                      <span className="text-xs font-semibold">{kw.search_volume.toLocaleString()}</span>
-                    ) : (
-                      <span className="text-muted-foreground text-xs">-</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="text-xs font-medium">{formatDate(kw.last_ranked_date)}</div>
-                    <div className="text-[10px] text-muted-foreground">{timeAgo(kw.last_ranked_date)}</div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {/* Same shell, header treatment and row rhythm as the primary keyword
+            table on /seo-rankings: shadcn Table, uppercase py-2 heads on
+            bg-muted/30, py-3 body cells, hover instead of zebra striping. */}
+        <Card className="shadow-elegant border border-border backdrop-blur-sm bg-card/80">
+          <CardContent className="p-0 overflow-x-auto">
+            {/* table-fixed makes the column widths below authoritative. Under
+                the default auto layout a cell's max-width is only a hint, and
+                `truncate` sets white-space: nowrap — so the browser widened the
+                keyword column to fit the longest URL instead of clipping it,
+                which is what starved the rank columns. */}
+            <Table className="table-fixed">
+              <TableHeader>
+                {/* Competitor first, then your rank and your best beside it.
+                    BEST is YOUR best-ever position — views.py reads it from
+                    your own SeoKeywordRank.top_rank, not the competitor's — so
+                    it is labelled MY BEST and grouped with MY RANK. */}
+                {/* KEYWORD is pinned to a fixed width so it stops absorbing all
+                    the slack — with no width it stretched and squeezed the rank
+                    columns until "MY BEST" wrapped onto two lines. Every other
+                    head is nowrap so a label can never break mid-column. */}
+                <TableRow className="bg-muted/30 hover:bg-muted/30">
+                  <SortableCompHead label="KEYWORD" sortId="keyword" className="text-xs font-semibold py-2 w-[340px]" />
+                  <SortableCompHead label="COMPETITOR RANK" sortId="their_rank" className="text-center text-xs font-semibold py-2 w-36 whitespace-nowrap [&>button]:mx-auto" />
+                  <SortableCompHead label="MY RANK" sortId="our_rank" className="text-center text-xs font-semibold py-2 w-24 whitespace-nowrap [&>button]:mx-auto" />
+                  <SortableCompHead label="MY BEST" sortId="best_rank" className="text-center text-xs font-semibold py-2 w-24 whitespace-nowrap [&>button]:mx-auto" />
+                  {/* SERP is not sortable: featured_snippet / knowledge_panel /
+                      ads are False on every keyword in the system, so the column
+                      reads "NA" throughout and sorting it does nothing. */}
+                  <TableHead className="text-center text-xs font-semibold py-2 w-16 whitespace-nowrap">SERP</TableHead>
+                  <SortableCompHead label="VOLUME" sortId="volume" className="text-center text-xs font-semibold py-2 w-20 whitespace-nowrap [&>button]:mx-auto" />
+                  <SortableCompHead label="DATE" sortId="date" className="text-right text-xs font-semibold py-2 w-32 whitespace-nowrap [&>button]:ml-auto" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {keywords.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-16 text-muted-foreground">
+                      Loading keywords...
+                    </TableCell>
+                  </TableRow>
+                )}
+                {pagedKws.map((kw) => (
+                  <TableRow key={kw.id} className="hover:bg-muted/30">
+                    <TableCell className="py-3 w-[340px] max-w-[340px]">
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm truncate">{kw.keyword}</p>
+                        {/* The competitor's ranking page — the useful URL in a
+                            head-to-head view. This showed our_url, which is
+                            blank on every keyword we don't currently rank for,
+                            so the column was a column of em-dashes. */}
+                        {kw.their_url ? (
+                          <a href={kw.their_url} target="_blank" rel="noopener noreferrer"
+                            title={kw.their_url}
+                            className="text-xs text-muted-foreground flex items-center gap-1 min-w-0 hover:text-primary hover:underline">
+                            {/* truncate needs its own element — the anchor is a
+                                flex container, so text-overflow would not apply
+                                to its anonymous text child. */}
+                            <span className="truncate">{kw.their_url}</span>
+                            <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+                          </a>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">—</p>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-center py-3"><RankCell rank={kw.their_rank} /></TableCell>
+                    <TableCell className="text-center py-3"><RankCell rank={kw.our_rank} /></TableCell>
+                    <TableCell className="text-center py-3"><RankCell rank={kw.best_rank} /></TableCell>
+                    <TableCell className="text-center py-3">
+                      <span className={`text-sm ${serpLabel(kw) !== "NA" ? "font-semibold text-primary" : "text-muted-foreground"}`}>
+                        {serpLabel(kw)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-center py-3">
+                      {kw.search_volume != null && kw.search_volume > 0 ? (
+                        <span className="text-sm">{kw.search_volume.toLocaleString()}</span>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right py-3">
+                      <div className="text-xs font-medium">{formatDate(kw.last_ranked_date)}</div>
+                      <div className="text-[10px] text-muted-foreground">{timeAgo(kw.last_ranked_date)}</div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+
+            {/* Same footer as the primary keyword table. The page-size select
+                only appears once there are more rows than the smallest option,
+                since below that every choice shows the same rows. */}
+            {sortedKws.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-border">
+                <p className="text-sm text-muted-foreground">
+                  Showing {(currentPage - 1) * kwPerPage + 1}-{Math.min(currentPage * kwPerPage, sortedKws.length)} of {sortedKws.length} keywords
+                </p>
+                <div className="flex items-center gap-2">
+                  {sortedKws.length > KW_PAGE_SIZE_OPTIONS[0] && (
+                    <Select value={String(kwPerPage)} onValueChange={(v) => setKwPerPage(Number(v))}>
+                      <SelectTrigger className="h-8 w-[120px] text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {KW_PAGE_SIZE_OPTIONS.map((size) => (
+                          <SelectItem key={size} value={String(size)}>{size} per page</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(1)} disabled={currentPage === 1}>
+                      First
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    {Array.from({ length: totalKwPages }, (_, i) => i + 1)
+                      .filter(page => page === 1 || page === totalKwPages || Math.abs(page - currentPage) <= 2)
+                      .reduce<(number | string)[]>((acc, page, idx, arr) => {
+                        if (idx > 0 && page - (arr[idx - 1] as number) > 1) acc.push('...');
+                        acc.push(page);
+                        return acc;
+                      }, [])
+                      .map((item, idx) =>
+                        item === '...' ? (
+                          <span key={`ellipsis-${idx}`} className="px-2 text-muted-foreground">...</span>
+                        ) : (
+                          <Button
+                            key={item}
+                            variant={currentPage === item ? "default" : "outline"}
+                            size="sm"
+                            className="min-w-[32px]"
+                            onClick={() => setCurrentPage(item as number)}
+                          >
+                            {item}
+                          </Button>
+                        )
+                      )}
+                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalKwPages, p + 1))} disabled={currentPage === totalKwPages}>
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(totalKwPages)} disabled={currentPage === totalKwPages}>
+                      Last
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     );
   }

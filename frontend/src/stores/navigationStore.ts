@@ -21,6 +21,7 @@ import {
   ExternalLink,
   Link as LinkIcon,
   SearchCheck,
+  MessageSquareText,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -59,10 +60,24 @@ interface NavigationState {
 }
 
 const allNavGroups: NavGroup[] = [
+  // Overview Section
   {
     name: "Overview",
+    sectionLabel: true,
+    items: [],
+  },
+  {
+    name: "Dashboard",
     items: [
-      { name: "Insights", path: "/insights", icon: LayoutDashboard, module: MODULES.DASHBOARD },
+      // Label only — the route stays /insights so existing links and bookmarks
+      // keep working. The underlying module is already MODULES.DASHBOARD.
+      { name: "Dashboard", path: "/insights", icon: LayoutDashboard, module: MODULES.DASHBOARD },
+    ],
+  },
+  {
+    name: "Ask Agent",
+    items: [
+      { name: "Ask Agent", path: "/chat", icon: MessageSquareText, module: MODULES.AI_COPILOT },
     ],
   },
   // GEO Monitoring Section
@@ -101,6 +116,15 @@ const allNavGroups: NavGroup[] = [
       { name: "Misinformation", path: "/misinformation", icon: AlertTriangle, module: MODULES.MISINFORMATION_ALERTS },
     ],
   },
+  // GEO competitors. Moved out of Strategy so each discipline owns its own
+  // competitor view — this one alongside Share of Voice and Mentions, and the
+  // SEO one under SEO Monitoring. Flat entry, matching its SEO counterpart.
+  {
+    name: "Competitors",
+    items: [
+      { name: "Competitors", path: "/competitors", icon: Users, module: MODULES.COMPETITORS },
+    ],
+  },
   {
     name: "GEO Reports",
     items: [
@@ -114,11 +138,18 @@ const allNavGroups: NavGroup[] = [
     separator: true,
     items: [],
   },
+  // Keywords and Competitors are siblings rather than a "Rankings" flyout with
+  // two children. A group of one renders as a flat link (see Sidebar), so both
+  // are reachable in a single click instead of hover-then-click.
   {
-    name: "Rankings",
-    icon: SearchCheck,
+    name: "Keywords",
     items: [
-      { name: "Keyword Rankings", path: "/seo-rankings", icon: TrendingUp, module: MODULES.KEYWORD_RANKINGS },
+      { name: "Keywords", path: "/seo-rankings", icon: SearchCheck, module: MODULES.KEYWORD_RANKINGS },
+    ],
+  },
+  {
+    name: "Competitors",
+    items: [
       { name: "Competitors", path: "/seo-competitors", icon: Users, module: MODULES.SEO_COMPETITORS },
     ],
   },
@@ -140,7 +171,6 @@ const allNavGroups: NavGroup[] = [
     icon: Lightbulb,
     items: [
       { name: "Content Gaps", path: "/content-gaps", icon: Target, module: MODULES.CONTENT_GAPS },
-      { name: "Competitors", path: "/competitors", icon: Users, module: MODULES.COMPETITORS },
       { name: "Content Planner", path: "/content-calendar", icon: Calendar, module: MODULES.CONTENT_PLANNER },
     ],
   },

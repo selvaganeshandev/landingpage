@@ -30,14 +30,12 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Check,
-  Eye,
-  MessageSquareText,
 } from "lucide-react";
 import { DomainSelector } from "./DomainSelector";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { useNavigationStore, type RecentChat } from "@/stores/navigationStore";
+import { useNavigationStore } from "@/stores/navigationStore";
 import { useDomainStore } from "@/stores/domainStore";
 import { MODULES } from "@/types/auth";
 import { useSidebar } from "@/contexts/SidebarContext";
@@ -67,6 +65,25 @@ import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
 
 // Icons are passed as components from the navigation store; fall back to LayoutDashboard when missing
 
+/* ─── Row styling ─────────────────────────────────────────────────────────────
+   One definition shared by every sidebar entry — flat links, submenu triggers,
+   popover items and the footer — so they cannot drift apart.
+
+   The active state is a soft accent wash plus a thin brand-coloured bar on the
+   left edge, rather than a saturated full-width pill. The pill dominated the
+   panel, fought with the domain selector above it, and made the icon invert to
+   white while every neighbouring icon stayed grey. Idle rows are muted and
+   only the label weight changes when active, which keeps the column quiet and
+   the eye on the content. */
+const ROW_BASE =
+  "relative flex items-center gap-3 rounded-md text-sm transition-colors";
+const ROW_OPEN = "px-3 py-2 w-full";
+const ROW_COLLAPSED = "justify-center aspect-square w-10 h-10 p-0 mx-auto";
+const ROW_ACTIVE = "bg-accent text-foreground font-medium";
+const ROW_IDLE =
+  "text-muted-foreground font-normal hover:bg-accent/60 hover:text-foreground";
+const ICON_BASE = "h-[18px] w-[18px] flex-shrink-0";
+
 const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDomainProcessing }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void; navigate: any; isDomainProcessing?: boolean }) => {
   const [submenuOpen, setSubmenuOpen] = useState(false);
 
@@ -76,12 +93,14 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
   // Section label - just render a text header (same style as Recents was)
   if (group.sectionLabel) {
     if (!isSidebarOpen) {
-      // Show a divider line when sidebar is collapsed
-      return <Separator className="my-2" />;
+      // Collapsed: no room for the label, so a hairline keeps the grouping.
+      return <Separator className="my-1.5" />;
     }
     return (
-      <div className="px-3 py-1.5 mt-1">
-        <p className="text-xs font-semibold text-muted-foreground">{group.name}</p>
+      <div className="px-3 pt-3 pb-1">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {group.name}
+        </p>
       </div>
     );
   }
@@ -101,14 +120,11 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
     const linkContent = isDisabled ? (
       <div
         className={cn(
-          "flex items-center opacity-50 cursor-not-allowed",
-          "text-muted-foreground",
-          isSidebarOpen
-            ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-            : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
+          ROW_BASE, "opacity-50 cursor-not-allowed text-muted-foreground",
+          isSidebarOpen ? ROW_OPEN : ROW_COLLAPSED
         )}
       >
-        <Icon className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+        <Icon className={cn(ICON_BASE, "text-muted-foreground")} />
         {isSidebarOpen && <span>{item.name}</span>}
       </div>
     ) : (
@@ -116,16 +132,12 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
         to={item.path}
         onClick={onItemClick}
         className={cn(
-          "flex items-center",
-          isActive
-            ? "bg-primary text-primary-foreground"
-            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-          isSidebarOpen
-            ? "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-            : "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
+          ROW_BASE,
+          isActive ? ROW_ACTIVE : ROW_IDLE,
+          isSidebarOpen ? ROW_OPEN : ROW_COLLAPSED
         )}
       >
-        <Icon className={cn("h-5 w-5 flex-shrink-0", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
+        <Icon className={cn(ICON_BASE, isActive ? "text-primary" : "text-muted-foreground")} />
         {isSidebarOpen && <span>{item.name}</span>}
       </Link>
     );
@@ -154,33 +166,25 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
       <PopoverTrigger asChild>
         {isSidebarOpen ? (
           <button
-            className={cn(
-              "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium",
-              hasActiveItem
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            )}
+            className={cn(ROW_BASE, ROW_OPEN, hasActiveItem ? ROW_ACTIVE : ROW_IDLE)}
           >
-            <GroupIcon className={cn("h-5 w-5 flex-shrink-0", hasActiveItem ? "text-primary-foreground" : "text-foreground")} />
+            {/* Was text-foreground — near-black against grey neighbours, which
+                made every group header shout. */}
+            <GroupIcon className={cn(ICON_BASE, hasActiveItem ? "text-primary" : "text-muted-foreground")} />
             <span className="flex-1 text-left">{group.name}</span>
-            <ChevronRight className="h-4 w-4 flex-shrink-0" />
+            <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
           </button>
         ) : (
           <button
-            className={cn(
-              "flex items-center justify-center rounded-md aspect-square w-10 h-10 p-0 mx-auto",
-              hasActiveItem
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            )}
+            className={cn(ROW_BASE, ROW_COLLAPSED, hasActiveItem ? ROW_ACTIVE : ROW_IDLE)}
           >
-            <GroupIcon className="h-5 w-5 flex-shrink-0" />
+            <GroupIcon className={cn(ICON_BASE, hasActiveItem ? "text-primary" : "text-muted-foreground")} />
           </button>
         )}
       </PopoverTrigger>
       <PopoverContent className="w-[200px] p-2" side="right" align="start">
         <div className="space-y-1">
-          <p className="text-xs font-semibold text-muted-foreground px-2 py-1">{group.name}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-2 pb-1">{group.name}</p>
           {group.items.map((item: any) => {
             const Icon = (item.icon as any) || LayoutDashboard;
             const isActive = location.pathname === item.path;
@@ -190,12 +194,9 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
               return (
                 <div
                   key={item.path}
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium opacity-50 cursor-not-allowed",
-                    "text-muted-foreground"
-                  )}
+                  className={cn(ROW_BASE, ROW_OPEN, "opacity-50 cursor-not-allowed text-muted-foreground")}
                 >
-                  <Icon className="h-5 w-5 text-muted-foreground" />
+                  <Icon className={cn(ICON_BASE, "text-muted-foreground")} />
                   {item.name}
                 </div>
               );
@@ -209,14 +210,9 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
                   onItemClick();
                   setSubmenuOpen(false);
                 }}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                )}
+                className={cn(ROW_BASE, ROW_OPEN, isActive ? ROW_ACTIVE : ROW_IDLE)}
               >
-                <Icon className={cn("h-5 w-5", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
+                <Icon className={cn(ICON_BASE, isActive ? "text-primary" : "text-muted-foreground")} />
                 {item.name}
               </Link>
             );
@@ -260,12 +256,11 @@ export const Sidebar = () => {
     return null;
   }
   const { toast } = useToast();
-  const { filteredNavGroups, filterByPermissions, recentChats, updateRecentChats } = useNavigationStore();
+  const { filteredNavGroups, filterByPermissions } = useNavigationStore();
   const { isOpen, toggleSidebar } = useSidebar();
   const { selectedDomain, domains, setSelectedDomain, setDomainSwitching } = useDomainStore();
   const [domainPopoverOpen, setDomainPopoverOpen] = useState(false);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
-  const [recentsExpanded, setRecentsExpanded] = useState(true);
 
   // Check if domain is currently processing
   const domainProcessingStatus = selectedDomain?.processing_status || null;
@@ -277,25 +272,6 @@ export const Sidebar = () => {
       filterByPermissions(checkPermission);
     }
   }, [user, checkPermission, filterByPermissions]);
-
-  // Load recent chats when domain changes
-  useEffect(() => {
-    if (!selectedDomain) return;
-    const loadRecents = async () => {
-      try {
-        const response = await apiClient.getChatConversations({ domain_id: selectedDomain.id });
-        if (response.conversations) {
-          const sorted = [...response.conversations].sort((a: any, b: any) =>
-            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-          );
-          updateRecentChats(sorted.slice(0, 10));
-        }
-      } catch (error) {
-        // Silently fail - recents are not critical
-      }
-    };
-    loadRecents();
-  }, [selectedDomain]);
 
   const handleItemClick = () => {
     // Close any open popovers when clicking on items
@@ -508,10 +484,11 @@ export const Sidebar = () => {
         )}
       </div>
 
-      <nav className={cn("space-y-0.5 flex-1", isOpen ? "p-4" : "px-3 py-4")}>
+      {/* Tighter rhythm: the section labels already mark the boundaries, so the
+          horizontal rules between them were redundant and cost ~16px each. */}
+      <nav className={cn("space-y-0.5 flex-1", isOpen ? "px-4 py-2" : "px-3 py-2")}>
           {filteredNavGroups.map((group, index) => (
             <div key={index}>
-              {group.separator && isOpen && <Separator className="mt-4 mb-0" />}
               <NavGroup
                 group={group}
                 location={location}
@@ -523,174 +500,35 @@ export const Sidebar = () => {
             </div>
           ))}
 
-          {/* Recents Section - after Strategy */}
-          {isOpen && <Separator className="mt-4 mb-0" />}
-          {isOpen ? (
-            <div className="mt-1">
-              <button
-                onClick={() => setRecentsExpanded(!recentsExpanded)}
-                className="flex items-center justify-between w-full px-3 py-1.5"
-              >
-                <span className="text-xs font-semibold text-muted-foreground">Recents</span>
-                <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-              </button>
-              {recentsExpanded && (
-                <div className="space-y-0.5 max-h-40 overflow-y-auto">
-                  {recentChats.length > 0 ? (
-                    recentChats.slice(0, 10).map((chat) => (
-                      <Link
-                        key={chat.id}
-                        to={`/chat?conversation=${chat.id}`}
-                        className={cn(
-                          "flex items-center gap-2 px-3 py-1.5 text-sm rounded-md",
-                          location.pathname === '/chat' && new URLSearchParams(location.search).get('conversation') === String(chat.id)
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                        )}
-                      >
-                        <MessageSquareText className="h-3.5 w-3.5 flex-shrink-0" />
-                        <span className="truncate text-xs">{chat.title || `Chat ${chat.id}`}</span>
-                      </Link>
-                    ))
-                  ) : (
-                    <p className="px-3 py-1.5 text-xs text-muted-foreground">No recent chats</p>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Link
-                  to="/chat"
-                  className={cn(
-                    "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
-                  )}
-                >
-                  <MessageSquareText className="h-5 w-5 flex-shrink-0" />
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                <p>Recent Chats</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
       </nav>
 
-      <div className={cn("border-t border-border mt-auto space-y-1 pt-0", isOpen ? "px-4 pb-4" : "px-3 pb-4")}>
-          {/* Organization / Profile shortcuts */}
+      <div className={cn("border-t border-border mt-auto space-y-0.5 pt-0", isOpen ? "px-4 pb-3" : "px-3 pb-3")}>
+          {/* Organization and Profile collapsed into one "Settings" entry —
+              two near-identical cog/person rows in the footer read as clutter,
+              and both are settings. Rendered through NavGroup so the flyout is
+              styled exactly like the ones in the nav above; NavGroup also falls
+              back to a flat link automatically when permissions leave only one
+              item. isDomainProcessing is passed false deliberately: settings
+              must stay reachable while a domain is being processed. */}
           {user && (
-            <div className="space-y-1 mt-4">
-              {(user.role === 'admin' || user.role === 'super_admin' || (user.role === 'user' && checkPermission && checkPermission('organization_settings', 'read'))) && (
-                !isOpen ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Link
-                        to="/organization-settings"
-                        className={cn(
-                          "flex items-center",
-                          location.pathname === "/organization-settings"
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                          "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
-                        )}
-                      >
-                        <Settings className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/organization-settings" ? "text-primary-foreground" : "text-muted-foreground")} />
-                      </Link>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      <p>Organization</p>
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Link
-                    to="/organization-settings"
-                    className={cn(
-                      "flex items-center",
-                      location.pathname === "/organization-settings"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-                    )}
-                  >
-                    <Settings className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/organization-settings" ? "text-primary-foreground" : "text-muted-foreground")} />
-                    <span>Organization</span>
-                  </Link>
-                )
-              )}
-              {(user.role === 'admin' || user.role === 'super_admin') && (
-                !isOpen ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Link
-                        to="/clients"
-                        className={cn(
-                          "flex items-center",
-                          location.pathname === "/clients"
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                          "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
-                        )}
-                      >
-                        <Users className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/clients" ? "text-primary-foreground" : "text-muted-foreground")} />
-                      </Link>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      <p>Clients</p>
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Link
-                    to="/clients"
-                    className={cn(
-                      "flex items-center",
-                      location.pathname === "/clients"
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-                    )}
-                  >
-                    <Users className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/clients" ? "text-primary-foreground" : "text-muted-foreground")} />
-                    <span>Clients</span>
-                  </Link>
-                )
-              )}
-              {!isOpen ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Link
-                      to="/profile"
-                      className={cn(
-                        "flex items-center",
-                        location.pathname === "/profile"
-                          ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                        "rounded-md justify-center aspect-square w-10 h-10 p-0 mx-auto"
-                      )}
-                    >
-                      <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
-                    </Link>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    <p>Profile</p>
-                  </TooltipContent>
-                </Tooltip>
-              ) : (
-                <Link
-                  to="/profile"
-                  className={cn(
-                    "flex items-center",
-                    location.pathname === "/profile"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    "gap-3 px-3 py-2 text-sm font-medium rounded-lg"
-                  )}
-                >
-                  <User className={cn("h-5 w-5 flex-shrink-0", location.pathname === "/profile" ? "text-primary-foreground" : "text-muted-foreground")} />
-                  <span>Profile</span>
-                </Link>
-              )}
+            <div className="space-y-0.5 mt-2">
+              <NavGroup
+                group={{
+                  name: "Settings",
+                  icon: Settings,
+                  items: [
+                    ...((user.role === 'admin' || user.role === 'super_admin' || (user.role === 'user' && checkPermission && checkPermission('organization_settings', 'read')))
+                      ? [{ name: "Organization", path: "/organization-settings", icon: Settings }]
+                      : []),
+                    { name: "Profile", path: "/profile", icon: User },
+                  ],
+                }}
+                location={location}
+                isSidebarOpen={isOpen}
+                onItemClick={handleItemClick}
+                navigate={navigate}
+                isDomainProcessing={false}
+              />
             </div>
           )}
 
@@ -716,7 +554,7 @@ export const Sidebar = () => {
               onClick={handleLogoutClick}
               className={cn(
                 "flex items-center text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                "w-full gap-3 px-3 py-2 text-sm font-medium rounded-lg"
+                "w-full gap-3 px-3 py-1.5 text-sm font-medium rounded-lg"
               )}
             >
               <LogOut className="h-5 w-5 flex-shrink-0" />
