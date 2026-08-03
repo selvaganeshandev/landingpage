@@ -656,17 +656,26 @@ export default function TrafficAttribution() {
                 />
               </PopoverContent>
             </Popover>
-            {/* Always rendered, disabled when there is nothing to clear, so the
-                row keeps its width instead of shifting as dates are picked. */}
+            {/* One slot for both states: the button becomes the loading
+                indicator while a window is fetching, so nothing is appended to
+                the row and Export never shifts under the pointer. Always
+                rendered, disabled when there is nothing to clear. */}
             <Button
               variant="ghost"
               size="sm"
-              disabled={!aiStartDate && !aiEndDate}
+              disabled={aiWindowLoading || (!aiStartDate && !aiEndDate)}
               onClick={() => { setAiStartDate(undefined); setAiEndDate(undefined); }}
+              className="min-w-[84px]"
             >
-              Clear
+              {aiWindowLoading ? (
+                <>
+                  <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                  Loading
+                </>
+              ) : (
+                "Clear"
+              )}
             </Button>
-            {aiWindowLoading && <span className="text-sm text-muted-foreground">Loading…</span>}
             <Button
               variant="outline"
               onClick={handleExportTraffic}
