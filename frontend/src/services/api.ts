@@ -2086,8 +2086,13 @@ export const apiClient = {
   deleteSeoKeyword: (id: number) =>
     apiRequest(`/seo/keywords/${id}/`, { method: 'DELETE' }),
 
-  getSeoRankHistory: (seoKwId: number, days?: number) => {
-    const params = days ? `?days=${days}` : '';
+  // `offset` shifts the window back by N days so the "Last Week/Month/..."
+  // filters can request the preceding period rather than the trailing one.
+  getSeoRankHistory: (seoKwId: number, days?: number, offset?: number) => {
+    const qs = new URLSearchParams();
+    if (days) qs.set('days', String(days));
+    if (offset) qs.set('offset', String(offset));
+    const params = qs.toString() ? `?${qs.toString()}` : '';
     return apiRequest(`/seo/keywords/${seoKwId}/history/${params}`);
   },
 

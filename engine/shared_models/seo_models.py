@@ -188,3 +188,40 @@ class SeoCompetitorAnalysis(models.Model):
         app_label = 'shared_models'
         db_table = 'seo_competitor_analysis'
         managed = False
+
+
+class SeoKeywordVolume(models.Model):
+    """Mirror of backend seo_rankings.SeoKeywordVolume.
+
+    One row per tracked keyword holding the Google Ads search-volume figures
+    fetched from DataForSEO: the headline average, the 12-month series behind
+    it, and the competition band.
+
+    month_wise_volume / month_labels are stored oldest-first so the Volume
+    History chart reads left-to-right. DataForSEO returns them newest-first, so
+    the writer reverses them.
+    """
+    seo_keyword_rank = models.OneToOneField(
+        SeoKeywordRank,
+        on_delete=models.CASCADE,
+        related_name='volume_data',
+        db_column='seo_keyword_rank_id',
+    )
+    average_volume = models.IntegerField(default=0)
+    top_volume = models.IntegerField(default=0)
+    low_volume = models.IntegerField(default=0)
+    comp_level = models.CharField(max_length=20, default='-')
+    comp_index = models.CharField(max_length=10, default='-')
+    month_wise_volume = models.JSONField(default=list, blank=True)
+    month_labels = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=10, default='new')
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        db_table = 'seo_keyword_volumes'
+        managed = False
+
+    def __str__(self):
+        return f"Volume {self.seo_keyword_rank_id}: avg={self.average_volume}"

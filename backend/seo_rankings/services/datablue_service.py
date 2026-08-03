@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 # pages / advanced params that _build_params forwards below.
 DEFAULT_DATABLUE_API_URL = "https://api.datablue.dev/v1/data/google/serp"
 
+# A Google results page holds ~10 organic results. Used to convert the
+# configured page count into the deepest rank a scrape can observe.
+RESULTS_PER_PAGE = 10
+
 
 def _cfg(name: str, default):
     return getattr(settings, name, default)
@@ -84,6 +88,39 @@ def _normalize_organic(organic):
     return organic
 
 
+def serp_pages() -> int:
+    """How many Google result pages each keyword scrape requests (1-5).
+
+    Derived from DATABLUE_NUM_RESULTS (~10 results/page) so the existing
+    depth/cost config keeps working, with DATABLUE_PAGES as an explicit
+    override. Read at call time so an .env change takes effect on restart
+    without a code deploy.
+    """
+    try:
+        cfg_pages = int(_cfg("DATABLUE_PAGES", 0) or 0)
+    except (TypeError, ValueError):
+        cfg_pages = 0
+    if cfg_pages > 0:
+        return max(1, min(5, cfg_pages))
+
+    try:
+        num = int(_cfg("DATABLUE_NUM_RESULTS", 10) or 10)
+    except (TypeError, ValueError):
+        num = 10
+    return max(1, min(5, (num + 9) // 10))
+
+
+def max_tracked_rank() -> int:
+    """The deepest rank a scrape can possibly see, ~10 results per page.
+
+    Anything below this is indistinguishable from "not ranking at all", so the
+    UI labels unranked keywords ">{max_tracked_rank}". Hardcoding that label is
+    how it came to read ">100" while only the first 10 results were ever
+    fetched.
+    """
+    return serp_pages() * RESULTS_PER_PAGE
+
+
 def _build_params(
     keyword_text: str,
     isocode: str,
@@ -105,18 +142,7 @@ def _build_params(
     """
     params = {"query": (keyword_text or "")[:2048]}
 
-    # num_results (~10/page) -> pages, capped to 1-5; DATABLUE_PAGES overrides.
-    try:
-        num = int(_cfg("DATABLUE_NUM_RESULTS", 10) or 10)
-    except (TypeError, ValueError):
-        num = 10
-    derived_pages = max(1, min(5, (num + 9) // 10))
-    try:
-        cfg_pages = int(_cfg("DATABLUE_PAGES", 0) or 0)
-    except (TypeError, ValueError):
-        cfg_pages = 0
-    # DATABLUE_PAGES <= 0 means "derive from num_results"; otherwise cap to 1-5.
-    params["pages"] = max(1, min(5, cfg_pages)) if cfg_pages > 0 else derived_pages
+    params["pages"] = serp_pages()
 
     # advanced=false → cheaper organic-focused SERP (1 credit/page vs 2).
     params["advanced"] = "true" if _cfg("DATABLUE_ADVANCED", False) else "false"

@@ -3,6 +3,7 @@ from .models import (
     SeoKeywordRank, SeoRankHistory, SeoSerpFeatureHistory,
     SeoDomainDailyMetrics, SeoKeywordNote, SeoKeywordVolume,
 )
+from .services.datablue_service import max_tracked_rank
 
 
 class SeoKeywordRankSerializer(serializers.ModelSerializer):
@@ -10,11 +11,19 @@ class SeoKeywordRankSerializer(serializers.ModelSerializer):
     keyword_text = serializers.CharField(source='keyword.keyword', read_only=True)
     domain_name = serializers.CharField(source='domain.name', read_only=True)
     domain_url = serializers.CharField(source='domain.url', read_only=True)
+    # How deep the scrape actually looks, so the UI can say ">30" instead of a
+    # hardcoded ">100" that never matched the configured depth. Changing
+    # DATABLUE_PAGES in .env moves this without a frontend change.
+    max_tracked_rank = serializers.SerializerMethodField()
+
+    def get_max_tracked_rank(self, obj):
+        return max_tracked_rank()
 
     class Meta:
         model = SeoKeywordRank
         fields = [
             'id', 'keyword', 'keyword_text', 'domain', 'domain_name', 'domain_url',
+            'max_tracked_rank',
             'platform', 'rank_now', 'top_rank', 'rank_since_start',
             'day_val', 'day_mark', 'week_val', 'week_mark',
             'half_month_val', 'half_month_mark', 'month_val', 'month_mark',

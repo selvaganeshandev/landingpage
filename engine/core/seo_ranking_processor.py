@@ -152,7 +152,12 @@ def parse_json_serp_response(json_data, target_url, exact_domain=False):
                     'title': item.get('title', ''),
                 })
         else:
-            if item_rank and item_rank <= 10:
+            # Store every non-brand result the scrape returned, not just the
+            # first page. The API only ever returns DATABLUE_PAGES x ~10, so
+            # this is self-limiting. Capping at 10 here meant a keyword ranking
+            # 11+ had no competitors recorded at or below its own position, so
+            # the detail page's "After You" filter was always empty for it.
+            if item_rank:
                 competitors[str(item_rank)] = {
                     'url': item_url,
                     'domain': item_domain,

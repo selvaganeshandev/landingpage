@@ -409,7 +409,12 @@ def seo_keyword_detail(request, pk):
 def seo_rank_history(request, seo_kw_id):
     """
     Get rank history for a specific keyword.
-    Query params: days (optional, default 30)
+
+    Query params:
+        days   window length (optional, default 30)
+        offset days back from today that the window ENDS (optional, default 0).
+               offset=0 is the trailing window; offset=days gives the preceding
+               period, which is what the "Last Week / Last Month" filters mean.
     """
     allowed_ids = list(_get_user_domain_ids(request.user))
 
@@ -418,13 +423,24 @@ def seo_rank_history(request, seo_kw_id):
     except SeoKeywordRank.DoesNotExist:
         return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    days = int(request.query_params.get('days', 30))
     from datetime import timedelta
-    since = date.today() - timedelta(days=days)
+
+    try:
+        days = max(1, int(request.query_params.get('days', 30)))
+    except (TypeError, ValueError):
+        days = 30
+    try:
+        offset = max(0, int(request.query_params.get('offset', 0)))
+    except (TypeError, ValueError):
+        offset = 0
+
+    until = date.today() - timedelta(days=offset)
+    since = until - timedelta(days=days)
 
     history = SeoRankHistory.objects.filter(
         seo_keyword_rank=seo_kw,
         snapshot_date__gte=since,
+        snapshot_date__lte=until,
     ).order_by('snapshot_date')
 
     serializer = SeoRankHistorySerializer(history, many=True)

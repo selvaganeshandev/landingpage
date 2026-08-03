@@ -364,6 +364,17 @@ WEEKLY_SWEEP_COOLDOWN_DAYS = config('WEEKLY_SWEEP_COOLDOWN_DAYS', default=6, cas
 # enabled platform has a usable key (which would burn the queue for nothing and
 # strand every prompt in INIT). A sweep still runs if even one platform is up.
 WEEKLY_SWEEP_PREFLIGHT_ENABLED = config('WEEKLY_SWEEP_PREFLIGHT_ENABLED', default=True, cast=bool)
+# Register the weekly sweep crontab entries in CELERY_BEAT_SCHEDULE at all.
+# Defaults to False so ONLY the production server — which sets this True in its
+# own .env — can schedule a sweep. A developer machine runs the same code and
+# usually the same DATABASE (dev has no local Postgres), so a `celery beat`
+# started on a laptop used to fire the weekly crontab and reset every prompt in
+# the PRODUCTION database. That is exactly what happened on 2026-07-23 at 03:44:
+# a laptop beat, an overdue Sunday crontab, and 2,703 prompts reset to INIT that
+# the server's own workers then paid to re-query. The task-level guards in
+# core/weekly_sweep_guard.py still apply; this keeps beat from ever proposing
+# the run in the first place.
+WEEKLY_SWEEP_BEAT_ENABLED = config('WEEKLY_SWEEP_BEAT_ENABLED', default=False, cast=bool)
 
 # ScrapingDog API Configuration (still used by misinformation crawler — /scrape endpoint)
 SCRAPINGDOG_API_KEY = config('SCRAPINGDOG_API_KEY', default=None)
@@ -383,6 +394,16 @@ DATABLUE_PLATFORM = config('DATABLUE_PLATFORM', default='desktop')
 DATABLUE_PAGES = config('DATABLUE_PAGES', default=0, cast=int)  # 0 = derive from NUM_RESULTS
 DATABLUE_GOOGLE_DOMAIN = config('DATABLUE_GOOGLE_DOMAIN', default='')
 DATABLUE_ADVANCED = config('DATABLUE_ADVANCED', default=False, cast=bool)
+
+# DataForSEO — Google Ads keyword search volume. DataBlue returns rankings but
+# no volume at any setting, so this is the only source of the figure. Billed per
+# REQUEST ($0.09) not per keyword, up to 1,000 keywords per call, which is why
+# core/volume_processor batches by (location, language) instead of fetching per
+# keyword. VOLUME_SWEEP_ENABLED turns the beat sweep off without a deploy.
+DATAFORSEO_LOGIN = config('DATAFORSEO_LOGIN', default=None)
+DATAFORSEO_PASSWORD = config('DATAFORSEO_PASSWORD', default=None)
+DATAFORSEO_USE_SANDBOX = config('DATAFORSEO_USE_SANDBOX', default=False, cast=bool)
+VOLUME_SWEEP_ENABLED = config('VOLUME_SWEEP_ENABLED', default=True, cast=bool)
 
 # DataBlue web scrape (/v1/scrape, POST) — second-opinion link checking for the
 # misinformation scan. Only reached when the free HEAD check is inconclusive
@@ -490,15 +511,8 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'core.processing_tasks.process_report_email_scheduler',
         'schedule': config('CELERY_BEAT_SCHEDULE_REPORT_EMAIL', default=15.0, cast=float),
     },
-    # Weekly batch reprocessing (off-peak). Adjust crontab as needed.
-    'weekly-prompts-batch': {
-        'task': 'core.processing_tasks.schedule_weekly_prompt_batches',
-        'schedule': crontab(day_of_week='sun', hour=0, minute=0),
-    },
-    'weekly-competitors-batch': {
-        'task': 'core.processing_tasks.schedule_weekly_competitor_batches',
-        'schedule': crontab(day_of_week='sun', hour=1, minute=0),
-    },
+    # NOTE: the weekly batch reprocessing entries are NOT here — they are added
+    # below only when WEEKLY_SWEEP_BEAT_ENABLED is on.
     'cmsmanager-scheduler-every-60s': {
         'task': 'core.processing_tasks.process_cmsmanager_scheduler',
         'schedule': config('CELERY_BEAT_SCHEDULE_CMSMANAGER', default=60.0, cast=float),
@@ -507,6 +521,15 @@ CELERY_BEAT_SCHEDULE = {
     'seo-rankings-daily-refresh': {
         'task': 'core.processing_tasks.seo_rankings_daily_scheduler',
         'schedule': crontab(hour=2, minute=0),
+    },
+    # Keyword search volume from DataForSEO. Hourly so a brand added during the
+    # day gets its figures within the hour, rather than waiting for a nightly
+    # run. Cheap to run often: it only calls the API when keywords are actually
+    # missing volume, so an idle sweep costs nothing. Runs at :20 to stay clear
+    # of the hourly jobs above.
+    'keyword-volume-sweep': {
+        'task': 'core.processing_tasks.sync_keyword_volume_task',
+        'schedule': crontab(minute=20),
     },
     # Daily GA + GSC monthly insight scheduling for MOM/YOY in reports (runs at 1:00 AM)
     'monthly-insights-daily-schedule': {
@@ -534,3 +557,17 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(hour=23, minute=59),
     },
 }
+
+# Weekly full-corpus reprocessing (off-peak). ~10,800 LLM calls per sweep, so
+# the entries only exist on a host that has explicitly opted in — see
+# WEEKLY_SWEEP_BEAT_ENABLED above. Set WEEKLY_SWEEP_BEAT_ENABLED=True in the
+# production .env; leave it unset everywhere else.
+if WEEKLY_SWEEP_BEAT_ENABLED:
+    CELERY_BEAT_SCHEDULE['weekly-prompts-batch'] = {
+        'task': 'core.processing_tasks.schedule_weekly_prompt_batches',
+        'schedule': crontab(day_of_week='sun', hour=0, minute=0),
+    }
+    CELERY_BEAT_SCHEDULE['weekly-competitors-batch'] = {
+        'task': 'core.processing_tasks.schedule_weekly_competitor_batches',
+        'schedule': crontab(day_of_week='sun', hour=1, minute=0),
+    }

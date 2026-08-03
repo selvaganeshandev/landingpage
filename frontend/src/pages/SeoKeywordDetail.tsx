@@ -104,6 +104,8 @@ interface SeoKeyword {
   language_code: string;
   tags: string[];
   favour: number;
+  /** Deepest rank the scrape can observe — DATABLUE_PAGES x ~10 results. */
+  max_tracked_rank?: number;
   auto_call_status: string;
   last_ranked_date: string | null;
   created_at: string;
@@ -171,9 +173,13 @@ function ChangeIndicator({ val, mark }: { val: number; mark: string }) {
   );
 }
 
-function RankDisplay({ rank }: { rank: number }) {
-  if (!rank || rank === 0) {
-    return <span className="text-3xl font-bold text-muted-foreground">&gt;100</span>;
+// `maxRank` is how deep the scrape actually looks (DATABLUE_PAGES x ~10),
+// supplied by the API. A keyword below it is indistinguishable from one that
+// doesn't rank at all, so ">{maxRank}" is the honest label. This used to be a
+// hardcoded ">100" while only 10 results were fetched.
+function RankDisplay({ rank, maxRank }: { rank: number; maxRank: number }) {
+  if (!rank || rank <= 0) {
+    return <span className="text-3xl font-bold text-muted-foreground">&gt;{maxRank}</span>;
   }
   return <span className="text-3xl font-bold">{rank}</span>;
 }
@@ -189,11 +195,19 @@ const RANK_FILTER_OPTIONS = [
   { label: "Year", days: 365 },
 ];
 
+// "Last X" means the period BEFORE the current one — last week is the seven
+// days ending a week ago, not the trailing seven days. Without `offset` these
+// sent exactly the same request as the buttons above and only changed which
+// button looked selected.
+// Rank-axis gridline spacings, smallest first. The first one that yields ~5 or
+// fewer gridlines wins, so ticks always land on round positions (5, 10, 20...).
+const NICE_RANK_STEPS = [1, 2, 5, 10, 20, 25, 50];
+
 const MORE_FILTER_OPTIONS = [
-  { label: "Last Week", days: 7 },
-  { label: "Last Month", days: 30 },
-  { label: "Last Quarter", days: 90 },
-  { label: "Last Year", days: 365 },
+  { label: "Last Week", days: 7, offset: 7 },
+  { label: "Last Month", days: 30, offset: 30 },
+  { label: "Last Quarter", days: 90, offset: 90 },
+  { label: "Last Year", days: 365, offset: 365 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -209,16 +223,21 @@ const SeoKeywordDetail = () => {
   // Core data
   const [kwData, setKwData] = useState<SeoKeyword | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  // "volume-history" is hidden (no volume data source) — an old bookmarked
-  // ?tab=volume-history link would otherwise land on a tab with no trigger.
+  // "volume-history" (no volume data source) and "notes" are hidden — an old
+  // bookmarked ?tab= link would otherwise land on a tab with no trigger,
+  // showing an empty page with nothing selected.
+  const HIDDEN_TABS = ["volume-history", "notes"];
   const requestedTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState(
-    !requestedTab || requestedTab === "volume-history" ? "overview" : requestedTab
+    !requestedTab || HIDDEN_TABS.includes(requestedTab) ? "overview" : requestedTab
   );
 
   // Rank History
   const [rankHistory, setRankHistory] = useState<RankHistoryPoint[]>([]);
   const [rankDays, setRankDays] = useState(7);
+  // Days back from today that the window ENDS. 0 = trailing window ending now;
+  // 7 with rankDays 7 = "Last Week".
+  const [rankOffset, setRankOffset] = useState(0);
   const [moreFilterActive, setMoreFilterActive] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
@@ -286,7 +305,7 @@ const SeoKeywordDetail = () => {
 
   useEffect(() => {
     if (activeTab === "rank-history" && kwData) loadRankHistory();
-  }, [rankDays]);
+  }, [rankDays, rankOffset]);
 
   useEffect(() => {
     if (activeTab === "competitors" && kwData) loadCompetitors();
@@ -295,7 +314,7 @@ const SeoKeywordDetail = () => {
   const loadRankHistory = async () => {
     try {
       setIsLoadingHistory(true);
-      const data = await apiClient.getSeoRankHistory(parseInt(id!), rankDays) as RankHistoryPoint[];
+      const data = await apiClient.getSeoRankHistory(parseInt(id!), rankDays, rankOffset) as RankHistoryPoint[];
       setRankHistory(data);
     } catch { /* empty */ } finally {
       setIsLoadingHistory(false);
@@ -395,42 +414,64 @@ const SeoKeywordDetail = () => {
   // ---------------------------------------------------------------------------
   // Chart data
   // ---------------------------------------------------------------------------
+  // How deep the scrape looks. Falls back to 30 (the current 3-page default)
+  // only if the API omits the field.
+  const maxRank = kwData?.max_tracked_rank || 30;
+  // Unranked (0) is plotted just past the observable floor so the line stays
+  // continuous and visibly bottoms out, rather than jumping to rank 0 at the
+  // top of a reversed axis.
+  const unrankedValue = maxRank + 1;
+
+  const activeMoreFilter = moreFilterActive
+    ? MORE_FILTER_OPTIONS.find((o) => o.days === rankDays && o.offset === rankOffset)
+    : undefined;
+
   const rankChartData = useMemo(() => {
     return rankHistory.map((h) => ({
       date: new Date(h.snapshot_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      rank: h.rank_position === 0 ? 101 : h.rank_position,
+      rank: h.rank_position === 0 ? unrankedValue : h.rank_position,
       rawDate: h.snapshot_date,
     }));
-  }, [rankHistory]);
+  }, [rankHistory, unrankedValue]);
 
-  // Dynamic Y-axis range matching RankMax logic
+  // Y-axis gridlines. Every tick has to be a round rank a person recognises —
+  // the old version started at the smallest value and added a computed step,
+  // which produced "1, 11, 21, 31, 41": arithmetically spaced but meaningless
+  // as rank positions. Ticks are snapped to these steps instead.
   const rankYDomain = useMemo(() => {
-    if (rankChartData.length === 0) return { min: 1, max: 101, ticks: [1, 30, 60, 101] };
+    if (rankChartData.length === 0) {
+      return { min: 1, max: unrankedValue, ticks: [1, unrankedValue] };
+    }
+
     const ranks = rankChartData.map((d) => d.rank);
-    let minVal = Math.min(...ranks);
-    let maxVal = Math.max(...ranks);
+    const ranked = ranks.filter((r) => r < unrankedValue);
+    const hasUnranked = ranks.some((r) => r >= unrankedValue);
+    const best = ranked.length ? Math.min(...ranked) : 1;
+    const worst = ranked.length ? Math.max(...ranked) : maxRank;
 
-    if (maxVal === minVal || (maxVal - minVal) < 6) {
-      minVal -= 2;
-      maxVal += 3;
-    } else {
-      const avg = (maxVal - minVal) / 4;
-      minVal = minVal - avg;
+    // Pick the largest step that still leaves ~5 gridlines.
+    const span = Math.max(1, (hasUnranked ? maxRank : worst) - 1);
+    const step = NICE_RANK_STEPS.find((s) => span / s <= 5) ?? 50;
+
+    // Snap both ends to multiples of the step, so the axis zooms to the data
+    // without landing on arbitrary numbers.
+    const min = best > step ? Math.max(1, Math.floor((best - 1) / step) * step) : 1;
+    let floor = hasUnranked ? maxRank : Math.min(maxRank, Math.ceil(worst / step) * step);
+    // A flat line needs a little room either side or it renders as one gridline.
+    if (!hasUnranked) floor = Math.min(maxRank, Math.max(floor, min + 4));
+
+    const ticks: number[] = [min];
+    for (let v = Math.ceil((min + 1) / step) * step; v <= floor; v += step) {
+      // Stop short of maxRank when the ">maxRank" marker is present, otherwise
+      // the two labels collide on adjacent gridlines.
+      if (hasUnranked && v > maxRank - step / 2) break;
+      ticks.push(v);
     }
+    if (!hasUnranked && ticks[ticks.length - 1] !== floor) ticks.push(floor);
+    if (hasUnranked) ticks.push(unrankedValue);
 
-    minVal = Math.max(1, Math.floor(minVal));
-    maxVal = Math.ceil(maxVal);
-
-    // Generate ~5 evenly spaced ticks
-    const step = Math.max(1, Math.round((maxVal - minVal) / 5));
-    const ticks: number[] = [];
-    for (let v = minVal; v <= maxVal; v += step) {
-      ticks.push(Math.round(v));
-    }
-    if (ticks[ticks.length - 1] < maxVal) ticks.push(maxVal);
-
-    return { min: minVal, max: maxVal, ticks };
-  }, [rankChartData]);
+    return { min, max: hasUnranked ? unrankedValue : floor, ticks };
+  }, [rankChartData, unrankedValue, maxRank]);
 
   const volumeChartData = useMemo(() => {
     if (!volumeData?.month_wise_volume?.length) return [];
@@ -467,16 +508,21 @@ const SeoKeywordDetail = () => {
     return String(vol);
   };
 
+  // Resolve the country from the keyword's ISO code rather than a short list of
+  // Google domains — the old six-entry map rendered a raw "google.co.jp" for
+  // every country outside it. Falls back to the region string if the browser
+  // can't name the code.
   const getRegionLabel = (region: string) => {
-    const map: Record<string, string> = {
-      "google.com": "United States",
-      "google.co.in": "India",
-      "google.co.uk": "United Kingdom",
-      "google.com.au": "Australia",
-      "google.ca": "Canada",
-      "google.ae": "UAE",
-    };
-    return map[region] || region;
+    const iso = (kwData?.isocode || "").toUpperCase();
+    if (iso.length === 2) {
+      try {
+        const name = new Intl.DisplayNames([navigator.language || "en"], { type: "region" }).of(iso);
+        if (name && name !== iso) return name;
+      } catch {
+        /* Intl.DisplayNames unsupported — fall through to the region string */
+      }
+    }
+    return region;
   };
 
   // ---------------------------------------------------------------------------
@@ -545,11 +591,12 @@ const SeoKeywordDetail = () => {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
+            {/* The keyword is what this page is about; the domain is context. */}
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold tracking-tight font-inter">{kwData.domain_name}</h1>
+              <h1 className="text-2xl font-bold tracking-tight font-inter">{kwData.keyword_text}</h1>
               {kwData.favour === 1 && <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />}
             </div>
-            <p className="text-muted-foreground mt-0.5">{kwData.keyword_text}</p>
+            <p className="text-muted-foreground mt-0.5">{kwData.domain_name}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -559,10 +606,13 @@ const SeoKeywordDetail = () => {
           <Button variant="outline" size="icon" className="border-border/50 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={handleDeleteKeyword}>
             <Trash2 className="h-4 w-4" />
           </Button>
-          <Button size="sm" onClick={openNewNote} className="gradient-primary text-white">
-            <Calendar className="h-4 w-4 mr-1" />
-            Add Notes
-          </Button>
+          {/* Notes hidden — see the Notes tab comment below. */}
+          {false && (
+            <Button size="sm" onClick={openNewNote} className="gradient-primary text-white">
+              <Calendar className="h-4 w-4 mr-1" />
+              Add Notes
+            </Button>
+          )}
         </div>
       </div>
 
@@ -584,9 +634,15 @@ const SeoKeywordDetail = () => {
           <TabsTrigger value="competitors" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
             Competitors
           </TabsTrigger>
-          <TabsTrigger value="notes" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
-            Notes {notes.length > 0 && `(${notes.length})`}
-          </TabsTrigger>
+          {/* Notes hidden: the feature is barely used (1 note across the whole
+              fleet) and the notes were never plotted on the rank chart, which
+              was the point of having them. The CRUD endpoints and the dialog
+              are left intact so restoring this is just flipping the flags. */}
+          {false && (
+            <TabsTrigger value="notes" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:text-white">
+              Notes {notes.length > 0 && `(${notes.length})`}
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* ============================================================== */}
@@ -670,11 +726,17 @@ const SeoKeywordDetail = () => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Card className="p-5 text-center border border-border">
                   <p className="text-xs text-muted-foreground mb-2 font-medium">Current</p>
-                  <RankDisplay rank={kwData.rank_now} />
+                  <RankDisplay rank={kwData.rank_now} maxRank={maxRank} />
                 </Card>
                 <Card className="p-5 text-center border border-border">
                   <p className="text-xs text-muted-foreground mb-2 font-medium">Last</p>
-                  <RankDisplay rank={kwData.rank_now + kwData.day_val * (kwData.day_mark === "up" ? 1 : kwData.day_mark === "down" ? -1 : 0)} />
+                  {/* Reconstructed from today's move: "up" means the rank
+                      improved, so yesterday's number was higher. When there is
+                      no recorded move (mark "-") this is just today's rank. */}
+                  <RankDisplay
+                    rank={kwData.rank_now + kwData.day_val * (kwData.day_mark === "up" ? 1 : kwData.day_mark === "down" ? -1 : 0)}
+                    maxRank={maxRank}
+                  />
                 </Card>
                 <Card className="p-5 text-center border border-border">
                   <p className="text-xs text-muted-foreground mb-2 font-medium">Change</p>
@@ -684,7 +746,7 @@ const SeoKeywordDetail = () => {
                 </Card>
                 <Card className="p-5 text-center border border-border">
                   <p className="text-xs text-muted-foreground mb-2 font-medium">Best</p>
-                  <RankDisplay rank={kwData.top_rank || 0} />
+                  <RankDisplay rank={kwData.top_rank || 0} maxRank={maxRank} />
                 </Card>
               </div>
 
@@ -692,10 +754,15 @@ const SeoKeywordDetail = () => {
               <Card className="p-5 border border-border">
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="text-sm font-semibold">Tags</h4>
-                  <Button variant="outline" size="sm" className="text-xs h-7">
-                    <Plus className="h-3 w-3 mr-1" />
-                    Add
-                  </Button>
+                  {/* Hidden: this button never had an onClick, so it did
+                      nothing. Tags are managed from the rankings list. The
+                      tags themselves still render below. */}
+                  {false && (
+                    <Button variant="outline" size="sm" className="text-xs h-7">
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add
+                    </Button>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {(kwData.tags || []).length > 0 ? (
@@ -762,7 +829,14 @@ const SeoKeywordDetail = () => {
                 )}
               </Card>
 
-              {/* SERP Features */}
+              {/* SERP Features — hidden. DataBlue runs with advanced=false
+                  (the cheap organic-only mode), which returns no answer_box,
+                  knowledge_graph or ads block, so featured_snippet /
+                  knowledge_panel / ads / review are False on all 3,140
+                  keywords and this card could only ever render "NA". Matches
+                  the SERP Features card hidden on the rankings list. Restore
+                  once DATABLUE_ADVANCED is turned on. */}
+              {false && (
               <Card className="p-5 border border-border">
                 <h4 className="text-sm font-semibold mb-3">SERP Features</h4>
                 <div className="flex flex-wrap gap-3">
@@ -779,6 +853,7 @@ const SeoKeywordDetail = () => {
                   )}
                 </div>
               </Card>
+              )}
 
               {/* Change summary */}
               <Card className="p-5 border border-border">
@@ -819,7 +894,7 @@ const SeoKeywordDetail = () => {
                     key={opt.label}
                     variant={rankDays === opt.days && !moreFilterActive ? "default" : "outline"}
                     size="sm"
-                    onClick={() => { setRankDays(opt.days); setMoreFilterActive(false); }}
+                    onClick={() => { setRankDays(opt.days); setRankOffset(0); setMoreFilterActive(false); }}
                     className={rankDays === opt.days && !moreFilterActive ? "gradient-primary text-white" : ""}
                   >
                     {opt.label}
@@ -832,15 +907,17 @@ const SeoKeywordDetail = () => {
                       size="sm"
                       className={moreFilterActive ? "gradient-primary text-white" : ""}
                     >
-                      More
+                      {/* Name the active period — "More" alone gave no hint
+                          which of the four was applied. */}
+                      {activeMoreFilter ? activeMoreFilter.label : "More"}
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     {MORE_FILTER_OPTIONS.map((opt) => (
                       <DropdownMenuItem
                         key={opt.label}
-                        onClick={() => { setRankDays(opt.days); setMoreFilterActive(true); }}
-                        className="cursor-pointer"
+                        onClick={() => { setRankDays(opt.days); setRankOffset(opt.offset); setMoreFilterActive(true); }}
+                        className={`cursor-pointer ${activeMoreFilter?.label === opt.label ? "text-primary font-semibold" : ""}`}
                       >
                         <Tag className="h-3.5 w-3.5 mr-2 text-primary" />
                         {opt.label}
@@ -880,7 +957,7 @@ const SeoKeywordDetail = () => {
                       ticks={rankYDomain.ticks}
                       stroke="hsl(var(--muted-foreground))"
                       fontSize={11}
-                      tickFormatter={(val: number) => (val > 100 ? ">30" : String(Math.round(val)))}
+                      tickFormatter={(val: number) => (val > maxRank ? `>${maxRank}` : String(Math.round(val)))}
                       width={40}
                     />
                     <Tooltip
@@ -890,7 +967,7 @@ const SeoKeywordDetail = () => {
                         borderRadius: "var(--radius)",
                         boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
                       }}
-                      formatter={(value: any) => [value > 100 ? ">30" : `#${value}`, "Google Rank"]}
+                      formatter={(value: any) => [value > maxRank ? `Not in top ${maxRank}` : `#${value}`, "Google Rank"]}
                       labelStyle={{ fontWeight: 600, marginBottom: 4 }}
                     />
                     <Line
@@ -915,10 +992,8 @@ const SeoKeywordDetail = () => {
                     <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: "hsl(var(--primary))" }} />
                     <span className="text-sm text-muted-foreground font-medium">Google Rank</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-sm bg-yellow-500" />
-                    <span className="text-sm text-muted-foreground font-medium">Notes</span>
-                  </div>
+                  {/* Removed: this promised note markers on the chart that
+                      were never plotted, and notes are now hidden entirely. */}
                 </div>
                 {/* Description text (like RankMax) */}
                 <p className="text-xs text-muted-foreground text-center mt-4 max-w-2xl mx-auto">
@@ -1117,7 +1192,12 @@ const SeoKeywordDetail = () => {
             )}
           </Card>
 
-          {/* Competitor Ads */}
+          {/* Competitor Ads — hidden. ad_snippet_history is empty on all 3,140
+              SERP-history rows: DataBlue's advanced=false mode returns no paid
+              results, so this card was permanently "No Google Ads competitors
+              available". Matches the Google Search Ads card hidden on the
+              rankings list. */}
+          {false && (
           <Card className="p-6 border border-border">
             <h3 className="text-lg font-semibold mb-4">Competitor in Google Ads</h3>
             {competitorAds.length === 0 ? (
@@ -1147,11 +1227,13 @@ const SeoKeywordDetail = () => {
               </div>
             )}
           </Card>
+          )}
         </TabsContent>
 
         {/* ============================================================== */}
         {/* TAB 5: NOTES */}
         {/* ============================================================== */}
+        {false && (
         <TabsContent value="notes" className="space-y-6 mt-6">
           <Card className="p-6 border border-border">
             <div className="flex items-center justify-between mb-6">
@@ -1209,6 +1291,7 @@ const SeoKeywordDetail = () => {
             )}
           </Card>
         </TabsContent>
+        )}
       </Tabs>
 
       {/* ================================================================ */}

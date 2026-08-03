@@ -967,3 +967,47 @@ def analyze_seo_competitors_task(self, domain_id: int):
     except Exception as e:
         logger.error(f"[CompAnalysis] Error for domain {domain_id}: {e}", exc_info=True)
         raise self.retry(exc=e, countdown=30)
+
+
+@shared_task(bind=True, ignore_result=True)
+def sync_keyword_volume_task(self):
+    """Fetch search volume for keywords that don't have it yet.
+
+    This is what makes a newly added brand work without anyone intervening:
+    add a domain, import its keywords, and the next sweep picks them all up.
+
+    Deliberately a sweep rather than a per-keyword hook on the add endpoints.
+    DataForSEO bills per REQUEST, not per keyword — one keyword costs the same
+    $0.09 as a thousand — so reacting to each insert would turn a 500-keyword
+    import into 500 paid calls instead of one. Letting keywords accumulate and
+    batching them is both cheaper and simpler.
+
+    Costs nothing when there is nothing new: with no missing keywords the
+    processor builds no batches and makes no API calls.
+    """
+    from django.conf import settings
+
+    if not getattr(settings, 'VOLUME_SWEEP_ENABLED', True):
+        logger.info("[VOLUME] Sweep disabled via VOLUME_SWEEP_ENABLED — skipping")
+        return
+
+    if not getattr(settings, 'DATAFORSEO_LOGIN', None):
+        logger.warning("[VOLUME] DATAFORSEO_LOGIN not configured — skipping sweep")
+        return
+
+    from core.volume_processor import sync_keyword_volume
+
+    try:
+        result = sync_keyword_volume(only_missing=True)
+    except Exception as exc:
+        logger.error(f"[VOLUME] Sweep failed: {exc}", exc_info=True)
+        return
+
+    if result['requests']:
+        logger.info(
+            "[VOLUME] Sweep: %d keywords, %d request(s), ~$%.2f, %d written, %d no-data, %d failed batches",
+            result['keywords_considered'], result['requests'], result['estimated_cost'],
+            result['updated'], result['no_data'], result['failed_batches'],
+        )
+    else:
+        logger.debug("[VOLUME] Sweep: nothing new, no API calls made")
