@@ -12,7 +12,8 @@ import {
   TrendingDown,
   Sparkles,
   Target,
-  Loader2
+  Loader2,
+  Download
 } from "lucide-react";
 import { TopicDetailDialog } from "@/components/TopicDetailDialog";
 import { TopicOptimizeDialog } from "@/components/TopicOptimizeDialog";
@@ -79,6 +80,7 @@ const Topics = () => {
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [isExporting, setIsExporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [topicTrends, setTopicTrends] = useState<any[]>([]);
@@ -352,6 +354,106 @@ const Topics = () => {
   const filteredTopics = topics;
 
   // Show PageLoader while loading
+  /**
+   * Export the topic view as a multi-sheet workbook.
+   *
+   * The Topics sheet carries the reconciled figures from /topics/performance/ —
+   * the same rows Insights and Mentions report on — rather than the stored
+   * TopicAnalytics values, so a reader can check the file against those pages.
+   * Competitors get their own sheet because a topic has several, and flattening
+   * them into one row would either truncate the list or repeat the topic.
+   */
+  const handleExportTopics = async () => {
+    setIsExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.utils.book_new();
+
+      const totalResponses = topics.reduce((s, t) => s + (t.responses ?? 0), 0);
+      const totalMentions = topics.reduce((s, t) => s + (t.mentions ?? 0), 0);
+
+      const summary = [
+        ["Topic-Based Tracking", ""],
+        ["Domain", selectedDomain?.name || ""],
+        ["Generated", new Date().toLocaleString()],
+        ["", ""],
+        ["Metric", "Value"],
+        ["Topics", topics.length],
+        ["Responses covered", totalResponses],
+        ["Responses naming your brand", totalMentions],
+        [
+          "Overall mention share (%)",
+          totalResponses > 0 ? Number(((totalMentions / totalResponses) * 100).toFixed(1)) : 0,
+        ],
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), "Summary");
+
+      if (topics.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          topics.map((t) => ({
+            Topic: t.name,
+            Keywords: (t.keywords || []).length,
+            Prompts: t.promptCount ?? "",
+            Responses: t.responses ?? "",
+            "Named in": t.mentions ?? 0,
+            "Mention share (%)": t.mentionShare ?? "",
+            "Avg position when named": t.avgPosition ?? "",
+            Citations: t.citations ?? "",
+            Opportunity: t.opportunity ?? "",
+            Platforms: (t.platforms || []).join(", "),
+          })),
+        ), "Topics");
+      }
+
+      const competitorRows: Record<string, any>[] = [];
+      topics.forEach((t) => {
+        (t.competitors || []).forEach((c) => {
+          competitorRows.push({
+            Topic: t.name,
+            Competitor: c.name,
+            Mentions: c.mentions,
+            "Mention share (%)": c.mention_share,
+          });
+        });
+      });
+      if (competitorRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(competitorRows), "Competitors");
+      }
+
+      // Keyword-level rows, so a topic can be traced back to what produced it.
+      const keywordRows: Record<string, any>[] = [];
+      topics.forEach((t) => {
+        (t.keywords || []).forEach((kw) => {
+          keywordRows.push({ Topic: t.name, Keyword: kw });
+        });
+      });
+      if (keywordRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(keywordRows), "Keywords");
+      }
+
+      if (keywordPerformance.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(keywordPerformance), "Keyword Performance");
+      }
+
+      const safeName = (selectedDomain?.name || "domain").replace(/[^a-z0-9]+/gi, "_");
+      const today = new Date().toISOString().split("T")[0];
+      XLSX.writeFile(wb, `topics_${safeName}_${today}.xlsx`);
+
+      toast({
+        title: "Export ready",
+        description: `Downloaded ${wb.SheetNames.length} sheet${wb.SheetNames.length === 1 ? "" : "s"} covering ${topics.length} topic${topics.length === 1 ? "" : "s"}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export failed",
+        description: error?.message || "Could not build the workbook.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleGenerateTopics = async () => {
     if (!selectedDomain?.id) return;
     setIsGenerating(true);
@@ -445,6 +547,12 @@ const Topics = () => {
           </p>
         </div>
         {/* Generate Topics and Add Topic buttons hidden as per requirements */}
+        <Button variant="outline" onClick={handleExportTopics} disabled={isExporting || topics.length === 0}>
+          {isExporting
+            ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            : <Download className="h-4 w-4 mr-2" />}
+          {isExporting ? "Exporting..." : "Export"}
+        </Button>
       </div>
 
       {/* Error State */}

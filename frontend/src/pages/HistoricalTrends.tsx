@@ -32,7 +32,8 @@ import {
   TrendingDown,
   Target,
   FileText,
-  Download
+  Download,
+  Loader2
 } from "lucide-react";
 import { useEffect, useState, useMemo } from "react";
 import { apiClient } from "@/services/api";
@@ -49,6 +50,7 @@ const HistoricalTrends = () => {
   const [months, setMonths] = useState<number>(12);
   const [trendsData, setTrendsData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Sync domainId from selectedDomain (Zustand store) or localStorage when domain changes
   useEffect(() => {
@@ -135,75 +137,140 @@ const HistoricalTrends = () => {
   const hasComparablePeriods = periodCount >= 2;
   const latestPeriodLabel = periodCount > 0 ? visibilityTrend[periodCount - 1]?.month : null;
 
-  const handleExportReport = () => {
-    const exportRows: Record<string, string | number>[] = [];
+  /**
+   * Export every series on the page as a multi-sheet workbook.
+   *
+   * Was a single flat CSV carrying two of the six sections — visibility trend
+   * and platform growth — with the other four columns blank on every row, and a
+   * lone Summary row appended at the bottom whose four growth figures were
+   * written into columns labelled Visibility Score, Mentions, Avg Position and
+   * Sentiment. Competitor comparison, seasonal pattern, forecast and milestones
+   * were on screen but absent from the file entirely.
+   *
+   * One sheet per section instead, each with its own headers, and sections with
+   * no rows are skipped rather than written as an empty table.
+   */
+  const handleExportReport = async () => {
+    setIsExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.utils.book_new();
+      const periodLabel = trendsData?.start_date && trendsData?.end_date
+        ? `${trendsData.start_date} to ${trendsData.end_date}`
+        : `Last ${months} months`;
 
-    // Visibility trend rows
-    visibilityTrend.forEach((v: any) => {
-      exportRows.push({
-        section: 'Visibility Trend',
-        month: v.month,
-        visibility_score: v.score,
-        mentions: v.mentions,
-        avg_position: v.avgPosition,
-        sentiment: v.sentiment,
-        chatgpt: '',
-        claude: '',
-        perplexity: '',
-        gemini: '',
+      const summarySheet = [
+        ["Historical Trends", ""],
+        ["Domain", selectedDomain?.name || ""],
+        ["Period", periodLabel],
+        ["Periods on record", periodCount],
+        ["Generated", new Date().toLocaleString()],
+        ["", ""],
+        ["Metric", "Change over period (%)"],
+        ["Visibility growth", summary.visibility_growth],
+        ["Mention growth", summary.mention_growth],
+        ["Position improvement", summary.position_improvement],
+        ["Market share gain", summary.market_share_gain],
+      ];
+      if (!hasComparablePeriods) {
+        summarySheet.push(["", ""]);
+        summarySheet.push([
+          "Note",
+          periodCount === 0
+            ? "No metric snapshots recorded for this domain yet."
+            : "Only one period on record — the changes above cannot be computed from a single point.",
+        ]);
+      }
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summarySheet), "Summary");
+
+      if (visibilityTrend.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          visibilityTrend.map((v: any) => ({
+            Month: v.month,
+            "Visibility score": v.score,
+            Mentions: v.mentions,
+            "Avg position": v.avgPosition,
+            Sentiment: v.sentiment,
+          })),
+        ), "Visibility Trend");
+      }
+
+      if (platformGrowth.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          platformGrowth.map((p: any) => ({
+            Month: p.month,
+            ChatGPT: p.chatgpt || 0,
+            Claude: p.claude || 0,
+            Perplexity: p.perplexity || 0,
+            Gemini: p.gemini || 0,
+          })),
+        ), "Platform Growth");
+      }
+
+      // Competitor keys vary by domain, so the columns are taken from the data
+      // rather than hardcoded to a fixed set of rivals.
+      if (competitorComparison.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          competitorComparison.map((row: any) => {
+            const out: Record<string, any> = { Month: row.month };
+            Object.entries(row).forEach(([k, v]) => {
+              if (k === "month") return;
+              const label = k === "yourbrand" ? `${selectedDomain?.name || "Your brand"} (You)` : k;
+              out[label] = v;
+            });
+            return out;
+          }),
+        ), "Competitors");
+      }
+
+      if (seasonalPattern.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          seasonalPattern.map((s: any) => ({
+            Month: s.month,
+            Mentions: s.mentions,
+            "Average for month": s.avgYear,
+          })),
+        ), "Seasonal Pattern");
+      }
+
+      if (forecast.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          forecast.map((f: any) => ({
+            Month: f.month,
+            Projected: f.projected ?? f.value ?? "",
+            "Lower bound": f.lower ?? "",
+            "Upper bound": f.upper ?? "",
+          })),
+        ), "Forecast");
+      }
+
+      if (milestones.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          milestones.map((m: any) => ({
+            Date: m.date ?? m.month ?? "",
+            Milestone: m.title ?? m.name ?? "",
+            Detail: m.description ?? m.detail ?? "",
+          })),
+        ), "Milestones");
+      }
+
+      const safeName = (selectedDomain?.name || "domain").replace(/[^a-z0-9]+/gi, "_");
+      const today = new Date().toISOString().split("T")[0];
+      XLSX.writeFile(wb, `historical_trends_${safeName}_${today}.xlsx`);
+
+      toast({
+        title: "Export ready",
+        description: `Downloaded ${wb.SheetNames.length} sheet${wb.SheetNames.length === 1 ? "" : "s"} covering ${periodLabel}.`,
       });
-    });
-
-    // Platform growth rows
-    platformGrowth.forEach((p: any) => {
-      exportRows.push({
-        section: 'Platform Growth',
-        month: p.month,
-        visibility_score: '',
-        mentions: '',
-        avg_position: '',
-        sentiment: '',
-        chatgpt: p.chatgpt || 0,
-        claude: p.claude || 0,
-        perplexity: p.perplexity || 0,
-        gemini: p.gemini || 0,
+    } catch (error: any) {
+      toast({
+        title: "Export failed",
+        description: error?.message || "Could not build the workbook.",
+        variant: "destructive",
       });
-    });
-
-    // Summary row
-    exportRows.push({
-      section: 'Summary',
-      month: '',
-      visibility_score: `${summary.visibility_growth}%`,
-      mentions: `${summary.mention_growth}%`,
-      avg_position: `${summary.position_improvement}%`,
-      sentiment: `${summary.market_share_gain}%`,
-      chatgpt: '',
-      claude: '',
-      perplexity: '',
-      gemini: '',
-    });
-
-    const headers = [
-      { key: 'section', label: 'Section' },
-      { key: 'month', label: 'Month' },
-      { key: 'visibility_score', label: 'Visibility Score' },
-      { key: 'mentions', label: 'Mentions' },
-      { key: 'avg_position', label: 'Avg Position' },
-      { key: 'sentiment', label: 'Sentiment' },
-      { key: 'chatgpt', label: 'ChatGPT' },
-      { key: 'claude', label: 'Claude' },
-      { key: 'perplexity', label: 'Perplexity' },
-      { key: 'gemini', label: 'Gemini' },
-    ];
-
-    const today = new Date().toISOString().split('T')[0];
-    downloadCsv(exportRows, headers, `historical_trends_${today}.csv`);
-
-    toast({
-      title: "Report Exported",
-      description: "Your historical trends report has been downloaded.",
-    });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   if (isLoading) {
@@ -260,9 +327,11 @@ const HistoricalTrends = () => {
               <SelectItem value="24">Last 24 Months</SelectItem>
             </SelectContent>
           </Select>
-          <Button onClick={handleExportReport} className="gradient-primary shadow-md shadow-primary/20">
-            <Download className="h-4 w-4 mr-2" />
-            Export Report
+          <Button variant="outline" onClick={handleExportReport} disabled={isExporting}>
+            {isExporting
+              ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              : <Download className="h-4 w-4 mr-2" />}
+            {isExporting ? "Exporting..." : "Export Report"}
           </Button>
         </div>
       </div>

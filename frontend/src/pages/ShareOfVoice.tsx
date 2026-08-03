@@ -11,7 +11,9 @@ import {
   Award,
   ArrowUpRight,
   ArrowDownRight,
-  Crown
+  Crown,
+  Download,
+  Loader2
 } from "lucide-react";
 import { 
   BarChart,
@@ -91,6 +93,7 @@ const ShareOfVoice = () => {
   // Removed; the loader now waits on the data the page actually renders.
 
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -282,6 +285,101 @@ const ShareOfVoice = () => {
   }, [shareHistory, ownBrandName]);
 
   // Show loading state while data is being fetched
+  /**
+   * Export every scope on the page as a multi-sheet workbook.
+   *
+   * Share is stored per platform plus an aggregate, and the page renders both:
+   * the headline cards read the aggregate while the radar and platform list
+   * read the per-platform rows. The workbook keeps them as separate sheets so
+   * the two cannot be mistaken for one another — summing the platform sheet
+   * would double-count every brand.
+   */
+  const handleExportShareOfVoice = async () => {
+    setIsExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.utils.book_new();
+
+      const summary = [
+        ["Share of Voice", ""],
+        ["Domain", selectedDomain?.name || ownBrandName],
+        ["Period", `Last ${days} days`],
+        ["Generated", new Date().toLocaleString()],
+        ["", ""],
+        ["Metric", "Value"],
+        ["Market share (%)", marketShareValue],
+        ["Market position", marketPosition ? `#${marketPosition}` : "—"],
+        ["Players tracked", playerCount],
+        ["Market leader", leaderName || "—"],
+        ["Dominance score", dominanceScore],
+        [
+          "Change vs last snapshot (pts)",
+          marketShareChange === null ? "No previous snapshot to compare" : marketShareChange,
+        ],
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), "Summary");
+
+      if (overallShare.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          overallShare.map((b: any) => ({
+            Brand: b.brand === ownBrandName ? `${b.brand} (You)` : b.brand,
+            "Share (%)": b.share,
+            Mentions: b.mentions,
+          })),
+        ), "Overall Share");
+      }
+
+      // One row per brand per platform, flattened from the grouped view so the
+      // sheet can be filtered and pivoted.
+      const platformRows: Record<string, any>[] = [];
+      Object.entries(platformShare).forEach(([platform, entries]) => {
+        entries.forEach((e) => {
+          platformRows.push({
+            Platform: platform,
+            Brand: e.brand === ownBrandName ? `${e.brand} (You)` : e.brand,
+            "Share (%)": e.share,
+          });
+        });
+      });
+      if (platformRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(platformRows), "By Platform");
+      }
+
+      if (shareHistory.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(shareHistory), "Trend");
+      }
+
+      if (opportunities.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          opportunities.map((o: any) => ({
+            Prompt: o.prompt?.prompt || o.prompt_text || "",
+            Competitor: o.competitor?.name || o.competitor_name || "",
+            Position: o.position ?? "",
+            "Competitor mentions": o.mention_count ?? 0,
+            Platform: o.platform || "",
+          })),
+        ), "Opportunities");
+      }
+
+      const safeName = (selectedDomain?.name || ownBrandName || "domain").replace(/[^a-z0-9]+/gi, "_");
+      const today = new Date().toISOString().split("T")[0];
+      XLSX.writeFile(wb, `share_of_voice_${safeName}_${today}.xlsx`);
+
+      toast({
+        title: "Export ready",
+        description: `Downloaded ${wb.SheetNames.length} sheet${wb.SheetNames.length === 1 ? "" : "s"}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export failed",
+        description: error?.message || "Could not build the workbook.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   if (isLoadingData) {
     return <PageLoader />;
   }
@@ -333,6 +431,12 @@ const ShareOfVoice = () => {
             Competitive benchmarking and market position analysis
           </p>
         </div>
+        <Button variant="outline" onClick={handleExportShareOfVoice} disabled={isExporting}>
+          {isExporting
+            ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            : <Download className="h-4 w-4 mr-2" />}
+          {isExporting ? "Exporting..." : "Export"}
+        </Button>
       </div>
 
       {/* Key Metrics — shared metric-card shape used across the app:
