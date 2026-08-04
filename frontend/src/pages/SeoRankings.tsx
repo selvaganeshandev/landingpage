@@ -216,7 +216,6 @@ interface ColumnVisibility {
 const SeoRankings = () => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
-  const [rankFilter, setRankFilter] = useState<"all" | "top3" | "top10" | "top50" | "nr">("all");
   // Sortable columns. `null` key = the API's own ordering, which is the default
   // so the table looks unchanged until the user asks for a sort.
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
@@ -677,18 +676,6 @@ const SeoRankings = () => {
     }
   };
 
-  // Filter keywords by search + rank-range filter (from the Comparison card).
-  // `kw.rank` holds the live position when it's 1-100, otherwise null
-  // (rank 0 / not-ranked / >100). Top buckets reuse that; "nr" = no rank.
-  const matchesRankFilter = (kw: typeof seoKeywords[number]) => {
-    switch (rankFilter) {
-      case "top3": return kw.rank != null && kw.rank <= 3;
-      case "top10": return kw.rank != null && kw.rank <= 10;
-      case "top50": return kw.rank != null && kw.rank <= 50;
-      case "nr": return kw.rank == null;
-      default: return true;
-    }
-  };
   const matchesSearch = (kw: typeof seoKeywords[number]) =>
     kw.keyword.toLowerCase().includes(searchQuery.toLowerCase());
 
@@ -700,7 +687,7 @@ const SeoRankings = () => {
   // sink to the bottom in BOTH directions — they carry no value to compare, so
   // letting them lead an ascending sort would bury the rows the user wants.
   const sortedKeywords = (() => {
-    const rows = seoKeywords.filter(kw => matchesSearch(kw) && matchesRankFilter(kw));
+    const rows = seoKeywords.filter(kw => matchesSearch(kw));
 
     // Favourites lead, whatever else is happening. A starred keyword is one the
     // user has said they want to watch, and with 154 keywords over 16 pages it
@@ -793,21 +780,6 @@ const SeoRankings = () => {
     );
   };
 
-  // Toggle a rank-range filter from the Comparison card and jump to the
-  // keyword list so the user immediately sees the filtered data. Clicking
-  // the already-active bucket clears the filter.
-  const handleRankFilter = (filter: typeof rankFilter) => {
-    setRankFilter((prev) => (prev === filter ? "all" : filter));
-    if (typeof document !== "undefined") {
-      requestAnimationFrame(() => {
-        document.getElementById("seo-keywords-section")?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      });
-    }
-  };
-
   // Pagination
   const totalPages = Math.ceil(filteredKeywords.length / KEYWORDS_PER_PAGE);
   const paginatedKeywords = filteredKeywords.slice(
@@ -819,7 +791,7 @@ const SeoRankings = () => {
   useEffect(() => {
     setCurrentPage(1);
     setGridTagPages({});
-  }, [searchQuery, rankFilter, keywordsPerPage]);
+  }, [searchQuery, keywordsPerPage]);
 
   // Column visibility state
   const [visibleColumns, setVisibleColumns] = useState<ColumnVisibility>({
@@ -1276,47 +1248,24 @@ const SeoRankings = () => {
                       { key: "top10" as const, label: "Top 10", value: overview?.today?.top_10_count ?? 0 },
                       { key: "top50" as const, label: "Top 50", value: overview?.today?.top_50_count ?? 0 },
                       { key: "nr" as const, label: "Not Ranked", value: overview?.today?.not_ranked_count ?? 0 },
-                    ]).map(({ key, label, value }) => {
-                      const active = rankFilter === key;
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => handleRankFilter(key)}
-                          aria-pressed={active}
-                          title={active ? `Showing only ${label} keywords — click to clear` : `Show only ${label} keywords`}
-                          className={`p-2 rounded-lg border text-left transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/50 ${
-                            active
-                              ? "bg-primary/10 border-primary ring-1 ring-primary"
-                              : "bg-muted/30 border-border hover:border-primary"
-                          }`}
-                        >
-                          <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">{label}</p>
-                          <p className="text-lg font-bold font-inter">{value}</p>
-                        </button>
-                      );
-                    })}
+                    ]).map(({ key, label, value }) => (
+                      // Read-only, like the Device / Performance / Rankmax
+                      // boxes beside it. These used to filter the table on
+                      // click, which was easy to trigger by accident and then
+                      // left "Total keywords" showing a subset with no obvious
+                      // cause. Filtering lives in the table's own controls.
+                      <div key={key} className="p-2 rounded-lg bg-muted/30 border border-border">
+                        <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">{label}</p>
+                        <p className="text-lg font-bold font-inter">{value}</p>
+                      </div>
+                    ))}
                   </div>
 
                   <div className="pt-2 border-t flex items-center justify-between">
-                    {rankFilter === "all" ? (
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="text-muted-foreground">Best</span>
-                        <span className="font-semibold">{overview?.today?.total_keywords ?? 0} keywords</span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="text-muted-foreground">Filtered</span>
-                        <span className="font-semibold">{filteredKeywords.length} keywords</span>
-                        <button
-                          type="button"
-                          onClick={() => setRankFilter("all")}
-                          className="text-xs text-primary hover:underline"
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-muted-foreground">Tracking</span>
+                      <span className="font-semibold">{overview?.today?.total_keywords ?? 0} keywords</span>
+                    </div>
                   </div>
                 </div>
               </Card>
