@@ -211,7 +211,9 @@ export default function Billing() {
   const [exporting, setExporting] = useState(false);
   // "all" | "<org id>". Ignored by the server for accounts without the
   // all-organisations grant, which are pinned to their own.
-  const [org, setOrg] = useState<string>("all");
+  // Empty until the first response tells us which organisation the server
+  // resolved; sending "all" would only be coerced back to one anyway.
+  const [org, setOrg] = useState<string>("");
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [invoiceMonth, setInvoiceMonth] = useState<string>("");
   const [invoiceBusy, setInvoiceBusy] = useState(false);
@@ -229,6 +231,9 @@ export default function Billing() {
         // Newest month first, so [0] is the current period.
         setInvoiceMonth((prev) => prev || res.invoice_months?.[0] || "");
         setInvoiceRegion((prev) => prev || res.regions?.[0]?.key || "");
+        if (res.selected_organisation && res.selected_organisation !== "own") {
+          setOrg((prev) => prev || res.selected_organisation);
+        }
       } catch (e: any) {
         setError(e?.message || "Could not load billing data.");
       } finally {
@@ -295,7 +300,8 @@ export default function Billing() {
               <SelectValue placeholder="Organization" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All organizations</SelectItem>
+              {/* No "all" option: billing figures are per account, and an
+                  invoice must name one legal entity as the buyer. */}
               {(data?.organisations ?? []).map((o) => (
                 <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>
               ))}
@@ -361,7 +367,7 @@ export default function Billing() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {(data?.regions ?? []).map((region) => (
-          <RegionTable key={region.key} region={region} showOrg={data?.selected_organisation === "all"} />
+          <RegionTable key={region.key} region={region} showOrg={false} />
         ))}
       </div>
 
@@ -440,11 +446,12 @@ export default function Billing() {
           <DialogHeader>
             <DialogTitle>Generate invoice</DialogTitle>
             <DialogDescription>
-              Pick a region and billing period. The invoice covers
+              Pick a region and billing period. The invoice is raised against
               {" "}
-              {data?.selected_organisation === "all"
-                ? "every organization"
-                : "this organization"}
+              <span className="font-medium text-foreground">
+                {(data?.organisations ?? []).find(
+                  (o) => String(o.id) === org)?.name || "this organization"}
+              </span>
               {" "}and is priced on the keywords tracked at the close of that month.
             </DialogDescription>
           </DialogHeader>
@@ -462,9 +469,6 @@ export default function Billing() {
                       {r.label} ({r.billable_projects} billable)
                     </SelectItem>
                   ))}
-                  {/* Combined is a summary, not a filing document: it has no
-                      single registered buyer when regions differ. */}
-                  <SelectItem value="all">All regions combined</SelectItem>
                 </SelectContent>
               </Select>
             </div>

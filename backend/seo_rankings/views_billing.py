@@ -93,6 +93,7 @@ def _resolve_scope(request):
     requested = (request.query_params.get("organisation") or "").strip().lower()
     if not can_view_all:
         return can_view_all, [], "own", None
+
     if requested and requested != "all":
         try:
             wanted = int(requested)
@@ -102,9 +103,15 @@ def _resolve_scope(request):
             return None
         return can_view_all, organisations, str(wanted), [wanted]
 
-    # Consolidated is the default for an all-orgs viewer — the point of the
-    # grant is seeing everything at once.
-    return can_view_all, organisations, "all", [o["id"] for o in organisations]
+    # Always exactly one organisation, never a combined view. Billing figures
+    # are only meaningful per account, and an invoice has to be addressed to a
+    # single legal entity — a consolidated document has no buyer to name.
+    # "all" is accepted and coerced rather than rejected so an old bookmark
+    # still resolves to something sensible.
+    if not organisations:
+        return can_view_all, [], "own", None
+    first = organisations[0]["id"]
+    return can_view_all, organisations, str(first), [first]
 
 
 def _billing_regions(user, organisation_ids=None, as_of=None):
@@ -179,8 +186,6 @@ def billing_summary(request):
         "grand_total": sum(r["total_price"] for r in regions),
         "total_projects": sum(r["total_projects"] for r in regions),
         "can_view_all_orgs": can_view_all,
-        # Export covers one organisation's account; it is not offered in the
-        # consolidated view, where "the account" is ambiguous.
         "can_export": not can_view_all,
         "organisations": organisations if can_view_all else [],
         "selected_organisation": selected,
@@ -323,10 +328,13 @@ def billing_invoice(request):
     # sum to its own total is worse than no breakdown.
     region_key = (request.query_params.get("region") or "").strip().lower()
     valid_keys = {r["key"] for r in REGIONS}
-    if region_key and region_key != "all" and region_key not in valid_keys:
+    if not region_key:
+        region_key = REGIONS[0]["key"]
+    if region_key not in valid_keys:
+        # No combined option: one region is taxed and the other zero-rated, so
+        # a single document cannot state a coherent tax treatment.
         return Response({"error": "Invalid region"}, status=status.HTTP_400_BAD_REQUEST)
-    if region_key and region_key != "all":
-        regions = [r for r in regions if r["key"] == region_key]
+    regions = [r for r in regions if r["key"] == region_key]
 
     subtotal = sum(r["total_price"] for r in regions)
 
@@ -356,25 +364,19 @@ def billing_invoice(request):
 
     # Which organisation is being billed. In the consolidated view there is no
     # single buyer, so the invoice is addressed to the account as a whole.
-    if selected == "all" or not org_ids:
-        buyer_org_id = request.user.organisation_id
-        buyer_name = "All organizations" if selected == "all" else (
-            request.user.organisation.name if request.user.organisation else "")
-    else:
-        buyer_org_id = org_ids[0]
-        buyer_name = next((o["name"] for o in organisations if o["id"] == buyer_org_id), "")
+    buyer_org_id = org_ids[0] if org_ids else request.user.organisation_id
+    buyer_name = next(
+        (o["name"] for o in organisations if o["id"] == buyer_org_id),
+        request.user.organisation.name if request.user.organisation else "",
+    )
 
     # The buyer block belongs to the organisation being invoiced, not to the
     # issuing user — it is edited under Organization Settings > Invoice Details.
     from authentication.models import Organisation
     org = Organisation.objects.filter(id=buyer_org_id).first()
-    if org and selected != "all":
-        # Region decides which registered entity is billed.
-        buyer = org.invoice_party(region_key or "row")
-    else:
-        # Consolidated: no single registered party to address it to.
-        buyer = {"name": buyer_name, "address": "", "gstin": "",
-                 "state_name": "", "state_code": ""}
+    buyer = (org.invoice_party(region_key or "row") if org else
+             {"name": buyer_name, "address": "", "gstin": "",
+              "state_name": "", "state_code": ""})
 
     # Page 1 carries one consolidated charge — a GST invoice reads better with a
     # single service line than with dozens of brand rows. The per-brand detail
