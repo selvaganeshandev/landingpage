@@ -45,6 +45,7 @@ import AcceptInvitation from "./pages/AcceptInvitation";
 import OrganizationSettings from "./pages/OrganizationSettings";
 import TeamMemberPermissions from "./pages/TeamMemberPermissions";
 import Clients from "./pages/Clients";
+import Billing from "./pages/Billing";
 import DomainSettings from "./pages/DomainSettings";
 import MisinformationAlerts from "./pages/MisinformationAlerts";
 import Citations from "./pages/Citations";
@@ -210,6 +211,13 @@ const App = () => (
               <Route path="/organization-settings/members/:memberId" element={
                 <ProtectedRoute requiredPermission={MODULES.TEAM_MANAGEMENT} requiredLevel="admin">
                   <TeamMemberPermissions />
+                </ProtectedRoute>
+              } />
+              {/* Billing — super admin only, gated here as well as in the
+                  navigation so it is unreachable by URL for anyone else. */}
+              <Route path="/billing" element={
+                <ProtectedRoute requiredRoles={['super_admin']}>
+                  <Billing />
                 </ProtectedRoute>
               } />
               <Route path="/clients" element={

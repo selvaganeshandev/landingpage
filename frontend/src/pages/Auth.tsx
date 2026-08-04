@@ -54,7 +54,9 @@ export default function Auth() {
         description: "You have successfully signed in.",
       });
       
-      navigate("/");
+      // Land on the Dashboard rather than "/" (which renders the chat) — the
+      // overview is what you want first on signing in.
+      navigate("/insights");
     } catch (error) {
       // Extract error message
       let errorMessage = "Login failed. Please try again.";

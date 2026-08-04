@@ -398,6 +398,12 @@ AI_VISIBILITY_HIDDEN_PLATFORMS = [
     ).split(',') if s.strip()
 ]
 
+# Billing — accounts allowed to see every organisation's charges consolidated,
+# rather than only their own. Comma-separated emails, matched case-insensitively.
+# Kept in config so the list can change without a deploy; everyone else is
+# restricted to their own organisation by _billing_regions.
+BILLING_ALL_ORG_EMAILS = config('BILLING_ALL_ORG_EMAILS', default='aarun@hitasoft.com')
+
 # DataForSEO API Configuration (for Backlink Portfolio in dashboard export)
 DATAFORSEO_LOGIN = config('DATAFORSEO_LOGIN', default=None)
 DATAFORSEO_PASSWORD = config('DATAFORSEO_PASSWORD', default=None)

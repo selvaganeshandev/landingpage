@@ -368,6 +368,10 @@ interface ProtectedRouteProps {
   children: ReactNode;
   requiredPermission?: string;
   requiredLevel?: 'read' | 'write' | 'admin';
+  /** Restrict to specific roles, e.g. ['super_admin']. Checked in addition to
+   *  any permission gate, so a page can be role-only without inventing a
+   *  permission module for it. */
+  requiredRoles?: string[];
   fallback?: ReactNode;
 }
 
@@ -375,9 +379,10 @@ export function ProtectedRoute({
   children, 
   requiredPermission, 
   requiredLevel = 'read',
+  requiredRoles,
   fallback = <div>Access denied</div>
 }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading, checkPermission } = useAuth();
+  const { isAuthenticated, isLoading, checkPermission, user } = useAuth();
 
   if (isLoading) {
     return <PageLoader />;
@@ -385,6 +390,10 @@ export function ProtectedRoute({
 
   if (!isAuthenticated) {
     return <Navigate to="/session-expired" replace />;
+  }
+
+  if (requiredRoles && !requiredRoles.includes(user?.role ?? '')) {
+    return <>{fallback}</>;
   }
 
   if (requiredPermission && !checkPermission(requiredPermission, requiredLevel)) {

@@ -30,6 +30,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Check,
+  CreditCard,
 } from "lucide-react";
 import { DomainSelector } from "./DomainSelector";
 import { Separator } from "@/components/ui/separator";
@@ -84,7 +85,7 @@ const ROW_IDLE =
   "text-muted-foreground font-normal hover:bg-accent/60 hover:text-foreground";
 const ICON_BASE = "h-4 w-4 flex-shrink-0";
 
-const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDomainProcessing }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void; navigate: any; isDomainProcessing?: boolean }) => {
+const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDomainProcessing, popoverAlign = "start" }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void; navigate: any; isDomainProcessing?: boolean; popoverAlign?: "start" | "end" }) => {
   const [submenuOpen, setSubmenuOpen] = useState(false);
 
   // Check if any item in group is active
@@ -184,7 +185,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
       </PopoverTrigger>
       {/* Same rhythm as the nav column: 0.5 row gap, and a heading matching
           the section labels so the flyout reads as a continuation of it. */}
-      <PopoverContent className="w-[200px] p-1.5" side="right" align="start">
+      <PopoverContent className="w-[200px] p-1.5" side="right" align={popoverAlign}>
         <div className="space-y-0.5">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-2.5 pt-1 pb-1">{group.name}</p>
           {group.items.map((item: any) => {
@@ -522,6 +523,10 @@ export const Sidebar = () => {
                     ...((user.role === 'admin' || user.role === 'super_admin' || (user.role === 'user' && checkPermission && checkPermission('organization_settings', 'read')))
                       ? [{ name: "Organization", path: "/organization-settings", icon: Settings }]
                       : []),
+                    // Super admin only, matching the route guard on /billing.
+                    ...(user.role === 'super_admin'
+                      ? [{ name: "Billing", path: "/billing", icon: CreditCard }]
+                      : []),
                     { name: "Profile", path: "/profile", icon: User },
                   ],
                 }}
@@ -530,6 +535,7 @@ export const Sidebar = () => {
                 onItemClick={handleItemClick}
                 navigate={navigate}
                 isDomainProcessing={false}
+                popoverAlign="end"
               />
             </div>
           )}

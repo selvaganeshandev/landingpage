@@ -758,7 +758,14 @@ const SeoCompetitors = () => {
                   </div>
                   {/* Info */}
                   <div className="flex-1 min-w-0">
-                    <button onClick={() => handleViewKeywords(p)} className="hover:underline">
+                    {/* block, not the default inline-block — as an inline box
+                        it sat on a text baseline and the line-height added
+                        descender space under it, which is what separated the
+                        name from the domain rather than the anchor's mt-0.5. */}
+                    <button
+                      onClick={() => handleViewKeywords(p)}
+                      className="block w-full text-left hover:underline"
+                    >
                       <p className="font-semibold text-sm text-primary truncate leading-tight">
                         {projectName(p.competitor_domain)}
                       </p>

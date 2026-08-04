@@ -1817,6 +1817,20 @@ export const apiClient = {
       method: 'DELETE',
     }),
 
+  // ===== Billing (super admin only) =====
+  // Price arrives pre-computed from the server — the UI sums rows and does no
+  // pricing arithmetic of its own.
+  // `organisation` is 'all' or an org id; ignored by the server for accounts
+  // without the consolidated-view grant.
+  getBillingSummary: (organisation?: string) =>
+    apiRequest(`/seo/billing/${organisation ? `?organisation=${encodeURIComponent(organisation)}` : ''}`),
+
+  exportBilling: (organisation?: string) =>
+    downloadFile(
+      `/seo/billing/export/${organisation ? `?organisation=${encodeURIComponent(organisation)}` : ''}`,
+      'promptmaxx_billing.xlsx',
+    ),
+
   // ===== Content Comments (Google Docs-style) =====
   getContentComments: (contentId: number) =>
     apiRequest(`/content/${contentId}/comments/`),

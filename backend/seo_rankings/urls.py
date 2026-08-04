@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views
+from . import views, views_billing
 
 urlpatterns = [
     # Keyword rankings
@@ -62,4 +62,8 @@ urlpatterns = [
 
     # Keyword Detail — Competitors
     path('keywords/<int:seo_kw_id>/competitors/', views.seo_keyword_competitors, name='seo-keyword-competitors'),
+
+    # Billing — per-project keyword charges (super admin only)
+    path('billing/', views_billing.billing_summary, name='seo-billing-summary'),
+    path('billing/export/', views_billing.billing_export, name='seo-billing-export'),
 ]
