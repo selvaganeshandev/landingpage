@@ -8,10 +8,12 @@ Price is computed server-side by services/billing.py and sent pre-computed;
 the client sums the rows it receives and does no pricing arithmetic.
 """
 import logging
+from datetime import datetime, timedelta
 from io import BytesIO
 
 from django.conf import settings
-from django.db.models import Count
+from django.db.models import Count, Min, Q
+from django.utils import timezone
 from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -36,6 +38,15 @@ def _is_super_admin(user) -> bool:
     return getattr(user, "role", None) == "super_admin"
 
 
+def billing_owner_emails():
+    """Accounts that act as the billing operator for the platform."""
+    return {
+        e.strip().lower()
+        for e in (getattr(settings, "BILLING_ALL_ORG_EMAILS", "") or "").split(",")
+        if e.strip()
+    }
+
+
 def _can_view_all_orgs(user) -> bool:
     """Whether this account may see every organisation's charges.
 
@@ -43,12 +54,7 @@ def _can_view_all_orgs(user) -> bool:
     else — including other super admins — stays scoped to their own
     organisation.
     """
-    allowed = {
-        e.strip().lower()
-        for e in (getattr(settings, "BILLING_ALL_ORG_EMAILS", "") or "").split(",")
-        if e.strip()
-    }
-    return (getattr(user, "email", "") or "").lower() in allowed
+    return (getattr(user, "email", "") or "").lower() in billing_owner_emails()
 
 
 def _visible_organisations(user):
@@ -101,7 +107,7 @@ def _resolve_scope(request):
     return can_view_all, organisations, "all", [o["id"] for o in organisations]
 
 
-def _billing_regions(user, organisation_ids=None):
+def _billing_regions(user, organisation_ids=None, as_of=None):
     """Build the region tables for the requesting user's organisation.
 
     Every domain in the organisation appears, including those tracking no
@@ -111,7 +117,15 @@ def _billing_regions(user, organisation_ids=None):
 
     Counts come from one annotated query rather than a count per domain.
     """
-    domains = Domain.objects.annotate(used=Count("seo_keyword_ranks"))
+    # `as_of` reconstructs a past month: count only keywords that existed by
+    # then. Keywords deleted since are unrecoverable, so a historical invoice
+    # can under-count — it reflects what the data still records.
+    if as_of is None:
+        domains = Domain.objects.annotate(used=Count("seo_keyword_ranks"))
+    else:
+        domains = Domain.objects.annotate(
+            used=Count("seo_keyword_ranks", filter=Q(seo_keyword_ranks__created_at__lt=as_of))
+        )
     if organisation_ids is None:
         domains = domains.filter(organisation=user.organisation)
     else:
@@ -170,6 +184,7 @@ def billing_summary(request):
         "can_export": not can_view_all,
         "organisations": organisations if can_view_all else [],
         "selected_organisation": selected,
+        "invoice_months": _invoice_months(request.user, organisation_ids=org_ids),
     })
 
 
@@ -239,4 +254,216 @@ def billing_export(request):
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     response["Content-Disposition"] = 'attachment; filename="promptmaxx_billing.xlsx"'
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Monthly invoices
+# ---------------------------------------------------------------------------
+
+def _month_bounds(month: str):
+    """'YYYY-MM' -> (label, exclusive end datetime), or None if malformed.
+
+    The end bound is the first instant of the following month, so the invoice
+    covers everything that existed at any point up to the month's close.
+    """
+    try:
+        start = datetime.strptime(month, "%Y-%m")
+    except (TypeError, ValueError):
+        return None
+    start = timezone.make_aware(start) if timezone.is_naive(start) else start
+    # First day of the next month.
+    end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return start.strftime("%B %Y"), end
+
+
+def _invoice_months(user, organisation_ids=None):
+    """Months with billable history, newest first, as ['YYYY-MM', ...]."""
+    qs = SeoKeywordRank.objects.all()
+    if organisation_ids is None:
+        qs = qs.filter(domain__organisation=user.organisation)
+    else:
+        qs = qs.filter(domain__organisation_id__in=organisation_ids)
+
+    first = qs.aggregate(first=Min("created_at"))["first"]
+    if not first:
+        return []
+
+    now = timezone.now()
+    months, cursor = [], first.replace(day=1)
+    while cursor <= now:
+        months.append(cursor.strftime("%Y-%m"))
+        cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return list(reversed(months))
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def billing_invoice(request):
+    """Monthly tax invoice PDF for ?month=YYYY-MM."""
+    if not _is_super_admin(request.user):
+        return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    scope = _resolve_scope(request)
+    if scope is None:
+        return Response({"error": "Invalid organisation"}, status=status.HTTP_400_BAD_REQUEST)
+    can_view_all, organisations, selected, org_ids = scope
+
+    bounds = _month_bounds(request.query_params.get("month", ""))
+    if bounds is None:
+        return Response({"error": "month must be YYYY-MM"}, status=status.HTTP_400_BAD_REQUEST)
+    period, end = bounds
+
+    regions = _billing_regions(request.user, organisation_ids=org_ids, as_of=end)
+
+    # One invoice per region: India & Other Regions and UAE are billed
+    # separately. `region=all` still exists for a combined document.
+    # Filtering happens before anything is totalled, so the itemised page 2
+    # always reconciles with page 1's taxable value — a breakdown that does not
+    # sum to its own total is worse than no breakdown.
+    region_key = (request.query_params.get("region") or "").strip().lower()
+    valid_keys = {r["key"] for r in REGIONS}
+    if region_key and region_key != "all" and region_key not in valid_keys:
+        return Response({"error": "Invalid region"}, status=status.HTTP_400_BAD_REQUEST)
+    if region_key and region_key != "all":
+        regions = [r for r in regions if r["key"] == region_key]
+
+    subtotal = sum(r["total_price"] for r in regions)
+
+    from .models_invoice import InvoiceSettings
+    from .services.invoice_template import render_invoice_html
+    from reports.services.weasyprint_pdf_generator import convert_html_to_pdf_weasyprint
+
+    # Always the billing operator's letterhead: one company issues every
+    # invoice, so a super admin downloading their own still gets the real
+    # company block rather than an empty one attached to their account.
+    from django.contrib.auth import get_user_model
+    owner = (get_user_model().objects
+             .filter(email__in=billing_owner_emails()).first()) or request.user
+    cfg_obj, _ = InvoiceSettings.objects.get_or_create(user=owner)
+
+    # Exports carry no GST: the supply is outside India, so no tax line, no
+    # HSN/SAC summary and no tax in words. Domestic invoices are unchanged.
+    is_export = bool(region_key and region_key not in ("", "all", "row"))
+    if is_export:
+        tax_rate, tax_amount, tax_label = 0.0, 0, ""
+    else:
+        tax_rate = float(cfg_obj.tax_rate or 0)
+        tax_amount = round(subtotal * tax_rate / 100)
+        tax_label = ("IGST" if cfg_obj.tax_type == InvoiceSettings.TAX_IGST else "CGST+SGST")
+        tax_label = f"{tax_label}@{tax_rate:g}%"
+    total = subtotal + tax_amount
+
+    # Which organisation is being billed. In the consolidated view there is no
+    # single buyer, so the invoice is addressed to the account as a whole.
+    if selected == "all" or not org_ids:
+        buyer_org_id = request.user.organisation_id
+        buyer_name = "All organizations" if selected == "all" else (
+            request.user.organisation.name if request.user.organisation else "")
+    else:
+        buyer_org_id = org_ids[0]
+        buyer_name = next((o["name"] for o in organisations if o["id"] == buyer_org_id), "")
+
+    # The buyer block belongs to the organisation being invoiced, not to the
+    # issuing user — it is edited under Organization Settings > Invoice Details.
+    from authentication.models import Organisation
+    org = Organisation.objects.filter(id=buyer_org_id).first()
+    if org and selected != "all":
+        # Region decides which registered entity is billed.
+        buyer = org.invoice_party(region_key or "row")
+    else:
+        # Consolidated: no single registered party to address it to.
+        buyer = {"name": buyer_name, "address": "", "gstin": "",
+                 "state_name": "", "state_code": ""}
+
+    # Page 1 carries one consolidated charge — a GST invoice reads better with a
+    # single service line than with dozens of brand rows. The per-brand detail
+    # goes on page 2 as an itemised bill.
+    items = [{
+        "particulars": "Promptmaxx Subscription Payment",
+        "sub": period,
+        "amount": subtotal,
+    }]
+
+    # Export invoices are raised in USD. The rate is the one in force at the
+    # close of the billing month — the time of supply — not the day the PDF is
+    # downloaded, so reissuing an old invoice reproduces the original figures.
+    currency, fx = CURRENCY, None
+    if is_export:
+        from .services.fx import FxUnavailable, get_rate
+        rate_date = (end - timedelta(days=1)).date()  # last day of the month
+        try:
+            rate, source = get_rate("INR", "USD", rate_date)
+        except FxUnavailable as exc:
+            logger.error("Invoice FX unavailable: %s", exc)
+            return Response(
+                {"error": "Exchange rate unavailable for this period. Try again shortly."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        currency = "USD"
+        fx = {
+            "rate": rate,
+            # Quoted the way people read it, to 2dp.
+            "inverse": f"{(1 / float(rate)):,.2f}",
+            "as_of": rate_date.strftime("%d-%b-%Y"),
+            "source": source,
+        }
+
+    def media_path(f):
+        # xhtml2pdf reads local paths; a URL would need a fetcher and would
+        # fail silently, leaving the logo blank.
+        try:
+            return f.path if f else ""
+        except (ValueError, NotImplementedError):
+            return ""
+
+    html = render_invoice_html(
+        cfg={f: getattr(cfg_obj, f) for f in (
+            "delivery_note", "payment_terms", "reference_no", "other_references",
+            "buyers_order_no", "dispatch_doc_no", "dispatched_through", "destination",
+            "terms_of_delivery", "bank_account_name", "bank_name",
+            "bank_account_number", "bank_branch_ifsc", "footer_note")},
+        seller={
+            "name": cfg_obj.company_name,
+            "address": cfg_obj.company_address,
+            "gstin": cfg_obj.company_gstin,
+            "state_name": cfg_obj.company_state_name,
+            "state_code": cfg_obj.company_state_code,
+            "email": cfg_obj.company_email,
+        },
+        buyer=buyer,
+        consignee=buyer,
+        invoice_no=cfg_obj.invoice_number(),
+        invoice_date=end.strftime("%d-%b-%y"),
+        items=items,
+        subtotal=subtotal,
+        tax_label=tax_label,
+        tax_rate=tax_rate,
+        tax_amount=tax_amount,
+        total=total,
+        hsn_sac=cfg_obj.hsn_sac,
+        logo_src=media_path(cfg_obj.logo),
+        signature_src=media_path(cfg_obj.signature),
+        regions=regions,
+        period=period,
+        # Export / SEZ declaration belongs only on invoices raised outside
+        # India; a domestic invoice carrying it would be wrong.
+        title_note=cfg_obj.export_declaration if is_export else "",
+        currency=currency,
+        fx=fx,
+    )
+
+    # WeasyPrint, not xhtml2pdf: the approved layout uses rowspan,
+    # border-collapse and percentage column widths, none of which xhtml2pdf
+    # renders correctly.
+    try:
+        pdf = convert_html_to_pdf_weasyprint(html)
+    except Exception as exc:
+        logger.error("Invoice render failed: %s", exc, exc_info=True)
+        return Response({"error": "Could not render the invoice"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    response = HttpResponse(pdf.getvalue(), content_type="application/pdf")
+    month = request.query_params.get("month")
+    response["Content-Disposition"] = f'attachment; filename="invoice_{month}.pdf"'
     return response

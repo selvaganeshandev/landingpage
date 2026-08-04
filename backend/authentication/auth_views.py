@@ -704,6 +704,8 @@ def organization_management(request):
             'team_count': organization.team_count,
             'created_at': organization.created_at,
             'modified_at': organization.modified_at,
+            # Invoice Details tab — the Consignee / Buyer block.
+            **{f: getattr(organization, f) for f in ('billing_legal_name', 'billing_address', 'billing_gstin', 'billing_state_name', 'billing_state_code', 'billing_alt_legal_name', 'billing_alt_address', 'billing_alt_gstin', 'billing_alt_state_name', 'billing_alt_state_code')},
         }
         if request.user.role == 'super_admin':
             response_data['api_keys'] = _build_api_keys_payload(organization)
@@ -719,6 +721,9 @@ def organization_management(request):
         organization.company_size = request.data.get('company_size')
     if 'goals' in request.data:
         organization.goals = request.data.get('goals', [])
+    for field in ('billing_legal_name', 'billing_address', 'billing_gstin', 'billing_state_name', 'billing_state_code', 'billing_alt_legal_name', 'billing_alt_address', 'billing_alt_gstin', 'billing_alt_state_name', 'billing_alt_state_code'):
+        if field in request.data:
+            setattr(organization, field, request.data.get(field) or "")
     # Update API keys and enabled toggles per provider
     is_key_update = False
     for provider in LLM_PROVIDERS:
@@ -783,6 +788,8 @@ def organization_management(request):
             'team_count': organization.team_count,
             'created_at': organization.created_at,
             'modified_at': organization.modified_at,
+            # Invoice Details tab — the Consignee / Buyer block.
+            **{f: getattr(organization, f) for f in ('billing_legal_name', 'billing_address', 'billing_gstin', 'billing_state_name', 'billing_state_code', 'billing_alt_legal_name', 'billing_alt_address', 'billing_alt_gstin', 'billing_alt_state_name', 'billing_alt_state_code')},
         }
     }
     if request.user.role == 'super_admin':

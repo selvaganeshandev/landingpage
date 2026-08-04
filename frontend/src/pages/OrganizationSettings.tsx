@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Clients from "@/pages/Clients";
+import InvoiceDetailsTab from "@/components/InvoiceDetailsTab";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
@@ -1955,6 +1956,10 @@ export default function OrganizationSettings() {
             {!isTeamMember && (
               <TabsTrigger value="clients" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Clients</TabsTrigger>
             )}
+            {/* This organisation's registered particulars for its tax invoices. */}
+            {!isTeamMember && (
+              <TabsTrigger value="invoice-details" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">Invoice Details</TabsTrigger>
+            )}
             {user?.role === 'super_admin' && (
               <TabsTrigger value="api-keys" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
                 <Key className="h-3.5 w-3.5 mr-1.5" />API Keys
@@ -2343,6 +2348,13 @@ export default function OrganizationSettings() {
         {!isTeamMember && (
           <TabsContent value="clients" className="space-y-6">
             <Clients embedded />
+          </TabsContent>
+        )}
+
+        {/* ─────────── INVOICE DETAILS TAB ─────────── */}
+        {!isTeamMember && (
+          <TabsContent value="invoice-details" className="space-y-6">
+            <InvoiceDetailsTab />
           </TabsContent>
         )}
 

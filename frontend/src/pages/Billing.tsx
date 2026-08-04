@@ -4,12 +4,15 @@ import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Download, ExternalLink, Loader2, AlertTriangle, CreditCard, Check } from "lucide-react";
+import { Download, ExternalLink, Loader2, AlertTriangle, CreditCard, Check, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 /**
@@ -64,9 +67,18 @@ interface BillingResponse {
   can_export: boolean;
   organisations: { id: number; name: string }[];
   selected_organisation: string;
+  invoice_months: string[];
 }
 
 const inr = (n: number) => n.toLocaleString("en-IN");
+
+/** "2026-07" -> "July 2026". Parsed as a plain Y/M so the label cannot shift a
+ *  month across a timezone boundary the way new Date("2026-07") can. */
+const monthLabel = (m: string) => {
+  const [y, mo] = (m || "").split("-").map(Number);
+  if (!y || !mo) return m;
+  return new Date(y, mo - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+};
 
 /** Strip scheme and www so a stored URL reads as a hostname. */
 const hostOf = (url: string) =>
@@ -93,7 +105,7 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
     <Card className="border border-border overflow-hidden">
       {/* The header renders even when the region is empty, so an unused region
           reads "0 projects / 0 INR" rather than vanishing from the page. */}
-      <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 bg-muted/30 border-b border-border">
+      <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-2.5 bg-muted/30 border-b border-border">
         <div>
           <p className="text-sm">
             <span className="text-muted-foreground">Project Region: </span>
@@ -116,8 +128,8 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
 
       {/* Capped height with the header pinned — 55 projects would otherwise
           make the card metres tall and push the second region table far below
-          the fold. */}
-      <CardContent className="p-0 max-h-[520px] overflow-auto">
+          the fold. Roughly six rows visible, then scroll. */}
+      <CardContent className="p-0 max-h-[320px] overflow-auto">
         {region.projects.length === 0 ? (
           <div className="py-16 text-center text-sm text-muted-foreground">
             No billable projects in this region
@@ -143,8 +155,8 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
                   // rather than hidden so the project is visibly present.
                   className={cn("hover:bg-muted/30", p.price === 0 && "text-muted-foreground")}
                 >
-                  <TableCell className="text-center py-3 text-sm text-muted-foreground">{i + 1}</TableCell>
-                  <TableCell className="py-3">
+                  <TableCell className="text-center py-2 text-sm text-muted-foreground">{i + 1}</TableCell>
+                  <TableCell className="py-2">
                     <div className="min-w-0">
                       <p className="font-medium text-sm truncate" title={p.name}>{p.name}</p>
                       {showOrg && p.organisation && (
@@ -165,7 +177,7 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
                     </div>
                   </TableCell>
                   {/* Highlighted — the metric the charge is derived from. */}
-                  <TableCell className="text-center py-3 bg-primary/5">
+                  <TableCell className="text-center py-2 bg-primary/5">
                     <span className="text-sm font-medium">{inr(p.used_keywords)}</span>
                     {p.over_top_slab && (
                       <span title="Above the largest published slab — charged at the top slab">
@@ -173,10 +185,10 @@ function RegionTable({ region, showOrg }: { region: BillingRegion; showOrg: bool
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="text-center py-3 text-sm">
+                  <TableCell className="text-center py-2 text-sm">
                     {p.keyword_limit > 0 ? inr(p.keyword_limit) : "—"}
                   </TableCell>
-                  <TableCell className="text-center py-3 text-sm">
+                  <TableCell className="text-center py-2 text-sm">
                     {inr(p.price)} <span className="font-bold">{p.currency}</span>
                   </TableCell>
                 </TableRow>
@@ -200,13 +212,23 @@ export default function Billing() {
   // "all" | "<org id>". Ignored by the server for accounts without the
   // all-organisations grant, which are pinned to their own.
   const [org, setOrg] = useState<string>("all");
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [invoiceMonth, setInvoiceMonth] = useState<string>("");
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
+  // Each region is invoiced separately — they are billed to different entities
+  // — so the picker defaults to the first rather than a combined document.
+  const [invoiceRegion, setInvoiceRegion] = useState<string>("");
 
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
         setError(null);
-        setData(await apiClient.getBillingSummary(org) as BillingResponse);
+        const res = await apiClient.getBillingSummary(org) as BillingResponse;
+        setData(res);
+        // Newest month first, so [0] is the current period.
+        setInvoiceMonth((prev) => prev || res.invoice_months?.[0] || "");
+        setInvoiceRegion((prev) => prev || res.regions?.[0]?.key || "");
       } catch (e: any) {
         setError(e?.message || "Could not load billing data.");
       } finally {
@@ -214,6 +236,22 @@ export default function Billing() {
       }
     })();
   }, [org]);
+
+  const handleInvoice = async () => {
+    if (!invoiceMonth) return;
+    setInvoiceBusy(true);
+    try {
+      await apiClient.downloadBillingInvoice(invoiceMonth, org, invoiceRegion);
+      const label = data?.regions?.find((r) => r.key === invoiceRegion)?.label;
+      toast({ title: `Invoice for ${monthLabel(invoiceMonth)} downloaded`,
+              description: label ? `Region: ${label}` : undefined });
+      setInvoiceOpen(false);
+    } catch (e: any) {
+      toast({ title: "Could not generate invoice", description: e?.message, variant: "destructive" });
+    } finally {
+      setInvoiceBusy(false);
+    }
+  };
 
   const handleExport = async () => {
     setExporting(true);
@@ -264,18 +302,14 @@ export default function Billing() {
             </SelectContent>
           </Select>
         )}
-        {data?.can_export && (
-          <Button
-            variant="outline"
-            onClick={handleExport}
-            disabled={exporting || loading || !!error}
-            title="Exports every region for the account, ignoring what is on screen"
-            className="gap-2"
-          >
-            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            Export
-          </Button>
-        )}
+        <Button
+          onClick={() => setInvoiceOpen(true)}
+          disabled={loading || !!error || !(data?.invoice_months?.length)}
+          className="gap-2 gradient-primary shadow-md shadow-primary/20 text-primary-foreground"
+        >
+          <FileText className="h-4 w-4" />
+          Download Invoice
+        </Button>
       </div>
     </div>
   );
@@ -398,6 +432,75 @@ export default function Billing() {
           </CardContent>
         </Card>
       ) : null}
+
+      {/* Monthly invoice. Figures are rebuilt as of the chosen month's close,
+          so an older period shows what was tracked then, not today's totals. */}
+      <Dialog open={invoiceOpen} onOpenChange={setInvoiceOpen}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Generate invoice</DialogTitle>
+            <DialogDescription>
+              Pick a region and billing period. The invoice covers
+              {" "}
+              {data?.selected_organisation === "all"
+                ? "every organization"
+                : "this organization"}
+              {" "}and is priced on the keywords tracked at the close of that month.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Region</label>
+              <Select value={invoiceRegion} onValueChange={setInvoiceRegion}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a region" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(data?.regions ?? []).map((r) => (
+                    <SelectItem key={r.key} value={r.key}>
+                      {r.label} ({r.billable_projects} billable)
+                    </SelectItem>
+                  ))}
+                  {/* Combined is a summary, not a filing document: it has no
+                      single registered buyer when regions differ. */}
+                  <SelectItem value="all">All regions combined</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Billing period</label>
+              <Select value={invoiceMonth} onValueChange={setInvoiceMonth}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a month" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(data?.invoice_months ?? []).map((m, i) => (
+                    <SelectItem key={m} value={m}>
+                      {monthLabel(m)}{i === 0 ? " (current)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInvoiceOpen(false)} disabled={invoiceBusy}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleInvoice}
+              disabled={invoiceBusy || !invoiceMonth || !invoiceRegion}
+              className="gap-2 gradient-primary text-primary-foreground"
+            >
+              {invoiceBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Download PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

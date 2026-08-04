@@ -138,3 +138,88 @@ REGIONS = [
     {"key": "row", "label": "India & Other Regions"},
     {"key": "uae", "label": "UAE"},
 ]
+
+
+# ---------------------------------------------------------------------------
+# Amount in words — Indian numbering (lakh / crore), as the invoice prints it
+# ---------------------------------------------------------------------------
+
+_ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+         "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
+         "Seventeen", "Eighteen", "Nineteen"]
+_TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
+
+
+def _two(n: int) -> str:
+    if n < 20:
+        return _ONES[n]
+    return (_TENS[n // 10] + (" " + _ONES[n % 10] if n % 10 else "")).strip()
+
+
+def _three(n: int) -> str:
+    out = []
+    if n >= 100:
+        out.append(_ONES[n // 100] + " Hundred")
+        n %= 100
+    if n:
+        out.append(_two(n))
+    return " ".join(out)
+
+
+def _int_words_western(n: int) -> str:
+    """Thousand / Million / Billion grouping, for currencies other than INR."""
+    if n == 0:
+        return "Zero"
+    parts, units = [], [(1_000_000_000, "Billion"), (1_000_000, "Million"), (1_000, "Thousand")]
+    for size, name in units:
+        chunk, n = divmod(n, size)
+        if chunk:
+            parts.append(_three(chunk) + " " + name)
+    if n:
+        parts.append(_three(n))
+    return " ".join(parts)
+
+
+def _int_words_indian(n: int) -> str:
+    """Lakh / Crore grouping, as Indian invoices spell amounts."""
+    if n == 0:
+        return "Zero"
+    parts = []
+    crore, n = divmod(n, 10_000_000)
+    lakh, n = divmod(n, 100_000)
+    thousand, rest = divmod(n, 1_000)
+    if crore:
+        parts.append(_three(crore) + " Crore")
+    if lakh:
+        parts.append(_three(lakh) + " Lakh")
+    if thousand:
+        parts.append(_three(thousand) + " Thousand")
+    if rest:
+        parts.append(_three(rest))
+    return " ".join(parts)
+
+
+def amount_in_words(amount, currency: str = CURRENCY) -> str:
+    """"INR One Lakh Six Thousand Two Hundred Only".
+
+    INR uses lakh/crore grouping and whole rupees, since every rate-card price
+    is an integer. Converted currencies can carry a fractional part, so cents
+    are spelled when present.
+    """
+    currency = (currency or CURRENCY).upper()
+    value = float(amount or 0)
+
+    if currency == "INR":
+        whole = int(round(value))
+        return f"INR {_int_words_indian(whole)} Only"
+
+    whole = int(value)
+    cents = int(round((value - whole) * 100))
+    if cents == 100:  # rounding pushed it to the next unit
+        whole, cents = whole + 1, 0
+    # Export invoices spell it out rather than using the ISO code.
+    label = "US Dollar" if currency == "USD" else currency
+    words = f"{label} {_int_words_western(whole)}"
+    if cents:
+        words += f" and Cents {_int_words_western(cents)}"
+    return words + " Only"

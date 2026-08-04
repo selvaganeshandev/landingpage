@@ -1,19 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Globe, Loader2, ChevronDown, AlertCircle } from "lucide-react";
+import { Check, Globe, Loader2, ChevronsUpDown, AlertCircle, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useDomainStore } from "@/stores/domainStore";
 import { useAuth } from "@/contexts/AuthContext";
@@ -31,6 +25,7 @@ const hostLabel = (url?: string | null): string => {
 
 export const DomainSelector = () => {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const { toast } = useToast();
   
   const {
@@ -137,6 +132,10 @@ export const DomainSelector = () => {
     }
   }, [error, toast]);
 
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
   const handleDomainSelect = async (domainId: number) => {
     const domain = domains.find(d => d.id === domainId);
     if (domain) {
@@ -231,68 +230,102 @@ export const DomainSelector = () => {
 
   const selectedFaviconUrl = selectedDomain ? getFaviconUrl(selectedDomain.url, 32) : null;
 
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="w-full justify-start gap-2"
-        >
-          {selectedFaviconUrl ? (
-            <img
-              src={selectedFaviconUrl}
-              alt=""
-              className="h-4 w-4 flex-shrink-0 rounded"
-              onError={(e) => handleFaviconError(e, selectedDomain?.url || '', selectedDomain?.name, 32)}
-            />
-          ) : null}
-          <Globe className={cn("h-4 w-4 flex-shrink-0", selectedFaviconUrl && "hidden")} />
-          <span className="text-left flex-1 truncate">
-            {selectedDomain ? selectedDomain.name : "Select domain"}
-          </span>
-          <ChevronDown className="h-4 w-4 flex-shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-        <Command>
-          <CommandInput placeholder="Search domains..." />
-          <CommandList>
-            <CommandEmpty>No domains found.</CommandEmpty>
-            <CommandGroup heading="Your Domains">
-              {domains.map((domain) => {
-                const faviconUrl = getFaviconUrl(domain.url, 32);
-                const isProcessing = domain.processing_status && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
-                const isFailed = domain.processing_status === 'FAIL';
-                const isDisabled = isProcessing || isFailed;
-                const processingLabel = domain.processing_status === 'INIT' ? 'Initializing...' :
-                                       domain.processing_status === 'SCHD' ? 'Scheduled...' :
-                                       domain.processing_status === 'PROC' ? 'Processing...' : 'Processing...';
+  const filtered = domains.filter((d) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (d.name || "").toLowerCase().includes(q)
+      || hostLabel(d.url).toLowerCase().includes(q);
+  });
 
-                return (
-                  <CommandItem
-                    key={domain.id}
-                    value={domain.name}
-                    onSelect={() => handleDomainSelect(domain.id)}
-                    className={cn(
-                      "flex items-center justify-between gap-2",
-                      isDisabled && "opacity-60 cursor-not-allowed"
-                    )}
-                    disabled={isDisabled}
-                  >
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      {faviconUrl ? (
-                        <img
-                          src={faviconUrl}
-                          alt=""
-                          className="h-4 w-4 flex-shrink-0 rounded"
-                          onError={(e) => handleFaviconError(e, domain.url, domain.name, 32)}
-                        />
-                      ) : null}
-                      <Globe className={cn("h-4 w-4 flex-shrink-0", faviconUrl && "hidden")} />
-                      <div className="flex flex-col flex-1 min-w-0">
-                        <span className="truncate">{domain.name}</span>
+  return (
+    <>
+      {/* Trigger. The stacked chevrons read as "switch between", which is what
+          this does — a single caret implies a dropdown will open below it. */}
+      <Button
+        variant="outline"
+        onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
+        className="w-full justify-start gap-2 h-11"
+      >
+        {selectedFaviconUrl ? (
+          <img
+            src={selectedFaviconUrl}
+            alt=""
+            className="h-5 w-5 flex-shrink-0 rounded"
+            onError={(e) => handleFaviconError(e, selectedDomain?.url || '', selectedDomain?.name, 32)}
+          />
+        ) : null}
+        <Globe className={cn("h-5 w-5 flex-shrink-0", selectedFaviconUrl && "hidden")} />
+        <span className="text-left flex-1 truncate font-medium">
+          {selectedDomain ? selectedDomain.name : "Select project"}
+        </span>
+        <ChevronsUpDown className="h-4 w-4 flex-shrink-0 opacity-60" />
+      </Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-[760px]">
+          <DialogHeader>
+            <DialogTitle>Switch project</DialogTitle>
+          </DialogHeader>
+
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search projects"
+              className="pl-9"
+              autoFocus
+            />
+          </div>
+
+          <div className="max-h-[55vh] overflow-y-auto -mx-1 px-1">
+            {filtered.length === 0 ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">
+                No projects match that search
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {filtered.map((domain) => {
+                  const faviconUrl = getFaviconUrl(domain.url, 32);
+                  const isProcessing = domain.processing_status
+                    && ['INIT', 'SCHD', 'PROC'].includes(domain.processing_status);
+                  const isFailed = domain.processing_status === 'FAIL';
+                  const isDisabled = isProcessing || isFailed;
+                  const isActive = selectedDomain?.id === domain.id;
+                  const processingLabel = domain.processing_status === 'INIT' ? 'Initializing...' :
+                                          domain.processing_status === 'SCHD' ? 'Scheduled...' :
+                                          domain.processing_status === 'PROC' ? 'Processing...' : 'Processing...';
+
+                  return (
+                    <button
+                      key={domain.id}
+                      type="button"
+                      disabled={isDisabled}
+                      onClick={() => handleDomainSelect(domain.id)}
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg border p-3 text-left transition-colors",
+                        isActive
+                          ? "border-primary/30 bg-primary/5"
+                          : "border-border hover:border-primary/40 hover:bg-accent/50",
+                        isDisabled && "opacity-60 cursor-not-allowed hover:border-border hover:bg-transparent",
+                      )}
+                    >
+                      <div className="h-10 w-10 flex-shrink-0 rounded-md border border-border bg-muted flex items-center justify-center overflow-hidden">
+                        {faviconUrl ? (
+                          <img
+                            src={faviconUrl}
+                            alt=""
+                            className="h-6 w-6 object-contain"
+                            onError={(e) => handleFaviconError(e, domain.url, domain.name, 32)}
+                          />
+                        ) : (
+                          <Globe className="h-5 w-5 text-muted-foreground" />
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold">{domain.name}</p>
                         {isProcessing ? (
                           <span className="text-xs text-orange-500 flex items-center gap-1">
                             <Loader2 className="h-3 w-3 animate-spin" />
@@ -304,39 +337,24 @@ export const DomainSelector = () => {
                             Failed
                           </span>
                         ) : (
-                          // The host, not a mention count. `domain.total_mentions`
-                          // is a denormalized column the engine only rewrites when
-                          // it reprocesses a group, so it drifts — Tata Motors read
-                          // 3615 here against 3595 on Insights. It is also all-time
-                          // while Insights counts the selected window, so the two
-                          // would disagree by design on any shorter range even once
-                          // the column is fresh. The host is what actually
-                          // distinguishes two similarly named domains anyway.
-                          <span className="text-xs text-muted-foreground truncate">
-                            {hostLabel(domain.url) || " "}
-                          </span>
+                          // The host, not a mention count: `total_mentions` is a
+                          // denormalized column that drifts, and the host is what
+                          // actually tells two similarly named projects apart.
+                          <p className="truncate text-xs text-muted-foreground">
+                            {hostLabel(domain.url) || " "}
+                          </p>
                         )}
                       </div>
-                    </div>
-                    {isProcessing ? (
-                      <AlertCircle className="h-4 w-4 flex-shrink-0 text-orange-500" />
-                    ) : isFailed ? (
-                      <AlertCircle className="h-4 w-4 flex-shrink-0 text-red-500" />
-                    ) : (
-                      <Check
-                        className={cn(
-                          "h-4 w-4 flex-shrink-0",
-                          selectedDomain?.id === domain.id ? "opacity-100" : "opacity-0"
-                        )}
-                      />
-                    )}
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+
+                      {isActive && <Check className="h-4 w-4 flex-shrink-0 text-primary" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };

@@ -103,6 +103,59 @@ class Organisation(models.Model):
         help_text="Whether the organisation is currently using AI monitoring tools"
     )
     team_count = models.PositiveIntegerField(default=1, help_text="Number of team members")
+
+    # ----- Invoice details -------------------------------------------------
+    # The Consignee / Buyer block on the tax invoice. These describe the
+    # organisation itself, so they live here rather than on the invoicing
+    # user's settings — each organisation owns its own registered particulars
+    # and edits them under Organization Settings > Invoice Details.
+    billing_legal_name = models.CharField(
+        max_length=255, blank=True, default="",
+        help_text="Registered name for invoices; falls back to `name` when blank",
+    )
+    billing_address = models.TextField(
+        blank=True, default="", help_text="Registered address, one line per line",
+    )
+    billing_gstin = models.CharField(max_length=32, blank=True, default="")
+    billing_state_name = models.CharField(max_length=64, blank=True, default="")
+    billing_state_code = models.CharField(max_length=8, blank=True, default="")
+
+    # A second set for the non-India region. The same organisation is often
+    # invoiced through a different registered entity abroad — different legal
+    # name, address and tax registration — so one block cannot serve both.
+    billing_alt_legal_name = models.CharField(max_length=255, blank=True, default="")
+    billing_alt_address = models.TextField(blank=True, default="")
+    billing_alt_gstin = models.CharField(
+        max_length=32, blank=True, default="",
+        help_text="Tax registration for the other region (e.g. TRN)",
+    )
+    billing_alt_state_name = models.CharField(max_length=64, blank=True, default="")
+    billing_alt_state_code = models.CharField(max_length=8, blank=True, default="")
+
+    def invoice_party(self, region_key: str = "row") -> dict:
+        """Consignee / Buyer block for this organisation, per invoice region.
+
+        Falls back to the primary block when the other-region set is blank, so
+        an unconfigured organisation still produces a usable invoice rather
+        than an empty address panel.
+        """
+        if region_key and region_key != "row" and (
+            self.billing_alt_legal_name or self.billing_alt_address or self.billing_alt_gstin
+        ):
+            return {
+                "name": self.billing_alt_legal_name or self.name,
+                "address": self.billing_alt_address,
+                "gstin": self.billing_alt_gstin,
+                "state_name": self.billing_alt_state_name,
+                "state_code": self.billing_alt_state_code,
+            }
+        return {
+            "name": self.billing_legal_name or self.name,
+            "address": self.billing_address,
+            "gstin": self.billing_gstin,
+            "state_name": self.billing_state_name,
+            "state_code": self.billing_state_code,
+        }
     seo_keyword_limit = models.PositiveIntegerField(default=3000, help_text="Maximum number of SEO keywords allowed for this organisation")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the organisation was created")
     modified_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the organisation was last modified")

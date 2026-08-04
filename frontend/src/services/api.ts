@@ -1831,6 +1831,36 @@ export const apiClient = {
       'promptmaxx_billing.xlsx',
     ),
 
+  // Monthly invoice PDF. `month` is YYYY-MM; figures are reconstructed as of
+  // that month's close, so past months differ from today's totals.
+  downloadBillingInvoice: (month: string, organisation?: string, region?: string) =>
+    downloadFile(
+      `/seo/billing/invoice/?month=${encodeURIComponent(month)}`
+        + (organisation ? `&organisation=${encodeURIComponent(organisation)}` : '')
+        + (region ? `&region=${encodeURIComponent(region)}` : ''),
+      `promptmaxx_invoice_${month}${region && region !== 'all' ? `_${region}` : ''}.pdf`,
+    ),
+
+  // ===== Invoice settings (super admin only) =====
+  getInvoiceSettings: () => apiRequest('/seo/billing/invoice-settings/'),
+
+  // Multipart because the logo and signature ride along with the text fields.
+  saveInvoiceSettings: (settings: Record<string, any>, files?: { logo?: File | null; signature?: File | null }) => {
+    const fd = new FormData();
+    Object.entries(settings).forEach(([k, v]) => {
+      if (k === 'buyers') fd.append('buyers', JSON.stringify(v || {}));
+      // Skip server-derived fields and nulls; sending them back would be a no-op
+      // at best and would clobber the stored image URLs at worst.
+      else if (!['logo_url', 'signature_url', 'invoice_number_preview'].includes(k) && v !== null && v !== undefined) {
+        fd.append(k, String(v));
+      }
+    });
+    if (files?.logo) fd.append('logo', files.logo);
+    if (files?.signature) fd.append('signature', files.signature);
+    // apiRequest omits Content-Type for FormData so the browser sets the boundary.
+    return apiRequest('/seo/billing/invoice-settings/', { method: 'PUT', body: fd });
+  },
+
   // ===== Content Comments (Google Docs-style) =====
   getContentComments: (contentId: number) =>
     apiRequest(`/content/${contentId}/comments/`),

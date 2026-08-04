@@ -17,13 +17,22 @@ class OrganisationSerializer(serializers.ModelSerializer):
 class AccountSerializer(serializers.ModelSerializer):
     """Serializer for Account model"""
     organisation_name = serializers.CharField(source='organisation.name', read_only=True)
+    # Whether this account is the platform's billing operator. Surfaced so the
+    # UI can hide operator-only screens without hard-coding an email in the
+    # frontend — the list itself stays server-side config.
+    can_manage_invoice_settings = serializers.SerializerMethodField()
+
+    def get_can_manage_invoice_settings(self, obj):
+        from seo_rankings.views_billing import billing_owner_emails
+        return (obj.role == 'super_admin'
+                and (obj.email or '').lower() in billing_owner_emails())
     
     class Meta:
         model = Account
         fields = [
             'id', 'email', 'first_name', 'last_name', 'role', 
             'organisation', 'organisation_name', 'is_active', 
-            'active_domain_id',
+            'active_domain_id', 'can_manage_invoice_settings',
             'created_at', 'modified_at'
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']

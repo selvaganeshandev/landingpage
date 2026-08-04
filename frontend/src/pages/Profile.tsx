@@ -5,10 +5,12 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import InvoiceSettingsTab from "@/components/InvoiceSettingsTab";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/services/api";
-import { User, Mail, Building, Shield, Calendar, Lock, Loader2, Pencil, Check, X } from "lucide-react";
+import { User, Mail, Building, Shield, Calendar, Lock, Loader2, Pencil, Check, X, ReceiptText } from "lucide-react";
 
 export default function Profile() {
   const { user, updateProfile } = useAuth();
@@ -81,7 +83,22 @@ export default function Profile() {
         <p className="text-muted-foreground">Manage your account information and preferences</p>
       </div>
 
-      <div className="space-y-6">
+      <Tabs defaultValue="profile" className="space-y-6">
+        <TabsList className="bg-muted/50 p-1 border border-border">
+          <TabsTrigger value="profile" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+            Profile
+          </TabsTrigger>
+          {/* Only the platform's billing operator — the account that issues
+              invoices. Driven by a server flag rather than an email check here,
+              and the API 404s for everyone else regardless. */}
+          {(user as any)?.can_manage_invoice_settings && (
+            <TabsTrigger value="invoice" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
+              <ReceiptText className="h-3.5 w-3.5 mr-1.5" />Invoice Settings
+            </TabsTrigger>
+          )}
+        </TabsList>
+
+        <TabsContent value="profile" className="space-y-6">
         {/* Profile Information */}
         <Card className="border border-border">
           <CardHeader>
@@ -236,7 +253,14 @@ export default function Profile() {
             </div>
           </CardContent>
         </Card>
-      </div>
+        </TabsContent>
+
+        {(user as any)?.can_manage_invoice_settings && (
+          <TabsContent value="invoice">
+            <InvoiceSettingsTab />
+          </TabsContent>
+        )}
+      </Tabs>
     </div>
   );
 }

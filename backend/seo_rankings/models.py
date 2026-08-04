@@ -607,3 +607,7 @@ class SeoKeywordVolume(models.Model):
 
     def __str__(self):
         return f"Volume for {self.seo_keyword_rank}: avg={self.average_volume}"
+
+
+# Invoice letterhead / GST settings, kept in their own module for clarity.
+from .models_invoice import InvoiceSettings, FxRate  # noqa: E402,F401
