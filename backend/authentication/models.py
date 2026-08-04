@@ -167,6 +167,13 @@ class Organisation(models.Model):
     anthropic_api_key = models.TextField(blank=True, null=True, help_text="Encrypted Anthropic API Key")
     xai_api_key = models.TextField(blank=True, null=True, help_text="Encrypted xAI (Grok) API Key")
     deepseek_api_key = models.TextField(blank=True, null=True, help_text="Encrypted DeepSeek API Key")
+    # The credential that actually authenticates ChatGPT, Claude and Perplexity
+    # since they moved onto OpenRouter. api_key_service.get_api_key already
+    # looks for `openrouter_api_key`; without this column the lookup always
+    # missed and every organisation silently fell back to the .env key.
+    openrouter_api_key = models.TextField(
+        blank=True, null=True, help_text="Encrypted OpenRouter API Key (sk-or-...)"
+    )
 
     # Enabled toggles
     openai_enabled = models.BooleanField(default=True, help_text="Whether OpenAI is enabled")
@@ -175,6 +182,7 @@ class Organisation(models.Model):
     anthropic_enabled = models.BooleanField(default=True, help_text="Whether Anthropic is enabled")
     xai_enabled = models.BooleanField(default=True, help_text="Whether xAI (Grok) is enabled")
     deepseek_enabled = models.BooleanField(default=True, help_text="Whether DeepSeek is enabled")
+    openrouter_enabled = models.BooleanField(default=True, help_text="Whether OpenRouter is enabled")
 
     # Dedicated Content Generation key (Claude) — used ONLY by the Strategy
     # content-generation pipeline, never by the background scanning engines.
@@ -237,6 +245,14 @@ class Organisation(models.Model):
     @deepseek_key.setter
     def deepseek_key(self, value):
         self.deepseek_api_key = encrypt_value(value) if value is not None else None
+
+    @property
+    def openrouter_key(self):
+        return decrypt_value(self.openrouter_api_key)
+
+    @openrouter_key.setter
+    def openrouter_key(self, value):
+        self.openrouter_api_key = encrypt_value(value) if value is not None else None
 
     @property
     def content_generation_key(self):

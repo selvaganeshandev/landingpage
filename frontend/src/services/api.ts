@@ -156,7 +156,7 @@ async function apiRequest<T>(
 
               if (!retryResponse.ok) {
                 const error = await retryResponse.json().catch(() => ({ detail: 'An error occurred' }));
-                const errorMessage = error.detail || error.error || error.message || `HTTP ${retryResponse.status}: ${retryResponse.statusText}`;
+                const errorMessage = extractErrorMessage(error, retryResponse.status, retryResponse.statusText);
                 reject(new Error(errorMessage));
                 return;
               }
@@ -213,7 +213,7 @@ async function apiRequest<T>(
   // Handle other errors
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
-    const errorMessage = error.detail || error.error || error.message || `HTTP ${response.status}: ${response.statusText}`;
+    const errorMessage = extractErrorMessage(error, response.status, response.statusText);
     // Message is unchanged, but the status and parsed body ride along so callers
     // can distinguish an expected rejection (409 "already validated") from a
     // real failure. Every existing `error.message` caller is unaffected.
@@ -226,6 +226,42 @@ async function apiRequest<T>(
   }
 
   return response.json();
+}
+
+/**
+ * Best human-readable message from an error body.
+ *
+ * DRF returns validation errors keyed by FIELD — {"email": ["User is already a
+ * member of this organisation"]} — which matches none of `detail`/`error`/
+ * `message`. Those bodies fell through to "HTTP 400: " with an empty
+ * statusText, so the server's actual reason was discarded and every validation
+ * failure in the app looked like an unexplained 400. Field errors are read
+ * before giving up on the status line.
+ */
+function extractErrorMessage(body: any, status: number, statusText?: string): string {
+  if (typeof body === 'string' && body.trim()) return body;
+
+  if (body && typeof body === 'object') {
+    const direct = body.detail || body.error || body.message;
+    if (typeof direct === 'string' && direct.trim()) return direct;
+
+    // non_field_errors first, then any other field, in declaration order.
+    const keys = Object.keys(body);
+    const ordered = keys.includes('non_field_errors')
+      ? ['non_field_errors', ...keys.filter((k) => k !== 'non_field_errors')]
+      : keys;
+    for (const key of ordered) {
+      const value = (body as any)[key];
+      const text = Array.isArray(value) ? value.find((v) => typeof v === 'string') : value;
+      if (typeof text === 'string' && text.trim()) {
+        // Prefix the field name only when it adds something the text doesn't.
+        const label = key === 'non_field_errors' || key === 'detail' ? '' : `${key}: `;
+        return `${label}${text}`;
+      }
+    }
+  }
+
+  return `HTTP ${status}${statusText ? `: ${statusText}` : ''}`;
 }
 
 /**
@@ -1187,7 +1223,7 @@ export const apiClient = {
     }).then(async (response) => {
       if (!response.ok) {
         const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
-        throw new Error(error.detail || error.error || `HTTP ${response.status}`);
+        throw new Error(extractErrorMessage(error, response.status, response.statusText));
       }
       return response.json();
     });
@@ -1257,7 +1293,7 @@ export const apiClient = {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
-      throw new Error(error.detail || error.error || `HTTP ${response.status}`);
+      throw new Error(extractErrorMessage(error, response.status, response.statusText));
     }
     return response.json();
   },

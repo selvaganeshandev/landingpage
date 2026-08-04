@@ -98,6 +98,18 @@ class ClaudeContentGenerator:
                 org_id, api_key[:7],
             )
             api_key = None
+        if not api_key and org_id:
+            # The organisation's OpenRouter key, now that it is manageable from
+            # Organization Settings. Content generation runs on OpenRouter like
+            # everything else, so it is the same credential.
+            try:
+                from authentication.models import Organisation
+                org = Organisation.objects.filter(id=org_id).only(
+                    'openrouter_api_key').first()
+                api_key = (org.openrouter_key or None) if org else None
+            except Exception as e:
+                logger.warning(f"Could not resolve org OpenRouter key: {e}")
+                api_key = None
         if not api_key:
             api_key = config('OPENROUTER_API_KEY', default=None)
         if not api_key:

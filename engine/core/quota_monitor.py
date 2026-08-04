@@ -232,6 +232,14 @@ _PROVIDER_LABELS = {
 
 def _probe_provider(provider, api_key):
     """Dispatch to the right provider probe with the configured probe model."""
+    if provider == "openrouter":
+        # The shared credential behind ChatGPT, Claude and Perplexity. Probed
+        # against OpenRouter itself rather than any one vendor, so a valid key
+        # is not marked broken because one model happens to be unavailable.
+        return _probe_openai_compatible(
+            "OpenRouter", "openrouter", api_key,
+            _cfg("OPENROUTER_BASE_URL", None) or "https://openrouter.ai/api/v1",
+            _cfg("QUOTA_PROBE_OPENROUTER_MODEL", "openai/gpt-4o-mini"))
     if provider == "openai":
         return _probe_openai(api_key, _cfg("QUOTA_PROBE_OPENAI_MODEL", "openai/gpt-4o-mini"))
     if provider == "anthropic":

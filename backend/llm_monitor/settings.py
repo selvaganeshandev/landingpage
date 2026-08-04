@@ -398,6 +398,20 @@ AI_VISIBILITY_HIDDEN_PLATFORMS = [
     ).split(',') if s.strip()
 ]
 
+# LLM providers whose per-organisation key is actually consulted at query time.
+#
+# ChatGPT, Claude and Perplexity all run through OpenRouter now (see
+# OPENROUTER_ROUTED in engine/core/services/api_key_service.py), so the single
+# "OpenRouter" entry is the credential for all three — their own per-provider
+# keys are never read. xAI and DeepSeek are not in ENABLED_PLATFORMS. Only the
+# providers listed here are offered in Organization Settings, so the page
+# cannot show a key as "Connected" when nothing would ever use it.
+BYOK_PROVIDERS = config(
+    'BYOK_PROVIDERS',
+    default='openrouter,gemini',
+    cast=lambda v: [p.strip() for p in v.split(',') if p.strip()],
+)
+
 # Billing — accounts allowed to see every organisation's charges consolidated,
 # rather than only their own. Comma-separated emails, matched case-insensitively.
 # Kept in config so the list can change without a deploy; everyone else is

@@ -24,7 +24,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-LLM_PROVIDERS = ['openai', 'gemini', 'perplexity', 'anthropic', 'xai', 'deepseek']
+LLM_PROVIDERS = ['openrouter', 'openai', 'gemini', 'perplexity', 'anthropic', 'xai', 'deepseek']
+
+
+def _byok_providers():
+    """Providers whose per-org key is genuinely used; see BYOK_PROVIDERS.
+
+    Kept as a function so the setting is read at call time and the list can be
+    changed in .env without a deploy. Anything outside it is neither shown nor
+    accepted — storing a key nothing reads only creates false confidence.
+    """
+    configured = getattr(settings, 'BYOK_PROVIDERS', None) or ['gemini']
+    return [p for p in LLM_PROVIDERS if p in configured]
 
 # Map the engine quota-probe states → status strings the frontend renders.
 _PROBE_STATE_TO_UI = {
@@ -106,7 +117,7 @@ def _build_api_keys_payload(org):
                      "enabled": true, "status": "CONNECTED"}, ...}
     """
     payload = {}
-    for provider in LLM_PROVIDERS:
+    for provider in _byok_providers():
         encrypted = getattr(org, f'{provider}_api_key', None)
         raw = decrypt_value(encrypted) if encrypted else ''
         enabled = getattr(org, f'{provider}_enabled', True)
@@ -729,6 +740,12 @@ def organization_management(request):
     for provider in LLM_PROVIDERS:
         if f'{provider}_api_key' in request.data or f'{provider}_enabled' in request.data:
             is_key_update = True
+            if provider not in _byok_providers():
+                return Response(
+                    {'error': f'{provider} is not configurable: it authenticates through '
+                              f'OpenRouter or is not an enabled platform.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             break
 
     if is_key_update and request.user.role != 'super_admin':
@@ -739,7 +756,7 @@ def organization_management(request):
 
     # Update API keys and enabled toggles per provider
     from .models import encrypt_value
-    for provider in LLM_PROVIDERS:
+    for provider in _byok_providers():
         key_field = f'{provider}_api_key'
         enabled_field = f'{provider}_enabled'
 
@@ -819,7 +836,7 @@ def reveal_api_key(request, provider):
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    if provider not in LLM_PROVIDERS:
+    if provider not in _byok_providers():
         return Response(
             {'error': 'Unknown provider'},
             status=status.HTTP_400_BAD_REQUEST,

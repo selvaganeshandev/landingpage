@@ -244,6 +244,9 @@ export default function OrganizationSettings() {
 
   // API Keys state
   const PROVIDERS = [
+    // One key for ChatGPT, Claude and Perplexity — all three are transported
+    // over OpenRouter, so their vendor keys are never consulted.
+    { id: 'openrouter', label: 'OpenRouter (ChatGPT, Claude, Perplexity)', color: '#6d28d9', docsUrl: 'https://openrouter.ai/keys' },
     { id: 'openai',     label: 'OpenAI (ChatGPT)',   color: '#10a37f', docsUrl: 'https://platform.openai.com/api-keys' },
     { id: 'gemini',     label: 'Google Gemini',       color: '#4285F4', docsUrl: 'https://aistudio.google.com/app/apikey' },
     { id: 'perplexity', label: 'Perplexity',          color: '#20808D', docsUrl: 'https://www.perplexity.ai/settings/api' },
@@ -1965,7 +1968,14 @@ export default function OrganizationSettings() {
                 <Key className="h-3.5 w-3.5 mr-1.5" />API Keys
               </TabsTrigger>
             )}
-            {user?.role === 'super_admin' && (
+            {/* Hidden: neither key on this tab is used any more. Content
+                generation runs on the system OPENROUTER_API_KEY — a stored
+                sk-ant key is ignored by the sk-or- prefix check — and the
+                Anthropic usage API the Admin key queries reports zero, because
+                Claude traffic now bills through OpenRouter. The tab and its
+                endpoints are left in place for when a usage source exists
+                again. */}
+            {false && user?.role === 'super_admin' && (
               <TabsTrigger value="content-key" className="data-[state=active]:gradient-primary data-[state=active]:shadow-md data-[state=active]:shadow-primary/20 data-[state=active]:text-white">
                 <Sparkles className="h-3.5 w-3.5 mr-1.5" />Content Generation api key
               </TabsTrigger>
@@ -2371,7 +2381,10 @@ export default function OrganizationSettings() {
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {PROVIDERS.map((provider) => {
+                  {/* Only providers the server says it will actually read.
+                      The rest authenticate through OpenRouter or are disabled
+                      platforms, so a key stored for them would never be used. */}
+                  {PROVIDERS.filter((p) => apiKeys?.[p.id]).map((provider) => {
                     const info = apiKeys[provider.id as ProviderId];
                     const status = info?.status ?? 'NOT_CONFIGURED';
                     const configured = info?.configured ?? false;
@@ -2538,7 +2551,7 @@ export default function OrganizationSettings() {
           </TabsContent>
         )}
 
-        {user?.role === 'super_admin' && (
+        {false && user?.role === 'super_admin' && (
           <TabsContent value="content-key" className="space-y-6">
             {(() => {
               const status = contentKey.status ?? 'NOT_CONFIGURED';
