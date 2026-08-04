@@ -56,7 +56,7 @@ def default_expires_in_1_hour():
 
 class Organisation(models.Model):
     """
-    Organisation model representing companies or entities using the LLM Monitor
+    Organisation model representing companies or entities using Promptmaxx App
     """
     INDUSTRY_CHOICES = [
         ('technology', 'Technology & Software'),

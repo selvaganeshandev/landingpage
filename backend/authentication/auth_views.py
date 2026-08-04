@@ -344,7 +344,7 @@ def send_invitation(request):
             message = f"""
             Hello,
 
-            You have been invited to join {invitation.organisation.name} on LLM Monitor.
+            You have been invited to join {invitation.organisation.name} on Promptmaxx App.
 
             Role: {invitation.get_role_display()}
             Invited by: {invitation.invited_by.email}
@@ -359,7 +359,7 @@ def send_invitation(request):
             If you don't want to join, you can simply ignore this email.
 
             Best regards,
-            LLM Monitor Team
+            Promptmaxx App Team
             """
             send_mail(subject=subject, message=message, from_email=settings.DEFAULT_FROM_EMAIL, recipient_list=[invitation.email], fail_silently=False)
             return Response({'message': 'Invitation sent successfully', 'invitation': TeamInvitationSerializer(invitation).data}, status=status.HTTP_201_CREATED)
@@ -446,12 +446,12 @@ def forgot_password(request):
             user = Account.objects.get(email=email, is_active=True)
             PasswordResetToken.objects.filter(user=user, status='pending').update(status='expired')
             reset_token = PasswordResetToken.objects.create(user=user, expires_at=timezone.now() + timezone.timedelta(hours=1))
-            subject = "Password Reset Request - LLM Monitor"
+            subject = "Password Reset Request - Promptmaxx App"
             reset_url = f"{settings.SITE_URL}/reset-password/{reset_token.id}"
             message = f"""
             Hello {user.first_name or 'User'},
 
-            You have requested to reset your password for your LLM Monitor account.
+            You have requested to reset your password for your Promptmaxx App account.
 
             To reset your password, click the link below:
             {reset_url}
@@ -462,7 +462,7 @@ def forgot_password(request):
             Your password will remain unchanged.
 
             Best regards,
-            LLM Monitor Team
+            Promptmaxx App Team
             """
             send_mail(subject=subject, message=message, from_email=settings.DEFAULT_FROM_EMAIL, recipient_list=[email], fail_silently=False)
             return Response({'message': 'Password reset email sent successfully', 'email': email}, status=status.HTTP_200_OK)

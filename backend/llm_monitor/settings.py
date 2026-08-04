@@ -243,7 +243,7 @@ MAILGUN_DOMAIN = config('MAILGUN_DOMAIN', default='')
 # Sender Email
 DEFAULT_FROM_EMAIL = config(
     'DEFAULT_FROM_EMAIL',
-    default='LLM Monitor <noreply@sandbox.mailgun.org>'
+    default='Promptmaxx App <noreply@sandbox.mailgun.org>'
 )
 
 # Frontend URL for email links
