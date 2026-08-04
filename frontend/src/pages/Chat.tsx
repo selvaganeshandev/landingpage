@@ -1,13 +1,22 @@
 import { useState, useEffect, useRef } from "react";
-import { Send, Sparkles, TrendingUp, Lightbulb, Users, Search, BarChart3, MessageSquare, Bell, ExternalLink } from "lucide-react";
+import { Send, Sparkles, TrendingUp, Lightbulb, Users, Search, BarChart3, MessageSquare, Bell, ExternalLink, MessageSquareText, Plus, ChevronDown, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDomainStore } from "@/stores/domainStore";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { api } from "@/services/api";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { getFaviconUrl, handleFaviconError } from "@/utils/faviconHelper";
+import { cn } from "@/lib/utils";
 import { formatMessage, FORMATTED_MESSAGE_CLASSES } from "@/utils/textFormatter";
 import {
   Popover,
@@ -62,6 +71,13 @@ export const Chat = () => {
   const { selectedDomain } = useDomainStore();
   const { updateRecentChats } = useNavigationStore();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  // Rendered by the conversations rail beside the chat. Also pushed to the
+  // navigation store below, which currently has no reader.
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -149,6 +165,7 @@ export const Chat = () => {
         const sorted = [...response.conversations].sort((a: any, b: any) =>
           new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
         );
+        setConversations(sorted.slice(0, 20));
         updateRecentChats(sorted.slice(0, 20));
       }
     } catch (error) {
@@ -304,12 +321,99 @@ export const Chat = () => {
     return "U";
   };
 
+  const openConversation = (id: number) => {
+    loadConversation(id);
+    navigate(`/chat?conversation=${id}`, { replace: true });
+    setHistoryOpen(false);
+  };
+
+  const handleDeleteConversation = async (id: number) => {
+    setDeletingId(id);
+    try {
+      await api.deleteChatConversation(id);
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      // Deleting the open conversation would otherwise leave its messages on
+      // screen with no record behind them.
+      if (conversationId === id) startNewChat();
+    } catch (error) {
+      console.error("Failed to delete conversation:", error);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const activeTitle =
+    conversations.find((c: any) => c.id === conversationId)?.title ||
+    (conversationId ? `Chat ${conversationId}` : "New chat");
+
+  const filteredConversations = conversations.filter((c: any) =>
+    !historySearch ||
+    (c.title || `Chat ${c.id}`).toLowerCase().includes(historySearch.toLowerCase())
+  );
+
+  const startNewChat = () => {
+    setMessages([]);
+    setConversationId(null);
+    setInput("");
+    navigate("/chat", { replace: true });
+  };
+
   return (
     <div className="flex flex-col h-screen bg-background animate-fade-in">
+      {/* Chat header — conversation switcher on the left, new chat on the
+          right. Replaces the fixed rail: the list is only needed on demand, and
+          a 240px column of titles was permanently spending horizontal space the
+          conversation itself wants. */}
+      <header className="relative z-20 flex items-center justify-between gap-3 px-4 h-12 border-b border-border flex-shrink-0 bg-background">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="gap-2 max-w-[60%] px-2">
+              <MessageSquareText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+              <span className="truncate text-sm font-medium">{activeTitle}</span>
+              <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 opacity-60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-[280px]">
+            <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Recent chats
+            </DropdownMenuLabel>
+            {conversations.length === 0 ? (
+              <p className="px-2 py-2 text-xs text-muted-foreground">No conversations yet</p>
+            ) : (
+              conversations.slice(0, 8).map((c: any) => (
+                <DropdownMenuItem
+                  key={c.id}
+                  onClick={() => openConversation(c.id)}
+                  className={cn("cursor-pointer gap-2", conversationId === c.id && "text-primary font-medium")}
+                >
+                  <MessageSquareText className="h-3.5 w-3.5 flex-shrink-0 opacity-60" />
+                  <span className="truncate">{c.title || `Chat ${c.id}`}</span>
+                </DropdownMenuItem>
+              ))
+            )}
+            {conversations.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setHistoryOpen(true)} className="cursor-pointer gap-2 text-primary">
+                  <Search className="h-3.5 w-3.5" />
+                  See all chats
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Button variant="outline" size="sm" onClick={startNewChat} className="gap-1.5 flex-shrink-0">
+          <Plus className="h-4 w-4" />
+          New chat
+        </Button>
+      </header>
+
+      <div className="flex-1 flex flex-col min-w-0">
       {messages.length === 0 ? (
         /* Initial Mode - Centered input with quick actions */
-        <div className="flex-1 flex flex-col justify-center items-center w-full px-4 -mt-[100px]">
-          <div className="w-[60%] text-center">
+        <div className="flex-1 flex flex-col justify-center items-center w-full px-4 pb-[100px]">
+          <div className="w-full max-w-3xl text-center">
             {/* Greeting - above input */}
             <div className="mb-8 flex items-center justify-center gap-3">
               <div className="flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-r from-primary to-secondary flex-shrink-0 overflow-hidden">
@@ -534,7 +638,7 @@ export const Chat = () => {
         <>
           <div className="flex-1 overflow-y-auto">
             <div className="w-full flex justify-center pt-16">
-              <div className="w-[60%]">
+              <div className="w-full max-w-3xl px-4">
               {messages.map((message, index) => (
                 <div
                   key={index}
@@ -598,7 +702,7 @@ export const Chat = () => {
 
           {/* Input Area at bottom - only in conversation mode */}
           <div className="px-4 py-4 bg-background w-full flex justify-center">
-            <div className="w-[60%]">
+            <div className="w-full max-w-3xl px-4">
               <div className="relative">
                 <Textarea
                   value={input}
@@ -624,6 +728,71 @@ export const Chat = () => {
           </div>
         </>
       )}
+      </div>
+
+      {/* Full history — search and delete. The dropdown above shows only the
+          eight most recent, which is enough to switch between what you are
+          actively working on; this is for finding something older. */}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>All chats</DialogTitle>
+          </DialogHeader>
+
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={historySearch}
+              onChange={(e) => setHistorySearch(e.target.value)}
+              placeholder="Search chats…"
+              className="pl-9"
+              autoFocus
+            />
+          </div>
+
+          <div className="max-h-[50vh] overflow-y-auto -mx-1 px-1 space-y-0.5">
+            {filteredConversations.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                {conversations.length === 0 ? "No conversations yet" : "No chats match that search"}
+              </p>
+            ) : (
+              filteredConversations.map((c: any) => (
+                <div
+                  key={c.id}
+                  className={cn(
+                    "group flex items-center gap-2 rounded-md px-2.5 py-2 transition-colors",
+                    conversationId === c.id ? "bg-accent" : "hover:bg-accent/60"
+                  )}
+                >
+                  <button
+                    onClick={() => openConversation(c.id)}
+                    className="flex flex-1 items-center gap-2 min-w-0 text-left"
+                    title={c.title || `Chat ${c.id}`}
+                  >
+                    <MessageSquareText className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                    <span className="truncate text-sm">{c.title || `Chat ${c.id}`}</span>
+                  </button>
+                  {c.updated_at && (
+                    <span className="text-[11px] text-muted-foreground flex-shrink-0">
+                      {new Date(c.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    </span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 flex-shrink-0 text-muted-foreground hover:text-destructive"
+                    disabled={deletingId === c.id}
+                    onClick={() => handleDeleteConversation(c.id)}
+                    aria-label="Delete chat"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
