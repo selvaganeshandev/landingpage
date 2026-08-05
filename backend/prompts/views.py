@@ -1577,59 +1577,38 @@ def prompt_groups_list(request):
                 # Defensive fallback so no row ends up with no platforms.
                 platforms = ["ChatGPT", "Google Gemini", "Claude"]
             
-            # Create prompts and analytics
-            created_prompts = []
-            created_analytics = []
-            
-            # Create primary prompts
-            for prompt_text in primary_prompts:
-                if prompt_text.strip():
-                    prompt = Prompt.objects.create(
-                        prompt=prompt_text.strip(),
-                        group=group,
-                        track_status='INIT',
-                        type='primary'
-                    )
-                    created_prompts.append(prompt)
-                    
-                    # Create analytics for each platform
-                    for platform in platforms:
-                        analytics = PromptAnalytics.objects.create(
-                            prompt=prompt,
-                            platform=platform,
-                            is_mention=False,  # Initially not a mention
-                            position=0.0,
-                            sentiment_category='neutral',
-                            sentiment_score=0.0,
-                            total_mentions=0,
-                            total_citations=0
-                        )
-                        created_analytics.append(analytics)
-            
-            # Create secondary prompts
-            for prompt_text in secondary_prompts:
-                if prompt_text.strip():
-                    prompt = Prompt.objects.create(
-                        prompt=prompt_text.strip(),
-                        group=group,
-                        track_status='INIT',
-                        type='secondary'
-                    )
-                    created_prompts.append(prompt)
-                    
-                    # Create analytics for each platform
-                    for platform in platforms:
-                        analytics = PromptAnalytics.objects.create(
-                            prompt=prompt,
-                            platform=platform,
-                            is_mention=False,  # Initially not a mention
-                            position=0.0,
-                            sentiment_category='neutral',
-                            sentiment_score=0.0,
-                            total_mentions=0,
-                            total_citations=0
-                        )
-                        created_analytics.append(analytics)
+            # Bulk-create rather than one INSERT per row.
+            #
+            # This used to create each prompt, then one PromptAnalytics per
+            # platform, individually — a 13-prompt group across 4 platforms is
+            # 65 round trips inside a single transaction. With the engine
+            # running 12 concurrent prompt workers against the same tables,
+            # each round trip slows and the request took ~53 seconds, which the
+            # UI showed as a stuck "Creating..." modal. Two queries instead.
+            rows = [(t.strip(), 'primary') for t in primary_prompts if t.strip()]
+            rows += [(t.strip(), 'secondary') for t in secondary_prompts if t.strip()]
+
+            created_prompts = Prompt.objects.bulk_create([
+                Prompt(prompt=text, group=group, track_status='INIT', type=kind)
+                for text, kind in rows
+            ])
+
+            # bulk_create returns the objects with PKs populated on PostgreSQL,
+            # so the analytics rows can reference them without re-querying.
+            created_analytics = PromptAnalytics.objects.bulk_create([
+                PromptAnalytics(
+                    prompt=prompt,
+                    platform=platform,
+                    is_mention=False,  # Initially not a mention
+                    position=0.0,
+                    sentiment_category='neutral',
+                    sentiment_score=0.0,
+                    total_mentions=0,
+                    total_citations=0,
+                )
+                for prompt in created_prompts
+                for platform in platforms
+            ])
             
             return Response({
                 'message': 'Prompt group created successfully',

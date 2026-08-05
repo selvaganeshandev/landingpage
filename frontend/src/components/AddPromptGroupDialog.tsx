@@ -149,17 +149,20 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
         secondary_prompts: variants,
       });
 
+      // Close first, then notify. Refreshing the list is the caller's job and
+      // can take a moment; holding the dialog open for it made a successful
+      // create look like it was still working.
+      onOpenChange(false);
+
       toast({
-        title: "Success",
-        description: `Created prompt group "${groupId}" successfully.`,
+        title: "Prompt group created",
+        description: `"${groupId}" is queued — analysis starts automatically.`,
       });
 
       // Call onAdd callback to refresh the list
       if (onAdd) {
         onAdd(response.group);
       }
-
-      onOpenChange(false);
     } catch (error: any) {
       toast({
         title: "Error",
