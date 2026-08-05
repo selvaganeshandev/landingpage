@@ -1011,3 +1011,47 @@ def sync_keyword_volume_task(self):
         )
     else:
         logger.debug("[VOLUME] Sweep: nothing new, no API calls made")
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=2)
+def process_prompt_generation(self, run_id: int):
+    """Run one AI prompt-generation job end to end."""
+    from core.prompt_generation import run_generation
+    try:
+        return run_generation(run_id)
+    except Exception as e:
+        logger.error(f"[PromptGen] task failed for run {run_id}: {e}", exc_info=True)
+        raise
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3)
+def prompt_generation_scheduler(self):
+    """Pick up queued generation runs.
+
+    The backend has no Celery, so it hands work over by writing a row with
+    status INIT — the same DB-handoff the competitor scheduler uses. Runs are
+    claimed with a guarded update so two ticks can't start the same job.
+    """
+    from shared_models.models import PromptGenerationRun
+    try:
+        queued = list(
+            PromptGenerationRun.objects
+            .filter(status='INIT')
+            .order_by('created_at')
+            .values_list('id', flat=True)[:5]
+        )
+        started = 0
+        for run_id in queued:
+            # Claim it: only the tick that flips INIT -> PROC gets to enqueue.
+            claimed = PromptGenerationRun.objects.filter(
+                id=run_id, status='INIT'
+            ).update(status='PROC', stage='ground', progress=1)
+            if claimed:
+                process_prompt_generation.delay(run_id)
+                started += 1
+        if started:
+            logger.info(f"[PromptGen] started {started} run(s)")
+        return {'started': started}
+    except Exception as e:
+        logger.error(f"[PromptGen] scheduler error: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=60)

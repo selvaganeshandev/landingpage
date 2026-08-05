@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 from . import diagnostic_views
 from .views_prompt_export import prompts_export, prompts_export_data, prompt_group_export
+from . import views_generation
 
 urlpatterns = [
     # Test endpoint
@@ -34,4 +35,11 @@ urlpatterns = [
     path('prompts/<int:prompt_id>/', views.prompt_detail, name='prompt_detail'),
     path('prompts/bulk-update/', views.bulk_update_prompts, name='bulk_update_prompts'),
     path('prompts/<int:prompt_id>/analytics/', views.prompt_analytics, name='prompt_analytics'),
+
+    # AI prompt generation
+    path('generation-runs/', views_generation.create_generation_run, name='create_generation_run'),
+    path('generation-runs/active/', views_generation.active_generation_run, name='active_generation_run'),
+    path('generation-runs/<int:run_id>/', views_generation.generation_run_detail, name='generation_run_detail'),
+    path('generation-runs/<int:run_id>/accept/', views_generation.accept_generation_run, name='accept_generation_run'),
+    path('generation-runs/<int:run_id>/discard/', views_generation.discard_generation_run, name='discard_generation_run'),
 ]
