@@ -82,7 +82,10 @@ const ROW_OPEN = "px-2.5 py-1.5 w-full";
 const ROW_COLLAPSED = "justify-center aspect-square w-9 h-9 p-0 mx-auto";
 const ROW_ACTIVE = "bg-accent text-foreground font-medium";
 const ROW_IDLE =
-  "text-muted-foreground font-normal hover:bg-accent/60 hover:text-foreground";
+  "text-foreground/75 font-normal hover:bg-accent/60 hover:text-foreground";
+// Idle icons sit a step lighter than their label so the row still reads
+// label-first, without being as washed out as --muted-foreground was.
+const ICON_IDLE = "text-foreground/60";
 const ICON_BASE = "h-4 w-4 flex-shrink-0";
 
 const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDomainProcessing, popoverAlign = "start" }: { group: any; location: any; isSidebarOpen: boolean; onItemClick: () => void; navigate: any; isDomainProcessing?: boolean; popoverAlign?: "start" | "end" }) => {
@@ -99,7 +102,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
     }
     return (
       <div className="px-2.5 pt-2.5 pb-0.5">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-foreground/55">
           {group.name}
         </p>
       </div>
@@ -138,7 +141,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
           isSidebarOpen ? ROW_OPEN : ROW_COLLAPSED
         )}
       >
-        <Icon className={cn(ICON_BASE, isActive ? "text-primary" : "text-muted-foreground")} />
+        <Icon className={cn(ICON_BASE, isActive ? "text-primary" : ICON_IDLE)} />
         {isSidebarOpen && <span>{item.name}</span>}
       </Link>
     );
@@ -171,7 +174,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
           >
             {/* Was text-foreground — near-black against grey neighbours, which
                 made every group header shout. */}
-            <GroupIcon className={cn(ICON_BASE, hasActiveItem ? "text-primary" : "text-muted-foreground")} />
+            <GroupIcon className={cn(ICON_BASE, hasActiveItem ? "text-primary" : ICON_IDLE)} />
             <span className="flex-1 text-left">{group.name}</span>
             <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
           </button>
@@ -179,7 +182,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
           <button
             className={cn(ROW_BASE, ROW_COLLAPSED, hasActiveItem ? ROW_ACTIVE : ROW_IDLE)}
           >
-            <GroupIcon className={cn(ICON_BASE, hasActiveItem ? "text-primary" : "text-muted-foreground")} />
+            <GroupIcon className={cn(ICON_BASE, hasActiveItem ? "text-primary" : ICON_IDLE)} />
           </button>
         )}
       </PopoverTrigger>
@@ -187,7 +190,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
           the section labels so the flyout reads as a continuation of it. */}
       <PopoverContent className="w-[200px] p-1.5" side="right" align={popoverAlign}>
         <div className="space-y-0.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-2.5 pt-1 pb-1">{group.name}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-foreground/55 px-2.5 pt-1 pb-1">{group.name}</p>
           {group.items.map((item: any) => {
             const Icon = (item.icon as any) || LayoutDashboard;
             const isActive = location.pathname === item.path;
@@ -215,7 +218,7 @@ const NavGroup = ({ group, location, isSidebarOpen, onItemClick, navigate, isDom
                 }}
                 className={cn(ROW_BASE, ROW_OPEN, isActive ? ROW_ACTIVE : ROW_IDLE)}
               >
-                <Icon className={cn(ICON_BASE, isActive ? "text-primary" : "text-muted-foreground")} />
+                <Icon className={cn(ICON_BASE, isActive ? "text-primary" : ICON_IDLE)} />
                 {item.name}
               </Link>
             );
