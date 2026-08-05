@@ -436,11 +436,11 @@ const SeoRankings = () => {
       if (!pollIntervalRef.current) {
         try {
           const firstCheck = await apiClient.getSeoRefreshStatus(activeDomainId) as {
-            refreshing: boolean; total: number; completed: number; progress: number; status: string;
+            refreshing: boolean; total: number; completed: number; progress: number; status: string; running?: number;
           };
           if (firstCheck.refreshing && firstCheck.status !== 'done') {
-            // If already partially complete (completed > 0), it's likely real
-            if (firstCheck.completed > 0) {
+            // Partially complete, or something actively scraping → real run.
+            if (firstCheck.completed > 0 || (firstCheck.running ?? 0) > 0) {
               setRefreshTotal(firstCheck.total);
               setRefreshCompleted(firstCheck.completed);
               setRefreshProgress(firstCheck.progress);
@@ -451,10 +451,16 @@ const SeoRankings = () => {
               // Bail if domain changed while waiting
               if (activeDomainRef.current !== activeDomainId) return;
               const secondCheck = await apiClient.getSeoRefreshStatus(activeDomainId) as {
-                refreshing: boolean; total: number; completed: number; progress: number; status: string;
+                refreshing: boolean; total: number; completed: number; progress: number; status: string; running?: number;
               };
+              // `running > 0` means keywords are actively being scraped right
+              // now. A freshly imported domain legitimately sits at completed=0
+              // for the first few seconds, and without this it was mistaken for
+              // a stale run — leaving the refresh button enabled mid-scrape.
               if (secondCheck.refreshing && secondCheck.status !== 'done' &&
-                  (secondCheck.completed > firstCheck.completed || secondCheck.progress > firstCheck.progress)) {
+                  ((secondCheck.running ?? 0) > 0 ||
+                   secondCheck.completed > firstCheck.completed ||
+                   secondCheck.progress > firstCheck.progress)) {
                 setRefreshTotal(secondCheck.total);
                 setRefreshCompleted(secondCheck.completed);
                 setRefreshProgress(secondCheck.progress);
@@ -997,8 +1003,15 @@ const SeoRankings = () => {
       setImportResult(result);
       toast({
         title: "Import complete",
-        description: `${result.seo_created_count} keyword(s) added to SEO tracking`,
+        description: `${result.seo_created_count} keyword(s) added — fetching ranks and search volume now`,
       });
+
+      // The backend starts ranking and volume the moment keywords are created,
+      // so reflect that immediately: this locks the manual refresh button and
+      // shows progress without waiting for the next mount-time poll.
+      if (activeDomainId && (result?.seo_created_count ?? 0) > 0) {
+        startRefreshPolling(activeDomainId);
+      }
 
       // Refresh keyword list
       const [keywordsRes, overviewRes] = await Promise.all([
@@ -1108,8 +1121,14 @@ const SeoRankings = () => {
       setAddKeywordResult(result);
       toast({
         title: "Keywords added",
-        description: `${result.seo_created_count} keyword(s) added to SEO tracking`,
+        description: `${result.seo_created_count} keyword(s) added — fetching ranks and search volume now`,
       });
+
+      // Same as the import path: ranking and volume start server-side on
+      // creation, so lock the refresh button and show progress right away.
+      if (activeDomainId && (result?.seo_created_count ?? 0) > 0) {
+        startRefreshPolling(activeDomainId);
+      }
 
       // Refresh keyword list
       const [keywordsRes, overviewRes] = await Promise.all([
