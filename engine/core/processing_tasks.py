@@ -1030,3 +1030,54 @@ def sync_domain_volume_task(self, domain_id: int):
     except Exception as exc:
         logger.error(f"[VOLUME] Domain {domain_id} sweep failed: {exc}", exc_info=True)
         raise self.retry(exc=exc, countdown=60)
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=2)
+def reap_stale_domain_scans(self):
+    """Release domains whose scan task died mid-run.
+
+    A misinformation scan sets misinformation_scan_status='SCANNING' and only
+    clears it on completion. If the worker is restarted while the task is in
+    flight — a deploy, an OOM, a kill -9 — the status stays SCANNING forever.
+    Nothing retries it, because the trigger skips domains that are already
+    scanning, so the domain is permanently locked out and the UI shows
+    "Processing Your Brand" indefinitely.
+
+    UTI Mutual Fund and Racold were both stranded this way, Racold for
+    thirteen days. This is the same idea as the prompt scheduler's reaper for
+    groups stuck in SCHD.
+
+    Anything still SCANNING past STALE_SCAN_MINUTES with no completion
+    timestamp is assumed dead and reset to READY so it can be picked up again.
+    """
+    from django.utils import timezone
+    from datetime import timedelta
+    from shared_models.models import Domain
+
+    minutes = getattr(settings, 'STALE_SCAN_MINUTES', 60)
+    cutoff = timezone.now() - timedelta(minutes=minutes)
+
+    try:
+        stale = Domain.objects.filter(
+            misinformation_scan_status='SCANNING',
+            modified_at__lt=cutoff,
+        )
+        ids = list(stale.values_list('id', flat=True))
+        if not ids:
+            return {'reaped': 0}
+
+        # Reset rather than re-dispatch here: the next completion cycle, or a
+        # user pressing Scan, will start it cleanly. Re-queuing from a reaper
+        # risks stacking duplicate scans if the original task is merely slow.
+        Domain.objects.filter(id__in=ids).update(
+            misinformation_scan_status='READY',
+            modified_at=timezone.now(),
+        )
+        logger.warning(
+            "[Reaper] Reset %s domain(s) stuck in SCANNING for over %s min: %s",
+            len(ids), minutes, ids,
+        )
+        return {'reaped': len(ids), 'domain_ids': ids}
+    except Exception as e:
+        logger.error(f"[Reaper] Error reaping stale scans: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=120)
