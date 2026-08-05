@@ -108,6 +108,38 @@ def seo_keyword_list(request):
     return Response(serializer.data)
 
 
+def _kickoff_new_keywords(domain_id, created_count):
+    """Start ranking and volume for keywords that were just added.
+
+    Without this a newly imported brand shows nothing until the 02:00 rank cron
+    and the :20 volume sweep — which reads as a broken page to whoever just
+    added the keywords.
+
+    Both calls are fire-and-forget against the engine, which owns Celery. They
+    are wrapped so a failure here can never fail the import itself: the crons
+    remain the safety net, so the worst case is the old behaviour of waiting.
+
+    Volume is a per-domain batch, not per keyword — DataForSEO bills per
+    request, so 500 new keywords cost one call.
+    """
+    if not created_count:
+        return
+    import requests as http_requests
+    engine_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001')
+    for path in ('seo/process-domain/', 'seo/sync-volume/'):
+        try:
+            http_requests.post(
+                f'{engine_url}/api/{path}',
+                json={'domain_id': int(domain_id)},
+                timeout=5,
+            )
+        except http_requests.RequestException as e:
+            logger.warning(
+                "[SEO] Could not auto-start %s for domain %s: %s — "
+                "the scheduled sweep will pick it up", path, domain_id, e,
+            )
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def seo_keyword_add(request):
@@ -129,6 +161,7 @@ def seo_keyword_add(request):
     try:
         with transaction.atomic():
             seo_kw = serializer.save(auto_call_status='avail')
+        _kickoff_new_keywords(seo_kw.domain_id, 1)
         return Response(
             SeoKeywordRankSerializer(seo_kw).data,
             status=status.HTTP_201_CREATED,
@@ -187,6 +220,8 @@ def seo_keyword_bulk_add(request):
                 created.append(SeoKeywordRankSerializer(obj).data)
             else:
                 skipped.append({'keyword_id': keyword_id, 'reason': 'already exists'})
+
+    _kickoff_new_keywords(domain.id, len(created))
 
     return Response({
         'created_count': len(created),
@@ -370,6 +405,8 @@ def seo_keyword_import(request):
             else:
                 seo_skipped += 1
                 details.append({'keyword': kw_text, 'status': 'already_tracked'})
+
+    _kickoff_new_keywords(domain.id, seo_created)
 
     return Response({
         'success': True,

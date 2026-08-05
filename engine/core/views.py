@@ -1843,6 +1843,39 @@ def seo_process_domain(request):
         )
 
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def seo_sync_volume(request):
+    """Fetch search volume for one domain's keywords now.
+
+    Body: { domain_id: int }
+
+    Used when keywords are first imported, so a new brand does not sit with
+    blank volumes until the next hourly sweep. Batched internally.
+    """
+    from .processing_tasks import sync_domain_volume_task
+
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response(
+            {'error': 'domain_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        sync_domain_volume_task.delay(int(domain_id))
+        return Response({
+            'message': f'Volume sync queued for domain {domain_id}',
+            'domain_id': domain_id,
+        })
+    except Exception as e:
+        logger.error(f"[VOLUME] Error queuing domain {domain_id}: {e}")
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 # ==================== SEO COMPETITOR ANALYSIS ====================
 
 @api_view(['POST'])

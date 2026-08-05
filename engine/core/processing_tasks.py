@@ -1055,3 +1055,22 @@ def prompt_generation_scheduler(self):
     except Exception as e:
         logger.error(f"[PromptGen] scheduler error: {e}", exc_info=True)
         raise self.retry(exc=e, countdown=60)
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=2)
+def sync_domain_volume_task(self, domain_id: int):
+    """Fetch search volume for one domain's keywords, right away.
+
+    The hourly sweep already covers every domain, but a brand whose keywords
+    were just imported should not sit with blank volumes until the next :20.
+    Still batched by volume_processor — DataForSEO bills per request, not per
+    keyword, so a 500-keyword import is one call, not 500.
+    """
+    from core.volume_processor import sync_keyword_volume
+    try:
+        result = sync_keyword_volume(domain_id=domain_id, only_missing=True)
+        logger.info(f"[VOLUME] Domain {domain_id} on-demand sweep: {result}")
+        return result
+    except Exception as exc:
+        logger.error(f"[VOLUME] Domain {domain_id} sweep failed: {exc}", exc_info=True)
+        raise self.retry(exc=exc, countdown=60)
