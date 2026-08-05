@@ -307,8 +307,13 @@ def build_plan(ground, entities, target, focus, branded_ratio) -> List[Dict[str,
     allocation.update(allocate(unbranded_intents, unbranded_target))
     allocation.update(allocate(branded_intents, branded_target))
 
-    # Modifier pools, longest-lived first so early tuples are the most useful.
+    # Categories become the cluster key in stage_assemble, so the size of this
+    # pool is the number of groups the run produces. stage_entities happily
+    # returns twelve, which turned a 10-prompt run into ten one-prompt groups.
+    # Cap it at roughly one group per six prompts (min 2) and take the earliest,
+    # which stage_entities orders most-central-first.
     categories = entities['categories'] or ground['categories'] or [ground['brand_name']]
+    categories = categories[:max(2, min(8, round(target / 6) or 1))]
     modifiers = {
         'region': ground['regions'],
         'use_case': entities['use_cases'],
@@ -560,22 +565,31 @@ def select_best(candidates, target) -> List[Dict[str, Any]]:
 # --------------------------------------------------------------------------
 
 def stage_assemble(run, candidates):
-    """Cluster and persist. The planner already knows the cluster key."""
+    """Cluster and persist. The planner already knows the cluster key.
+
+    Grouping is by ENTITY ALONE. Including the intent split every subject across
+    as many groups as it had question types: a 10-prompt run came back as
+    "Web Scraping Api — Use case" and "Web Scraping Api — Problem", one prompt in
+    each, and the Prompts page became a wall of single-prompt cards. Since the
+    planner deliberately spreads each entity across the funnel, keying on intent
+    guaranteed that fragmentation for every run.
+
+    Intent is still stored on the candidate and shown as a label in review — it
+    just no longer decides what belongs together.
+    """
     from shared_models.models import PromptCandidate
 
     rows = []
     for c in candidates:
         entity = (c.get('entity') or 'general').strip()
-        intent = c['intent']
-        title = f"{entity.title()} — {INTENTS[intent]['label']}"
         rows.append(PromptCandidate(
             run=run,
             text=c['text'],
-            intent=intent,
+            intent=c['intent'],
             entity=entity,
             is_branded=bool(c.get('is_branded')),
-            cluster_key=f"{entity.lower()}::{intent}",
-            cluster_title=title,
+            cluster_key=entity.lower(),
+            cluster_title=entity.title(),
             score_realism=c.get('score_realism', 0.5),
             score_elicits_brands=c.get('score_elicits_brands', 0.5),
             status='pending',
