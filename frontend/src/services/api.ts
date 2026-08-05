@@ -873,6 +873,16 @@ export const apiClient = {
     }),
   discardGenerationRun: (runId: number) =>
     apiRequest(`/prompts/generation-runs/${runId}/discard/`, { method: 'POST' }),
+  // Reads the project's website and proposes wizard answers. Unlike the calls
+  // above this one blocks — a crawl plus a model call, ~15s — so the caller
+  // must show progress. Resolves with {fields, error}; `error` is a message to
+  // show, not a thrown failure, because an unreadable site is an ordinary
+  // outcome here and the wizard stays usable by hand.
+  prefillFromSite: (domainId: number) =>
+    apiRequest('/prompts/generation-runs/prefill/', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId }),
+    }),
 
   // ===== Prompts =====
   getPrompts: (params?: any) => {

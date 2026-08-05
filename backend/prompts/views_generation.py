@@ -292,3 +292,36 @@ def discard_generation_run(request, run_id):
     run.status = 'DISC'
     run.save(update_fields=['status', 'modified_at'])
     return Response({'status': 'discarded'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def prefill_from_site(request):
+    """Propose wizard answers by reading the project's own website.
+
+    Returns the fields only — nothing is saved. The wizard fills the inputs the
+    user has left empty and leaves anything they typed alone, so a guess can
+    never overwrite a fact the user supplied.
+
+    Always 200, even on failure: an unreachable site is an ordinary outcome for
+    this button, not a client error, and the wizard just carries on by hand with
+    the message shown. Reserving non-2xx for real faults keeps the frontend's
+    error handling meaningful.
+    """
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    domain = get_object_or_404(_visible_domains(request.user), id=domain_id)
+
+    from .site_profile import infer_profile
+    result = infer_profile(domain)
+
+    # Persist so the crawl is paid for once per project, not once per visit to
+    # the wizard. The next open reads these straight off Domain and shows them
+    # as "Saved" — the button is then only needed to deliberately refresh.
+    if result['fields']:
+        from .site_profile import to_storage
+        _persist_brand_facts(domain, to_storage(result['fields']))
+
+    return Response({'fields': result['fields'], 'error': result['error']})

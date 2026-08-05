@@ -24,6 +24,13 @@ class DomainSerializer(serializers.ModelSerializer):
             'tone_of_voice', 'content_style', 'key_messages', 'topics_to_avoid',
             'target_audience', 'brand_values', 'key_competitors',
             'country', 'niches', 'organisation', 'organisation_name',
+            # Commercial profile (migration 0010). The prompt-generation wizard
+            # both writes these and reads them back, so a site crawl is paid for
+            # once per project rather than on every visit — they have to be on
+            # the wire in both directions for that to hold.
+            'business_model', 'price_positioning', 'offering_categories',
+            'regions_served', 'use_cases', 'buying_criteria',
+            'common_objections', 'differentiators',
             'total_mentions', 'total_citations', 'visibility_score',
             'average_position', 'active_alerts', 'sentiment_category',
             'sentiment_score', 'processing_status', 'track_message', 'tracked_at',
