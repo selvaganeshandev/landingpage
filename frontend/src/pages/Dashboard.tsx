@@ -8,6 +8,7 @@ import { TrendChart } from "@/components/TrendChart";
 import { TimeFilter } from "@/components/TimeFilter";
 import { MentionsByCountry } from "@/components/MentionsByCountry";
 import { PageLoader } from "@/components/PageLoader";
+import { ProcessingStateCard } from "@/components/ProcessingStateCard";
 import { Eye, TrendingUp, Target, Bell, Link2, FileText, Download, CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -28,6 +29,17 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { METRIC_HINTS } from "@/components/MetricHints";
 
+/** Reject after `ms` so a request that never returns can't hang the page.
+ *  The underlying fetch is left to finish on its own; we only stop waiting. */
+function withTimeout<T>(promise: Promise<T>, ms = 45000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("Dashboard took too long to respond")), ms)
+    ),
+  ]);
+}
+
 /** GA4's YYYYMMDD -> ISO YYYY-MM-DD, or "" when the input isn't a GA date. */
 function isoFromGADate(yyyymmdd: string): string {
   if (!yyyymmdd || yyyymmdd.length !== 8) return "";
@@ -45,6 +57,12 @@ function formatGADate(yyyymmdd: string): string {
 const Dashboard = () => {
   const { user } = useAuth();
   const { selectedDomain } = useDomainStore();
+  // Only prompt generation counts as "not ready yet" — see the guard below for
+  // why the shared isDomainProcessing() helper is the wrong check here.
+  const isPromptProcessing = Boolean(
+    selectedDomain?.processing_status &&
+      ['INIT', 'SCHD', 'PROC'].includes(selectedDomain.processing_status)
+  );
   const [timePeriod, setTimePeriod] = useState("30");
   const [selectedLLM, setSelectedLLM] = useState("all");
   const [loading, setLoading] = useState(false);
@@ -205,6 +223,13 @@ const Dashboard = () => {
 
   async function fetchSummary(forceRefresh = false) {
     if (!user) return;
+    // Nothing to summarise until prompt generation finishes, and the query is
+    // expensive — skipping it keeps a new project from adding load to a box
+    // that is already busy generating its prompts.
+    if (isPromptProcessing) {
+      setLoading(false);
+      return;
+    }
 
     // Get domain ID - prefer selectedDomain from Zustand, fallback to server
     let currentDomainId = selectedDomain?.id ? String(selectedDomain.id) : '';
@@ -251,14 +276,18 @@ const Dashboard = () => {
 
     try {
       setLoading(true);
-      const data = await api.getDashboardSummary({
+      // Gunicorn's timeout is 300s, so a saturated server can leave this
+      // pending for five minutes and the page shows a spinner the whole time
+      // with no way out. Fail after 45s and render the empty dashboard, which
+      // at least gives the user the page and its Refresh button.
+      const data = await withTimeout(api.getDashboardSummary({
         domain_id: currentDomainId,
         // Only send `days` when no explicit range is applied — the backend
         // falls back to its existing behavior unchanged.
         ...(useRange ? {} : { days: Number(timePeriod) }),
         llm_model: selectedLLM !== 'all' ? selectedLLM : undefined,
         ...(useRange ? { start_date: startStr, end_date: endStr } : {}),
-      });
+      }));
       setSummary(data);
 
       // The two GA-backed series (AI Traffic tab, Visibility vs Traffic tab)
@@ -383,6 +412,22 @@ const Dashboard = () => {
         setAiTrafficError(true);
       });
   }, [user, domainId, chartDays, selectedLLM, chartMatchesPage]);
+
+  // A project whose prompts are still being generated has nothing to show yet,
+  // and asking for a dashboard summary makes the server aggregate over data
+  // that is still being written. Tell the user what is happening instead.
+  //
+  // Deliberately NOT isDomainProcessing(): that also treats
+  // competitor_analysis_status === 'READY' as processing, and almost every
+  // domain sits in READY permanently, which would blank the dashboard for all
+  // of them. Only prompt generation genuinely means "no data yet".
+  if (isPromptProcessing) {
+    return (
+      <div className="p-8 bg-background animate-fade-in">
+        <ProcessingStateCard domain={selectedDomain!} />
+      </div>
+    );
+  }
 
   // Show loading state whenever we're fetching data
   if (loading || !summary) {
