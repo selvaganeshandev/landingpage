@@ -193,6 +193,12 @@ MAX_CONCURRENT_PROMPT_PLATFORMS = config('MAX_CONCURRENT_PROMPT_PLATFORMS', defa
 # still catching a genuinely dead worker within the hour.
 STALE_SCHD_MINUTES = config('STALE_SCHD_MINUTES', default=60, cast=int)
 
+# A domain left in misinformation_scan_status='SCANNING' longer than this is
+# assumed to have lost its worker (deploy, OOM, kill -9) and is reset to READY.
+# Without a reaper the status never clears, the trigger refuses to start a new
+# scan while one is "running", and the domain shows as processing forever.
+STALE_SCAN_MINUTES = config('STALE_SCAN_MINUTES', default=60, cast=int)
+
 # Prompt engine knobs
 # Number of prompts to generate per keyword
 PROMPT_MIN_COUNT = config('PROMPT_MIN_COUNT', default=2, cast=int)
@@ -519,6 +525,12 @@ CELERY_BEAT_SCHEDULE = {
     },
     # NOTE: the weekly batch reprocessing entries are NOT here — they are added
     # below only when WEEKLY_SWEEP_BEAT_ENABLED is on.
+    # Releases domains whose scan task died mid-run. Every 10 min is ample —
+    # the reaper only acts on scans older than STALE_SCAN_MINUTES.
+    'reap-stale-domain-scans': {
+        'task': 'core.processing_tasks.reap_stale_domain_scans',
+        'schedule': config('CELERY_BEAT_SCHEDULE_REAP_SCANS', default=600.0, cast=float),
+    },
     'cmsmanager-scheduler-every-60s': {
         'task': 'core.processing_tasks.process_cmsmanager_scheduler',
         'schedule': config('CELERY_BEAT_SCHEDULE_CMSMANAGER', default=60.0, cast=float),

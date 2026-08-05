@@ -13,12 +13,18 @@ export const isDomainProcessing = (domain: Domain | null | undefined): boolean =
     return true;
   }
 
-  // After prompt processing completes, check if competitor/misinfo analysis is ongoing
+  // After prompt processing completes, check if competitor/misinfo analysis is
+  // actually running.
+  //
+  // 'READY' deliberately does NOT count. It means "ready to analyse", and
+  // nothing in the codebase ever advances competitor_analysis_status past it —
+  // grep for COMPLETED, it is never assigned — so every finished domain rests
+  // at READY permanently. Treating that as in-flight made this return true for
+  // ~59 of 63 domains, pinning the "Processing Your Brand" card on screen
+  // forever. Only the genuinely active states count.
   if (domain.processing_status === 'COMP') {
-    const competitorProcessing = domain.competitor_analysis_status &&
-      (domain.competitor_analysis_status === 'READY' || domain.competitor_analysis_status === 'ANALYZING');
-    const misinfoProcessing = domain.misinformation_scan_status &&
-      (domain.misinformation_scan_status === 'READY' || domain.misinformation_scan_status === 'SCANNING');
+    const competitorProcessing = domain.competitor_analysis_status === 'ANALYZING';
+    const misinfoProcessing = domain.misinformation_scan_status === 'SCANNING';
 
     return competitorProcessing || misinfoProcessing;
   }
@@ -31,8 +37,14 @@ export const isDomainProcessing = (domain: Domain | null | undefined): boolean =
  */
 export const isCompetitorProcessing = (domain: Domain | null | undefined): boolean => {
   if (!domain) return false;
-  return domain.competitor_analysis_status === 'ANALYZING' ||
-         domain.competitor_analysis_status === 'READY';
+  // 'READY' excluded on purpose — see isDomainProcessing above. It is written
+  // once when analysis is triggered and never advanced, so it is the resting
+  // state of a finished domain, not an in-flight one.
+  //
+  // isMisinformationProcessing below still counts READY, and correctly so:
+  // there it is a genuine transient set moments before the scan task runs, and
+  // the scan advances it to SCANNING and then a terminal state.
+  return domain.competitor_analysis_status === 'ANALYZING';
 };
 
 /**
