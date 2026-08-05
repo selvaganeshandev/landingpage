@@ -139,39 +139,42 @@ export const AddPromptGroupDialog = ({ open, onOpenChange, onAdd }: AddPromptGro
       return;
     }
 
-    try {
-      setIsLoading(true);
-      const response = await apiClient.createPromptGroup({
-        group_id: groupId.trim(),
-        domain_id: activeDomainId,
-        // Omit the primary prompt entirely when left blank (don't send [""]).
-        primary_prompts: mainPrompt.trim() ? [mainPrompt.trim()] : [],
-        secondary_prompts: variants,
-      });
+    // Fire and close. The request is normally ~30ms, but it shares a small
+    // gunicorn thread pool with the rest of the app, so it can occasionally
+    // wait behind slower requests. Blocking the dialog on that made it look
+    // frozen and stopped the user queuing the next group — the thing they were
+    // actually trying to do. The group is queued server-side either way.
+    const name = groupId.trim();
+    const payload = {
+      group_id: name,
+      domain_id: activeDomainId,
+      // Omit the primary prompt entirely when left blank (don't send [""]).
+      primary_prompts: mainPrompt.trim() ? [mainPrompt.trim()] : [],
+      secondary_prompts: variants,
+    };
 
-      // Close first, then notify. Refreshing the list is the caller's job and
-      // can take a moment; holding the dialog open for it made a successful
-      // create look like it was still working.
-      onOpenChange(false);
+    onOpenChange(false);
+    toast({
+      title: "Adding prompt group",
+      description: `"${name}" is being queued — analysis starts automatically.`,
+    });
 
-      toast({
-        title: "Prompt group created",
-        description: `"${groupId}" is queued — analysis starts automatically.`,
+    // Deliberately not awaited: failures still surface as a toast, and the
+    // dialog resets on close so nothing is lost if the user reopens it.
+    apiClient
+      .createPromptGroup(payload)
+      .then((response: any) => {
+        if (onAdd) {
+          onAdd(response?.group);
+        }
+      })
+      .catch((error: any) => {
+        toast({
+          title: `Could not add "${name}"`,
+          description: error?.message || "Failed to create prompt group",
+          variant: "destructive",
+        });
       });
-
-      // Call onAdd callback to refresh the list
-      if (onAdd) {
-        onAdd(response.group);
-      }
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to create prompt group",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
