@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -725,7 +726,7 @@ class PromptGenerationRun(models.Model):
     tokens_used = models.PositiveIntegerField(default=0)
 
     created_by = models.ForeignKey(
-        'authentication.User',
+        settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name='prompt_generation_runs',
