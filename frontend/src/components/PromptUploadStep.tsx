@@ -1,30 +1,69 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Upload, FileSpreadsheet, X, Download } from "lucide-react";
+import { Upload, FileSpreadsheet, X, Download, Loader2, CircleAlert } from "lucide-react";
 
 /**
- * Upload step of Add Prompt Group — presentation only.
+ * Upload step of Add Prompt Group.
  *
- * Selecting a file records it in local state and shows the summary card; the
- * parse and the review table that follows are not built yet, so nothing is
- * sent anywhere. Kept as its own component so wiring it up later touches this
- * file and not the dialog.
+ * Sends the file to the backend, which parses it, themes the prompts with the
+ * internal model, and returns a run in DONE with candidates attached — exactly
+ * what AI generation produces. The caller then shows the same review table, so
+ * an uploaded list and a generated one are indistinguishable from here on.
+ *
+ * Owns its own upload state rather than lifting it: the parent only needs to
+ * know that a run now exists.
  */
 
 interface PromptUploadStepProps {
+  /** Uploads the file and resolves once the run exists. */
+  onUpload: (file: File) => Promise<void>;
   onFileSelected?: (file: File | null) => void;
 }
 
 const ACCEPTED = ".csv,.xlsx,.xls";
+const TEMPLATE_ROWS = [
+  "prompt",
+  "What is the best web scraping API for developers?",
+  "How do I convert websites into structured JSON?",
+  "Which tools handle JavaScript rendering well?",
+];
 
-export const PromptUploadStep = ({ onFileSelected }: PromptUploadStepProps) => {
+export const PromptUploadStep = ({ onUpload, onFileSelected }: PromptUploadStepProps) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const pick = (next: File | null) => {
     setFile(next);
+    setError(null);
     onFileSelected?.(next);
+  };
+
+  const submit = async () => {
+    if (!file || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onUpload(file);
+    } catch (e: any) {
+      setError(e?.message || "That file could not be processed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** A one-column CSV is the format least likely to be got wrong, and it opens
+   *  in Excel and Sheets alike. Built inline so there is no asset to serve. */
+  const downloadTemplate = () => {
+    const blob = new Blob([TEMPLATE_ROWS.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "prompt-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -90,10 +129,18 @@ export const PromptUploadStep = ({ onFileSelected }: PromptUploadStepProps) => {
           <button
             type="button"
             onClick={() => pick(null)}
-            className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+            disabled={busy}
+            className="text-muted-foreground hover:text-destructive transition-colors shrink-0 disabled:opacity-40"
           >
             <X className="h-4 w-4" />
           </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3.5 flex gap-2.5">
+          <CircleAlert className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <p className="text-xs text-foreground/80 leading-relaxed">{error}</p>
         </div>
       )}
 
@@ -102,11 +149,42 @@ export const PromptUploadStep = ({ onFileSelected }: PromptUploadStepProps) => {
         <div className="flex-1">
           <p className="text-sm font-medium">Not sure about the format?</p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Download the template with every supported column filled in.
+            One prompt per row. Put them in the first column, or under a heading
+            called "prompt".
           </p>
         </div>
-        <Button variant="outline" size="sm" className="border-border shrink-0">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={downloadTemplate}
+          className="border-border shrink-0"
+        >
           Template
+        </Button>
+      </div>
+
+      {/* Sits with the dropzone rather than in the wizard footer: the action
+          belongs to the file, and the wait needs explaining where the file is. */}
+      <div className="flex items-center justify-end gap-3">
+        {busy && (
+          <span className="text-xs text-muted-foreground">
+            Reading the file and grouping prompts by theme…
+          </span>
+        )}
+        <Button
+          type="button"
+          onClick={submit}
+          disabled={!file || busy}
+          className="gradient-primary"
+        >
+          {busy ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Processing…
+            </>
+          ) : (
+            "Continue"
+          )}
         </Button>
       </div>
     </div>

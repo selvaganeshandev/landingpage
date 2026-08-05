@@ -883,6 +883,16 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ domain_id: domainId }),
     }),
+  // Uploads a spreadsheet and gets back a DONE run with candidates already
+  // grouped — the same shape generation produces, so the review table takes it
+  // as-is. Blocks for a few seconds while the prompts are themed.
+  // apiRequest omits Content-Type for FormData so the browser sets the boundary.
+  uploadPromptFile: (domainId: number, file: File) => {
+    const fd = new FormData();
+    fd.append('domain_id', String(domainId));
+    fd.append('file', file);
+    return apiRequest('/prompts/generation-runs/upload/', { method: 'POST', body: fd });
+  },
 
   // ===== Prompts =====
   getPrompts: (params?: any) => {

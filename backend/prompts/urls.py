@@ -41,6 +41,7 @@ urlpatterns = [
     path('generation-runs/active/', views_generation.active_generation_run, name='active_generation_run'),
     # Static segment, so it must precede the <int:run_id> pattern below.
     path('generation-runs/prefill/', views_generation.prefill_from_site, name='prefill_from_site'),
+    path('generation-runs/upload/', views_generation.upload_prompt_file, name='upload_prompt_file'),
     path('generation-runs/<int:run_id>/', views_generation.generation_run_detail, name='generation_run_detail'),
     path('generation-runs/<int:run_id>/accept/', views_generation.accept_generation_run, name='accept_generation_run'),
     path('generation-runs/<int:run_id>/discard/', views_generation.discard_generation_run, name='discard_generation_run'),
