@@ -189,6 +189,9 @@ def invalidate_org_clients(org_id: int) -> None:
     """
     keys_to_remove = [k for k in _client_cache if k[1] == org_id]
     for k in keys_to_remove:
-        del _client_cache[k]
+        # pop() not del: the worker runs a threads pool, so another thread can
+        # invalidate the same org between building this list and deleting from
+        # it. A missing key is the outcome we wanted anyway.
+        _client_cache.pop(k, None)
     if keys_to_remove:
         logger.info(f"ClientFactory: invalidated {len(keys_to_remove)} cached clients for org {org_id}")
