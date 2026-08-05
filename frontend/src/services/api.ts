@@ -855,6 +855,25 @@ export const apiClient = {
       body: JSON.stringify(data),
     }),
 
+  // ===== AI prompt generation =====
+  // Runs in the engine, so these only queue and poll — nothing here blocks.
+  createGenerationRun: (data: { domain_id: number; config: any }) =>
+    apiRequest('/prompts/generation-runs/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getActiveGenerationRun: (domainId: number) =>
+    apiRequest(`/prompts/generation-runs/active/?domain_id=${domainId}`),
+  getGenerationRun: (runId: number) =>
+    apiRequest(`/prompts/generation-runs/${runId}/`),
+  acceptGenerationRun: (runId: number, data: { accepted_ids?: number[]; edits?: Record<string, string> }) =>
+    apiRequest(`/prompts/generation-runs/${runId}/accept/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  discardGenerationRun: (runId: number) =>
+    apiRequest(`/prompts/generation-runs/${runId}/discard/`, { method: 'POST' }),
+
   // ===== Prompts =====
   getPrompts: (params?: any) => {
     const queryParams = params ? `?${new URLSearchParams(params).toString()}` : '';

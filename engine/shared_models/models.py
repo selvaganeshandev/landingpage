@@ -46,6 +46,9 @@ class Organisation(models.Model):
     anthropic_api_key = models.TextField(blank=True, null=True, help_text="Encrypted Anthropic API Key")
     xai_api_key = models.TextField(blank=True, null=True, help_text="Encrypted xAI (Grok) API Key")
     deepseek_api_key = models.TextField(blank=True, null=True, help_text="Encrypted DeepSeek API Key")
+    # BYOK: every routed LLM call should bill the customer's own key, so the
+    # engine needs to read it too — not just the backend that stores it.
+    openrouter_api_key = models.TextField(blank=True, null=True, help_text="Encrypted OpenRouter API Key")
 
     # Per-provider enable/disable toggles.
     openai_enabled = models.BooleanField(default=True, help_text="Whether OpenAI is enabled")
@@ -164,6 +167,23 @@ class Domain(models.Model):
     name = models.CharField(max_length=255, help_text="Name of the domain")
     url = models.URLField(help_text="URL of the domain")
     country = models.CharField(max_length=100, default='United States', help_text="Country name for domain context")
+
+    # Brand context read by prompt generation. Declared here so the engine can
+    # query them; the backend owns the migrations for these columns.
+    short_description = models.TextField(blank=True, null=True)
+    target_audience = models.TextField(blank=True, null=True)
+    key_competitors = models.TextField(blank=True, null=True)
+    topics_to_avoid = models.TextField(blank=True, null=True)
+    niches = models.JSONField(blank=True, null=True)
+    business_model = models.CharField(max_length=64, blank=True, default='')
+    offering_categories = models.JSONField(blank=True, null=True)
+    regions_served = models.JSONField(blank=True, null=True)
+    price_positioning = models.CharField(max_length=32, blank=True, default='')
+    use_cases = models.JSONField(blank=True, null=True)
+    buying_criteria = models.JSONField(blank=True, null=True)
+    common_objections = models.JSONField(blank=True, null=True)
+    differentiators = models.JSONField(blank=True, null=True)
+
     organisation = models.ForeignKey(
         Organisation, 
         on_delete=models.CASCADE, 
@@ -2488,3 +2508,79 @@ class SweepGuardState(models.Model):
 
     def __str__(self):
         return f"{self.sweep} (enabled={self.enabled}, runs={self.runs})"
+
+
+class PromptGenerationRun(models.Model):
+    """Engine-side mirror of prompts.PromptGenerationRun.
+
+    The backend creates rows here with status INIT and the engine scheduler
+    picks them up — the same DB-handoff pattern used for competitor processing,
+    since the backend has no Celery of its own. Backend owns the migration.
+    """
+    STATUS_CHOICES = [
+        ('INIT', 'Queued'),
+        ('PROC', 'Processing'),
+        ('DONE', 'Ready for review'),
+        ('FAIL', 'Failed'),
+        ('ACPT', 'Accepted'),
+        ('DISC', 'Discarded'),
+    ]
+    STAGE_ORDER = ['ground', 'entities', 'expand', 'dedup', 'score', 'assemble']
+
+    domain = models.ForeignKey(
+        Domain, on_delete=models.CASCADE, related_name='prompt_generation_runs',
+    )
+    status = models.CharField(max_length=4, choices=STATUS_CHOICES, default='INIT')
+    stage = models.CharField(max_length=16, blank=True, default='')
+    progress = models.PositiveSmallIntegerField(default=0)
+    config = models.JSONField(default=dict, blank=True)
+    grounding = models.JSONField(default=dict, blank=True)
+    error = models.TextField(blank=True, default='')
+    tokens_used = models.PositiveIntegerField(default=0)
+    created_by_id = models.IntegerField(null=True, blank=True, db_column='created_by_id')
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        db_table = 'prompt_generation_runs'
+        managed = True  # Let backend manage this table
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Run {self.pk} for domain {self.domain_id} ({self.status})"
+
+    def mark(self, stage, progress):
+        """Advance the progress the UI polls."""
+        self.stage = stage
+        self.progress = progress
+        self.status = 'PROC'
+        self.save(update_fields=['stage', 'progress', 'status', 'modified_at'])
+
+
+class PromptCandidate(models.Model):
+    """Engine-side mirror of prompts.PromptCandidate."""
+    run = models.ForeignKey(
+        PromptGenerationRun, on_delete=models.CASCADE, related_name='candidates',
+    )
+    text = models.TextField()
+    intent = models.CharField(max_length=16, blank=True, default='')
+    entity = models.CharField(max_length=255, blank=True, default='')
+    is_branded = models.BooleanField(default=False)
+    cluster_key = models.CharField(max_length=255, blank=True, default='')
+    cluster_title = models.CharField(max_length=255, blank=True, default='')
+    score_realism = models.FloatField(default=0)
+    score_elicits_brands = models.FloatField(default=0)
+    brands_seen = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=10, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'shared_models'
+        db_table = 'prompt_candidates'
+        managed = True  # Let backend manage this table
+        ordering = ['cluster_key', '-score_elicits_brands']
+
+    def __str__(self):
+        return self.text[:80]

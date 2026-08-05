@@ -669,3 +669,146 @@ class SweepGuardState(models.Model):
 
     def __str__(self):
         return f"{self.sweep} (enabled={self.enabled}, runs={self.runs})"
+
+
+class PromptGenerationRun(models.Model):
+    """One AI prompt-generation job for a domain.
+
+    The backend has no Celery of its own — long work is handed to the engine by
+    writing a row and letting an engine scheduler poll for it, exactly as
+    competitor processing does. This row is that handoff: the API creates it
+    with status INIT and returns immediately, the engine picks it up, walks the
+    six stages updating `stage`/`progress`, and the UI polls this record.
+
+    Candidates live in PromptCandidate rather than being written straight to
+    Prompt, so a run can be reviewed, partially accepted, or discarded without
+    ever creating anything trackable.
+    """
+    STATUS_CHOICES = [
+        ('INIT', 'Queued'),
+        ('PROC', 'Processing'),
+        ('DONE', 'Ready for review'),
+        ('FAIL', 'Failed'),
+        ('ACPT', 'Accepted'),
+        ('DISC', 'Discarded'),
+    ]
+
+    # The six pipeline stages, in order. `stage` drives the progress UI.
+    STAGE_CHOICES = [
+        ('ground', 'Reading your site'),
+        ('entities', 'Understanding what you offer'),
+        ('expand', 'Writing prompts'),
+        ('dedup', 'Removing duplicates'),
+        ('score', 'Checking which ones surface brands'),
+        ('assemble', 'Grouping by theme'),
+    ]
+    STAGE_ORDER = ['ground', 'entities', 'expand', 'dedup', 'score', 'assemble']
+
+    domain = models.ForeignKey(
+        'domains.Domain',
+        on_delete=models.CASCADE,
+        related_name='prompt_generation_runs',
+    )
+    status = models.CharField(max_length=4, choices=STATUS_CHOICES, default='INIT')
+    stage = models.CharField(max_length=16, choices=STAGE_CHOICES, blank=True, default='')
+    progress = models.PositiveSmallIntegerField(default=0, help_text="0-100")
+
+    # Everything the wizard collected. Kept verbatim so a run is reproducible
+    # and so re-running with a tweak doesn't need the wizard walked again.
+    config = models.JSONField(default=dict, blank=True)
+    # Crawl + extraction output, cached so a re-run skips the slow stages.
+    grounding = models.JSONField(default=dict, blank=True)
+
+    error = models.TextField(blank=True, default='')
+    # Spend is recorded because generation runs on the customer's own
+    # OpenRouter key under BYOK and they are entitled to see the cost.
+    tokens_used = models.PositiveIntegerField(default=0)
+
+    created_by = models.ForeignKey(
+        'authentication.User',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='prompt_generation_runs',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'prompt_generation_runs'
+        verbose_name = 'Prompt Generation Run'
+        verbose_name_plural = 'Prompt Generation Runs'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['domain', 'status']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f"Run {self.pk} for domain {self.domain_id} ({self.status})"
+
+    @property
+    def stage_index(self):
+        """1-based position of the current stage, 0 before it starts."""
+        try:
+            return self.STAGE_ORDER.index(self.stage) + 1
+        except ValueError:
+            return 0
+
+
+class PromptCandidate(models.Model):
+    """A generated prompt awaiting review.
+
+    Deliberately not a Prompt: nothing here is tracked, costs anything, or
+    appears in analytics until the user accepts it and it is promoted.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending review'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+    ]
+
+    # Funnel intents the planner builds against. Stored so the review table can
+    # show why a prompt exists and so the mix can be verified after the fact.
+    INTENT_CHOICES = [
+        ('discovery', 'Discovery'),
+        ('comparison', 'Comparison'),
+        ('evaluation', 'Evaluation'),
+        ('use_case', 'Use case'),
+        ('problem', 'Problem'),
+        ('brand', 'Brand'),
+        ('trust', 'Trust'),
+    ]
+
+    run = models.ForeignKey(
+        PromptGenerationRun,
+        on_delete=models.CASCADE,
+        related_name='candidates',
+    )
+    text = models.TextField()
+    intent = models.CharField(max_length=16, choices=INTENT_CHOICES, blank=True, default='')
+    entity = models.CharField(max_length=255, blank=True, default='')
+    is_branded = models.BooleanField(default=False)
+    # Groups candidates that belong together; becomes one PromptGroup on accept.
+    cluster_key = models.CharField(max_length=255, blank=True, default='')
+    cluster_title = models.CharField(max_length=255, blank=True, default='')
+
+    score_realism = models.FloatField(default=0)
+    score_elicits_brands = models.FloatField(default=0)
+    # Set when the scoring stage actually ran the prompt and read the answer.
+    brands_seen = models.JSONField(default=list, blank=True)
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'prompt_candidates'
+        verbose_name = 'Prompt Candidate'
+        verbose_name_plural = 'Prompt Candidates'
+        ordering = ['cluster_key', '-score_elicits_brands']
+        indexes = [
+            models.Index(fields=['run', 'status']),
+        ]
+
+    def __str__(self):
+        return self.text[:80]

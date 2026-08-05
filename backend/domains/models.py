@@ -50,6 +50,37 @@ class Domain(models.Model):
 
     country = models.CharField(max_length=100, default='United States', help_text="Country name for domain context")
     niches = models.JSONField(blank=True, null=True, help_text="List of industry niches/categories for the brand")
+
+    # ----- Commercial profile -----
+    # Collected by the prompt-generation wizard and stored here rather than on
+    # the run, because these are facts about the brand, not about one job.
+    # Competitor analysis and reporting can use them too. All nullable: two
+    # thirds of existing domains predate them.
+    business_model = models.CharField(
+        max_length=64, blank=True, default='',
+        help_text="B2C ecommerce, B2B SaaS, Local services, ... — selects the prompt intent taxonomy",
+    )
+    offering_categories = models.JSONField(
+        blank=True, null=True, help_text="Product/service categories the brand sells",
+    )
+    regions_served = models.JSONField(
+        blank=True, null=True, help_text="Cities/regions served — country alone is too coarse for local queries",
+    )
+    price_positioning = models.CharField(
+        max_length=32, blank=True, default='', help_text="Budget | Mid-market | Premium | Mixed",
+    )
+    use_cases = models.JSONField(
+        blank=True, null=True, help_text="Use cases and occasions that drive purchases",
+    )
+    buying_criteria = models.JSONField(
+        blank=True, null=True, help_text="Decision factors, e.g. same-day delivery, price, compliance",
+    )
+    common_objections = models.JSONField(
+        blank=True, null=True, help_text="Pre-purchase concerns — feeds trust prompts",
+    )
+    differentiators = models.JSONField(
+        blank=True, null=True, help_text="Why customers choose this brand — feeds comparison prompts",
+    )
     organisation = models.ForeignKey(
         'authentication.Organisation',
         on_delete=models.CASCADE,

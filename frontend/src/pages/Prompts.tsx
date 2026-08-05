@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, FolderOpen, TrendingUp, Eye, Edit, Sparkles, Loader2, Clock, CheckCircle, Download, Trash2 } from "lucide-react";
+import { Plus, TrendingUp, Eye, Edit, Sparkles, Loader2, Clock, CheckCircle, Download, Trash2, ArrowLeft } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,12 +28,24 @@ import { useAuth } from "@/contexts/AuthContext";
 import { AddPromptGroupDialog } from "@/components/AddPromptGroupDialog";
 import { EditPromptGroupDialog } from "@/components/EditPromptGroupDialog";
 import { GenerateVariantsDialog } from "@/components/GenerateVariantsDialog";
+import { PromptSourceChooser, type PromptSource } from "@/components/PromptSourceChooser";
+import { PromptUploadStep } from "@/components/PromptUploadStep";
+import { PromptGenerationWizard } from "@/components/PromptGenerationWizard";
+import { PromptReviewTable, GenerationProgress, type Candidate } from "@/components/PromptReviewTable";
+import { useGenerationRun } from "@/hooks/useGenerationRun";
 import { getActiveDomainIdNumber } from "@/utils/activeDomain";
 
 const Prompts = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  // Which build-your-list panel the empty state is showing. "choose" is the
+  // three cards; picking Upload swaps them for the upload panel in place.
+  const [buildStep, setBuildStep] = useState<"choose" | "upload" | "wizard">("choose");
+  const [isAccepting, setIsAccepting] = useState(false);
+  // Lets a project that already has groups open the build panel — otherwise
+  // the chooser and the review table are unreachable once prompts exist.
+  const [forceBuildPanel, setForceBuildPanel] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -50,6 +62,13 @@ const Prompts = () => {
   const [isExporting, setIsExporting] = useState(false);
 
   const { selectedDomain, setDomainSwitching } = useDomainStore();
+  // Server-owned generation state, so it survives navigation and refreshes.
+  const {
+    run: genRun,
+    start: startRun,
+    accept: acceptRun,
+    discard: discardRun,
+  } = useGenerationRun(selectedDomain?.id);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -214,6 +233,10 @@ const Prompts = () => {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {/* Export hidden — the spreadsheet it produces carries no useful
+              information for this page. Kept rather than deleted so it can be
+              restored if the report is ever made worth exporting. */}
+          {false && (
           <Button
             variant="outline"
             onClick={async () => {
@@ -242,17 +265,51 @@ const Prompts = () => {
             <Download className="h-4 w-4 mr-2" />
             {isExporting ? "Exporting..." : "Export"}
           </Button>
+          )}
           <Button onClick={() => setAddDialogOpen(true)} className="gradient-primary shadow-md shadow-primary/20">
             <Plus className="h-4 w-4 mr-2" />
-            Add Prompt Group
+            Add Prompts Manually
           </Button>
         </div>
       </div>
 
       {/* Search and organize controls removed as per requirements */}
 
+      {/* The chooser only renders in the empty state, so once a project has
+          groups a live run would otherwise be invisible. This keeps it
+          findable in both cases. */}
+      {promptGroups.length > 0 && genRun && ["INIT", "PROC", "DONE"].includes(genRun.status) && (
+        <Card className="p-4 mb-6 border-primary/30 bg-primary/5">
+          <div className="flex flex-wrap items-center gap-3">
+            <Sparkles className="h-4 w-4 text-primary shrink-0" />
+            {genRun.status === "DONE" ? (
+              <>
+                <p className="text-sm flex-1">
+                  <span className="font-medium">{genRun.candidate_count} prompts ready to review.</span>{" "}
+                  <span className="text-muted-foreground">Nothing is tracked until you add them.</span>
+                </p>
+                <Button
+                  size="sm"
+                  className="gradient-primary"
+                  onClick={() => setForceBuildPanel(true)}
+                >
+                  Review {genRun.candidate_count} prompts
+                </Button>
+              </>
+            ) : (
+              <p className="text-sm flex-1">
+                <span className="font-medium">Generating prompts…</span>{" "}
+                <span className="text-muted-foreground">
+                  Step {genRun.stage_index || 1} of {genRun.stage_total} · {genRun.stage_label}
+                </span>
+              </p>
+            )}
+          </div>
+        </Card>
+      )}
+
       <div className="grid gap-6">
-        {promptGroups.length > 0 ? (
+        {promptGroups.length > 0 && !forceBuildPanel ? (
           <>
           {promptGroups.map((group) => (
           <Card key={group.id} className="p-6 transition-all duration-300 border border-border hover:border-primary backdrop-blur-sm bg-card/80">
@@ -346,16 +403,99 @@ const Prompts = () => {
         )}
         </>
         ) : (
-          <Card className="p-12 text-center">
-            <FolderOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No Prompt Groups Found</h3>
-            <p className="text-muted-foreground mb-4">
-              Create your first prompt group to get started.
-            </p>
-            <Button onClick={() => setAddDialogOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Prompt Group
-            </Button>
+          <Card className="p-8 md:p-10">
+            {/* A live run outranks whatever step the user was on — it survives
+                navigation, so the page must reflect it on arrival. */}
+            {genRun && (genRun.status === "INIT" || genRun.status === "PROC") ? (
+              <GenerationProgress
+                stageLabel={genRun.stage_label}
+                stageIndex={genRun.stage_index}
+                stageTotal={genRun.stage_total}
+                progress={genRun.progress}
+              />
+            ) : genRun && genRun.status === "DONE" && genRun.candidates ? (
+              <PromptReviewTable
+                candidates={genRun.candidates as Candidate[]}
+                saving={isAccepting}
+                onAccept={async (ids, edits) => {
+                  try {
+                    setIsAccepting(true);
+                    const res: any = await acceptRun(ids, edits);
+                    toast({
+                      title: "Prompts added",
+                      description: `${res?.prompts_created ?? ids.length} prompts in ${res?.groups_created ?? 0} groups. Tracking starts on the next run.`,
+                    });
+                    setBuildStep("choose");
+                    setForceBuildPanel(false);
+                    setOffset(0);
+                    void loadPromptGroups(0, true);
+                  } catch (e: any) {
+                    toast({ title: "Could not add prompts", description: e?.message, variant: "destructive" });
+                  } finally {
+                    setIsAccepting(false);
+                  }
+                }}
+                onDiscard={async () => {
+                  await discardRun();
+                  setBuildStep("choose");
+                  setForceBuildPanel(false);
+                }}
+              />
+            ) : genRun && genRun.status === "FAIL" ? (
+              <div className="text-center py-14">
+                <h3 className="font-semibold text-lg">Generation failed</h3>
+                <p className="text-sm text-muted-foreground mt-1.5 max-w-md mx-auto">
+                  {genRun.error || "Something went wrong while generating prompts."}
+                </p>
+                <Button
+                  className="gradient-primary mt-5"
+                  onClick={async () => {
+                    await discardRun();
+                    setBuildStep("wizard");
+                  }}
+                >
+                  Try again
+                </Button>
+              </div>
+            ) : buildStep === "choose" ? (
+              <PromptSourceChooser
+                onSelect={(source: PromptSource) => {
+                  setBuildStep(source === "upload" ? "upload" : "wizard");
+                }}
+              />
+            ) : buildStep === "wizard" ? (
+              <PromptGenerationWizard
+                onBack={() => setBuildStep("choose")}
+                onGenerate={async (config) => {
+                  try {
+                    await startRun(config);
+                    toast({
+                      title: "Generating prompts",
+                      description: "This runs in the background — you can leave this page.",
+                    });
+                  } catch (e: any) {
+                    toast({ title: "Could not start", description: e?.message, variant: "destructive" });
+                  }
+                }}
+              />
+            ) : (
+              <div className="max-w-2xl mx-auto">
+                <PromptUploadStep />
+                <div className="flex justify-end gap-2 mt-6">
+                  <Button
+                    variant="outline"
+                    onClick={() => setBuildStep("choose")}
+                    className="mr-auto border-border"
+                  >
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back
+                  </Button>
+                  <Button disabled className="gradient-primary">
+                    Continue
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         )}
       </div>
