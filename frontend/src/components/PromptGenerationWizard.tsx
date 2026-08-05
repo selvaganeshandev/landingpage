@@ -14,7 +14,6 @@ import {
   Check,
   Loader2,
   CircleAlert,
-  Globe,
 } from "lucide-react";
 
 /**
@@ -30,7 +29,14 @@ import {
  * hands the assembled config to the caller.
  */
 
-type Provenance = "saved" | "inferred" | "missing";
+/** Where a field's current value came from. There is deliberately no
+ *  "from the site" state: nothing crawls the site to prefill this wizard.
+ *  stage_ground does read the site, but only at generation time and only as
+ *  LLM context — it never populates these inputs.
+ *
+ *  "none" is what the user's own typing gets: it needs no badge, because the
+ *  thing they just entered is not news to them. */
+type Provenance = "saved" | "missing" | "none";
 
 export interface WizardConfig {
   // Step 1
@@ -99,17 +105,11 @@ const toList = (v: any): string[] => {
 };
 
 const Badge = ({ state }: { state: Provenance }) => {
+  if (state === "none") return null;
   if (state === "saved") {
     return (
       <span className="inline-flex items-center gap-1 text-[11px] font-medium text-success">
         <Check className="h-3 w-3" /> Saved
-      </span>
-    );
-  }
-  if (state === "inferred") {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-primary">
-        <Globe className="h-3 w-3" /> From your site
       </span>
     );
   }
@@ -161,8 +161,8 @@ export const PromptGenerationWizard = ({
     funnel_mix: "balanced",
     branded_ratio: 30,
   });
-  // Which fields arrived already populated — drives the Saved badge. Fields the
-  // crawl fills will register as "inferred" once generation is wired up.
+  // Which fields arrived already populated from the project record — drives the
+  // Saved badge. Anything the user types is unbadged.
   const [prefilled, setPrefilled] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -208,7 +208,7 @@ export const PromptGenerationWizard = ({
     const v = cfg[k];
     const empty = Array.isArray(v) ? v.length === 0 : !v;
     if (empty) return "missing";
-    return prefilled[k] ? "saved" : "inferred";
+    return prefilled[k] ? "saved" : "none";
   };
 
   // Only two fields gate progress; everything else improves quality without
