@@ -29,6 +29,7 @@ from .serializers import (
     SeoKeywordNoteCreateSerializer,
     SeoKeywordVolumeSerializer,
 )
+from .services.datablue_service import max_tracked_rank
 
 logger = logging.getLogger(__name__)
 
@@ -656,6 +657,11 @@ def seo_domain_overview(request):
         'yesterday': SeoDomainDailyMetricsSerializer(yesterday).data if yesterday else None,
         'best': SeoDomainDailyMetricsSerializer(best).data if best else None,
         'comparison': [],
+        # How deep the SERP scrape actually goes (pages x 10). The ranking
+        # buckets are stored at fixed thresholds — 3/10/50/100 — but a 3-page
+        # scrape can never return a rank past 30, so labelling that bucket
+        # "Top 50" claims coverage we do not have. The UI labels it from this.
+        'max_tracked_rank': max_tracked_rank(),
     }
 
     if latest:

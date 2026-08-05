@@ -149,6 +149,8 @@ interface OverviewData {
   yesterday: any;
   best: any;
   comparison: Array<{ status: string; today: number; yesterday: number; best: number }>;
+  /** Deepest rank the SERP scrape can return (pages x 10). */
+  max_tracked_rank?: number;
 }
 
 type SortKey = "rank" | "volume" | "best" | "clicks" | "impressions";
@@ -231,6 +233,20 @@ const SeoRankings = () => {
   const [refreshTotal, setRefreshTotal] = useState(0);
   const [seoKeywords, setSeoKeywords] = useState<ReturnType<typeof mapKeywordForUI>[]>([]);
   const [overview, setOverview] = useState<OverviewData | null>(null);
+
+  // The daily metrics store ranking counts at fixed thresholds (3/10/50/100),
+  // but the scrape only reaches pages x 10. At the default 3 pages nothing can
+  // rank past 30, so showing "Top 50" claims coverage we do not have. Label
+  // from the real depth and read whichever stored bucket actually contains it.
+  const maxTrackedRank = overview?.max_tracked_rank ?? 50;
+  const rankedBucket = (() => {
+    const t = overview?.today;
+    const field =
+      maxTrackedRank <= 10 ? "top_10_count"
+      : maxTrackedRank <= 50 ? "top_50_count"
+      : "top_100_count";
+    return { label: `Top ${maxTrackedRank}`, value: t?.[field] ?? 0 };
+  })();
   const [currentPage, setCurrentPage] = useState(1);
   const [gridTagPages, setGridTagPages] = useState<Record<string, number>>({});
   // Selectable page size. Was a fixed 10, which meant a domain with 200
@@ -1265,7 +1281,7 @@ const SeoRankings = () => {
                     {([
                       { key: "top3" as const, label: "Top 3", value: overview?.today?.top_3_count ?? 0 },
                       { key: "top10" as const, label: "Top 10", value: overview?.today?.top_10_count ?? 0 },
-                      { key: "top50" as const, label: "Top 50", value: overview?.today?.top_50_count ?? 0 },
+                      { key: "top50" as const, label: rankedBucket.label, value: rankedBucket.value },
                       { key: "nr" as const, label: "Not Ranked", value: overview?.today?.not_ranked_count ?? 0 },
                     ]).map(({ key, label, value }) => (
                       // Read-only, like the Device / Performance / Rankmax
