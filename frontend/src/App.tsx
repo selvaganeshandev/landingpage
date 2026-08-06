@@ -61,13 +61,18 @@ const queryClient = new QueryClient();
 
 /** Shown while a route's chunk is fetched.
  *
- *  Every page is code-split, so navigating to one the browser has not seen
- *  costs a network round trip. Deliberately minimal: a spinner that appears for
- *  ~100ms on a fast connection is more distracting than a blank area, and the
- *  surrounding Layout (sidebar, header) is eager, so the app never looks gone.
+ *  Every page is code-split, so the first visit to a route costs a network
+ *  round trip; afterwards the chunk is in memory and this never renders again.
+ *  That asymmetry is why the placeholder must reserve the space the page will
+ *  occupy — it first shipped as a short `py-24` box, which collapsed the layout
+ *  and then expanded it when the chunk arrived, so every first visit visibly
+ *  jumped while repeat visits did not.
+ *
+ *  min-h-screen matches the shell in Layout, so the content area keeps its
+ *  height across the swap and nothing shifts.
  */
 const RouteFallback = () => (
-  <div className="flex items-center justify-center py-24">
+  <div className="flex min-h-screen items-center justify-center">
     <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
   </div>
 );
