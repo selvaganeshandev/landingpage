@@ -16,6 +16,7 @@ class DomainSerializer(serializers.ModelSerializer):
     latest_health_score = serializers.SerializerMethodField()
     latest_health_grade = serializers.SerializerMethodField()
     latest_health_grade_color = serializers.SerializerMethodField()
+    prompt_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Domain
@@ -35,9 +36,24 @@ class DomainSerializer(serializers.ModelSerializer):
             'average_position', 'active_alerts', 'sentiment_category',
             'sentiment_score', 'processing_status', 'track_message', 'tracked_at',
             'created_at', 'modified_at',
-            'latest_health_score', 'latest_health_grade', 'latest_health_grade_color'
+            'latest_health_score', 'latest_health_grade', 'latest_health_grade_color',
+            'prompt_count',
         ]
         read_only_fields = ['id', 'created_at', 'modified_at']
+
+    def get_prompt_count(self, obj):
+        """How many prompts this project tracks.
+
+        Competitors, Topics and Misinformation are all derived from tracked
+        prompt responses, so with none they can only ever be empty. The pages
+        use this to say "add prompts first" instead of offering a Run button
+        that would analyse nothing.
+        """
+        annotated = getattr(obj, 'prompt_count_annotated', None)
+        if annotated is not None:
+            return annotated
+        from prompts.models import Prompt
+        return Prompt.objects.filter(group__domain=obj).count()
 
     def _get_latest_health_check(self, obj):
         """Get the latest health check, using prefetched data if available."""

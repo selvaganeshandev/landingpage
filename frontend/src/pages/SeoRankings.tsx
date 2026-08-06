@@ -1272,8 +1272,8 @@ const SeoRankings = () => {
                       <h3 className="text-base font-semibold font-inter">Comparison</h3>
                       <p className="text-sm text-muted-foreground">Ranking distribution</p>
                     </div>
-                    <div className="w-10 h-10 rounded-lg shadow-glow flex items-center justify-center font-bold text-white text-sm font-inter bg-primary">
-                      <BarChart3 className="h-5 w-5" />
+                    <div className="flex items-center justify-center">
+                      <BarChart3 className="h-5 w-5 text-muted-foreground" />
                     </div>
                   </div>
 
@@ -1284,7 +1284,7 @@ const SeoRankings = () => {
                       { key: "top50" as const, label: rankedBucket.label, value: rankedBucket.value },
                       { key: "nr" as const, label: "Not Ranked", value: overview?.today?.not_ranked_count ?? 0 },
                     ]).map(({ key, label, value }) => (
-                      // Read-only, like the Device / Performance / Rankmax
+                      // Read-only, like the Device / Performance / PromptMaxx
                       // boxes beside it. These used to filter the table on
                       // click, which was easy to trigger by accident and then
                       // left "Total keywords" showing a subset with no obvious
@@ -1313,8 +1313,8 @@ const SeoRankings = () => {
                       <h3 className="text-base font-semibold font-inter">Device</h3>
                       <p className="text-sm text-muted-foreground">Keywords by device</p>
                     </div>
-                    <div className="w-10 h-10 rounded-lg shadow-glow flex items-center justify-center font-bold text-white text-sm font-inter bg-primary">
-                      <Monitor className="h-5 w-5" />
+                    <div className="flex items-center justify-center">
+                      <Monitor className="h-5 w-5 text-muted-foreground" />
                     </div>
                   </div>
 
@@ -1354,8 +1354,8 @@ const SeoRankings = () => {
                       <h3 className="text-base font-semibold font-inter">Performance</h3>
                       <p className="text-sm text-muted-foreground">Today's changes</p>
                     </div>
-                    <div className="w-10 h-10 rounded-lg shadow-glow flex items-center justify-center font-bold text-white text-sm font-inter bg-primary">
-                      <TrendingUp className="h-5 w-5" />
+                    <div className="flex items-center justify-center">
+                      <TrendingUp className="h-5 w-5 text-muted-foreground" />
                     </div>
                   </div>
 
@@ -1396,18 +1396,46 @@ const SeoRankings = () => {
                 </div>
               </Card>
 
-              {/* Rankmax Score Card */}
+              {/* PromptMaxx Score Card */}
               <Card className="p-4 transition-all duration-300 backdrop-blur-sm bg-card/80 border border-border hover:border-primary">
                 <div className="space-y-3">
                   <div className="flex items-start justify-between">
                     <div>
-                      <h3 className="text-base font-semibold font-inter">Rankmax Score</h3>
+                      <h3 className="text-base font-semibold font-inter">PromptMaxx Score</h3>
                       <p className="text-sm text-muted-foreground">Overall performance</p>
                     </div>
-                    <div className={`w-10 h-10 rounded-lg shadow-glow flex items-center justify-center font-bold text-white text-base font-inter ${
-                      (overview?.today?.score_meter ?? 0) >= 50 ? 'bg-green-500' : (overview?.today?.score_meter ?? 0) >= 20 ? 'bg-yellow-500' : 'bg-red-500'
-                    }`}>
-                      {Math.round(overview?.today?.score_meter ?? 0)}
+                    {/* The score reads inside the leaf mark rather than on a
+                        coloured tile: a solid red square for a new project with
+                        no data yet looked like an error state, when the honest
+                        reading is simply "nothing measured". Colour stays on the
+                        number, so a low score is still legible at a glance. */}
+                    {/* The score reads inside the leaf mark rather than on a
+                        coloured tile: a solid red square for a project with no
+                        data yet looked like an error state, when the honest
+                        reading is "nothing measured".
+
+                        The artwork is a small leaf centred in a 2700x1800
+                        canvas — 1230 units wide, so nearly half the file is
+                        empty margin. Rendered at the container's own size it
+                        would come out around 20px. It is drawn oversized and
+                        centred on the same axis instead, which crops the margin
+                        away and lands the glyph at full size. Inverted in dark
+                        mode, where a black silhouette would disappear. */}
+                    <div className="relative w-14 h-14 flex items-center justify-center flex-shrink-0">
+                      <img
+                        src="/score.svg"
+                        alt=""
+                        aria-hidden="true"
+                        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-none w-[100px] dark:invert"
+                      />
+                      {/* text-foreground, not white: the artwork is a laurel
+                          wreath and its centre is hollow, so the number sits on
+                          the card background rather than on the glyph — white
+                          text was invisible. Nudged up because the wreath's
+                          opening sits slightly above the bounding-box centre. */}
+                      <span className="relative -translate-y-[2px] font-bold text-lg leading-none font-inter text-foreground">
+                        {Math.round(overview?.today?.score_meter ?? 0)}
+                      </span>
                     </div>
                   </div>
 
@@ -1476,8 +1504,8 @@ const SeoRankings = () => {
                       <h3 className="text-base font-semibold font-inter">SERP Features</h3>
                       <p className="text-sm text-muted-foreground">Your search result ratings</p>
                     </div>
-                    <div className="w-10 h-10 rounded-lg shadow-glow flex items-center justify-center font-bold text-white text-sm font-inter bg-yellow-500">
-                      <Star className="h-5 w-5" />
+                    <div className="flex items-center justify-center">
+                      <Star className="h-5 w-5 text-yellow-500" />
                     </div>
                   </div>
 
@@ -1534,8 +1562,8 @@ const SeoRankings = () => {
                       <h3 className="text-base font-semibold font-inter">Google Search Ads</h3>
                       <p className="text-sm text-muted-foreground">Ad placement comparison</p>
                     </div>
-                    <div className="w-10 h-10 rounded-lg shadow-glow flex items-center justify-center font-bold text-white text-sm font-inter bg-blue-500">
-                      <LayoutGrid className="h-5 w-5" />
+                    <div className="flex items-center justify-center">
+                      <LayoutGrid className="h-5 w-5 text-blue-500" />
                     </div>
                   </div>
 
@@ -2221,7 +2249,7 @@ const SeoRankings = () => {
                         <TooltipContent>Add tags to all keywords in this group</TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
-                    <span className="text-xs text-muted-foreground">Rankmax score</span>
+                    <span className="text-xs text-muted-foreground">PromptMaxx score</span>
                     <div className="w-8 h-8 rounded-full border-2 border-primary flex items-center justify-center">
                       <span className="text-xs font-bold text-primary">0</span>
                     </div>

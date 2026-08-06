@@ -208,7 +208,9 @@ def infer_profile(domain) -> Dict[str, Any]:
             client = get_internal_client(timeout=60)
         except Exception as exc:
             logger.error('[SiteProfile] no OpenRouter client: %s', exc)
-            return {'fields': {}, 'error': 'No OpenRouter API key is configured.'}
+            # Reaches the user verbatim (toast / analysis warning), so it names
+            # no provider — the transport is never surfaced in the UI.
+            return {'fields': {}, 'error': 'No AI API key is configured.'}
 
     model = getattr(settings, 'OPENROUTER_INTERNAL_MODEL', 'openai/gpt-5-mini')
     user = f"Brand: {getattr(domain, 'name', '') or ''}\nURL: {url}\n\nPage text:\n{text}"

@@ -394,18 +394,27 @@ def process_topics_for_domain_task(self, domain_id: int):
     from shared_models.models import Domain
     from core.topic_processor import TopicProcessor
     from core.topic_analytics_processor import TopicAnalyticsProcessor
-    
+    from core import topic_progress
+
     try:
         domain = Domain.objects.get(id=domain_id)
-        
+
         # Step 1: Group keywords into topics
         logger.info(f"Starting topic processing for domain {domain_id}")
+        topic_progress.write(domain_id, state='running', stage='grouping', task_id=self.request.id)
         topic_processor = TopicProcessor()
         result = topic_processor.process_topics_for_domain(domain)
-        
+
         if not result.get('success'):
             logger.error(f"Topic processing failed for domain {domain_id}: {result.get('message')}")
+            topic_progress.fail(domain_id, result.get('message') or 'Topic grouping failed')
             return result
+
+        topic_progress.write(
+            domain_id,
+            stage='analytics',
+            topics_created=result.get('topics_created', 0),
+        )
         
         # Step 2: Process topic analytics
         logger.info(f"Starting topic analytics processing for domain {domain_id}")
@@ -414,21 +423,28 @@ def process_topics_for_domain_task(self, domain_id: int):
         
         if not analytics_result.get('success'):
             logger.error(f"Topic analytics processing failed for domain {domain_id}: {analytics_result.get('message')}")
+            # The topics themselves exist by this point, so the run is finished
+            # as far as the page is concerned — analytics fill in on the next
+            # scheduler tick.
+            topic_progress.finish(domain_id, result.get('topics_created', 0))
             return analytics_result
-        
+
         logger.info(f"Successfully completed topic processing for domain {domain_id}")
+        topic_progress.finish(domain_id, result.get('topics_created', 0))
         return {
             'success': True,
             'topics_created': result.get('topics_created', 0),
             'keywords_processed': analytics_result.get('keywords_processed', 0),
             'topics_processed': analytics_result.get('topics_processed', 0)
         }
-        
+
     except Domain.DoesNotExist:
         logger.error(f"Domain {domain_id} not found")
+        topic_progress.fail(domain_id, 'Domain not found')
         return {'error': 'domain_not_found'}
     except Exception as e:
         logger.error(f"Error processing topics for domain {domain_id}: {str(e)}", exc_info=True)
+        topic_progress.fail(domain_id, str(e))
         return {'error': str(e)}
 
 
@@ -451,17 +467,19 @@ def process_topic_analytics_scheduler(self):
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
-def process_misinformation_scan_task(self, domain_id: int, prompt_analytics_ids: list = None):
+def process_misinformation_scan_task(self, domain_id: int, prompt_analytics_ids: list = None,
+                                     own_links_only: bool = False):
     """
     Process misinformation scan for a domain.
-    
+
     Args:
         domain_id: ID of the domain to scan
         prompt_analytics_ids: Optional list of specific prompt analytics IDs to scan
+        own_links_only: Skip citations that don't point at the domain's own site
     """
     try:
         processor = MisinformationProcessor()
-        scan = processor.process_domain(domain_id, prompt_analytics_ids)
+        scan = processor.process_domain(domain_id, prompt_analytics_ids, own_links_only)
         logger.info(f"Misinformation scan completed for domain {domain_id}: scan_id={scan.id}")
         return {'scan_id': scan.id, 'status': 'completed'}
     except Exception as e:

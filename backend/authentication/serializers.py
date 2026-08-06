@@ -126,7 +126,11 @@ class TeamInvitationCreateSerializer(serializers.ModelSerializer):
         # Get organisation from context (set in the view)
         organisation = self.context.get('organisation')
         if organisation:
-            if Account.objects.filter(email=value, organisation=organisation).exists():
+            existing = Account.objects.filter(email=value, organisation=organisation).first()
+            # Removing a member only deactivates the account so their reports,
+            # comments and grants stay attached to them. A deactivated row must
+            # not block a re-invite — accepting it reactivates that same account.
+            if existing and existing.is_active:
                 raise serializers.ValidationError("User is already a member of this organisation")
         return value
 

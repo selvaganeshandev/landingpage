@@ -1137,7 +1137,13 @@ def start_topic_generation(request):
                 status=status.HTTP_409_CONFLICT
             )
 
+        from core import topic_progress
+
+        # Recorded BEFORE the task is queued so a page refresh in the first
+        # seconds — before a worker has picked the message up — still finds a
+        # run in progress rather than an empty "No topics yet" card.
         task = process_topics_for_domain_task.delay(domain_id)
+        topic_progress.start(domain_id, pending, task_id=task.id)
 
         return Response({
             'success': True,
@@ -1155,6 +1161,46 @@ def start_topic_generation(request):
         )
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def topic_generation_status(request):
+    """Progress of the topic-grouping run for a domain.
+
+    Grouping writes nothing to the database until every batch has returned, so
+    the database cannot answer "is a run in progress?" — for thirteen minutes a
+    running domain and an untouched one look identical. This reads the Redis
+    record the task keeps, which is why a page refresh mid-run can restore the
+    progress bar instead of offering to start the run again.
+
+    Query params:
+        domain_id: Required
+    """
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from core import topic_progress
+
+    progress = topic_progress.read(domain_id) or {}
+    done = int(progress.get('batches_done') or 0)
+    total = int(progress.get('batches_total') or 0)
+
+    return Response({
+        'domain_id': int(domain_id),
+        # 'idle' when nothing has ever run, or the record has expired.
+        'state': progress.get('state') or 'idle',
+        'stage': progress.get('stage') or '',
+        'batches_done': done,
+        'batches_total': total,
+        'percent': int(done * 100 / total) if total else 0,
+        'keywords': int(progress.get('keywords') or 0),
+        'topics_created': int(progress.get('topics_created') or 0),
+        'started_at': progress.get('started_at'),
+        'updated_at': progress.get('updated_at'),
+        'error': progress.get('error'),
+    })
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def start_misinformation_scan(request):
@@ -1164,11 +1210,18 @@ def start_misinformation_scan(request):
     Body:
         domain_id: Required - ID of the domain to scan
         prompt_analytics_ids: Optional - List of specific prompt analytics IDs to scan
+        own_links_only: Optional - Only visit citations pointing at the domain's
+            own site. This is what the Citations page's "Validate Citations"
+            button sends: it asks whether links AI sent to *this* brand still
+            work, so crawling the other few hundred third-party sources in the
+            same responses is pure cost. Automatic scans leave it off, because
+            misinformation detection has to read third-party pages.
     """
     try:
         domain_id = request.data.get('domain_id')
         prompt_analytics_ids = request.data.get('prompt_analytics_ids')
-        
+        own_links_only = bool(request.data.get('own_links_only'))
+
         if not domain_id:
             return Response(
                 {'error': 'domain_id is required'},
@@ -1195,7 +1248,9 @@ def start_misinformation_scan(request):
             )
         
         # Trigger the Celery task
-        task = process_misinformation_scan_task.delay(domain_id, prompt_analytics_ids)
+        task = process_misinformation_scan_task.delay(
+            domain_id, prompt_analytics_ids, own_links_only
+        )
         
         return Response({
             'success': True,

@@ -1,10 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Sparkles, BarChart3, Upload, ArrowRight, AlertCircle } from "lucide-react";
+import { GoogleIcon } from "@/components/GoogleIcon";
 
 /**
  * Step 1 of Add Prompt Group — how the prompt list gets built.
  *
- * Two routes into the same review step: AI generation or a spreadsheet upload.
+ * Three routes into the same review step: AI generation, real Search Console
+ * demand, or a spreadsheet upload.
  * Presentation only; each card reports the chosen method upward and the dialog
  * decides what to render next.
  *
@@ -15,7 +17,7 @@ import { Sparkles, BarChart3, Upload, ArrowRight, AlertCircle } from "lucide-rea
  * ship.
  */
 
-export type PromptSource = "ai" | "audit" | "upload";
+export type PromptSource = "ai" | "audit" | "upload" | "gsc";
 
 const SHOW_AUDIT = false;
 
@@ -45,7 +47,7 @@ export const PromptSourceChooser = ({
 
       <div
         className={`grid grid-cols-1 gap-4 ${
-          SHOW_AUDIT ? "md:grid-cols-3" : "md:grid-cols-2 max-w-3xl mx-auto"
+          SHOW_AUDIT ? "md:grid-cols-4" : "md:grid-cols-3"
         }`}
       >
         {/* ---------- Generate with AI ---------- */}
@@ -74,6 +76,36 @@ export const PromptSourceChooser = ({
           >
             <Sparkles className="h-4 w-4 mr-2" />
             Generate with AI
+          </Button>
+        </div>
+
+        {/* ---------- From Search Console ---------- */}
+        <div className="group flex flex-col rounded-xl border border-border bg-card p-5 transition-all hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5">
+          <div className="h-11 w-11 rounded-xl bg-blue-500/10 flex items-center justify-center">
+            <GoogleIcon className="h-5 w-5" />
+          </div>
+
+          <h3 className="font-semibold text-base mt-4">From Search Console</h3>
+          <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+            Build prompts from what people already searched to find you — real
+            questions, not invented ones.
+          </p>
+
+          <div className="border-t border-border my-4" />
+
+          <ul className="space-y-2 text-sm font-medium flex-1">
+            <li>Your own Search Console demand</li>
+            <li>Branded searches left out — they measure nothing</li>
+            <li>Rewritten as the question people ask an assistant</li>
+          </ul>
+
+          <Button
+            variant="outline"
+            onClick={() => onSelect("gsc")}
+            className="w-full mt-5"
+          >
+            <GoogleIcon className="h-4 w-4 mr-2" />
+            Fetch from Search Console
           </Button>
         </div>
 

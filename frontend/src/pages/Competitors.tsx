@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useContentGeneration } from "@/hooks/useContentGeneration";
 import { AddCompetitorDialog } from "@/components/AddCompetitorDialog";
 import { PageLoader } from "@/components/PageLoader";
+import { NoPromptsYet } from "@/components/NoPromptsYet";
 import { ProcessingStateCard } from "@/components/ProcessingStateCard";
 import { GenerateContentDialog } from "@/components/GenerateContentDialog";
 import { isDomainProcessing, isCompetitorProcessing } from "@/utils/processingStatus";
@@ -1503,6 +1504,12 @@ const Competitors = () => {
   // ALSO show loader when filtering by platform (isLoadingAnalysis but competitors exist)
   if ((isPageLoading || !hasLoadedData || loadedDomainId !== domainId || (isLoadingAnalysis && competitors.length === 0)) && !isAnalysisInProgress) {
     return <PageLoader sidebarOpen />;
+  }
+
+  // Competitors are mined out of tracked AI answers, so with no prompts there
+  // is nothing to mine and the "Start Analysis" state below would be a dead end.
+  if (selectedDomain?.prompt_count === 0) {
+    return <NoPromptsYet what="Competitors are found in the AI answers your prompts collect" />;
   }
 
   // Show ProcessingStateCard when domain or competitor analysis is processing

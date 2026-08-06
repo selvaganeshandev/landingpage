@@ -326,7 +326,7 @@ const Citations = () => {
                 ? `Validation in progress${validationProgress ? ` — ${validationProgress} checked` : ""}`
                 : alreadyValidated
                   ? "These citations have already been validated"
-                  : "Check every cited URL and mark it valid or broken"
+                  : "Check the citations pointing at your own site and mark each valid or broken"
             }
           >
             {isValidationRunning
@@ -426,8 +426,8 @@ const Citations = () => {
                 <InfoHint>
                   <MetricHint
                     title="Broken Links"
-                    plain="Cited pages that no longer load. If one of these is yours, an AI answer is sending readers to a dead page."
-                    formula="Crawled citations that returned an HTTP error (400 or above) or that the crawler could not fetch at all."
+                    plain="Pages on your own site that AI answers cite but that no longer load — an AI is sending readers to a dead page of yours."
+                    formula="Citations to your own domain that returned an HTTP error (400 or above) or that the crawler could not fetch at all. Third-party sources are not checked."
                   />
                 </InfoHint>
               </p>
@@ -435,7 +435,7 @@ const Citations = () => {
             </div>
             <XCircle className="h-5 w-5 text-destructive" />
           </div>
-          <p className="text-xs text-muted-foreground mt-2">Need attention</p>
+          <p className="text-xs text-muted-foreground mt-2">Dead links to your site</p>
         </Card>
       </div>
 
@@ -489,8 +489,8 @@ const Citations = () => {
                 <InfoHint>
                   <MetricHint
                     title="Valid Links"
-                    plain="Cited pages confirmed to be live and reachable."
-                    formula="Crawled citations the crawler fetched successfully with an HTTP status below 400."
+                    plain="Citations to your own site confirmed live and reachable."
+                    formula="Citations to your own domain the crawler fetched successfully with an HTTP status below 400. Third-party sources are not checked."
                   />
                 </InfoHint>
               </p>
@@ -498,7 +498,7 @@ const Citations = () => {
             </div>
             <CheckCircle2 className="h-5 w-5 text-success" />
           </div>
-          <p className="text-xs text-muted-foreground mt-2">Working citations</p>
+          <p className="text-xs text-muted-foreground mt-2">Working links to your site</p>
         </Card>
 
         <Card className="p-6 border border-border">
@@ -509,8 +509,8 @@ const Citations = () => {
                 <InfoHint>
                   <MetricHint
                     title="Pending"
-                    plain="Citations we have collected but not yet visited, so their live/broken status is still unknown."
-                    formula="Total citations minus the ones the crawler has already checked. This falls as validation catches up."
+                    plain="Citations to your own site we have collected but not yet visited, so their live/broken status is still unknown."
+                    formula="Citations to your own domain minus the ones the crawler has already checked. This falls as validation catches up; third-party sources are never counted here because they are never crawled."
                   />
                 </InfoHint>
               </p>
@@ -518,7 +518,7 @@ const Citations = () => {
             </div>
             <Clock className="h-5 w-5 text-warning" />
           </div>
-          <p className="text-xs text-muted-foreground mt-2">Awaiting validation</p>
+          <p className="text-xs text-muted-foreground mt-2">Your links awaiting validation</p>
         </Card>
       </div>
 

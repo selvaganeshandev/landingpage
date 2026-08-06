@@ -533,6 +533,33 @@ def extract_domain_from_url(url):
         return url
 
 
+def brand_host(domain):
+    """The bare host of the project's own site, for own-link comparisons."""
+    raw = (getattr(domain, 'url', '') or '').strip().lower()
+    if not raw.startswith(('http://', 'https://')):
+        raw = f'https://{raw}'
+    host = urlparse(raw).netloc
+    return host[4:] if host.startswith('www.') else host
+
+
+def is_brand_url(url, host):
+    """True when a cited URL points at the brand's own site (or a subdomain).
+
+    Host comparison, not a substring test: `"iob.bank.in" in url` also matches
+    a competitor page at example.com/?ref=iob.bank.in, and the whole point of
+    these counters is to separate the brand's own links from everyone else's.
+    """
+    if not host:
+        return False
+    try:
+        cited = extract_domain_from_url(str(url).strip().lower())
+    except Exception:
+        return False
+    if cited.startswith('www.'):
+        cited = cited[4:]
+    return bool(cited) and (cited == host or cited.endswith(f'.{host}'))
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def citations_dashboard(request):
@@ -574,7 +601,6 @@ def citations_dashboard(request):
     # Extract all URLs from citation_list
     all_urls = []
     url_to_analytics_map = {}  # Track which analytics has which URL
-    domain_url_clean = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
 
     for pa in all_analytics:
         if pa.citation_list and isinstance(pa.citation_list, list):
@@ -598,8 +624,11 @@ def citations_dashboard(request):
         unique_sources.add(extract_domain_from_url(url_data['url']))
     unique_sources_count = len(unique_sources)
 
-    # Your domain citations (citations pointing to your domain)
-    your_domain_citations = sum(1 for url_data in all_urls if domain_url_clean in url_data['url'])
+    # Your domain citations (citations pointing to your domain). Host-matched:
+    # see is_brand_url for why a substring test over-counts.
+    own_host = brand_host(domain)
+    brand_urls = [u for u in all_urls if is_brand_url(u['url'], own_host)]
+    your_domain_citations = len(brand_urls)
 
     # Competitor citations
     competitor_citations = total_citations - your_domain_citations
@@ -631,13 +660,19 @@ def citations_dashboard(request):
     # validation" — pure arithmetic residue, not unchecked work.
     #
     # Mapping each event through the crawl rows makes the four buckets sum to
-    # total_citations, so Pending reaching 0 means exactly what it says.
+    # the citations validation actually covers, so Pending reaching 0 means
+    # exactly what it says.
+    #
+    # Own links only. Validation crawls the brand's own cited pages and nothing
+    # else — checking whether aws.amazon.com is up is someone else's problem,
+    # and it was 700+ crawls per pass. Counting the whole citation set here
+    # would leave Pending permanently stuck at every third-party citation.
     crawl_by_url = {}
     for row in crawled_urls.only('url', 'crawl_status', 'http_status_code'):
         crawl_by_url[citation_lookup_key(row.url)] = row
 
     status_breakdown = {'valid': 0, 'broken': 0, 'blocked': 0, 'pending': 0}
-    for url_data in all_urls:
+    for url_data in brand_urls:
         url = url_data['url']
         row = crawl_by_url.get(citation_lookup_key(url))
         if not row:
@@ -700,8 +735,9 @@ def citations_dashboard(request):
     # already-validated while 1,237 URLs were still queued. A running scan is
     # its own state and the only reliable signal for it is the scan record.
     running_scan = MisinformationScan.objects.filter(domain=domain, status='running').first()
-    # Progress in the same unit as the cards, so "x of y" matches Pending.
-    checked = total_citations - status_breakdown['pending']
+    # Progress in the same unit as the cards, so "x of y" matches Pending —
+    # which is own links, the only ones validation visits.
+    checked = your_domain_citations - status_breakdown['pending']
     if running_scan:
         validation_state = 'running'
     elif checked:
@@ -727,7 +763,8 @@ def citations_dashboard(request):
         'validation': {
             'state': validation_state,
             'checked': checked,
-            'total': total_citations,
+            # Own links, matching what validation crawls and what Pending counts.
+            'total': your_domain_citations,
             'started_at': running_scan.started_at if running_scan else None,
             'last_validated_at': last_completed.completed_at if last_completed else None,
         },
@@ -793,7 +830,7 @@ def citations_list(request):
 
     # Extract all citations with metadata
     all_citations = []
-    domain_url_clean = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
+    own_host = brand_host(domain)
 
     # Pre-fetch all citation URLs for this domain to avoid N+1 queries.
     # Keyed through citation_lookup_key so a citation the LLM emitted with
@@ -821,7 +858,7 @@ def citations_list(request):
                         continue
 
                     source_domain = extract_domain_from_url(url)
-                    is_your_domain = domain_url_clean in url
+                    is_your_domain = is_brand_url(url, own_host)
 
                     # Source type filter
                     if source_type_filter:
@@ -975,36 +1012,52 @@ def validate_citations(request):
             status=status.HTTP_409_CONFLICT,
         )
 
-    # Only rows that actually carry citations are worth handing to the scanner.
-    analytics_ids = list(
+    # Only rows that cite the brand's OWN pages are worth handing to the scanner.
+    #
+    # Validation answers one question — "is a link an AI sent to my site still
+    # alive?" — and that question only exists for our own URLs. Crawling the
+    # other 700 (aws.amazon.com, cloud.google.com, ...) told the user nothing
+    # they could act on and cost a fetch each.
+    own_host = brand_host(domain)
+    analytics_ids, citation_count = [], 0
+    for pa_id, citation_list in (
         PromptAnalytics.objects.filter(
             prompt__group__domain=domain,
             track_status='COMP',
         )
         .exclude(citation_list=[])
         .exclude(citation_list__isnull=True)
-        .values_list('id', flat=True)
-    )
+        .values_list('id', 'citation_list')
+    ):
+        own = [u for u in (citation_list or []) if is_brand_url(u, own_host)]
+        if own:
+            analytics_ids.append(pa_id)
+            citation_count += len(own)
 
     if not analytics_ids:
         return Response(
             {
-                'error': 'No citations found for this domain yet. Validation runs once prompts have been tracked.',
+                'error': (
+                    'No citations to your own site yet. Validation checks the links '
+                    'AI answers point back at you — third-party sources are not crawled.'
+                ),
                 'status': 'no_data',
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    citation_count = sum(
-        len(cl or [])
-        for cl in PromptAnalytics.objects.filter(id__in=analytics_ids).values_list('citation_list', flat=True)
-    )
-
     try:
         engine_api_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001').rstrip('/')
         response = requests.post(
             f"{engine_api_url}/api/misinformation/scan/",
-            json={'domain_id': domain_id, 'prompt_analytics_ids': analytics_ids},
+            json={
+                'domain_id': domain_id,
+                'prompt_analytics_ids': analytics_ids,
+                # Belt and braces: the ID list already only names responses that
+                # cite us, but a response usually cites us *and* twenty others.
+                # Without this the engine would still crawl all twenty.
+                'own_links_only': True,
+            },
             timeout=15,
         )
     except requests.exceptions.RequestException as e:
@@ -1031,7 +1084,7 @@ def validate_citations(request):
     return Response(
         {
             'status': 'started',
-            'message': f'Validating {citation_count} citations across {len(analytics_ids)} responses.',
+            'message': f'Validating {citation_count} links to your site across {len(analytics_ids)} responses.',
             'citation_count': citation_count,
             'response_count': len(analytics_ids),
             'task_id': response.json().get('task_id'),
@@ -1068,7 +1121,7 @@ def citations_by_source(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    domain_url_clean = domain.url.replace('https://', '').replace('http://', '').rstrip('/')
+    own_host = brand_host(domain)
 
     # Get all completed prompt analytics
     all_analytics = PromptAnalytics.objects.filter(
@@ -1088,7 +1141,7 @@ def citations_by_source(request):
                     source_data[source] = {
                         'source_domain': source,
                         'mention_count': 0,
-                        'is_your_domain': domain_url_clean in url,
+                        'is_your_domain': is_brand_url(url, own_host),
                         'platforms': set(),
                         'last_cited': None,
                     }
@@ -1120,7 +1173,7 @@ def citations_by_source(request):
                     results = [{
                         'source_domain': h,
                         'mention_count': c,
-                        'is_your_domain': domain_url_clean in h,
+                        'is_your_domain': is_brand_url(h, own_host),
                         'platforms': ['DataBlue SERP'],
                         'last_cited': timezone.now()
                     } for h, c in ranked]
@@ -1155,7 +1208,7 @@ def citation_detail(request, citation_id):
 
     domain_url = citation.domain.url.replace('https://', '').replace('http://', '').rstrip('/')
     source_domain = extract_domain_from_url(citation.url)
-    is_your_domain = domain_url in citation.url
+    is_your_domain = is_brand_url(citation.url, brand_host(citation.domain))
 
     # Get related alerts for this citation
     related_alerts = MisinformationAlert.objects.filter(

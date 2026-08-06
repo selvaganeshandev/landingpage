@@ -9,6 +9,7 @@ from llm_monitor.email_utils import send_mail
 from django.utils import timezone
 from django.conf import settings
 from django.core.cache import cache
+from django.db import transaction
 from .models import Account, Organisation, TeamInvitation, UserPermission, PasswordResetToken, decrypt_value
 from domains.models import Domain, DomainAccess
 from .services import ClientService  # used for client login activity logging
@@ -337,6 +338,14 @@ def send_invitation(request):
         )
     serializer = TeamInvitationCreateSerializer(data=request.data, context={'organisation': request.user.organisation})
     if serializer.is_valid():
+        # TeamInvitation is unique on (email, organisation), so re-inviting
+        # someone who was previously invited — a removed member, or a lapsed
+        # invite — has to replace the old row instead of adding one. Without
+        # this the save raised an unhandled IntegrityError.
+        TeamInvitation.objects.filter(
+            email=serializer.validated_data['email'],
+            organisation=request.user.organisation,
+        ).delete()
         invitation = serializer.save(invited_by=request.user, organisation=request.user.organisation, expires_at=timezone.now() + timezone.timedelta(days=7))
         try:
             subject = f"Invitation to join {invitation.organisation.name}"
@@ -369,6 +378,66 @@ def send_invitation(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+def _account_for_invitation(invitation):
+    """Resolve the existing account behind an invited address as
+    ``(reinstatable, conflicting)``.
+
+    Removing a member only flips ``is_active`` off (see
+    ``team_member_management``) so their reports, comments and access grants
+    stay attached to them. ``Account.email`` is globally unique, so re-inviting
+    that person has to revive the existing row rather than create a second one.
+    Any other match — an account still active, or one in another organisation —
+    is a genuine conflict and must keep being rejected.
+    """
+    account = Account.objects.filter(email=invitation.email).first()
+    if account is None:
+        return None, None
+    if account.is_active or account.organisation_id != invitation.organisation_id:
+        return None, account
+    return account, None
+
+
+def _provision_invited_user(user, invitation):
+    """Give a newly accepted invitee the default rights for their role.
+
+    Grant-everything defaults apply to staff only. Clients are domain-scoped to
+    exactly the domain their invitation targeted. Callers must have cleared any
+    prior grants first, so this produces the same result for a returning member
+    as for a first-time invitee.
+    """
+    if user.role == 'client':
+        if invitation.domain_id:
+            # update_or_create, not get_or_create: a returning member has a
+            # revoked row for this domain that needs re-enabling, and defaults
+            # only apply on insert.
+            DomainAccess.objects.update_or_create(
+                user=user,
+                domain=invitation.domain,
+                defaults={'granted_by': invitation.invited_by, 'is_active': True},
+            )
+            user.active_domain_id = invitation.domain_id
+            user.save(update_fields=['active_domain_id', 'modified_at'])
+        return
+
+    # Grant all module permissions by default - admin can revoke specific ones later.
+    # PRIVILEGED_MODULES are excluded: granting team_management here (even at
+    # 'read') is what let every invited user send invitations, including for
+    # ADMIN accounts. Admins do not need the row — their role short-circuits
+    # the check — so nothing is lost by withholding it from everyone.
+    all_modules = [m[0] for m in UserPermission.MODULE_CHOICES if m[0] not in PRIVILEGED_MODULES]
+    for module in all_modules:
+        UserPermission.objects.create(user=user, module=module, permission_level='read', granted_by=invitation.invited_by)
+
+    # Grant access to all existing domains in the organization
+    org_domains = Domain.objects.filter(organisation=invitation.organisation)
+    for domain in org_domains:
+        DomainAccess.objects.update_or_create(
+            user=user,
+            domain=domain,
+            defaults={'granted_by': invitation.invited_by, 'is_active': True}
+        )
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def get_invitation_details(request, invitation_id):
@@ -376,7 +445,8 @@ def get_invitation_details(request, invitation_id):
         invitation = get_object_or_404(TeamInvitation, id=invitation_id)
         if not invitation.can_be_accepted():
             return Response({'error': 'Invitation has expired or is no longer valid'}, status=status.HTTP_400_BAD_REQUEST)
-        if Account.objects.filter(email=invitation.email).exists():
+        _, conflict = _account_for_invitation(invitation)
+        if conflict:
             return Response({'error': 'User with this email already exists'}, status=status.HTTP_400_BAD_REQUEST)
         return Response(TeamInvitationSerializer(invitation).data, status=status.HTTP_200_OK)
     except Exception as e:
@@ -390,47 +460,43 @@ def accept_invitation(request, invitation_id):
         invitation = get_object_or_404(TeamInvitation, id=invitation_id)
         if not invitation.can_be_accepted():
             return Response({'error': 'Invitation has expired or is no longer valid'}, status=status.HTTP_400_BAD_REQUEST)
-        if Account.objects.filter(email=invitation.email).exists():
+        returning_member, conflict = _account_for_invitation(invitation)
+        if conflict:
             return Response({'error': 'User with this email already exists'}, status=status.HTTP_400_BAD_REQUEST)
         first_name = request.data.get('first_name', '')
         last_name = request.data.get('last_name', '')
         password = request.data.get('password')
         if not password:
             return Response({'error': 'Password is required'}, status=status.HTTP_400_BAD_REQUEST)
-        user = Account.objects.create_user(username=invitation.email, email=invitation.email, password=password, first_name=first_name, last_name=last_name, role=invitation.role, organisation=invitation.organisation, is_active=True)
-        invitation.status = 'accepted'
-        invitation.accepted_at = timezone.now()
-        invitation.save()
-        # Grant-everything defaults apply to staff only. Clients are domain-scoped
-        # to exactly the domain their invitation targeted.
-        if user.role == 'client':
-            if invitation.domain_id:
-                DomainAccess.objects.get_or_create(
-                    user=user,
-                    domain=invitation.domain,
-                    defaults={'granted_by': invitation.invited_by, 'is_active': True},
-                )
-                user.active_domain_id = invitation.domain_id
-                user.save(update_fields=['active_domain_id', 'modified_at'])
-        else:
-            # Grant all module permissions by default - admin can revoke specific ones later.
-            # PRIVILEGED_MODULES are excluded: granting team_management here (even at
-            # 'read') is what let every invited user send invitations, including for
-            # ADMIN accounts. Admins do not need the row — their role short-circuits
-            # the check — so nothing is lost by withholding it from everyone.
-            all_modules = [m[0] for m in UserPermission.MODULE_CHOICES if m[0] not in PRIVILEGED_MODULES]
-            for module in all_modules:
-                UserPermission.objects.create(user=user, module=module, permission_level='read', granted_by=invitation.invited_by)
-
-            # Grant access to all existing domains in the organization
-            org_domains = Domain.objects.filter(organisation=invitation.organisation)
-            for domain in org_domains:
-                DomainAccess.objects.get_or_create(
-                    user=user,
-                    domain=domain,
-                    defaults={'granted_by': invitation.invited_by}
-                )
-
+        # Reactivation clears permissions before re-granting them, so a failure
+        # part-way through would otherwise leave a live account with no access.
+        with transaction.atomic():
+            if returning_member:
+                # Revive the removed member's own account so every report,
+                # comment and grant they created stays theirs. They set a fresh
+                # password here — the old one is not carried over.
+                user = returning_member
+                user.first_name = first_name
+                user.last_name = last_name
+                user.role = invitation.role
+                user.is_active = True
+                user.account_status = 'active'
+                user.active_domain_id = None
+                user.set_password(password)
+                user.save()
+                # Re-grant from a clean slate below, so a returning member lands
+                # on exactly the rights a brand-new invitee of this role would
+                # get. Keeping the old rows would carry a former admin's module
+                # permissions, or a former staffer's org-wide domain access,
+                # into a re-invite that deliberately assigns a lesser role.
+                UserPermission.objects.filter(user=user).delete()
+                DomainAccess.objects.filter(user=user).update(is_active=False)
+            else:
+                user = Account.objects.create_user(username=invitation.email, email=invitation.email, password=password, first_name=first_name, last_name=last_name, role=invitation.role, organisation=invitation.organisation, is_active=True)
+            _provision_invited_user(user, invitation)
+            invitation.status = 'accepted'
+            invitation.accepted_at = timezone.now()
+            invitation.save()
         return Response({'message': 'Invitation accepted successfully', 'user': AccountSerializer(user).data}, status=status.HTTP_201_CREATED)
     except Exception as e:
         return Response({'error': f'Failed to accept invitation: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1270,7 +1336,12 @@ def delete_invitation(request, invitation_id):
 def team_members(request):
     if not _can_view_team(request.user):
         return Response({'error': 'You do not have permission to view team members'}, status=status.HTTP_403_FORBIDDEN)
-    members = Account.objects.filter(organisation=request.user.organisation).exclude(role='super_admin')
+    # Removed members are deactivated rather than deleted so their work stays
+    # attributed to them, but they are no longer part of the team and must not
+    # be listed — this also keeps the list consistent with Organisation.team_count,
+    # which has always counted active accounts only. Re-inviting them revives
+    # the account (see accept_invitation) and brings them back here.
+    members = Account.objects.filter(organisation=request.user.organisation, is_active=True).exclude(role='super_admin')
     members_data = []
     for member in members:
         members_data.append({'id': member.id, 'email': member.email, 'first_name': member.first_name, 'last_name': member.last_name, 'role': member.role, 'organisation': member.organisation.id, 'organisation_name': member.organisation.name, 'is_active': member.is_active, 'created_at': member.created_at, 'modified_at': member.modified_at})
@@ -1331,7 +1402,12 @@ def team_member_management(request, member_id):
                     perm.save()
 
         return Response({'message': 'Team member role updated successfully', 'member': {'id': member.id, 'email': member.email, 'first_name': member.first_name, 'last_name': member.last_name, 'role': member.role, 'organisation': member.organisation.id, 'organisation_name': member.organisation.name, 'is_active': member.is_active, 'created_at': member.created_at, 'modified_at': member.modified_at}})
+    # Soft delete: the row survives so everything the member created stays
+    # attributed to them, and re-inviting them revives this same account.
+    # account_status is the gate core.authorization and jwt_auth check, so it
+    # has to move in step with is_active — matching how client removal works.
     member.is_active = False
+    member.account_status = 'disabled'
     member.save()
     organization = request.user.organisation
     organization.team_count = Account.objects.filter(organisation=organization, is_active=True).count()

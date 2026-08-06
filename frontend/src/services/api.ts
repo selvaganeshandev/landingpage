@@ -603,6 +603,29 @@ export const apiClient = {
       body: JSON.stringify(data),
     }),
 
+  /**
+   * Onboarding site analysis: crawls the brand's homepage and extracts its
+   * profile, falling back to model knowledge when the site can't be read.
+   * Blocking — a crawl plus a model call, ~15s. Nothing is saved.
+   */
+  analyzeBrandSite: (data: { domain_name: string; brand_name: string }) =>
+    apiRequest('/domains/analyze-site/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** Creates the brand from an analyzeBrandSite result. No keywords, no prompts. */
+  createAnalyzedDomain: (data: {
+    domain_name: string;
+    brand_name: string;
+    country: string;
+    fields?: Record<string, any>;
+  }) =>
+    apiRequest('/domains/create-analyzed/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   getDomainHealthCheck: (domainId: number) =>
     apiRequest(`/domains/${domainId}/health-check/`, { timeout: 300000 }),  // 5 minutes - health check calls multiple external APIs
 
@@ -1107,6 +1130,32 @@ export const apiClient = {
    * the same rows Insights, Mentions and Citations report on, so the figures
    * reconcile with those pages. Omit `days` for all-time.
    */
+  /**
+   * Progress of a running topic-grouping job. Cheap and safe to poll: it reads
+   * a Redis record the engine task keeps, so the page can restore a progress
+   * bar after a refresh instead of showing "No topics yet" mid-run.
+   */
+  getTopicGenerationStatus: (domainId: number) =>
+    apiRequest(`/topics/generation-status/?domain_id=${domainId}`),
+
+  /**
+   * Candidate prompt seeds from the project's Search Console queries: branded
+   * searches removed, ordered by whether an answer would name brands at all.
+   */
+  getSearchConsoleSeeds: (domainId: number) =>
+    apiRequest(`/prompts/generation-runs/search-console-seeds/?domain_id=${domainId}`, {
+      // A live Search Console call, up to 1,000 rows.
+      timeout: 60000,
+    }),
+
+  /** Rewrites chosen Search Console queries into prompts, ready for review. */
+  createRunFromSearchConsole: (data: { domain_id: number; queries: string[] }) =>
+    apiRequest('/prompts/generation-runs/from-search-console/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      timeout: 120000,
+    }),
+
   /**
    * Queue topic generation for a domain. Additive — only ungrouped keywords are
    * read and TopicProcessor performs no deletes — so it is safe on a domain

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,17 @@ import {
   Target,
   LinkIcon,
   AlertCircle,
+  ExternalLink,
+  ChevronDown,
+  Check,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { InfoHint } from "@/components/InfoHint";
 import { apiClient } from "@/services/api";
@@ -69,6 +79,15 @@ const PromptDetail = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [selectedResponsePlatform, setSelectedResponsePlatform] = useState<string>("");
   const [platformResponses, setPlatformResponses] = useState<Record<string, string>>({});
+  // Every variant's answer, per platform: { [promptId]: { [platform]: text } }.
+  // The page used to read prompts[0] only, so a group's other variants had
+  // their metrics on screen with no way to see what was actually said.
+  const [variantResponses, setVariantResponses] = useState<Record<number, Record<string, string>>>({});
+  // Which variant the Main Prompt card and the response tabs are showing.
+  // null means the group's primary prompt.
+  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
+  const [promptPickerOpen, setPromptPickerOpen] = useState(false);
+  const responseSectionRef = useRef<HTMLDivElement>(null);
 
   // Initial load - load everything once
   useEffect(() => {
@@ -116,6 +135,7 @@ const PromptDetail = () => {
 
       // Fetch full responses for each platform
       const responsesMap: Record<string, string> = {};
+      const byVariant: Record<number, Record<string, string>> = {};
 
       // First, check if we have a primary response and which platform it belongs to
       const primaryPlatform = promptsData.find((p: any) => p.full_ai_response)?.platform ||
@@ -143,6 +163,13 @@ const PromptDetail = () => {
             // Try multiple sources for the response
             let platformFullResponse = null;
 
+            // Keep every variant's answer for this platform, not only the
+            // first prompt's — the variant selector reads from this.
+            const perVariant: Record<number, string> = {};
+            (platformResponse.group?.prompts || []).forEach((pr: any) => {
+              if (pr?.id && pr?.full_ai_response) perVariant[pr.id] = pr.full_ai_response;
+            });
+
             if (platformResponse.group?.prompts?.[0]?.full_ai_response) {
               // First priority: prompt's own full_ai_response
               platformFullResponse = platformResponse.group.prompts[0].full_ai_response;
@@ -155,14 +182,14 @@ const PromptDetail = () => {
 
             if (platformFullResponse) {
               console.log(`✓ Stored response for ${platform}, length: ${platformFullResponse.length}`);
-              return { platform, response: platformFullResponse };
+              return { platform, response: platformFullResponse, perVariant };
             } else {
               console.warn(`✗ No response found for ${platform}`);
-              return { platform, response: null };
+              return { platform, response: null, perVariant };
             }
           } catch (error) {
             console.error(`Failed to load response for ${platform}:`, error);
-            return { platform, response: null };
+            return { platform, response: null, perVariant: {} };
           }
         });
 
@@ -170,14 +197,19 @@ const PromptDetail = () => {
         const results = await Promise.all(platformPromises);
 
         // Store all results in the map
-        results.forEach(({ platform, response }) => {
+        results.forEach(({ platform, response, perVariant }) => {
           if (response) {
             responsesMap[platform] = response;
           }
+          Object.entries(perVariant || {}).forEach(([promptId, text]) => {
+            const key = Number(promptId);
+            byVariant[key] = { ...(byVariant[key] || {}), [platform]: text as string };
+          });
         });
       }
 
       setPlatformResponses(responsesMap);
+      setVariantResponses(byVariant);
 
       // Debug: Log the full AI response availability
       console.log('Prompt Group Response:', {
@@ -276,6 +308,31 @@ const PromptDetail = () => {
   }, [promptGroup]);
 
   // Show all variants - filtering is done on the backend via API call
+  // The variant currently on show, and the text/response that belong to it.
+  const selectedVariant = useMemo(
+    () => prompts.find((p: any) => p.id === selectedVariantId) || null,
+    [prompts, selectedVariantId],
+  );
+
+  const selectedPromptText =
+    selectedVariant?.prompt_text || promptGroup?.primary_prompt || 'No main prompt available';
+
+  /** A variant's answer for one platform, falling back to the group's primary. */
+  const responseFor = (platform: string) => {
+    if (selectedVariantId && variantResponses[selectedVariantId]?.[platform]) {
+      return variantResponses[selectedVariantId][platform];
+    }
+    // No stored answer for this variant on this platform: say so rather than
+    // showing the primary prompt's answer, which would misattribute it.
+    if (selectedVariantId) return '';
+    return platformResponses[platform] || '';
+  };
+
+  const showVariant = (variantId: number) => {
+    setSelectedVariantId(variantId);
+    responseSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const filteredVariants = useMemo(() => {
     // Always show all prompts returned from API (backend already filters by platform)
     return prompts || [];
@@ -529,22 +586,85 @@ const PromptDetail = () => {
       </div>
 
       {/* Main Prompt Trend - Full Width */}
-      <Card className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
+      <Card ref={responseSectionRef} className="p-6 shadow-elegant border-border/50 backdrop-blur-sm bg-card/80">
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold font-inter">Main Prompt</h3>
-            <Button variant="ghost" size="sm" onClick={() => handleCopy(promptGroup?.primary_prompt || '')}>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h3 className="text-lg font-semibold font-inter">
+              {selectedVariantId ? 'Variant' : 'Main Prompt'}
+            </h3>
+            <Button variant="ghost" size="sm" onClick={() => handleCopy(selectedPromptText)}>
               <Copy className="h-4 w-4 mr-1" />
               Copy
             </Button>
           </div>
-          <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
+
+          {/* The box keeps its own styling; the chevron in its corner is the
+              only affordance, and it opens a list rather than a native menu —
+              these are full questions, and a dropdown row truncates them to
+              something you cannot tell apart. */}
+          <div className="relative p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
             {/* text-sm, not text-lg: this is a short value being displayed, not
                 long-form reading content. At 18px it outweighed the "Main
                 Prompt" heading above it. The AI response below stays at
                 text-[15px] (FORMATTED_MESSAGE_CLASSES) because that IS prose. */}
-            <p className="font-mono text-sm leading-relaxed break-words">{promptGroup?.primary_prompt || 'No main prompt available'}</p>
+            <p className={`font-mono text-sm leading-relaxed break-words ${prompts.length > 1 ? 'pr-10' : ''}`}>
+              {selectedPromptText}
+            </p>
+
+            {prompts.length > 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                title="Show every prompt in this group"
+                onClick={() => setPromptPickerOpen(true)}
+                className="absolute right-2 bottom-2 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            )}
           </div>
+
+          <Dialog open={promptPickerOpen} onOpenChange={setPromptPickerOpen}>
+            <DialogContent className="sm:max-w-[720px]">
+              <DialogHeader>
+                <DialogTitle>Prompts in this group</DialogTitle>
+                <DialogDescription>
+                  Pick one to see what each assistant answered.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="max-h-[55vh] overflow-y-auto -mx-1 px-1 space-y-2">
+                {[{ id: null as number | null, text: promptGroup?.primary_prompt || 'Main prompt', label: 'Main prompt' },
+                  ...prompts.map((p: any) => ({ id: p.id as number | null, text: p.prompt_text, label: '' }))
+                ].map((item, index) => {
+                  const isActive = selectedVariantId === item.id;
+                  return (
+                    <button
+                      key={item.id ?? `primary-${index}`}
+                      type="button"
+                      onClick={() => {
+                        setSelectedVariantId(item.id);
+                        setPromptPickerOpen(false);
+                      }}
+                      className={`w-full text-left rounded-lg border p-3 transition-colors ${
+                        isActive
+                          ? 'border-primary/40 bg-primary/5'
+                          : 'border-border hover:border-primary/30 hover:bg-accent/40'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <p className="font-mono text-sm leading-relaxed break-words flex-1">{item.text}</p>
+                        {isActive && <Check className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />}
+                      </div>
+                      {item.label && (
+                        <span className="text-xs text-muted-foreground mt-1 inline-block">{item.label}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </Card>
 
@@ -554,7 +674,7 @@ const PromptDetail = () => {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold font-inter">Full AI Response</h3>
-              <Button variant="ghost" size="sm" onClick={() => handleCopy(selectedFullAiResponse || '')}>
+              <Button variant="ghost" size="sm" onClick={() => handleCopy(responseFor(selectedResponsePlatform) || selectedFullAiResponse || '')}>
                 <Copy className="h-4 w-4 mr-1" />
                 Copy
               </Button>
@@ -575,7 +695,7 @@ const PromptDetail = () => {
 
               {availablePlatforms.map((platform) => {
                 // Get the platform-specific response from our pre-loaded map
-                const platformResponse = platformResponses[platform] || '';
+                const platformResponse = responseFor(platform);
 
                 // Debug logging
                 console.log(`Platform Tab: ${platform}`, {
@@ -741,19 +861,35 @@ const PromptDetail = () => {
                   {filteredVariants.map((variant: any) => {
                     const dominantSentiment = getDominantSentiment(variant.sentiment);
                     return (
-                    <TableRow key={variant.id}>
+                    <TableRow
+                      key={variant.id}
+                      onClick={() => showVariant(variant.id)}
+                      className={`cursor-pointer ${selectedVariantId === variant.id ? 'bg-primary/5' : ''}`}
+                    >
                         <TableCell>
                           <div className="flex items-start gap-2">
-                            <p
-                              className={`text-sm flex-1 ${variant.latest_mention_id ? 'cursor-pointer hover:text-primary' : ''}`}
-                              onClick={() => {
-                                if (variant.latest_mention_id) {
-                                  navigate(`/mentions/${variant.latest_mention_id}`);
-                                }
-                              }}
-                            >
+                            {/* The row shows this variant's answer above. The
+                                mention link moved to its own control: clicking
+                                the text used to navigate away to /mentions,
+                                which is a different question from "what did the
+                                assistants say to this one?". */}
+                            <p className="text-sm flex-1 hover:text-primary">
                               {variant.prompt_text}
                             </p>
+                            {variant.latest_mention_id && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                title="Open the latest mention"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/mentions/${variant.latest_mention_id}`);
+                                }}
+                                className="opacity-70 hover:opacity-100"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"

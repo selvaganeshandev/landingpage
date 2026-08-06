@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, ProtectedRoute } from "@/contexts/AuthContext";
 import { SidebarProvider } from "@/contexts/SidebarContext";
 import { Layout } from "./components/Layout";
+import { RouteFallback } from "./components/RouteFallback";
 const Chat = lazy(() => import("./pages/Chat").then((m) => ({ default: m.Chat })));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Prompts = lazy(() => import("./pages/Prompts"));
@@ -59,18 +60,11 @@ import { MODULES } from "@/types/auth";
 
 const queryClient = new QueryClient();
 
-/** Shown while a route's chunk is fetched.
- *
- *  Every page is code-split, so navigating to one the browser has not seen
- *  costs a network round trip. Deliberately minimal: a spinner that appears for
- *  ~100ms on a fast connection is more distracting than a blank area, and the
- *  surrounding Layout (sidebar, header) is eager, so the app never looks gone.
- */
-const RouteFallback = () => (
-  <div className="flex items-center justify-center py-24">
-    <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
-  </div>
-);
+/* RouteFallback moved to components/RouteFallback so Layout can mount its own
+ * Suspense boundary around the content area. This outer boundary now only
+ * catches the routes that render outside the app shell (sign-in and friends):
+ * inside the shell, Layout's boundary is the nearer one and wins, which is what
+ * keeps the sidebar on screen while a page chunk downloads. */
 
 const App = () => (
   <QueryClientProvider client={queryClient}>

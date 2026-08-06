@@ -416,6 +416,15 @@ VOLUME_SWEEP_ENABLED = config('VOLUME_SWEEP_ENABLED', default=True, cast=bool)
 # (403 / 429 / timeout / connection error), so it bills on a fraction of URLs.
 # Set MISINFO_DATABLUE_FALLBACK=False to disable and keep the HEAD-only verdict.
 MISINFO_DATABLUE_FALLBACK = config('MISINFO_DATABLUE_FALLBACK', default=True, cast=bool)
+
+# The misinformation scan now re-runs after every prompt-tracking cycle, not
+# once per domain lifetime. Left False it stays a full scan, which is what
+# misinformation detection needs — the claims being checked live on third-party
+# pages. Set True to narrow the recurring scan to the brand's own cited pages
+# (link health only, a handful of URLs per cycle) if the crawl cost matters more
+# than catching hallucinations on other people's sites. The Citations page's
+# Validate button is always own-links-only regardless of this setting.
+MISINFO_FOLLOWUP_OWN_LINKS_ONLY = config('MISINFO_FOLLOWUP_OWN_LINKS_ONLY', default=False, cast=bool)
 DATABLUE_SCRAPE_URL = config('DATABLUE_SCRAPE_URL', default='https://api.datablue.dev/v1/scrape')
 DATABLUE_SCRAPE_TIMEOUT = config('DATABLUE_SCRAPE_TIMEOUT', default=30, cast=int)
 # Request body field holding the target URL. "url" is what /v1/scrape expects

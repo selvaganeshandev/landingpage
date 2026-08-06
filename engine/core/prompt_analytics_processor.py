@@ -1185,55 +1185,14 @@ class PromptAnalyticsProcessor:
                         domain_fresh.tracked_at = timezone.now()
                         domain_fresh.save(update_fields=['processing_status', 'track_message', 'tracked_at', 'modified_at'])
 
-                        # Topic generation is NOT triggered here any more.
-                        #
-                        # It used to fire automatically on this PROC -> COMP
-                        # transition, which made it a one-shot: a domain that
-                        # completed before its keywords were ready, or whose
-                        # grouping call failed that day, had no second chance and
-                        # no way to ask for one. It also meant a run started
-                        # itself, so a failure was invisible until someone opened
-                        # the page and found it empty.
-                        #
-                        # Generation now runs only when a user asks for it, via
-                        # POST /api/topics/generate/ behind the Start Analysing
-                        # button on the Topics page. The run is additive and
-                        # repeatable, so triggering it deliberately costs nothing
-                        # that an automatic run did not already cost.
+                        # Topics, competitors and the misinformation scan are not
+                        # triggered from this branch — see _run_domain_followups
+                        # below, which runs them per finished cycle instead of
+                        # once per lifetime. The Topics page's Start Analysing
+                        # button (POST /api/topics/generate/) still exists for
+                        # the manual case; both paths are additive and share the
+                        # same "only ungrouped keywords" guard.
 
-                        # Auto-trigger competitor analysis
-                        logger.info(f"🎯 Auto-triggering competitor analysis for domain {domain.id}")
-                        domain_fresh.competitor_analysis_status = 'READY'
-                        domain_fresh.save(update_fields=['competitor_analysis_status', 'modified_at'])
-
-                        # Extract and create competitors automatically
-                        try:
-                            created_count, competitor_names = _extract_competitors_for_domain(domain_fresh)
-                            if created_count > 0:
-                                logger.info(f"✅ Auto-extracted {created_count} competitors for domain {domain.id}: {', '.join(competitor_names)}")
-                                # Competitors will be picked up by competitor scheduler
-                            else:
-                                logger.info(f"No new competitors extracted for domain {domain.id}")
-                        except Exception as comp_error:
-                            logger.error(f"Error auto-extracting competitors for domain {domain.id}: {str(comp_error)}")
-
-                        # Sync competitor analytics after extraction
-                        try:
-                            from competitors.utils import sync_competitor_prompt_analytics
-                            logger.info(f"🔄 Syncing competitor prompt analytics for domain {domain.id}")
-                            sync_stats = sync_competitor_prompt_analytics(domain_id=domain.id)
-                            logger.info(f"✅ Competitor sync completed for domain {domain.id}: {sync_stats}")
-                        except Exception as sync_error:
-                            logger.error(f"Error syncing competitor analytics for domain {domain.id}: {str(sync_error)}")
-
-                        # Auto-trigger misinformation scan
-                        logger.info(f"🔍 Auto-triggering misinformation scan for domain {domain.id}")
-                        domain_fresh.misinformation_scan_status = 'READY'
-                        domain_fresh.save(update_fields=['misinformation_scan_status', 'modified_at'])
-                        
-                        # Trigger the scan via Celery task
-                        from .processing_tasks import process_misinformation_scan_task
-                        process_misinformation_scan_task.delay(domain.id)
                     else:
                         logger.info(f"Domain {domain.id} already in status {domain_fresh.processing_status}, skipping")
             else:
@@ -1241,8 +1200,134 @@ class PromptAnalyticsProcessor:
                 pending_groups = total_groups - completed_groups
                 logger.info(f"Domain {domain.id} still processing: {pending_groups} groups remaining")
 
+            # Follow-ups run per finished CYCLE, not per PROC -> COMP transition.
+            #
+            # Competitor extraction and the misinformation scan used to live
+            # inside the `processing_status == 'PROC'` branch above, so they
+            # fired exactly once in a domain's life. Two consequences: a domain
+            # created already COMP (the current onboarding does this — it queues
+            # no keyword run, so there is nothing for it to be PROC for) never
+            # got competitors or a citation scan at all; and an established
+            # domain that had 40 new prompts accepted got its dashboards updated
+            # while its competitor set and citation checks stayed frozen at
+            # whatever the first run found.
+            #
+            # Hanging them off "this domain has no group still queued" instead
+            # makes them track the prompt list: every time a batch of prompts
+            # finishes tracking, the modules built on that data refresh.
+            self._run_domain_followups(domain)
+
         except Exception as e:
             logger.error(f"Error checking domain completion for domain {domain.id}: {str(e)}")
+
+    def _run_domain_followups(self, domain: Domain) -> None:
+        """Refresh the modules that are derived from tracked prompt data.
+
+        Called when a domain's tracking cycle drains (no group left in INIT,
+        SCHD or PROC). Each follow-up guards itself so a domain whose cycle
+        drains twice in quick succession does not pay twice, and so a module
+        already mid-run is never restarted underneath itself.
+        """
+        try:
+            busy_groups = PromptGroup.objects.filter(
+                domain=domain, track_status__in=['INIT', 'SCHD', 'PROC']
+            ).count()
+            if busy_groups:
+                return
+
+            # Nothing tracked yet means nothing to derive from: no responses to
+            # mine competitors out of, no citations to check, no analytics to
+            # group. Skip rather than queue three runs that can only find zero.
+            has_analytics = PromptAnalytics.objects.filter(
+                prompt__group__domain=domain, track_status='COMP'
+            ).exists()
+            if not has_analytics:
+                logger.info(f"[Followups] Domain {domain.id}: no completed analytics yet, skipping")
+                return
+
+            domain_fresh = Domain.objects.get(id=domain.id)
+
+            # ---- Competitors -------------------------------------------------
+            # Extraction is additive (it only creates competitors it has not seen)
+            # and the competitor scheduler picks the new rows up on its own tick.
+            if domain_fresh.competitor_analysis_status == 'ANALYZING':
+                logger.info(f"[Followups] Domain {domain.id}: competitor analysis already running")
+            else:
+                try:
+                    domain_fresh.competitor_analysis_status = 'READY'
+                    domain_fresh.save(update_fields=['competitor_analysis_status', 'modified_at'])
+
+                    created_count, competitor_names = _extract_competitors_for_domain(domain_fresh)
+                    if created_count > 0:
+                        logger.info(
+                            f"✅ [Followups] Extracted {created_count} competitors for domain "
+                            f"{domain.id}: {', '.join(competitor_names)}"
+                        )
+                    else:
+                        logger.info(f"[Followups] No new competitors for domain {domain.id}")
+                except Exception as comp_error:
+                    logger.error(f"[Followups] Competitor extraction failed for {domain.id}: {comp_error}")
+
+                try:
+                    from competitors.utils import sync_competitor_prompt_analytics
+                    sync_stats = sync_competitor_prompt_analytics(domain_id=domain.id)
+                    logger.info(f"✅ [Followups] Competitor sync for domain {domain.id}: {sync_stats}")
+                except Exception as sync_error:
+                    logger.error(f"[Followups] Competitor sync failed for {domain.id}: {sync_error}")
+
+            # ---- Misinformation / citations ----------------------------------
+            # The processor skips any URL crawled in the last 24h, so a rerun
+            # costs fetches only for citations that are actually new.
+            try:
+                from shared_models.models import MisinformationScan
+
+                scan_running = MisinformationScan.objects.filter(
+                    domain=domain, status='running'
+                ).exists()
+                if scan_running or domain_fresh.misinformation_scan_status == 'SCANNING':
+                    logger.info(f"[Followups] Domain {domain.id}: misinformation scan already running")
+                else:
+                    domain_fresh.misinformation_scan_status = 'READY'
+                    domain_fresh.save(update_fields=['misinformation_scan_status', 'modified_at'])
+
+                    # Full scan by default: misinformation detection is about
+                    # what OTHER people's pages say, so it has to read them.
+                    # MISINFO_FOLLOWUP_OWN_LINKS_ONLY=True narrows the recurring
+                    # scan to the brand's own pages (link health only, a handful
+                    # of URLs) for anyone who wants the cheaper cadence.
+                    own_only = bool(getattr(settings, 'MISINFO_FOLLOWUP_OWN_LINKS_ONLY', False))
+
+                    from .processing_tasks import process_misinformation_scan_task
+                    process_misinformation_scan_task.delay(domain.id, None, own_only)
+                    logger.info(
+                        f"🔍 [Followups] Queued misinformation scan for domain {domain.id} "
+                        f"(own_links_only={own_only})"
+                    )
+            except Exception as scan_error:
+                logger.error(f"[Followups] Could not queue misinformation scan for {domain.id}: {scan_error}")
+
+            # ---- Topics ------------------------------------------------------
+            # Topics group KEYWORDS, not prompts, and TopicProcessor only reads
+            # keywords never used for grouping — so this is a no-op unless new
+            # keywords have arrived. That guard is what makes it safe to call on
+            # every cycle: no unused keywords, no LLM spend.
+            try:
+                from shared_models.models import Keyword
+
+                unused_keywords = Keyword.objects.filter(
+                    domain=domain, last_used_for_topic_generation__isnull=True
+                ).exists()
+                if unused_keywords:
+                    from .processing_tasks import process_topics_for_domain_task
+                    process_topics_for_domain_task.delay(domain.id)
+                    logger.info(f"🧩 [Followups] Queued topic grouping for domain {domain.id}")
+                else:
+                    logger.info(f"[Followups] Domain {domain.id}: no ungrouped keywords, topics unchanged")
+            except Exception as topic_error:
+                logger.error(f"[Followups] Could not queue topics for {domain.id}: {topic_error}")
+
+        except Exception as e:
+            logger.error(f"[Followups] Error running follow-ups for domain {domain.id}: {e}", exc_info=True)
 
     def _update_sentiment_analytics_for_theme(self, group: PromptGroup, analytics) -> None:
         """

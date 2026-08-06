@@ -768,7 +768,7 @@ export const PromptGenerationWizard = ({
               <span className="font-medium text-foreground">
                 {estimate} calls/month
               </span>{" "}
-              on your OpenRouter key at 3 platforms, tracked daily.
+              across 3 AI platforms, tracked daily.
             </p>
           </div>
 

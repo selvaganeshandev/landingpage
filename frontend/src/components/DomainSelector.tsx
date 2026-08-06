@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Check, Globe, Loader2, ChevronsUpDown, AlertCircle, Search } from "lucide-react";
+import { Check, Globe, Loader2, ChevronsUpDown, AlertCircle, Search, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { AddDomainDialog } from "@/components/AddDomainDialog";
 import { cn } from "@/lib/utils";
 import { useDomainStore } from "@/stores/domainStore";
 import { useAuth } from "@/contexts/AuthContext";
@@ -26,6 +27,7 @@ const hostLabel = (url?: string | null): string => {
 export const DomainSelector = () => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [addDomainOpen, setAddDomainOpen] = useState(false);
   const { toast } = useToast();
   
   const {
@@ -190,6 +192,8 @@ export const DomainSelector = () => {
     }
   };
 
+  const canAddDomain = user?.role === 'admin' || user?.role === 'super_admin';
+
   if (isLoading && domains.length === 0) {
     return (
       <Button
@@ -353,8 +357,29 @@ export const DomainSelector = () => {
               </div>
             )}
           </div>
+
+          {canAddDomain && (
+            <div className="flex justify-end pt-2">
+              <Button
+                onClick={() => {
+                  setOpen(false);
+                  setAddDomainOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Domain
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
+
+      <AddDomainDialog
+        open={addDomainOpen}
+        onOpenChange={setAddDomainOpen}
+        // Selection and the hand-off to Prompts happen inside the dialog, so
+        // both entry points behave the same.
+      />
     </>
   );
 };

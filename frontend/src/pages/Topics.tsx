@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
 import { PageLoader } from "@/components/PageLoader";
+import { NoPromptsYet } from "@/components/NoPromptsYet";
 import {
   TrendingUp,
   TrendingDown,
@@ -33,6 +34,13 @@ import {
   ResponsiveContainer,
   Legend 
 } from "recharts";
+
+// Grouping is a background LLM job of one model call per 40 keywords, ~35s a
+// batch: 30s for a 44-keyword project, 3 minutes at 200, and IOB Bank's 812
+// pending keywords are 21 batches — around 13 minutes. Poll on that scale
+// rather than guessing a single reload delay.
+const GENERATION_POLL_MS = 5000;
+const GENERATION_TIMEOUT_MS = 20 * 60 * 1000;
 
 // Chart color palette
 const CHART_COLORS = [
@@ -89,6 +97,16 @@ const Topics = () => {
   const [promptSuggestions, setPromptSuggestions] = useState<any[]>([]);
   const [promptLoading, setPromptLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  // Server-reported progress of the grouping run: {state, batches_done,
+  // batches_total, percent}. Read from the engine, not from React state, so a
+  // refresh mid-run restores the bar instead of showing "No topics yet".
+  const [genProgress, setGenProgress] = useState<any>(null);
+  // Bumped to re-run the fetch effect once a run has finished, instead of
+  // reloading the whole page on a guessed timer.
+  const [reloadKey, setReloadKey] = useState(0);
+  // Set on unmount so a poll that outlives the page cannot setState.
+  const goneRef = useRef(false);
+  useEffect(() => () => { goneRef.current = true; }, []);
 
   const handleGenerateContent = (topic: typeof topics[0]) => {
     setSelectedTopic(topic);
@@ -348,7 +366,7 @@ const Topics = () => {
     };
 
     fetchTopics();
-  }, [selectedDomain?.id, toast]);
+  }, [selectedDomain?.id, toast, reloadKey]);
 
   // Use topics directly (search removed)
   const filteredTopics = topics;
@@ -454,18 +472,89 @@ const Topics = () => {
     }
   };
 
+  // Watches the engine's progress record until the run leaves 'running'.
+  // Defined outside the click handler because the mount effect below uses it
+  // too: a refresh mid-run has no click to hang a poll off.
+  const watchGeneration = (domainId: number) => {
+    const deadline = Date.now() + GENERATION_TIMEOUT_MS;
+
+    const tick = async () => {
+      if (goneRef.current) return;
+      try {
+        const status: any = await apiClient.getTopicGenerationStatus(domainId);
+        if (goneRef.current) return;
+
+        if (status?.state === 'running') {
+          setIsGenerating(true);
+          setGenProgress(status);
+        } else if (status?.state === 'done' || status?.state === 'failed') {
+          setGenProgress(status);
+          setIsGenerating(false);
+          setReloadKey((k) => k + 1);
+          if (status.state === 'failed') {
+            toast({
+              title: "Grouping failed",
+              description: status.error || "The run could not finish. Try again.",
+              variant: "destructive",
+            });
+          }
+          return;
+        }
+        // 'unknown' (engine unreachable) and 'idle' both fall through: keep
+        // waiting rather than declaring the run over on a transient blip.
+      } catch {
+        // Same reasoning — a failed poll is not a failed run.
+      }
+
+      if (Date.now() >= deadline) {
+        setIsGenerating(false);
+        setReloadKey((k) => k + 1);
+        return;
+      }
+      window.setTimeout(tick, GENERATION_POLL_MS);
+    };
+
+    tick();
+  };
+
+  // Restore an in-flight run after a refresh or a domain switch.
+  useEffect(() => {
+    if (!selectedDomain?.id) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const status: any = await apiClient.getTopicGenerationStatus(selectedDomain.id);
+        if (cancelled || goneRef.current) return;
+        if (status?.state === 'running') {
+          setIsGenerating(true);
+          setGenProgress(status);
+          watchGeneration(selectedDomain.id);
+        }
+      } catch {
+        // No progress record, or the engine is unreachable — nothing to restore.
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDomain?.id]);
+
   const handleGenerateTopics = async () => {
     if (!selectedDomain?.id) return;
     setIsGenerating(true);
+    setGenProgress(null);
     try {
       const result: any = await apiClient.generateTopics({ domain_id: selectedDomain.id });
       toast({
         title: "Analysis started",
         description: result?.message || "Grouping your keywords into topics.",
       });
-      // The run is a background job; give it time to write before reloading so
-      // the user does not land back on the same empty card.
-      setTimeout(() => window.location.reload(), 20000);
+      // Progress comes from the engine, not a guessed timer. This used to be
+      // `setTimeout(() => window.location.reload(), 20000)`, which reliably
+      // reloaded mid-run, showed the same empty card, and got clicked again —
+      // queueing a second run over the same keywords.
+      watchGeneration(selectedDomain.id);
     } catch (error: any) {
       // 409 means there is nothing to group — an answer, not a failure.
       const alreadyGrouped = error?.status === 409;
@@ -480,6 +569,11 @@ const Topics = () => {
 
   if (loading) {
     return <PageLoader />;
+  }
+
+  // Topics group the keywords a project tracks, which only exist once prompts do.
+  if (selectedDomain?.prompt_count === 0) {
+    return <NoPromptsYet what="Topics group the keywords behind your tracked prompts" />;
   }
 
   // Show processing card when no topics available
@@ -512,9 +606,25 @@ const Topics = () => {
               </h3>
               <p className="text-sm text-muted-foreground">
                 {isGenerating
-                  ? "Your keywords are being grouped into topics. This runs in the background — you can leave this page and come back."
+                  ? "Your keywords are being grouped into topics. This runs in the background — you can leave this page, refresh, or come back later."
                   : "Topics group your keywords into the subjects the AI platforms are asked about. Start the analysis to generate them for this domain."}
               </p>
+
+              {/* Real progress, reported by the run itself. An indeterminate
+                  spinner on a job that can take minutes reads as "stuck", which
+                  is exactly what it looked like on a 812-keyword project. */}
+              {isGenerating && genProgress?.batches_total > 0 && (
+                <div className="space-y-1.5 pt-1 max-w-md">
+                  <Progress value={genProgress.percent || 0} className="h-2" />
+                  <p className="text-xs text-muted-foreground">
+                    {genProgress.stage === 'analytics'
+                      ? `Grouped into ${genProgress.topics_created} topic${genProgress.topics_created === 1 ? '' : 's'} — building analytics`
+                      : `Batch ${genProgress.batches_done} of ${genProgress.batches_total}`}
+                    {genProgress.keywords ? ` · ${genProgress.keywords} keywords` : ""}
+                  </p>
+                </div>
+              )}
+
               <div className="flex flex-wrap gap-3 pt-2">
                 <Button
                   onClick={handleGenerateTopics}
@@ -526,7 +636,7 @@ const Topics = () => {
                     : <Sparkles className="h-4 w-4 mr-2" />}
                   {isGenerating ? "Analysing..." : "Start Analysing"}
                 </Button>
-                <Button variant="outline" onClick={() => window.location.reload()}>
+                <Button variant="outline" onClick={() => setReloadKey((k) => k + 1)}>
                   Refresh
                 </Button>
               </div>

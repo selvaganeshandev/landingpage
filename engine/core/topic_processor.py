@@ -2,6 +2,7 @@
 Topic Processor: Groups keywords into topics using NLP when domain completes
 """
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
 from difflib import SequenceMatcher
@@ -10,6 +11,8 @@ from django.db import transaction
 from django.utils import timezone
 from shared_models.models import Domain, Keyword, Topic, TopicKeyword
 from core.chatgpt_client import ChatGPTClient
+from core import topic_progress
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,8 @@ class TopicProcessor:
     
     def __init__(self):
         self.chatgpt_client = ChatGPTClient()
+        # Guards lazy client construction while batches run on a thread pool.
+        self._client_lock = threading.Lock()
     
     def process_topics_for_domain(self, domain: Domain) -> Dict[str, Any]:
         """
@@ -124,11 +129,45 @@ class TopicProcessor:
         batch_size = int(getattr(settings, 'TOPIC_GROUPING_BATCH_SIZE', 40))
         batches = [keywords[i:i + batch_size] for i in range(0, len(keywords), batch_size)]
 
+        # Batches run concurrently. They are independent model calls whose
+        # results are merged afterwards, but they used to run strictly one after
+        # another: IOB Bank's 812 keywords are 21 calls at ~35s each, so a run
+        # the user was watching took thirteen minutes of almost entirely idle
+        # waiting. Eight at a time brings the same work under two.
+        concurrency = max(1, int(getattr(settings, 'TOPIC_GROUPING_CONCURRENCY', 8)))
+        total = len(batches)
+
+        topic_progress.write(domain.id, stage='grouping', batches_total=total, batches_done=0)
+
         merged: Dict[str, List[str]] = {}
         succeeded = 0
+        done = 0
 
-        for index, batch in enumerate(batches, start=1):
-            groups = self._group_keyword_batch(batch, domain, index, len(batches))
+        # Ordered results, so the merge stays deterministic regardless of which
+        # call happens to return first — two batches naming the same topic must
+        # merge the same way on every run.
+        results: List[Optional[List[Dict[str, Any]]]] = [None] * total
+
+        with ThreadPoolExecutor(max_workers=min(concurrency, total)) as pool:
+            futures = {
+                pool.submit(self._group_keyword_batch, batch, domain, index, total): index - 1
+                for index, batch in enumerate(batches, start=1)
+            }
+            for future in as_completed(futures):
+                position = futures[future]
+                try:
+                    results[position] = future.result()
+                except Exception as exc:
+                    logger.error(
+                        f"Domain {domain.id} batch {position + 1}/{total} raised: {exc}"
+                    )
+                    results[position] = None
+                done += 1
+                # Written per batch so the page can show real progress instead
+                # of an indeterminate spinner.
+                topic_progress.write(domain.id, batches_done=done, batches_total=total)
+
+        for groups in results:
             if groups is None:
                 continue
             succeeded += 1
@@ -204,7 +243,12 @@ Keywords: {keywords_text}
 Return ONLY the JSON array, no markdown, no explanations."""
 
         try:
-            self.chatgpt_client._ensure_client()
+            # Batches run on a thread pool, so first-use client construction is
+            # serialised — two threads racing _ensure_client would build two
+            # clients and one could observe a half-built one. Requests
+            # themselves are fine concurrently.
+            with self._client_lock:
+                self.chatgpt_client._ensure_client()
             if not self.chatgpt_client.client:
                 logger.warning("ChatGPT client not available for topic grouping")
                 return None
