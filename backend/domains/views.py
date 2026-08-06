@@ -251,6 +251,11 @@ def domain_list(request):
                 domains.select_related('organisation')
                 .prefetch_related('health_checks')
                 .annotate(prompt_count_annotated=Count('prompt_groups__prompts', distinct=True))
+                # Explicit, because annotate() adds a GROUP BY and Django drops
+                # Meta.ordering when it does — which silently flipped the project
+                # switcher to oldest-first. Newest first is what it should be:
+                # the project you just added is the one you are looking for.
+                .order_by('-created_at')
             )
 
         # Search support
