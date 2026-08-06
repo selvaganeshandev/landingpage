@@ -141,6 +141,13 @@ def get_mentions(request):
     # Order by most recent first
     mentions = mentions.order_by('-created_at')
 
+    # Serialising each row reads prompt.prompt, prompt.group.group_id and
+    # prompt.group.domain.name. Without this that is three extra queries per
+    # row — sixty on a twenty-row page — all of them lazy loads of rows the
+    # database could have returned in the first place.
+    mentions = mentions.select_related(
+        'prompt', 'prompt__group', 'prompt__group__domain')
+
     # Pagination
     try:
         limit = int(request.GET.get('limit', 20))
