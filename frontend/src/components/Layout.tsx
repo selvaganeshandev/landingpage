@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { Sidebar } from "./Sidebar";
 import { PageLoader } from "./PageLoader";
+import { RouteFallback } from "./RouteFallback";
 import { ProcessingStateCard } from "./ProcessingStateCard";
 import { OnboardingModal } from "./OnboardingModal";
 import { Outlet, useLocation } from "react-router-dom";
@@ -10,7 +11,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { isDomainProcessing, isCompetitorProcessing, isMisinformationProcessing } from "@/utils/processingStatus";
 
 export const Layout = () => {
-  const [isLoading, setIsLoading] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const location = useLocation();
   const { isOpen: sidebarOpen } = useSidebar();
@@ -101,17 +101,12 @@ export const Layout = () => {
     isDomainSwitching &&
     !noDomainDataPages.some(page => location.pathname.startsWith(page));
 
-  useEffect(() => {
-    // Show loader when route changes
-    setIsLoading(true);
-
-    // Hide loader after a brief delay to allow page to render
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [location.pathname]);
+  // There used to be a `setIsLoading(true)` here on every pathname change,
+  // cleared 300ms later, which painted the full-screen PageLoader over the
+  // whole content area on EVERY menu click — a guaranteed spinner flash even
+  // for a page that had all its data cached and could have rendered instantly.
+  // Navigation is client-side; pages own their loading states. Nothing needs a
+  // blanket delay.
 
   // Show onboarding modal if no domains
   if (showOnboarding) {
@@ -120,14 +115,20 @@ export const Layout = () => {
 
   return (
     <div className="flex min-h-screen gradient-subtle">
-      {(isLoading || shouldShowDomainSwitchingLoader) && <PageLoader sidebarOpen={sidebarOpen} />}
+      {shouldShowDomainSwitchingLoader && <PageLoader sidebarOpen={sidebarOpen} />}
       <Sidebar />
       <main className="flex-1 overflow-auto">
-        {shouldShowProcessingState() ? (
-          <ProcessingStateCard domain={selectedDomain!} />
-        ) : (
-          <Outlet />
-        )}
+        {/* Suspense sits HERE, not around <Routes> in App: a boundary above the
+            Layout unmounts the sidebar and shell too, so the first visit to a
+            code-split page blanked the entire window. Scoped to the content
+            area, the shell stays put and only the page swaps. */}
+        <Suspense fallback={<RouteFallback />}>
+          {shouldShowProcessingState() ? (
+            <ProcessingStateCard domain={selectedDomain!} />
+          ) : (
+            <Outlet />
+          )}
+        </Suspense>
       </main>
 
       {/* The floating "New Chat" shortcut was removed: it sat fixed at

@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, ProtectedRoute } from "@/contexts/AuthContext";
 import { SidebarProvider } from "@/contexts/SidebarContext";
 import { Layout } from "./components/Layout";
+import { RouteFallback } from "./components/RouteFallback";
 const Chat = lazy(() => import("./pages/Chat").then((m) => ({ default: m.Chat })));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Prompts = lazy(() => import("./pages/Prompts"));
@@ -59,23 +60,11 @@ import { MODULES } from "@/types/auth";
 
 const queryClient = new QueryClient();
 
-/** Shown while a route's chunk is fetched.
- *
- *  Every page is code-split, so the first visit to a route costs a network
- *  round trip; afterwards the chunk is in memory and this never renders again.
- *  That asymmetry is why the placeholder must reserve the space the page will
- *  occupy — it first shipped as a short `py-24` box, which collapsed the layout
- *  and then expanded it when the chunk arrived, so every first visit visibly
- *  jumped while repeat visits did not.
- *
- *  min-h-screen matches the shell in Layout, so the content area keeps its
- *  height across the swap and nothing shifts.
- */
-const RouteFallback = () => (
-  <div className="flex min-h-screen items-center justify-center">
-    <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
-  </div>
-);
+/* RouteFallback moved to components/RouteFallback so Layout can mount its own
+ * Suspense boundary around the content area. This outer boundary now only
+ * catches the routes that render outside the app shell (sign-in and friends):
+ * inside the shell, Layout's boundary is the nearer one and wins, which is what
+ * keeps the sidebar on screen while a page chunk downloads. */
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
