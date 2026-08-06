@@ -1750,7 +1750,7 @@ const Competitors = () => {
               {isExporting
                 ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 : <Download className="h-4 w-4 mr-2" />}
-              {isExporting ? "Exporting..." : "Export to Excel"}
+              {isExporting ? "Exporting..." : "Export"}
             </Button>
             <Button onClick={handleAddCompetitor} className="gradient-primary shadow-md shadow-primary/20">
               <Plus className="h-4 w-4 mr-2" />
