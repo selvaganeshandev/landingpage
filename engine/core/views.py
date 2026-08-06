@@ -1164,11 +1164,18 @@ def start_misinformation_scan(request):
     Body:
         domain_id: Required - ID of the domain to scan
         prompt_analytics_ids: Optional - List of specific prompt analytics IDs to scan
+        own_links_only: Optional - Only visit citations pointing at the domain's
+            own site. This is what the Citations page's "Validate Citations"
+            button sends: it asks whether links AI sent to *this* brand still
+            work, so crawling the other few hundred third-party sources in the
+            same responses is pure cost. Automatic scans leave it off, because
+            misinformation detection has to read third-party pages.
     """
     try:
         domain_id = request.data.get('domain_id')
         prompt_analytics_ids = request.data.get('prompt_analytics_ids')
-        
+        own_links_only = bool(request.data.get('own_links_only'))
+
         if not domain_id:
             return Response(
                 {'error': 'domain_id is required'},
@@ -1195,7 +1202,9 @@ def start_misinformation_scan(request):
             )
         
         # Trigger the Celery task
-        task = process_misinformation_scan_task.delay(domain_id, prompt_analytics_ids)
+        task = process_misinformation_scan_task.delay(
+            domain_id, prompt_analytics_ids, own_links_only
+        )
         
         return Response({
             'success': True,

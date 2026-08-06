@@ -39,13 +39,20 @@ class MisinformationProcessor:
         self.comparator = ContentComparator()
 
     @observe(name="misinformation.process_domain", ignore_inputs=["self"])
-    def process_domain(self, domain_id: int, prompt_analytics_ids: List[int] = None):
+    def process_domain(self, domain_id: int, prompt_analytics_ids: List[int] = None,
+                       own_links_only: bool = False):
         """
         Process misinformation scan for a domain.
 
         Args:
             domain_id: ID of the domain to scan
             prompt_analytics_ids: Optional list of specific prompt analytics to scan
+            own_links_only: Visit only citations pointing at the domain's own
+                site. Sent by the Citations page's "Validate Citations" button,
+                which asks whether links AI sent to this brand still work —
+                a question that does not exist for aws.amazon.com. Automatic
+                scans leave it off: misinformation detection is precisely about
+                what third-party pages say.
 
         Returns:
             MisinformationScan instance
@@ -112,7 +119,8 @@ class MisinformationProcessor:
             for pa in prompt_analytics_qs:
                 try:
                     result = self._process_prompt_analytics(
-                        pa, domain, CitationURL, CitationContent, CitationMention, MisinformationAlert, scan
+                        pa, domain, CitationURL, CitationContent, CitationMention, MisinformationAlert, scan,
+                        own_links_only=own_links_only
                     )
                     prompts_scanned += 1
                     citations_found += result['citations']
@@ -165,7 +173,8 @@ class MisinformationProcessor:
 
     def _process_prompt_analytics(
         self, pa: PromptAnalytics, domain: Domain,
-        CitationURL, CitationContent, CitationMention, MisinformationAlert, scan
+        CitationURL, CitationContent, CitationMention, MisinformationAlert, scan,
+        own_links_only: bool = False
     ) -> dict:
         """
         Process a single prompt analytics record.
@@ -184,6 +193,12 @@ class MisinformationProcessor:
         citation_list = pa.citation_list or []
 
         urls = self.url_extractor.extract_all(response_text, citation_list)
+
+        if own_links_only:
+            # Own-site host match, not _is_brand_related_url: that also accepts
+            # any URL with the brand name in its path, which is a third-party
+            # article about the brand — not a link we own or can fix.
+            urls = [u for u in urls if self._is_own_site_url(u['url'], domain)]
 
         if not urls:
             logger.debug(f"No URLs found in prompt analytics {pa.id}")
@@ -385,6 +400,23 @@ class MisinformationProcessor:
             )
 
         return alert_created
+
+    def _is_own_site_url(self, url: str, domain: Domain) -> bool:
+        """True only when the URL is on the brand's own host (or a subdomain)."""
+        from urllib.parse import urlparse
+
+        def host_of(value: str) -> str:
+            value = (value or '').strip().lower()
+            if value and not value.startswith(('http://', 'https://')):
+                value = f'https://{value}'
+            host = urlparse(value).netloc
+            return host[4:] if host.startswith('www.') else host
+
+        brand = host_of(getattr(domain, 'url', ''))
+        cited = host_of(url)
+        if not brand or not cited:
+            return False
+        return cited == brand or cited.endswith(f'.{brand}')
 
     def _is_brand_related_url(self, url: str, domain: Domain) -> bool:
         """

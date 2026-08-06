@@ -451,17 +451,19 @@ def process_topic_analytics_scheduler(self):
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
-def process_misinformation_scan_task(self, domain_id: int, prompt_analytics_ids: list = None):
+def process_misinformation_scan_task(self, domain_id: int, prompt_analytics_ids: list = None,
+                                     own_links_only: bool = False):
     """
     Process misinformation scan for a domain.
-    
+
     Args:
         domain_id: ID of the domain to scan
         prompt_analytics_ids: Optional list of specific prompt analytics IDs to scan
+        own_links_only: Skip citations that don't point at the domain's own site
     """
     try:
         processor = MisinformationProcessor()
-        scan = processor.process_domain(domain_id, prompt_analytics_ids)
+        scan = processor.process_domain(domain_id, prompt_analytics_ids, own_links_only)
         logger.info(f"Misinformation scan completed for domain {domain_id}: scan_id={scan.id}")
         return {'scan_id': scan.id, 'status': 'completed'}
     except Exception as e:
