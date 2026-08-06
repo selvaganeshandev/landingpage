@@ -232,7 +232,18 @@ const SeoCompetitors = () => {
     if (!domainId) return;
     setView("analyzing"); setAnalysisStatus("SCHD"); setWaitReady(false);
     try { await apiClient.startSeoCompetitorAnalysis(domainId); }
-    catch { toast({ title: "Error", description: "Could not start analysis.", variant: "destructive" }); setView("init"); }
+    catch (e: any) {
+      // Show what the server said. The generic "Could not start analysis" hid
+      // the one failure the user can actually act on — no tracked keywords, so
+      // there is nothing to find competitors in.
+      const msg = e?.message || "Could not start analysis.";
+      toast({
+        title: /keyword/i.test(msg) ? "No keywords to analyse" : "Error",
+        description: msg,
+        variant: "destructive",
+      });
+      setView("init");
+    }
   };
 
   const handleViewAnalysis = async () => {

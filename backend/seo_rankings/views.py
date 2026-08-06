@@ -1436,6 +1436,18 @@ def seo_competitor_start(request):
     if int(domain_id) not in allowed_ids:
         return Response({'error': 'Domain not found or access denied'}, status=status.HTTP_403_FORBIDDEN)
 
+    # Competitors are discovered by looking at who else ranks for THIS domain's
+    # tracked keywords — _run_competitor_analysis iterates SeoKeywordRank. With
+    # none, the analysis has nothing to read: it ran, cost a round trip, and
+    # completed with an empty candidate list, which reads as "you have no
+    # competitors" rather than "you have not told us what to search for".
+    if not SeoKeywordRank.objects.filter(domain_id=domain_id).exists():
+        return Response(
+            {'error': 'Add some keywords to rank tracking first — competitors are '
+                      'found by seeing who else ranks for the keywords you track.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     # If already running, return current status
     existing = SeoCompetitorAnalysis.objects.filter(domain_id=domain_id).first()
     if existing and existing.status == 'SCHD':
