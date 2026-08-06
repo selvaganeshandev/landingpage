@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from core.queryset_scoping import user_can_access_domain
-from django.db.models import Q, Count, Avg, F, Sum, Prefetch
+from django.db.models import Q, Count, Avg, F, Sum, Prefetch, Max
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.conf import settings
@@ -2393,16 +2393,42 @@ def prompts_list(request):
             limit = max(1, min(limit, 100))
             offset = max(0, offset)
             total_count = prompts.count()
-            prompts = prompts[offset:offset + limit]
-            
+            # Every row reads group.group_id and group.domain.name; without the
+            # join that is two lazy queries per prompt.
+            prompts = list(
+                prompts.select_related('group', 'group__domain')[offset:offset + limit]
+            )
+
+            # ---- Batched analytics aggregates -------------------------------
+            # Each figure below used to be its own query inside the loop, so a
+            # 50-row page cost 378 queries and scaled with page size. Same shape
+            # as the fix already applied to the prompt-group list and detail.
+            _page_prompt_ids = [p.id for p in prompts]
+            _pa = PromptAnalytics.objects.filter(prompt_id__in=_page_prompt_ids)
+            _published = _pa.filter(is_mention=True, is_published=True)
+
+            def _by_prompt(qs, **ann):
+                return {
+                    r['prompt_id']: r
+                    for r in qs.values('prompt_id').annotate(**ann)
+                }
+
+            _p_totals = _by_prompt(_pa, n=Count('id'), avg_pos=Avg('position'))
+            # Max(created_at) is what .order_by('-created_at').first() returned,
+            # and its absence is what .exists() was guarding against.
+            _p_mentions = _by_prompt(_published, n=Count('id'), latest=Max('created_at'))
+
+            _p_platforms = {}
+            for pid, platform in _pa.values_list('prompt_id', 'platform').distinct():
+                _p_platforms.setdefault(pid, []).append(platform)
+
             # Prepare response data
             prompts_data = []
             for prompt in prompts:
-                # Get analytics for this prompt
-                analytics = PromptAnalytics.objects.filter(
-                    prompt=prompt
-                )
-                
+                _t = _p_totals.get(prompt.id, {})
+                _m = _p_mentions.get(prompt.id, {})
+                _latest = _m.get('latest')
+
                 prompts_data.append({
                     'id': prompt.id,
                     'prompt_text': prompt.prompt,
@@ -2417,11 +2443,11 @@ def prompts_list(request):
                     'created_at': prompt.created_at.isoformat(),
                     'modified_at': prompt.modified_at.isoformat(),
                     'analytics_summary': {
-                        'total_analytics': analytics.count(),
-                        'mentions_count': analytics.filter(is_mention=True, is_published=True).count(),
-                        'avg_position': float(analytics.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0),
-                        'platforms': list(analytics.values_list('platform', flat=True).distinct()),
-                        'latest_mention': analytics.filter(is_mention=True, is_published=True).order_by('-created_at').first().created_at.isoformat() if analytics.filter(is_mention=True, is_published=True).exists() else None
+                        'total_analytics': _t.get('n', 0),
+                        'mentions_count': _m.get('n', 0),
+                        'avg_position': float(_t.get('avg_pos') or 0),
+                        'platforms': _p_platforms.get(prompt.id, []),
+                        'latest_mention': _latest.isoformat() if _latest else None
                     }
                 })
             
