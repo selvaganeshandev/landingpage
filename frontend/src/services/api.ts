@@ -1139,6 +1139,24 @@ export const apiClient = {
     apiRequest(`/topics/generation-status/?domain_id=${domainId}`),
 
   /**
+   * Candidate prompt seeds from the project's Search Console queries: branded
+   * searches removed, ordered by whether an answer would name brands at all.
+   */
+  getSearchConsoleSeeds: (domainId: number) =>
+    apiRequest(`/prompts/generation-runs/search-console-seeds/?domain_id=${domainId}`, {
+      // A live Search Console call, up to 1,000 rows.
+      timeout: 60000,
+    }),
+
+  /** Rewrites chosen Search Console queries into prompts, ready for review. */
+  createRunFromSearchConsole: (data: { domain_id: number; queries: string[] }) =>
+    apiRequest('/prompts/generation-runs/from-search-console/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      timeout: 120000,
+    }),
+
+  /**
    * Queue topic generation for a domain. Additive — only ungrouped keywords are
    * read and TopicProcessor performs no deletes — so it is safe on a domain
    * that already has topics. 409 means every keyword is already grouped.

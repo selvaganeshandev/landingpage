@@ -12,9 +12,11 @@ Nothing here runs the pipeline. The backend has no Celery, so queuing a run
 means writing a row with status INIT and letting the engine's scheduler claim
 it — the same handoff competitor processing uses.
 """
+import json
 import logging
 import re
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
@@ -306,6 +308,24 @@ _MATCH_STOPWORDS = {
 }
 
 
+
+def _json_array(text):
+    """Parse a JSON array from a model reply, tolerating a fence or preamble."""
+    if not text:
+        return []
+    fenced = re.search(r'```(?:json)?\s*(.+?)\s*```', text, re.S)
+    if fenced:
+        text = fenced.group(1)
+    start, end = text.find('['), text.rfind(']')
+    if start == -1 or end == -1 or end < start:
+        return []
+    try:
+        parsed = json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
 def _tokens(text):
     return {
         w for w in re.findall(r"[a-z0-9]+", (text or '').lower())
@@ -414,6 +434,194 @@ def _link_prompts_to_keywords(domain, accepted_pairs):
         PromptKeyword.objects.bulk_create(links, ignore_conflicts=True)
 
     return len(links), len(new_keywords)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def search_console_seeds(request):
+    """Candidate prompt seeds from this project's Search Console queries.
+
+    Three answers, and the card on the Prompts page renders one per state:
+    Search Console is not connected (send them to Integrations), it is connected
+    but has no usable queries yet, or here are the queries worth turning into
+    prompts.
+
+    Query params:
+        domain_id: Required
+    """
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    domain = get_object_or_404(_visible_domains(request.user), id=domain_id)
+
+    from integrations.models import Integration
+    from .gsc_seeds import fetch_search_console_queries, rank_candidates
+
+    integration = Integration.objects.filter(
+        domain=domain, type='search_console', status='active',
+    ).order_by('-modified_at').first()
+
+    if not integration:
+        return Response({
+            'connected': False,
+            'candidates': [],
+            'message': 'Google Search Console is not connected for this project.',
+        })
+
+    site_url = integration.provider_id
+    try:
+        rows = fetch_search_console_queries(integration, site_url)
+    except Exception as exc:
+        logger.error("[GSCSeeds] fetch failed for domain %s: %s", domain.id, exc)
+        return Response({
+            'connected': True,
+            'site_url': site_url,
+            'candidates': [],
+            'error': 'Could not read Search Console right now. Please try again shortly.',
+        }, status=status.HTTP_502_BAD_GATEWAY)
+
+    candidates, stats = rank_candidates(rows, domain)
+
+    return Response({
+        'connected': True,
+        'site_url': site_url,
+        'candidates': candidates,
+        'stats': stats,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_run_from_search_console(request):
+    """Turn chosen Search Console queries into prompts, ready for review.
+
+    A search query and a chat prompt are not the same sentence. "digital
+    marketing agencies in andheri" is how a person types into a search box; the
+    same person asks an assistant "Which digital marketing agencies work in
+    Andheri?". So each query is rewritten into the question form, and nothing
+    else about it is invented — the demand is real, only the phrasing changes.
+
+    The result lands in the same PromptGenerationRun the AI wizard produces, so
+    review, editing, accepting and keyword linking are the existing flow rather
+    than a second one.
+
+    Body:
+        domain_id: Required
+        queries: Required - list of Search Console query strings
+    """
+    domain_id = request.data.get('domain_id')
+    queries = request.data.get('queries') or []
+
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    domain = get_object_or_404(_visible_domains(request.user), id=domain_id)
+
+    queries = [str(q).strip() for q in queries if str(q).strip()][:100]
+    if not queries:
+        return Response({'error': 'Select at least one query.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from .gsc_seeds import classify, TIER_LABELS
+
+    system = (
+        "You rewrite search queries as the question a person would type into an "
+        "AI assistant. Return ONLY a JSON array, no prose, no code fence.\n\n"
+        "Each element: {\"i\": <index of the input>, \"q\": \"the question\", "
+        "\"entity\": \"the thing being asked about\", \"topic\": \"short theme\"}\n\n"
+        "Rules: keep the intent and every qualifier of the original — place, "
+        "budget, industry, product type. One sentence, under 25 words, "
+        "conversational. NEVER name the brand being monitored; these questions "
+        "measure whether an assistant recommends it unprompted, so a question "
+        "that names it measures nothing."
+    )
+
+    payload = {
+        'country': domain.country or '',
+        'queries_to_rewrite': [{'i': i, 'query': q} for i, q in enumerate(queries)],
+    }
+
+    try:
+        from domains.views import get_openai_client
+
+        client = get_openai_client()
+        response = client.chat.completions.create(
+            model=getattr(settings, 'OPENROUTER_INTERNAL_MODEL', 'openai/gpt-5-mini'),
+            messages=[
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': json.dumps(payload)},
+            ],
+            temperature=0.4,
+            max_tokens=8000,
+            extra_body={'reasoning': {'effort': 'low'}},
+        )
+        reply = (response.choices[0].message.content or '') if response.choices else ''
+    except Exception as exc:
+        logger.error("[GSCSeeds] rewrite failed for domain %s: %s", domain.id, exc)
+        return Response(
+            {'error': 'Could not rewrite the queries right now. Please try again.'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    rows = _json_array(reply)
+    if not rows:
+        return Response(
+            {'error': 'Nothing usable came back from the rewrite. Please try again.'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    with transaction.atomic():
+        run = PromptGenerationRun.objects.create(
+            domain=domain,
+            status='DONE',
+            stage='assemble',
+            progress=100,
+            config={
+                'source': 'search_console',
+                'seed_questions': queries[:10],
+                'target_count': len(queries),
+                'branded_ratio': 0,
+            },
+            grounding={'source': 'search_console', 'query_count': len(queries)},
+        )
+
+        created = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get('q') or '').strip()
+            if not text:
+                continue
+            try:
+                original = queries[int(row.get('i'))]
+            except (TypeError, ValueError, IndexError):
+                original = ''
+
+            tier = classify(original) if original else 3
+            PromptCandidate.objects.create(
+                run=run,
+                text=text,
+                intent=str(row.get('intent') or '')[:16],
+                entity=str(row.get('entity') or '')[:255],
+                is_branded=False,
+                cluster_key=str(row.get('topic') or 'search console')[:255],
+                cluster_title=str(row.get('topic') or 'Search Console')[:255],
+                # Real demand, so realism is not in question — it was typed by a
+                # person. The tier carries how likely an answer is to name any
+                # brand at all, which is what the other score means elsewhere.
+                score_realism=1.0,
+                score_elicits_brands={1: 0.9, 2: 0.6, 3: 0.3}.get(tier, 0.3),
+            )
+            created += 1
+
+    logger.info("[GSCSeeds] domain %s: run %s created with %s prompts from %s queries",
+                domain.id, run.id, created, len(queries))
+
+    return Response({
+        'run_id': run.id,
+        'candidates_created': created,
+        'queries_used': len(queries),
+    }, status=status.HTTP_201_CREATED)
 
 
 @api_view(['POST'])

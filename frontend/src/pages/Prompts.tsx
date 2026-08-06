@@ -29,6 +29,7 @@ import { AddPromptGroupDialog } from "@/components/AddPromptGroupDialog";
 import { EditPromptGroupDialog } from "@/components/EditPromptGroupDialog";
 import { GenerateVariantsDialog } from "@/components/GenerateVariantsDialog";
 import { PromptSourceChooser, type PromptSource } from "@/components/PromptSourceChooser";
+import { SearchConsoleSeedPicker } from "@/components/SearchConsoleSeedPicker";
 import { PromptUploadStep } from "@/components/PromptUploadStep";
 import { PromptGenerationWizard } from "@/components/PromptGenerationWizard";
 import { PromptReviewTable, GenerationProgress, type Candidate } from "@/components/PromptReviewTable";
@@ -41,7 +42,7 @@ const Prompts = () => {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   // Which build-your-list panel the empty state is showing. "choose" is the
   // three cards; picking Upload swaps them for the upload panel in place.
-  const [buildStep, setBuildStep] = useState<"choose" | "upload" | "wizard">("choose");
+  const [buildStep, setBuildStep] = useState<"choose" | "upload" | "wizard" | "gsc">("choose");
   const [isAccepting, setIsAccepting] = useState(false);
   // Lets a project that already has groups open the build panel — otherwise
   // the chooser and the review table are unreachable once prompts exist.
@@ -497,7 +498,21 @@ const Prompts = () => {
             ) : buildStep === "choose" ? (
               <PromptSourceChooser
                 onSelect={(source: PromptSource) => {
-                  setBuildStep(source === "upload" ? "upload" : "wizard");
+                  setBuildStep(
+                    source === "upload" ? "upload" : source === "gsc" ? "gsc" : "wizard"
+                  );
+                }}
+              />
+            ) : buildStep === "gsc" ? (
+              <SearchConsoleSeedPicker
+                domainId={selectedDomain?.id}
+                onBack={() => setBuildStep("choose")}
+                onRunCreated={async () => {
+                  // The run is created already DONE, so the existing active-run
+                  // poll picks it up and renders the same review table the AI
+                  // path uses.
+                  await refreshRun();
+                  setBuildStep("wizard");
                 }}
               />
             ) : buildStep === "wizard" ? (
