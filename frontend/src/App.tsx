@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -6,57 +7,70 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, ProtectedRoute } from "@/contexts/AuthContext";
 import { SidebarProvider } from "@/contexts/SidebarContext";
 import { Layout } from "./components/Layout";
-import { Chat } from "./pages/Chat";
-import Dashboard from "./pages/Dashboard";
-import Prompts from "./pages/Prompts";
-import PromptDetail from "./pages/PromptDetail";
-import Mentions from "./pages/Mentions";
-import MentionDetail from "./pages/MentionDetail";
-import Sentiment from "./pages/Sentiment";
-import ShareOfVoice from "./pages/ShareOfVoice";
-import ContentGaps from "./pages/ContentGaps";
-import HistoricalTrends from "./pages/HistoricalTrends";
-import Topics from "./pages/Topics";
-import Alerts from "./pages/Alerts";
-import Competitors from "./pages/Competitors";
-import CompetitorDetail from "./pages/CompetitorDetail";
-import Reports from "./pages/Reports";
-import ReportBuilder from "./pages/ReportBuilder";
-import Multilingual from "./pages/Multilingual";
+const Chat = lazy(() => import("./pages/Chat").then((m) => ({ default: m.Chat })));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Prompts = lazy(() => import("./pages/Prompts"));
+const PromptDetail = lazy(() => import("./pages/PromptDetail"));
+const Mentions = lazy(() => import("./pages/Mentions"));
+const MentionDetail = lazy(() => import("./pages/MentionDetail"));
+const Sentiment = lazy(() => import("./pages/Sentiment"));
+const ShareOfVoice = lazy(() => import("./pages/ShareOfVoice"));
+const ContentGaps = lazy(() => import("./pages/ContentGaps"));
+const HistoricalTrends = lazy(() => import("./pages/HistoricalTrends"));
+const Topics = lazy(() => import("./pages/Topics"));
+const Alerts = lazy(() => import("./pages/Alerts"));
+const Competitors = lazy(() => import("./pages/Competitors"));
+const CompetitorDetail = lazy(() => import("./pages/CompetitorDetail"));
+const Reports = lazy(() => import("./pages/Reports"));
+const ReportBuilder = lazy(() => import("./pages/ReportBuilder"));
+const Multilingual = lazy(() => import("./pages/Multilingual"));
 // import PromptInsights from "./pages/PromptInsights";
 // import AgentAnalytics from "./pages/AgentAnalytics";
 // import AICrawler from "./pages/AICrawler";
-import AICopilot from "./pages/AICopilot";
-import ContentCalendar from "./pages/ContentCalendar";
-import ContentEditor from "./pages/ContentEditor";
-import BulkContentUpload from "./pages/BulkContentUpload";
-import AutomationSettings from "./pages/AutomationSettings";
-import TrafficAttribution from "./pages/TrafficAttribution";
-import SeoRankings from "./pages/SeoRankings";
-import SeoKeywordDetail from "./pages/SeoKeywordDetail";
-import SeoCompetitors from "./pages/SeoCompetitors";
-import SeoReports from "./pages/SeoReports";
-import ConfigureSeoReport from "./pages/ConfigureSeoReport";
-import AddSeoKeyword from "./pages/AddSeoKeyword";
-import SignIn from "./pages/Auth";
-import ForgotPassword from "./pages/ForgotPassword";
-import ResetPassword from "./pages/ResetPassword";
-import AcceptInvitation from "./pages/AcceptInvitation";
-import OrganizationSettings from "./pages/OrganizationSettings";
-import TeamMemberPermissions from "./pages/TeamMemberPermissions";
-import Clients from "./pages/Clients";
-import Billing from "./pages/Billing";
-import DomainSettings from "./pages/DomainSettings";
-import MisinformationAlerts from "./pages/MisinformationAlerts";
-import Citations from "./pages/Citations";
-import Sources from "./pages/Sources";
-import PlaceholderPage from "./pages/PlaceholderPage";
-import NotFound from "./pages/NotFound";
-import Profile from "./pages/Profile";
-import SessionExpired from "./pages/SessionExpired";
+const AICopilot = lazy(() => import("./pages/AICopilot"));
+const ContentCalendar = lazy(() => import("./pages/ContentCalendar"));
+const ContentEditor = lazy(() => import("./pages/ContentEditor"));
+const BulkContentUpload = lazy(() => import("./pages/BulkContentUpload"));
+const AutomationSettings = lazy(() => import("./pages/AutomationSettings"));
+const TrafficAttribution = lazy(() => import("./pages/TrafficAttribution"));
+const SeoRankings = lazy(() => import("./pages/SeoRankings"));
+const SeoKeywordDetail = lazy(() => import("./pages/SeoKeywordDetail"));
+const SeoCompetitors = lazy(() => import("./pages/SeoCompetitors"));
+const SeoReports = lazy(() => import("./pages/SeoReports"));
+const ConfigureSeoReport = lazy(() => import("./pages/ConfigureSeoReport"));
+const AddSeoKeyword = lazy(() => import("./pages/AddSeoKeyword"));
+const SignIn = lazy(() => import("./pages/Auth"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const AcceptInvitation = lazy(() => import("./pages/AcceptInvitation"));
+const OrganizationSettings = lazy(() => import("./pages/OrganizationSettings"));
+const TeamMemberPermissions = lazy(() => import("./pages/TeamMemberPermissions"));
+const Clients = lazy(() => import("./pages/Clients"));
+const Billing = lazy(() => import("./pages/Billing"));
+const DomainSettings = lazy(() => import("./pages/DomainSettings"));
+const MisinformationAlerts = lazy(() => import("./pages/MisinformationAlerts"));
+const Citations = lazy(() => import("./pages/Citations"));
+const Sources = lazy(() => import("./pages/Sources"));
+const PlaceholderPage = lazy(() => import("./pages/PlaceholderPage"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const Profile = lazy(() => import("./pages/Profile"));
+const SessionExpired = lazy(() => import("./pages/SessionExpired"));
 import { MODULES } from "@/types/auth";
 
 const queryClient = new QueryClient();
+
+/** Shown while a route's chunk is fetched.
+ *
+ *  Every page is code-split, so navigating to one the browser has not seen
+ *  costs a network round trip. Deliberately minimal: a spinner that appears for
+ *  ~100ms on a fast connection is more distracting than a blank area, and the
+ *  surrounding Layout (sidebar, header) is eager, so the app never looks gone.
+ */
+const RouteFallback = () => (
+  <div className="flex items-center justify-center py-24">
+    <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
+  </div>
+);
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -66,6 +80,7 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
+          <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/signin" element={<SignIn />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -305,6 +320,7 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
+          </Suspense>
         </BrowserRouter>
         </TooltipProvider>
       </SidebarProvider>

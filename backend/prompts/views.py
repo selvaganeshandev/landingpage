@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from core.queryset_scoping import user_can_access_domain
-from django.db.models import Q, Count, Avg, F, Sum
+from django.db.models import Q, Count, Avg, F, Sum, Prefetch, Max
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.conf import settings
@@ -15,6 +15,44 @@ import json
 import logging
 import re
 import statistics
+
+# Key-phrase patterns used to pull a headline out of the text preceding a
+# citation. Each entry is (keywords, compiled pattern).
+#
+# The keywords are a fast pre-filter, not a second source of truth: they are
+# exactly the alternatives inside their own pattern, so when none of them appears
+# in the text the pattern cannot match either, and skipping it changes nothing.
+#
+# That guard matters because these patterns are expensive. `[^.!?]{0,50}` before
+# an alternation makes the engine try 51 prefix lengths at every position, and
+# profiling the mentions endpoint on production showed re.findall at 1,792 calls
+# and 1.02s of self time — the single largest cost in a 1.27s request. Most text
+# preceding a citation contains none of these words, so most of that work was
+# spent confirming there was nothing to find.
+_HEADLINE_PATTERNS = [
+    (
+        ('stands out', 'top choice', 'best', 'superior', 'excellent',
+         'outstanding', 'recommended', 'highly rated'),
+        re.compile(
+            r'([^.!?]{0,50}(?:stands out|top choice|best|superior|excellent|'
+            r'outstanding|recommended|highly rated)[^.!?]{0,50})',
+            re.IGNORECASE),
+    ),
+    (
+        ('key benefits', 'features', 'advantages', 'benefits'),
+        re.compile(
+            r'([^.!?]{0,50}(?:key benefits|features|advantages|benefits)'
+            r'[^.!?]{0,50})',
+            re.IGNORECASE),
+    ),
+    (
+        ('notable', 'significant', 'important', 'noteworthy'),
+        re.compile(
+            r'([^.!?]{0,50}(?:notable|significant|important|noteworthy)'
+            r'[^.!?]{0,50})',
+            re.IGNORECASE),
+    ),
+]
 from dateutil.relativedelta import relativedelta
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -103,6 +141,13 @@ def get_mentions(request):
     # Order by most recent first
     mentions = mentions.order_by('-created_at')
 
+    # Serialising each row reads prompt.prompt, prompt.group.group_id and
+    # prompt.group.domain.name. Without this that is three extra queries per
+    # row — sixty on a twenty-row page — all of them lazy loads of rows the
+    # database could have returned in the first place.
+    mentions = mentions.select_related(
+        'prompt', 'prompt__group', 'prompt__group__domain')
+
     # Pagination
     try:
         limit = int(request.GET.get('limit', 20))
@@ -133,15 +178,26 @@ def get_mentions(request):
             return 'Source'
     
     # Helper function to extract headline from context around URL
-    def _extract_headline_from_context(url, context_summary):
-        """Extract a headline/quote from context around the URL"""
+    def _extract_headline_from_context(url, context_summary, context_lower=None):
+        """Extract a headline/quote from context around the URL
+
+        `context_lower` is the caller's cached lowercase copy of
+        `context_summary`. Callers loop over every citation on a record, and
+        context_summary holds the LLM's full response — 13 KB on average and
+        178 KB at worst — so lowercasing it once per citation copied roughly
+        6 MB of string per 20-row page and accounted for 87% of this endpoint's
+        runtime. Built once per record and passed in, that cost disappears.
+
+        Still optional so the helper stays correct if called without it.
+        """
         if not context_summary or not url:
             return None
         try:
             import re
             # Find the URL in the context
             url_lower = url.lower()
-            context_lower = context_summary.lower()
+            if context_lower is None:
+                context_lower = context_summary.lower()
             idx = context_lower.find(url_lower)
             if idx == -1:
                 return None
@@ -177,13 +233,13 @@ def get_mentions(request):
             
             # Strategy 3: Extract key phrases (look for patterns like "stands out", "top choice", etc.)
             # Look for common patterns that indicate key statements
-            patterns = [
-                r'([^.!?]{0,50}(?:stands out|top choice|best|superior|excellent|outstanding|recommended|highly rated)[^.!?]{0,50})',
-                r'([^.!?]{0,50}(?:key benefits|features|advantages|benefits)[^.!?]{0,50})',
-                r'([^.!?]{0,50}(?:notable|significant|important|noteworthy)[^.!?]{0,50})',
-            ]
-            for pattern in patterns:
-                matches = re.findall(pattern, text_before, re.IGNORECASE)
+            before_lower = text_before.lower()
+            for keywords, pattern in _HEADLINE_PATTERNS:
+                # Cheap substring check first; the pattern cannot match unless
+                # one of its own alternatives is present. See _HEADLINE_PATTERNS.
+                if not any(k in before_lower for k in keywords):
+                    continue
+                matches = pattern.findall(text_before)
                 if matches:
                     phrase = matches[-1].strip()
                     if len(phrase) > 10 and len(phrase) < 150:
@@ -210,14 +266,16 @@ def get_mentions(request):
         citations_data = []
         citation_list = getattr(mention, 'citation_list', None) or []
         context_summary = mention.context_summary or ''
-        
+        # Lowercased once per mention, not once per citation — see the helper.
+        context_lower = context_summary.lower()
+
         if citation_list and isinstance(citation_list, list):
             for idx, citation_url in enumerate(citation_list):
                 if not citation_url or not isinstance(citation_url, str):
                     continue
                 
                 # Extract headline from context around this URL
-                headline = _extract_headline_from_context(citation_url, context_summary)
+                headline = _extract_headline_from_context(citation_url, context_summary, context_lower)
                 
                 # Extract source name from URL
                 source_name = _extract_domain_name(citation_url)
@@ -461,15 +519,20 @@ def get_mention_detail(request, analytics_id):
                 return 'Source'
         
         # Helper function to extract headline from context around URL
-        def _extract_headline_from_context(url, context_summary):
-            """Extract a headline/quote from context around the URL"""
+        def _extract_headline_from_context(url, context_summary, context_lower=None):
+            """Extract a headline/quote from context around the URL
+
+            See the copy in get_mentions: `context_lower` is the caller's cached
+            lowercase copy, built once per record instead of once per citation.
+            """
             if not context_summary or not url:
                 return None
             try:
                 import re
                 # Find the URL in the context
                 url_lower = url.lower()
-                context_lower = context_summary.lower()
+                if context_lower is None:
+                    context_lower = context_summary.lower()
                 idx = context_lower.find(url_lower)
                 if idx == -1:
                     return None
@@ -505,13 +568,13 @@ def get_mention_detail(request, analytics_id):
                 
                 # Strategy 3: Extract key phrases (look for patterns like "stands out", "top choice", etc.)
                 # Look for common patterns that indicate key statements
-                patterns = [
-                    r'([^.!?]{0,50}(?:stands out|top choice|best|superior|excellent|outstanding|recommended|highly rated)[^.!?]{0,50})',
-                    r'([^.!?]{0,50}(?:key benefits|features|advantages|benefits)[^.!?]{0,50})',
-                    r'([^.!?]{0,50}(?:notable|significant|important|noteworthy)[^.!?]{0,50})',
-                ]
-                for pattern in patterns:
-                    matches = re.findall(pattern, text_before, re.IGNORECASE)
+                before_lower = text_before.lower()
+                for keywords, pattern in _HEADLINE_PATTERNS:
+                    # Cheap substring check first; the pattern cannot match
+                    # unless one of its own alternatives is present.
+                    if not any(k in before_lower for k in keywords):
+                        continue
+                    matches = pattern.findall(text_before)
                     if matches:
                         phrase = matches[-1].strip()
                         if len(phrase) > 10 and len(phrase) < 150:
@@ -535,14 +598,16 @@ def get_mention_detail(request, analytics_id):
         citations_data = []
         citation_list = getattr(analytics_record, 'citation_list', None) or []
         context_summary = analytics_record.context_summary or ''
-        
+        # Lowercased once per record, not once per citation — see the helper.
+        context_lower = context_summary.lower()
+
         if citation_list and isinstance(citation_list, list):
             for idx, citation_url in enumerate(citation_list):
                 if not citation_url or not isinstance(citation_url, str):
                     continue
                 
                 # Extract headline from context around this URL
-                headline = _extract_headline_from_context(citation_url, context_summary)
+                headline = _extract_headline_from_context(citation_url, context_summary, context_lower)
                 
                 # Extract source name from URL
                 source_name = _extract_domain_name(citation_url)
@@ -980,15 +1045,26 @@ def _format_mention_for_export(analytics_record):
             return 'Source'
     
     # Helper function to extract headline from context around URL
-    def _extract_headline_from_context(url, context_summary):
-        """Extract a headline/quote from context around the URL"""
+    def _extract_headline_from_context(url, context_summary, context_lower=None):
+        """Extract a headline/quote from context around the URL
+
+        `context_lower` is the caller's cached lowercase copy of
+        `context_summary`. Callers loop over every citation on a record, and
+        context_summary holds the LLM's full response — 13 KB on average and
+        178 KB at worst — so lowercasing it once per citation copied roughly
+        6 MB of string per 20-row page and accounted for 87% of this endpoint's
+        runtime. Built once per record and passed in, that cost disappears.
+
+        Still optional so the helper stays correct if called without it.
+        """
         if not context_summary or not url:
             return None
         try:
             import re
             # Find the URL in the context
             url_lower = url.lower()
-            context_lower = context_summary.lower()
+            if context_lower is None:
+                context_lower = context_summary.lower()
             idx = context_lower.find(url_lower)
             if idx == -1:
                 return None
@@ -1033,14 +1109,16 @@ def _format_mention_for_export(analytics_record):
     citations_data = []
     citation_list = getattr(analytics_record, 'citation_list', None) or []
     context_summary = analytics_record.context_summary or ''
-    
+    # Lowercased once per record, not once per citation — see the helper.
+    context_lower = context_summary.lower()
+
     if citation_list and isinstance(citation_list, list):
         for idx, citation_url in enumerate(citation_list):
             if not citation_url or not isinstance(citation_url, str):
                 continue
             
             # Extract headline from context around this URL
-            headline = _extract_headline_from_context(citation_url, context_summary)
+            headline = _extract_headline_from_context(citation_url, context_summary, context_lower)
             
             # Extract source name from URL
             source_name = _extract_domain_name(citation_url)
@@ -1380,8 +1458,9 @@ def prompt_groups_list(request):
             if not has_access:
                 return Response({'error': 'Forbidden: no access to this domain.'}, status=status.HTTP_403_FORBIDDEN)
 
-            # Get prompt groups scoped to domain
-            groups = PromptGroup.objects.filter(domain_id=domain_id)
+            # Get prompt groups scoped to domain.
+            # select_related('domain') because every row reads domain.id/.name.
+            groups = PromptGroup.objects.filter(domain_id=domain_id).select_related('domain')
             
             # Apply search filter if provided
             search_query = request.GET.get('search', '')
@@ -1404,46 +1483,69 @@ def prompt_groups_list(request):
             limit = max(1, min(limit, 100))
             offset = max(0, offset)
             total_count = groups.count()
-            groups = groups[offset:offset + limit]
-            
+            # Prompts are prefetched in one query and split by type in Python
+            # below; ordering here reproduces the per-group
+            # .order_by('created_at') the loop used to issue.
+            groups = list(
+                groups.prefetch_related(
+                    Prefetch('prompts', queryset=Prompt.objects.order_by('created_at'))
+                )[offset:offset + limit]
+            )
+
+            # ---- Batched analytics aggregates -------------------------------
+            # Every figure below was previously computed with its own query
+            # inside the loop, so a 20-row page cost ~180 queries and grew with
+            # the page size. Each is now one grouped query for the whole page.
+            page_ids = [g.id for g in groups]
+            _base = PromptAnalytics.objects.filter(prompt__group_id__in=page_ids)
+
+            def _by_group(qs, **ann):
+                return {
+                    r['prompt__group_id']: r
+                    for r in qs.values('prompt__group_id').annotate(**ann)
+                }
+
+            _totals = _by_group(_base, n=Count('id'), avg_pos=Avg('position'))
+            _mentions = _by_group(
+                _base.filter(is_mention=True, is_published=True), n=Count('id'))
+
+            _platforms = {}
+            for gid, platform in _base.values_list(
+                    'prompt__group_id', 'platform').distinct():
+                _platforms.setdefault(gid, []).append(platform)
+
+            # Growth windows, same boundaries the loop used.
+            from datetime import timedelta as _td
+            _now = timezone.now()
+            _d7 = _now - _td(days=7)
+            _d14 = _now - _td(days=14)
+            _published = _base.filter(is_mention=True, is_published=True)
+            _cur = _by_group(_published.filter(created_at__gte=_d7), n=Count('id'))
+            _prev = _by_group(
+                _published.filter(created_at__gte=_d14, created_at__lt=_d7), n=Count('id'))
+            _older = _by_group(_published.filter(created_at__lt=_d14), n=Count('id'))
+
             # Prepare response data
             groups_data = []
             for group in groups:
-                # Get analytics summary for the group
-                analytics = PromptAnalytics.objects.filter(
-                    prompt__group=group
-                )
-                # Derive primary and secondary prompts
-                primary_prompt_obj = group.prompts.filter(type='primary').order_by('created_at').first()
+                # Prefetched — no query.
+                group_prompts = list(group.prompts.all())
+                primary_prompt_obj = next(
+                    (p for p in group_prompts if p.type == 'primary'), None)
                 primary_prompt_text = primary_prompt_obj.prompt if primary_prompt_obj else ''
-                secondary_prompts_list = list(
-                    group.prompts.filter(type='secondary').order_by('created_at').values_list('prompt', flat=True)
-                )
+                secondary_prompts_list = [
+                    p.prompt for p in group_prompts if p.type == 'secondary']
                 
                 # Calculate visibility growth: compare current mentions with previous period (last 7 days vs previous 7 days)
                 # Only show growth if there's historical data across multiple time periods
                 visibility_growth = None
                 
                 try:
-                    # Get mentions from last 7 days
-                    from datetime import timedelta
-                    now = timezone.now()
-                    seven_days_ago = now - timedelta(days=7)
-                    fourteen_days_ago = now - timedelta(days=14)
-                    
-                    current_period_mentions = analytics.filter(
-                        is_mention=True,
-                        is_published=True,
-                        created_at__gte=seven_days_ago
-                    ).count()
-                    
-                    previous_period_mentions = analytics.filter(
-                        is_mention=True,
-                        is_published=True,
-                        created_at__gte=fourteen_days_ago,
-                        created_at__lt=seven_days_ago
-                    ).count()
-                    
+                    # Read from the batched aggregates above rather than
+                    # issuing three counts per group.
+                    current_period_mentions = _cur.get(group.id, {}).get('n', 0)
+                    previous_period_mentions = _prev.get(group.id, {}).get('n', 0)
+
                     # Only calculate growth if we have data in BOTH periods (historical comparison)
                     # This prevents showing 100% growth when there's only data in one period
                     if previous_period_mentions > 0:
@@ -1452,12 +1554,8 @@ def prompt_groups_list(request):
                     elif current_period_mentions > 0 and previous_period_mentions == 0:
                         # Current period has data but previous doesn't - check if we have ANY older data
                         # If we have data older than 14 days, it means we're tracking but just no data in previous period
-                        older_mentions = analytics.filter(
-                            is_mention=True,
-                            is_published=True,
-                            created_at__lt=fourteen_days_ago
-                        ).count()
-                        
+                        older_mentions = _older.get(group.id, {}).get('n', 0)
+
                         if older_mentions > 0:
                             # We have historical data (older than 14 days), so this is a valid comparison
                             # Previous period had 0, current has some = 100% growth
@@ -1482,7 +1580,7 @@ def prompt_groups_list(request):
                     'average_position': float(group.average_position),
                     'created_at': group.created_at.isoformat(),
                     'modified_at': group.modified_at.isoformat(),
-                    'prompts_count': group.prompts.count(),
+                    'prompts_count': len(group_prompts),
                     'primary_prompt': primary_prompt_text,
                     'secondary_prompts': secondary_prompts_list,
                     'visibility_growth': visibility_growth,
@@ -1490,10 +1588,10 @@ def prompt_groups_list(request):
                     'track_message': group.track_message,
                     'tracked_at': group.tracked_at.isoformat() if group.tracked_at else None,
                     'analytics_summary': {
-                        'total_analytics': analytics.count(),
-                        'mentions_count': analytics.filter(is_mention=True, is_published=True).count(),
-                        'avg_position': float(analytics.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0),
-                        'platforms': list(analytics.values_list('platform', flat=True).distinct())
+                        'total_analytics': _totals.get(group.id, {}).get('n', 0),
+                        'mentions_count': _mentions.get(group.id, {}).get('n', 0),
+                        'avg_position': float(_totals.get(group.id, {}).get('avg_pos') or 0),
+                        'platforms': _platforms.get(group.id, [])
                     }
                 })
             
@@ -1929,19 +2027,25 @@ def prompt_group_detail(request, group_id):
             now_date = timezone.now().date()
             start_date_snapshots = now_date - timedelta(days=30)  # Last 30 days
             
-            for p in prompts:
-                # Get snapshots for this prompt (aggregated across all platforms)
-                prompt_snapshots = PromptMetricSnapshot.objects.filter(
-                    prompt=p,
+            # One grouped aggregate for every prompt in the group, rather than
+            # one per prompt inside the loop. That loop made this endpoint cost
+            # roughly one query per prompt: a 169-prompt group issued 188
+            # queries and took 449ms, while a 51-prompt group took 71 and 226ms
+            # — linear in group size, on a page whose whole job is to show a
+            # large group.
+            _mention_totals = {
+                row['prompt_id']: row['total'] or 0
+                for row in PromptMetricSnapshot.objects.filter(
+                    prompt__in=prompts,
                     snapshot_date__gte=start_date_snapshots,
-                    snapshot_date__lte=now_date
-                )
-                # Sum mentions from all snapshots
-                total_mentions = prompt_snapshots.aggregate(total=Sum('mentions'))['total'] or 0
+                    snapshot_date__lte=now_date,
+                ).values('prompt_id').annotate(total=Sum('mentions'))
+            }
+            for p in prompts:
                 variants_perf.append({
                     'prompt_id': p.id,
                     'prompt_text': p.prompt,
-                    'mentions': int(total_mentions)
+                    'mentions': int(_mention_totals.get(p.id, 0))
                 })
 
             # Mention trends (by month in last 6 months) - use PromptGroupMetricSnapshot
@@ -2289,16 +2393,42 @@ def prompts_list(request):
             limit = max(1, min(limit, 100))
             offset = max(0, offset)
             total_count = prompts.count()
-            prompts = prompts[offset:offset + limit]
-            
+            # Every row reads group.group_id and group.domain.name; without the
+            # join that is two lazy queries per prompt.
+            prompts = list(
+                prompts.select_related('group', 'group__domain')[offset:offset + limit]
+            )
+
+            # ---- Batched analytics aggregates -------------------------------
+            # Each figure below used to be its own query inside the loop, so a
+            # 50-row page cost 378 queries and scaled with page size. Same shape
+            # as the fix already applied to the prompt-group list and detail.
+            _page_prompt_ids = [p.id for p in prompts]
+            _pa = PromptAnalytics.objects.filter(prompt_id__in=_page_prompt_ids)
+            _published = _pa.filter(is_mention=True, is_published=True)
+
+            def _by_prompt(qs, **ann):
+                return {
+                    r['prompt_id']: r
+                    for r in qs.values('prompt_id').annotate(**ann)
+                }
+
+            _p_totals = _by_prompt(_pa, n=Count('id'), avg_pos=Avg('position'))
+            # Max(created_at) is what .order_by('-created_at').first() returned,
+            # and its absence is what .exists() was guarding against.
+            _p_mentions = _by_prompt(_published, n=Count('id'), latest=Max('created_at'))
+
+            _p_platforms = {}
+            for pid, platform in _pa.values_list('prompt_id', 'platform').distinct():
+                _p_platforms.setdefault(pid, []).append(platform)
+
             # Prepare response data
             prompts_data = []
             for prompt in prompts:
-                # Get analytics for this prompt
-                analytics = PromptAnalytics.objects.filter(
-                    prompt=prompt
-                )
-                
+                _t = _p_totals.get(prompt.id, {})
+                _m = _p_mentions.get(prompt.id, {})
+                _latest = _m.get('latest')
+
                 prompts_data.append({
                     'id': prompt.id,
                     'prompt_text': prompt.prompt,
@@ -2313,11 +2443,11 @@ def prompts_list(request):
                     'created_at': prompt.created_at.isoformat(),
                     'modified_at': prompt.modified_at.isoformat(),
                     'analytics_summary': {
-                        'total_analytics': analytics.count(),
-                        'mentions_count': analytics.filter(is_mention=True, is_published=True).count(),
-                        'avg_position': float(analytics.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0),
-                        'platforms': list(analytics.values_list('platform', flat=True).distinct()),
-                        'latest_mention': analytics.filter(is_mention=True, is_published=True).order_by('-created_at').first().created_at.isoformat() if analytics.filter(is_mention=True, is_published=True).exists() else None
+                        'total_analytics': _t.get('n', 0),
+                        'mentions_count': _m.get('n', 0),
+                        'avg_position': float(_t.get('avg_pos') or 0),
+                        'platforms': _p_platforms.get(prompt.id, []),
+                        'latest_mention': _latest.isoformat() if _latest else None
                     }
                 })
             
