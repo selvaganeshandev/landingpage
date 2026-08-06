@@ -357,8 +357,15 @@ def _link_prompts_to_keywords(domain, accepted_pairs):
             # keyword fully contained in a long question is a strong match, and
             # Jaccard would score it near zero purely because the prompt is
             # longer.
-            overlap = len(tokens & prompt_tokens) / len(tokens)
-            if overlap >= 0.6:
+            shared = len(tokens & prompt_tokens)
+            overlap = shared / len(tokens)
+            # Two conditions, because either alone is wrong. Coverage alone
+            # accepts a two-word keyword matching on the single word "ai",
+            # which pairs every prompt with every AI keyword. A raw count alone
+            # favours long keywords that happen to share filler. Measured on
+            # AppInventiv: this rule matches 7 of 10 wizard prompts, and the
+            # three it rejects genuinely have no keyword about them.
+            if shared >= 2 and overlap >= 0.5:
                 scored.append((overlap, len(tokens), keyword))
 
         if scored:
