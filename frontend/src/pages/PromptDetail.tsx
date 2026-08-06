@@ -599,19 +599,21 @@ const PromptDetail = () => {
                 setSelectedVariantId(value === 'primary' ? null : Number(value))
               }
             >
-              <SelectTrigger asChild>
-                <button
-                  type="button"
-                  title="Choose which prompt in this group to view"
-                  className="w-full text-left p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50 cursor-pointer"
-                >
-                  {/* text-sm, not text-lg: this is a short value being displayed,
-                      not long-form reading content. At 18px it outweighed the
-                      "Main Prompt" heading above it. The AI response below stays
-                      at text-[15px] (FORMATTED_MESSAGE_CLASSES) because that IS
-                      prose. */}
-                  <p className="font-mono text-sm leading-relaxed break-words">{selectedPromptText}</p>
-                </button>
+              {/* Styled directly rather than via asChild: SelectTrigger renders
+                  its children AND a chevron, so asChild hands Radix's Slot two
+                  elements, React.Children.only throws, and the page white-
+                  screens. The chevron is hidden here instead, which keeps the
+                  box looking exactly as it did. */}
+              <SelectTrigger
+                title="Choose which prompt in this group to view"
+                className="h-auto w-full justify-start text-left p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border-border/50 cursor-pointer focus:ring-0 focus:ring-offset-0 [&>svg]:hidden"
+              >
+                {/* text-sm, not text-lg: this is a short value being displayed,
+                    not long-form reading content. At 18px it outweighed the
+                    "Main Prompt" heading above it. The AI response below stays
+                    at text-[15px] (FORMATTED_MESSAGE_CLASSES) because that IS
+                    prose. */}
+                <p className="font-mono text-sm leading-relaxed break-words">{selectedPromptText}</p>
               </SelectTrigger>
               <SelectContent className="max-w-[560px]">
                 <SelectItem value="primary">Main prompt</SelectItem>
