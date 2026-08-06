@@ -32,7 +32,16 @@ import {
   LinkIcon,
   AlertCircle,
   ExternalLink,
+  ChevronDown,
+  Check,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { InfoHint } from "@/components/InfoHint";
 import { apiClient } from "@/services/api";
@@ -77,6 +86,7 @@ const PromptDetail = () => {
   // Which variant the Main Prompt card and the response tabs are showing.
   // null means the group's primary prompt.
   const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
+  const [promptPickerOpen, setPromptPickerOpen] = useState(false);
   const responseSectionRef = useRef<HTMLDivElement>(null);
 
   // Initial load - load everything once
@@ -588,47 +598,73 @@ const PromptDetail = () => {
             </Button>
           </div>
 
-          {/* The prompt box IS the selector — no second control beside the
-              heading. Same styling either way: with variants it opens the list
-              on click, with a single prompt it stays a plain box rather than a
-              dropdown that offers one choice. */}
-          {prompts.length > 1 ? (
-            <Select
-              value={selectedVariantId ? String(selectedVariantId) : 'primary'}
-              onValueChange={(value) =>
-                setSelectedVariantId(value === 'primary' ? null : Number(value))
-              }
-            >
-              {/* Styled directly rather than via asChild: SelectTrigger renders
-                  its children AND a chevron, so asChild hands Radix's Slot two
-                  elements, React.Children.only throws, and the page white-
-                  screens. The chevron is hidden here instead, which keeps the
-                  box looking exactly as it did. */}
-              <SelectTrigger
-                title="Choose which prompt in this group to view"
-                className="h-auto w-full justify-start text-left p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border-border/50 cursor-pointer focus:ring-0 focus:ring-offset-0 [&>svg]:hidden"
+          {/* The box keeps its own styling; the chevron in its corner is the
+              only affordance, and it opens a list rather than a native menu —
+              these are full questions, and a dropdown row truncates them to
+              something you cannot tell apart. */}
+          <div className="relative p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
+            {/* text-sm, not text-lg: this is a short value being displayed, not
+                long-form reading content. At 18px it outweighed the "Main
+                Prompt" heading above it. The AI response below stays at
+                text-[15px] (FORMATTED_MESSAGE_CLASSES) because that IS prose. */}
+            <p className={`font-mono text-sm leading-relaxed break-words ${prompts.length > 1 ? 'pr-10' : ''}`}>
+              {selectedPromptText}
+            </p>
+
+            {prompts.length > 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                title="Show every prompt in this group"
+                onClick={() => setPromptPickerOpen(true)}
+                className="absolute right-2 bottom-2 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
               >
-                {/* text-sm, not text-lg: this is a short value being displayed,
-                    not long-form reading content. At 18px it outweighed the
-                    "Main Prompt" heading above it. The AI response below stays
-                    at text-[15px] (FORMATTED_MESSAGE_CLASSES) because that IS
-                    prose. */}
-                <p className="font-mono text-sm leading-relaxed break-words">{selectedPromptText}</p>
-              </SelectTrigger>
-              <SelectContent className="max-w-[560px]">
-                <SelectItem value="primary">Main prompt</SelectItem>
-                {prompts.map((p: any) => (
-                  <SelectItem key={p.id} value={String(p.id)}>
-                    {p.prompt_text}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
-              <p className="font-mono text-sm leading-relaxed break-words">{selectedPromptText}</p>
-            </div>
-          )}
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+
+          <Dialog open={promptPickerOpen} onOpenChange={setPromptPickerOpen}>
+            <DialogContent className="sm:max-w-[720px]">
+              <DialogHeader>
+                <DialogTitle>Prompts in this group</DialogTitle>
+                <DialogDescription>
+                  Pick one to see what each assistant answered.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="max-h-[55vh] overflow-y-auto -mx-1 px-1 space-y-2">
+                {[{ id: null as number | null, text: promptGroup?.primary_prompt || 'Main prompt', label: 'Main prompt' },
+                  ...prompts.map((p: any) => ({ id: p.id as number | null, text: p.prompt_text, label: '' }))
+                ].map((item, index) => {
+                  const isActive = selectedVariantId === item.id;
+                  return (
+                    <button
+                      key={item.id ?? `primary-${index}`}
+                      type="button"
+                      onClick={() => {
+                        setSelectedVariantId(item.id);
+                        setPromptPickerOpen(false);
+                      }}
+                      className={`w-full text-left rounded-lg border p-3 transition-colors ${
+                        isActive
+                          ? 'border-primary/40 bg-primary/5'
+                          : 'border-border hover:border-primary/30 hover:bg-accent/40'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <p className="font-mono text-sm leading-relaxed break-words flex-1">{item.text}</p>
+                        {isActive && <Check className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />}
+                      </div>
+                      {item.label && (
+                        <span className="text-xs text-muted-foreground mt-1 inline-block">{item.label}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </Card>
 
