@@ -1313,13 +1313,18 @@ def dashboard_summary(request):
 
         your_entry = agg.get(None)
 
+        # Fetched in one query rather than one per competitor inside the loop.
+        # A missing id simply stays absent from the map, which reproduces the
+        # DoesNotExist -> continue the loop used to rely on.
+        _competitors_by_id = Competitor.objects.in_bulk(
+            [cid for cid in agg if cid is not None])
+
         competitors_list = []
         for competitor_id, entry in agg.items():
             if competitor_id is None:
                 continue
-            try:
-                competitor = Competitor.objects.get(id=competitor_id)
-            except Competitor.DoesNotExist:
+            competitor = _competitors_by_id.get(competitor_id)
+            if competitor is None:
                 continue
             share = _share_of(entry['mentions'])
             competitors_list.append({
@@ -1605,7 +1610,9 @@ def dashboard_summary(request):
     if platform_filter:
         recent_analytics = recent_analytics.filter(platform=platform_filter)
 
-    recent_analytics = recent_analytics.order_by('-_window_dt')[:10]
+    # The loop below reads a.prompt.prompt for every row, which without this is
+    # one lazy query per row — ten on a ten-row feed.
+    recent_analytics = recent_analytics.select_related('prompt').order_by('-_window_dt')[:10]
     
     recent_mentions = []
     for a in recent_analytics:
