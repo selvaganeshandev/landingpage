@@ -13,8 +13,10 @@ means writing a row with status INIT and letting the engine's scheduler claim
 it — the same handoff competitor processing uses.
 """
 import logging
+import re
 
 from django.db import transaction
+from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -279,69 +281,132 @@ def accept_generation_run(request, run_id):
         run.save(update_fields=['status', 'modified_at'])
 
     logger.info(
-        "[PromptGen] run %s accepted: %s groups, %s prompts, %s keywords seeded",
-        run.id, created_groups, created_prompts, created_keywords,
+        "[PromptGen] run %s accepted: %s groups, %s prompts, %s keyword links "
+        "(%s keywords derived)",
+        run.id, created_groups, created_prompts, created_links, created_keywords,
     )
     return Response({
         'groups_created': created_groups,
         'prompts_created': created_prompts,
-        'keywords_seeded': created_keywords,
+        'keyword_links': created_links,
+        'keywords_derived': created_keywords,
     })
 
 
-def _seed_keywords_from_candidates(domain, candidates):
-    """Mirror accepted prompts into Keyword rows so Topics has something to group.
+# Words that carry no signal when matching a prompt to a keyword. Question
+# openers dominate prompt text and would otherwise make every prompt look
+# similar to every keyword.
+_MATCH_STOPWORDS = {
+    'a', 'an', 'the', 'and', 'or', 'of', 'for', 'to', 'in', 'on', 'with', 'my',
+    'our', 'your', 'their', 'is', 'are', 'be', 'do', 'does', 'did', 'can',
+    'could', 'should', 'would', 'will', 'what', 'which', 'who', 'whom', 'how',
+    'where', 'when', 'why', 'best', 'good', 'top', 'me', 'i', 'we', 'you',
+    'it', 'that', 'this', 'these', 'those', 'about', 'into', 'from', 'by',
+    'at', 'as', 'any', 'some', 'more', 'most', 'help', 'need', 'want', 'look',
+}
 
-    Topics are built by grouping `Keyword` rows, not prompts — TopicProcessor
-    reads keywords whose last_used_for_topic_generation is NULL. A project
-    onboarded through the AI wizard has prompts but no keywords, so its Topics
-    page stayed permanently empty however many prompts it tracked.
 
-    Two flags matter here:
+def _tokens(text):
+    return {
+        w for w in re.findall(r"[a-z0-9]+", (text or '').lower())
+        if len(w) > 2 and w not in _MATCH_STOPWORDS
+    }
 
-      auto_generate_prompts=False  — True would feed these straight back into
-        prompt generation, and since each generated prompt would seed another
-        keyword, the domain would loop: generate, seed, reset to INIT, generate.
-      last_used_for_generation=now — belt and braces on the same loop, so the
-        rows read as "already used" even if the flag is flipped by hand later.
 
-    Returns the number of rows created.
+def _link_prompts_to_keywords(domain, accepted_pairs):
+    """Attach each accepted prompt to the keywords it is about.
+
+    A topic reaches its prompts through Topic -> TopicKeyword -> Keyword ->
+    PromptKeyword -> Prompt. The old pipeline generated one prompt per keyword,
+    so that last link was free. The generation wizard writes prompts that came
+    from a brand brief instead, so nothing linked them to anything: every topic
+    card on a wizard-built project read "across 0 prompts" while the prompts
+    underneath had tracked analytics all along.
+
+    Matching is token overlap against the domain's own keywords — deterministic
+    and free, no second model call. A prompt with no confident match gets a
+    short keyword derived from the candidate's own entity and cluster, never the
+    whole question: a keyword is what a searcher types, and storing sentences
+    here is what filled the topic chips with paragraphs.
+
+    Returns (links_created, keywords_created).
     """
-    from django.utils import timezone
     from keywords.models import Keyword
+    from topics.models import PromptKeyword
 
+    if not accepted_pairs:
+        return 0, 0
+
+    keywords = list(Keyword.objects.filter(domain=domain).only('id', 'keyword'))
+    keyword_tokens = [(k, _tokens(k.keyword)) for k in keywords]
+    by_text = {k.keyword.lower(): k for k in keywords}
+
+    links, new_keywords = [], []
     now = timezone.now()
-    existing = set(
-        Keyword.objects.filter(domain=domain).values_list('keyword', flat=True)
-    )
 
-    rows, seen = [], set()
-    for cand in candidates:
-        # keyword is a CharField(255); a long prompt is truncated rather than
-        # dropped — the text is a grouping signal, not the tracked query.
-        text = (cand.text or '').strip()[:255]
-        key = text.lower()
-        if not text or key in seen or text in existing:
+    for prompt, cand in accepted_pairs:
+        prompt_tokens = _tokens(prompt.prompt)
+        if not prompt_tokens:
             continue
-        seen.add(key)
-        rows.append(Keyword(
-            keyword=text,
-            domain=domain,
-            auto_generate_prompts=False,
-            source='ai-prompt',
-            intent=(cand.intent or None),
-            entity=(cand.entity or None),
-            topic=(cand.cluster_title or None),
-            cluster_id=(cand.cluster_key or None),
-            last_used_for_generation=now,
-            last_used_for_topic_generation=None,
-        ))
 
-    if not rows:
-        return 0
+        scored = []
+        for keyword, tokens in keyword_tokens:
+            if not tokens:
+                continue
+            # Share of the KEYWORD's words present in the prompt: a two-word
+            # keyword fully contained in a long question is a strong match, and
+            # Jaccard would score it near zero purely because the prompt is
+            # longer.
+            overlap = len(tokens & prompt_tokens) / len(tokens)
+            if overlap >= 0.6:
+                scored.append((overlap, len(tokens), keyword))
 
-    Keyword.objects.bulk_create(rows, ignore_conflicts=True)
-    return len(rows)
+        if scored:
+            # Best coverage, then the most specific keyword among ties.
+            scored.sort(key=lambda row: (row[0], row[1]), reverse=True)
+            for overlap, _size, keyword in scored[:3]:
+                links.append(PromptKeyword(
+                    prompt=prompt,
+                    keyword=keyword,
+                    relevance_score=round(overlap * 100, 2),
+                ))
+            continue
+
+        # No match: derive a short keyword from what the candidate already
+        # carries. entity is the subject the question is about; cluster_title is
+        # its theme. Both are short by construction.
+        parts = [p for p in ((cand.entity or '').strip(), (cand.cluster_title or '').strip()) if p]
+        derived = ' '.join(dict.fromkeys(' '.join(parts).split()))[:255].strip()
+        if not derived:
+            continue
+
+        existing = by_text.get(derived.lower())
+        if existing is None:
+            existing = Keyword.objects.create(
+                keyword=derived,
+                domain=domain,
+                # These must not feed the old keyword -> prompt generator: every
+                # generated prompt would derive another keyword, and the domain
+                # would loop generate -> derive -> INIT -> generate.
+                auto_generate_prompts=False,
+                source='ai-prompt',
+                intent=(cand.intent or None),
+                entity=(cand.entity or None),
+                topic=(cand.cluster_title or None),
+                cluster_id=(cand.cluster_key or None),
+                last_used_for_generation=now,
+                last_used_for_topic_generation=None,
+            )
+            by_text[derived.lower()] = existing
+            keyword_tokens.append((existing, _tokens(derived)))
+            new_keywords.append(existing)
+
+        links.append(PromptKeyword(prompt=prompt, keyword=existing, relevance_score=50))
+
+    if links:
+        PromptKeyword.objects.bulk_create(links, ignore_conflicts=True)
+
+    return len(links), len(new_keywords)
 
 
 @api_view(['POST'])

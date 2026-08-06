@@ -15,7 +15,7 @@ from shared_models.models import (
     Topic, TopicKeyword, KeywordAnalytics, TopicAnalytics
 )
 from .domain_processor import DomainProcessor
-from .processing_tasks import process_domain_task, process_prompt_analytics_task, process_single_competitor_task, process_topics_for_domain_task, process_misinformation_scan_task
+from .processing_tasks import process_domain_task, process_prompt_analytics_task, process_single_competitor_task, process_topics_for_domain_task, process_misinformation_scan_task, seed_domain_keywords_task
 from .serializers import (
     DomainSerializer, ProcessingStatusSerializer,
     CompetitorSerializer, CompetitorPromptAnalyticsSerializer,
@@ -1159,6 +1159,41 @@ def start_topic_generation(request):
             {'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def start_keyword_seeding(request):
+    """Queue generation of a brand's starting keyword set.
+
+    Called by onboarding right after a domain is created. Keywords are what
+    Topics group and what SEO rankings track, and the new onboarding creates
+    none inline so that adding a brand stays instant — this is where that work
+    actually happens.
+
+    Body:
+        domain_id: Required
+        count: Optional, default 50
+    """
+    try:
+        domain_id = request.data.get('domain_id')
+        if not domain_id:
+            return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        domain = get_object_or_404(Domain, id=domain_id)
+        count = int(request.data.get('count') or 50)
+
+        task = seed_domain_keywords_task.delay(int(domain_id), count)
+        return Response({
+            'success': True,
+            'message': f'Generating keywords for {domain.name}.',
+            'domain_id': int(domain_id),
+            'task_id': task.id,
+        }, status=status.HTTP_202_ACCEPTED)
+
+    except Exception as e:
+        logger.error(f"Error starting keyword seeding: {str(e)}", exc_info=True)
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
