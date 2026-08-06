@@ -204,9 +204,13 @@ export default function OrganizationSettings() {
 
   // API Keys state
   const PROVIDERS = [
-    // One key for ChatGPT, Claude and Perplexity — all three are transported
-    // over OpenRouter, so their vendor keys are never consulted.
-    { id: 'openrouter', label: 'OpenRouter (ChatGPT, Claude, Perplexity)', color: '#6d28d9', docsUrl: 'https://openrouter.ai/keys' },
+    // One key covers ChatGPT, Claude and Perplexity — all three share a
+    // transport, so their individual vendor keys are never consulted. The id
+    // stays 'openrouter' because it is what the API returns; only the label is
+    // shown, and the transport is not named anywhere in the UI.
+    // No docsUrl: it is not rendered for any provider, and shipping it put the
+    // transport's domain in the bundle for anyone reading the JS.
+    { id: 'openrouter', label: 'AI Platforms (ChatGPT, Claude, Perplexity)', color: '#6d28d9' },
     { id: 'openai',     label: 'OpenAI (ChatGPT)',   color: '#10a37f', docsUrl: 'https://platform.openai.com/api-keys' },
     { id: 'gemini',     label: 'Google Gemini',       color: '#4285F4', docsUrl: 'https://aistudio.google.com/app/apikey' },
     { id: 'perplexity', label: 'Perplexity',          color: '#20808D', docsUrl: 'https://www.perplexity.ai/settings/api' },
