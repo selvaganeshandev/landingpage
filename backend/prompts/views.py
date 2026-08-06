@@ -15,6 +15,44 @@ import json
 import logging
 import re
 import statistics
+
+# Key-phrase patterns used to pull a headline out of the text preceding a
+# citation. Each entry is (keywords, compiled pattern).
+#
+# The keywords are a fast pre-filter, not a second source of truth: they are
+# exactly the alternatives inside their own pattern, so when none of them appears
+# in the text the pattern cannot match either, and skipping it changes nothing.
+#
+# That guard matters because these patterns are expensive. `[^.!?]{0,50}` before
+# an alternation makes the engine try 51 prefix lengths at every position, and
+# profiling the mentions endpoint on production showed re.findall at 1,792 calls
+# and 1.02s of self time — the single largest cost in a 1.27s request. Most text
+# preceding a citation contains none of these words, so most of that work was
+# spent confirming there was nothing to find.
+_HEADLINE_PATTERNS = [
+    (
+        ('stands out', 'top choice', 'best', 'superior', 'excellent',
+         'outstanding', 'recommended', 'highly rated'),
+        re.compile(
+            r'([^.!?]{0,50}(?:stands out|top choice|best|superior|excellent|'
+            r'outstanding|recommended|highly rated)[^.!?]{0,50})',
+            re.IGNORECASE),
+    ),
+    (
+        ('key benefits', 'features', 'advantages', 'benefits'),
+        re.compile(
+            r'([^.!?]{0,50}(?:key benefits|features|advantages|benefits)'
+            r'[^.!?]{0,50})',
+            re.IGNORECASE),
+    ),
+    (
+        ('notable', 'significant', 'important', 'noteworthy'),
+        re.compile(
+            r'([^.!?]{0,50}(?:notable|significant|important|noteworthy)'
+            r'[^.!?]{0,50})',
+            re.IGNORECASE),
+    ),
+]
 from dateutil.relativedelta import relativedelta
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -188,13 +226,13 @@ def get_mentions(request):
             
             # Strategy 3: Extract key phrases (look for patterns like "stands out", "top choice", etc.)
             # Look for common patterns that indicate key statements
-            patterns = [
-                r'([^.!?]{0,50}(?:stands out|top choice|best|superior|excellent|outstanding|recommended|highly rated)[^.!?]{0,50})',
-                r'([^.!?]{0,50}(?:key benefits|features|advantages|benefits)[^.!?]{0,50})',
-                r'([^.!?]{0,50}(?:notable|significant|important|noteworthy)[^.!?]{0,50})',
-            ]
-            for pattern in patterns:
-                matches = re.findall(pattern, text_before, re.IGNORECASE)
+            before_lower = text_before.lower()
+            for keywords, pattern in _HEADLINE_PATTERNS:
+                # Cheap substring check first; the pattern cannot match unless
+                # one of its own alternatives is present. See _HEADLINE_PATTERNS.
+                if not any(k in before_lower for k in keywords):
+                    continue
+                matches = pattern.findall(text_before)
                 if matches:
                     phrase = matches[-1].strip()
                     if len(phrase) > 10 and len(phrase) < 150:
@@ -523,13 +561,13 @@ def get_mention_detail(request, analytics_id):
                 
                 # Strategy 3: Extract key phrases (look for patterns like "stands out", "top choice", etc.)
                 # Look for common patterns that indicate key statements
-                patterns = [
-                    r'([^.!?]{0,50}(?:stands out|top choice|best|superior|excellent|outstanding|recommended|highly rated)[^.!?]{0,50})',
-                    r'([^.!?]{0,50}(?:key benefits|features|advantages|benefits)[^.!?]{0,50})',
-                    r'([^.!?]{0,50}(?:notable|significant|important|noteworthy)[^.!?]{0,50})',
-                ]
-                for pattern in patterns:
-                    matches = re.findall(pattern, text_before, re.IGNORECASE)
+                before_lower = text_before.lower()
+                for keywords, pattern in _HEADLINE_PATTERNS:
+                    # Cheap substring check first; the pattern cannot match
+                    # unless one of its own alternatives is present.
+                    if not any(k in before_lower for k in keywords):
+                        continue
+                    matches = pattern.findall(text_before)
                     if matches:
                         phrase = matches[-1].strip()
                         if len(phrase) > 10 and len(phrase) < 150:
