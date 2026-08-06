@@ -582,43 +582,51 @@ const PromptDetail = () => {
             <h3 className="text-lg font-semibold font-inter">
               {selectedVariantId ? 'Variant' : 'Main Prompt'}
             </h3>
-            <div className="flex items-center gap-2">
-              {/* Which prompt in the group the response below belongs to. Every
-                  variant is tracked separately and answered separately, so the
-                  page needs to say which one is on screen. */}
-              {prompts.length > 0 && (
-                <Select
-                  value={selectedVariantId ? String(selectedVariantId) : 'primary'}
-                  onValueChange={(value) =>
-                    setSelectedVariantId(value === 'primary' ? null : Number(value))
-                  }
+            <Button variant="ghost" size="sm" onClick={() => handleCopy(selectedPromptText)}>
+              <Copy className="h-4 w-4 mr-1" />
+              Copy
+            </Button>
+          </div>
+
+          {/* The prompt box IS the selector — no second control beside the
+              heading. Same styling either way: with variants it opens the list
+              on click, with a single prompt it stays a plain box rather than a
+              dropdown that offers one choice. */}
+          {prompts.length > 1 ? (
+            <Select
+              value={selectedVariantId ? String(selectedVariantId) : 'primary'}
+              onValueChange={(value) =>
+                setSelectedVariantId(value === 'primary' ? null : Number(value))
+              }
+            >
+              <SelectTrigger asChild>
+                <button
+                  type="button"
+                  title="Choose which prompt in this group to view"
+                  className="w-full text-left p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50 cursor-pointer"
                 >
-                  <SelectTrigger className="w-[260px] h-9">
-                    <SelectValue placeholder="Select a prompt" />
-                  </SelectTrigger>
-                  <SelectContent className="max-w-[420px]">
-                    <SelectItem value="primary">Main prompt</SelectItem>
-                    {prompts.map((p: any) => (
-                      <SelectItem key={p.id} value={String(p.id)}>
-                        {p.prompt_text}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Button variant="ghost" size="sm" onClick={() => handleCopy(selectedPromptText)}>
-                <Copy className="h-4 w-4 mr-1" />
-                Copy
-              </Button>
+                  {/* text-sm, not text-lg: this is a short value being displayed,
+                      not long-form reading content. At 18px it outweighed the
+                      "Main Prompt" heading above it. The AI response below stays
+                      at text-[15px] (FORMATTED_MESSAGE_CLASSES) because that IS
+                      prose. */}
+                  <p className="font-mono text-sm leading-relaxed break-words">{selectedPromptText}</p>
+                </button>
+              </SelectTrigger>
+              <SelectContent className="max-w-[560px]">
+                <SelectItem value="primary">Main prompt</SelectItem>
+                {prompts.map((p: any) => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {p.prompt_text}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
+              <p className="font-mono text-sm leading-relaxed break-words">{selectedPromptText}</p>
             </div>
-          </div>
-          <div className="p-4 rounded-xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/50">
-            {/* text-sm, not text-lg: this is a short value being displayed, not
-                long-form reading content. At 18px it outweighed the "Main
-                Prompt" heading above it. The AI response below stays at
-                text-[15px] (FORMATTED_MESSAGE_CLASSES) because that IS prose. */}
-            <p className="font-mono text-sm leading-relaxed break-words">{selectedPromptText}</p>
-          </div>
+          )}
         </div>
       </Card>
 
