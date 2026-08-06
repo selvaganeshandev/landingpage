@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
 import { PageLoader } from "@/components/PageLoader";
+import { NoPromptsYet } from "@/components/NoPromptsYet";
 import {
   TrendingUp,
   TrendingDown,
@@ -480,6 +481,11 @@ const Topics = () => {
 
   if (loading) {
     return <PageLoader />;
+  }
+
+  // Topics group the keywords a project tracks, which only exist once prompts do.
+  if (selectedDomain?.prompt_count === 0) {
+    return <NoPromptsYet what="Topics group the keywords behind your tracked prompts" />;
   }
 
   // Show processing card when no topics available

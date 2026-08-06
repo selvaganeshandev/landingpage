@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useDomainStore } from "@/stores/domainStore";
 import { apiClient } from "@/services/api";
 import { PageLoader } from "@/components/PageLoader";
+import { NoPromptsYet } from "@/components/NoPromptsYet";
 import { InfoHint, MetricHint } from "@/components/InfoHint";
 import { ProcessingStateCard } from "@/components/ProcessingStateCard";
 import { MisinformationDetailDialog } from "@/components/MisinformationDetailDialog";
@@ -457,6 +458,12 @@ const MisinformationAlerts = () => {
     return <ProcessingStateCard domain={selectedDomain!} />;
   }
 
+
+  // The scan compares cited pages against what AI answers claim; with no prompts
+  // there are no answers and no citations, so there is nothing to scan.
+  if (selectedDomain?.prompt_count === 0) {
+    return <NoPromptsYet what="Misinformation is detected by checking what AI answers claim about you" />;
+  }
 
   // Misinformation scan runs automatically after prompt processing
   // No manual "Start Scan" needed - just show appropriate message if not ready

@@ -27,6 +27,10 @@ export interface Domain {
   misinformation_scan_status?: 'NOT_READY' | 'READY' | 'SCANNING' | 'SCANNED' | 'NO_ISSUES';
   track_message?: string | null;
   tracked_at?: string | null;
+  /** Prompts tracked for this project. Competitors, Topics and Misinformation
+   *  are all derived from prompt responses, so 0 means those pages can only be
+   *  empty and should point the user at Prompts first. */
+  prompt_count?: number;
   created_at: string;
   modified_at: string;
 }

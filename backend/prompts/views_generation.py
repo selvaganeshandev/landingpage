@@ -271,19 +271,77 @@ def accept_generation_run(request, run_id):
                 )
                 created_prompts += 1
 
+        created_keywords = _seed_keywords_from_candidates(domain, candidates)
+
         run.candidates.filter(id__in=[c.id for c in candidates]).update(status='accepted')
         run.candidates.exclude(id__in=[c.id for c in candidates]).update(status='rejected')
         run.status = 'ACPT'
         run.save(update_fields=['status', 'modified_at'])
 
     logger.info(
-        "[PromptGen] run %s accepted: %s groups, %s prompts",
-        run.id, created_groups, created_prompts,
+        "[PromptGen] run %s accepted: %s groups, %s prompts, %s keywords seeded",
+        run.id, created_groups, created_prompts, created_keywords,
     )
     return Response({
         'groups_created': created_groups,
         'prompts_created': created_prompts,
+        'keywords_seeded': created_keywords,
     })
+
+
+def _seed_keywords_from_candidates(domain, candidates):
+    """Mirror accepted prompts into Keyword rows so Topics has something to group.
+
+    Topics are built by grouping `Keyword` rows, not prompts — TopicProcessor
+    reads keywords whose last_used_for_topic_generation is NULL. A project
+    onboarded through the AI wizard has prompts but no keywords, so its Topics
+    page stayed permanently empty however many prompts it tracked.
+
+    Two flags matter here:
+
+      auto_generate_prompts=False  — True would feed these straight back into
+        prompt generation, and since each generated prompt would seed another
+        keyword, the domain would loop: generate, seed, reset to INIT, generate.
+      last_used_for_generation=now — belt and braces on the same loop, so the
+        rows read as "already used" even if the flag is flipped by hand later.
+
+    Returns the number of rows created.
+    """
+    from django.utils import timezone
+    from keywords.models import Keyword
+
+    now = timezone.now()
+    existing = set(
+        Keyword.objects.filter(domain=domain).values_list('keyword', flat=True)
+    )
+
+    rows, seen = [], set()
+    for cand in candidates:
+        # keyword is a CharField(255); a long prompt is truncated rather than
+        # dropped — the text is a grouping signal, not the tracked query.
+        text = (cand.text or '').strip()[:255]
+        key = text.lower()
+        if not text or key in seen or text in existing:
+            continue
+        seen.add(key)
+        rows.append(Keyword(
+            keyword=text,
+            domain=domain,
+            auto_generate_prompts=False,
+            source='ai-prompt',
+            intent=(cand.intent or None),
+            entity=(cand.entity or None),
+            topic=(cand.cluster_title or None),
+            cluster_id=(cand.cluster_key or None),
+            last_used_for_generation=now,
+            last_used_for_topic_generation=None,
+        ))
+
+    if not rows:
+        return 0
+
+    Keyword.objects.bulk_create(rows, ignore_conflicts=True)
+    return len(rows)
 
 
 @api_view(['POST'])
