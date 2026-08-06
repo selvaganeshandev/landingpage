@@ -1131,6 +1131,14 @@ export const apiClient = {
    * reconcile with those pages. Omit `days` for all-time.
    */
   /**
+   * Progress of a running topic-grouping job. Cheap and safe to poll: it reads
+   * a Redis record the engine task keeps, so the page can restore a progress
+   * bar after a refresh instead of showing "No topics yet" mid-run.
+   */
+  getTopicGenerationStatus: (domainId: number) =>
+    apiRequest(`/topics/generation-status/?domain_id=${domainId}`),
+
+  /**
    * Queue topic generation for a domain. Additive — only ungrouped keywords are
    * read and TopicProcessor performs no deletes — so it is safe on a domain
    * that already has topics. 409 means every keyword is already grouped.

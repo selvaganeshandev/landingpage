@@ -272,3 +272,46 @@ def generate_topics(request):
         {'error': 'The processing engine rejected the request.'},
         status=status.HTTP_502_BAD_GATEWAY,
     )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def topic_generation_status(request):
+    """Progress of a running topic-grouping job, proxied from the engine.
+
+    The page polls this so a refresh mid-run restores the progress bar. A run
+    writes no rows until it finishes, so without it the UI cannot distinguish
+    "grouping 812 keywords" from "never started" — and used to offer to start a
+    second run over the same keywords.
+
+    Query params:
+        domain_id: Required
+    """
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not user_can_access_domain(request.user, domain_id, request):
+        return Response({'error': 'Domain not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        engine_api_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001').rstrip('/')
+        response = requests.get(
+            f"{engine_api_url}/api/topics/generation-status/",
+            params={'domain_id': int(domain_id)},
+            timeout=10,
+        )
+    except requests.exceptions.RequestException as e:
+        # An unreachable engine is not "no run in progress" — say unknown so the
+        # page keeps whatever it was showing rather than flipping to idle and
+        # inviting a duplicate run.
+        logger.warning(f"topic_generation_status: engine unreachable for domain {domain_id}: {e}")
+        return Response({'state': 'unknown', 'domain_id': int(domain_id)})
+
+    if response.status_code != 200:
+        return Response({'state': 'unknown', 'domain_id': int(domain_id)})
+
+    try:
+        return Response(response.json())
+    except ValueError:
+        return Response({'state': 'unknown', 'domain_id': int(domain_id)})

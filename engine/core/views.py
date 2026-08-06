@@ -1137,7 +1137,13 @@ def start_topic_generation(request):
                 status=status.HTTP_409_CONFLICT
             )
 
+        from core import topic_progress
+
+        # Recorded BEFORE the task is queued so a page refresh in the first
+        # seconds — before a worker has picked the message up — still finds a
+        # run in progress rather than an empty "No topics yet" card.
         task = process_topics_for_domain_task.delay(domain_id)
+        topic_progress.start(domain_id, pending, task_id=task.id)
 
         return Response({
             'success': True,
@@ -1153,6 +1159,46 @@ def start_topic_generation(request):
             {'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def topic_generation_status(request):
+    """Progress of the topic-grouping run for a domain.
+
+    Grouping writes nothing to the database until every batch has returned, so
+    the database cannot answer "is a run in progress?" — for thirteen minutes a
+    running domain and an untouched one look identical. This reads the Redis
+    record the task keeps, which is why a page refresh mid-run can restore the
+    progress bar instead of offering to start the run again.
+
+    Query params:
+        domain_id: Required
+    """
+    domain_id = request.query_params.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from core import topic_progress
+
+    progress = topic_progress.read(domain_id) or {}
+    done = int(progress.get('batches_done') or 0)
+    total = int(progress.get('batches_total') or 0)
+
+    return Response({
+        'domain_id': int(domain_id),
+        # 'idle' when nothing has ever run, or the record has expired.
+        'state': progress.get('state') or 'idle',
+        'stage': progress.get('stage') or '',
+        'batches_done': done,
+        'batches_total': total,
+        'percent': int(done * 100 / total) if total else 0,
+        'keywords': int(progress.get('keywords') or 0),
+        'topics_created': int(progress.get('topics_created') or 0),
+        'started_at': progress.get('started_at'),
+        'updated_at': progress.get('updated_at'),
+        'error': progress.get('error'),
+    })
 
 
 @api_view(['POST'])
