@@ -34,6 +34,7 @@ import {
   Search,
   Sparkles,
   Loader2,
+  Download,
   ExternalLink
 } from "lucide-react";
 import { 
@@ -63,6 +64,14 @@ import { getActiveDomainId } from "@/utils/activeDomain";
 import { useDomainStore } from "@/stores/domainStore";
 
 // Static data constants removed - all data now comes from APIs
+
+// The page shows a short rolling window and one page of prompts at a time. An
+// export is a record of what is on file, so it re-fetches every time-scoped
+// call over a range wide enough to cover all history and walks the prompt table
+// to its last page.
+const EXPORT_DAYS = 3650;
+const EXPORT_PROMPT_PAGE_SIZE = 100;
+const EXPORT_MAX_PROMPT_PAGES = 200;
 
 type VisibilityLegendProps = LegendProps & {
   disabledBrands: string[];
@@ -166,6 +175,7 @@ const Competitors = () => {
   const [answerGapData, setAnswerGapData] = useState<any[]>([]);
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
   const [isPageLoading, setIsPageLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
   const [hasLoadedData, setHasLoadedData] = useState(false);
   const [disabledBrands, setDisabledBrands] = useState<string[]>([]);
   const [strengthDisabledBrands, setStrengthDisabledBrands] = useState<string[]>([]);
@@ -514,11 +524,259 @@ const Competitors = () => {
   };
 
 
-  const handleExportReport = () => {
-    toast({
-      title: "Exporting Report",
-      description: "Your competitor analysis report is being generated...",
-    });
+  /**
+   * Export every competitor dataset on this page as a multi-sheet workbook.
+   *
+   * Deliberately does not reuse page state: the screen is scoped to a 7-day
+   * window, the prompt table to 20 rows and whichever platform filter is
+   * active, and none of those limits belong in a full data export. Everything
+   * is re-fetched unfiltered over the full range. Sections with no rows are
+   * skipped rather than written as an empty table.
+   */
+  const handleExportReport = async () => {
+    if (!domainId) {
+      toast({
+        title: "Export failed",
+        description: "No domain selected.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+
+      const [list, snapshotHistory, heatmapResponse, strength, insights, gaps]: any[] = await Promise.all([
+        apiClient.getEngineCompetitors({ domain_id: domainId }),
+        apiClient.getCompetitorMetricSnapshots({ domain_id: domainId, days: EXPORT_DAYS }),
+        apiClient.getCompetitorHeatmap({ domain_id: domainId, days: EXPORT_DAYS }),
+        apiClient.getCompetitiveStrengthAnalysis({ domain_id: domainId }).catch(() => undefined),
+        apiClient.getCompetitiveInsights({ domain_id: domainId }).catch(() => undefined),
+        apiClient.getAnswerGapAnalysis({ domain_id: domainId }).catch(() => undefined),
+      ]);
+
+      // Prompt analytics is paginated server-side, so the export walks pages
+      // until the last one. The page cap is a runaway guard, not a product
+      // limit — if it ever bites, the Summary sheet says so rather than letting
+      // a partial file pass as complete.
+      const promptGroups: any[] = [];
+      let promptPage = 1;
+      let promptTotalPages = 1;
+      let promptsTruncated = false;
+      while (promptPage <= promptTotalPages) {
+        if (promptPage > EXPORT_MAX_PROMPT_PAGES) {
+          promptsTruncated = true;
+          break;
+        }
+        const res: any = await apiClient.getCompetitorPromptAnalyticsEngine({
+          domain_id: domainId,
+          page_size: String(EXPORT_PROMPT_PAGE_SIZE),
+          page: promptPage,
+        });
+        const batch = Array.isArray(res) ? res : res?.results || [];
+        promptGroups.push(...batch);
+        promptTotalPages = Array.isArray(res) ? 1 : Number(res?.total_pages || 1);
+        promptPage += 1;
+      }
+
+      const rawCompetitors: any[] = Array.isArray(list) ? list : list?.results || [];
+      const isYouRow = (c: any) => c.is_you === true || c.name === "You";
+      const displayName = (c: any) =>
+        isYouRow(c) && c.domain_name ? `${c.domain_name} (You)` : c.name || "Unknown";
+
+      const snapshotRows: any[] = Array.isArray(snapshotHistory)
+        ? snapshotHistory
+        : snapshotHistory?.results || [];
+
+      // platform_metrics is a point-in-time figure, so the breakdown is taken
+      // from each competitor's most recent snapshot rather than summed.
+      const latestSnapshotPerCompetitor = new Map<string, any>();
+      snapshotRows.forEach((snap: any) => {
+        const key = String(snap.competitor ?? snap.competitor_name ?? "domain");
+        const held = latestSnapshotPerCompetitor.get(key);
+        const at = new Date(snap.timestamp || snap.created_at || 0).getTime();
+        if (!held || at > new Date(held.timestamp || held.created_at || 0).getTime()) {
+          latestSnapshotPerCompetitor.set(key, snap);
+        }
+      });
+      const platformRows: any[] = [];
+      latestSnapshotPerCompetitor.forEach((snap: any) => {
+        (Array.isArray(snap.platform_metrics) ? snap.platform_metrics : []).forEach((pm: any) => {
+          platformRows.push({
+            Competitor: snap.competitor_name || "Unknown",
+            Platform: pm.platform || "Unknown",
+            Mentions: Number(pm.mentions || 0),
+            Citations: Number(pm.citations || 0),
+            "As of": String(snap.timestamp || snap.created_at || "").split("T")[0],
+          });
+        });
+      });
+
+      const promptSheetRows: any[] = [];
+      promptGroups.forEach((group: any) => {
+        (Array.isArray(group.analytics) ? group.analytics : []).forEach((a: any) => {
+          promptSheetRows.push({
+            Prompt: group.prompt_text || "",
+            Competitor: a.competitor_name || `${selectedDomain?.name || "Your brand"} (You)`,
+            Platform: a.platform || "",
+            Mentioned: a.is_mentioned ? "Yes" : "No",
+            Mentions: Number(a.mention_count ?? (a.is_mentioned ? 1 : 0)),
+            Citations: Array.isArray(a.citation_list) ? a.citation_list.length : 0,
+            Sentiment: a.sentiment_category || "",
+            "Tracked at": a.tracked_at ? new Date(a.tracked_at).toLocaleString() : "",
+          });
+        });
+      });
+
+      const heatRows: any[] = Array.isArray(heatmapResponse?.rows) ? heatmapResponse.rows : [];
+      const heatPlatforms: string[] = Array.isArray(heatmapResponse?.platforms)
+        ? heatmapResponse.platforms
+        : [];
+      const strengthRows: any[] = Array.isArray(strength) ? strength : [];
+      const insightRows: any[] = Array.isArray(insights) ? insights : [];
+      const gapRows: any[] = Array.isArray(gaps) ? gaps : [];
+
+      const wb = XLSX.utils.book_new();
+
+      const summarySheet: any[][] = [
+        ["Competitor Analysis", ""],
+        ["Domain", selectedDomain?.name || ""],
+        ["Coverage", "Full history — unfiltered by time period or platform"],
+        ["Generated", new Date().toLocaleString()],
+        ["", ""],
+        ["Competitors tracked", rawCompetitors.filter((c) => !isYouRow(c)).length],
+        ["Metric snapshots", snapshotRows.length],
+        ["Prompts covered", promptGroups.length],
+        ["Prompt analytics rows", promptSheetRows.length],
+      ];
+      if (promptsTruncated) {
+        summarySheet.push(["", ""]);
+        summarySheet.push([
+          "Note",
+          `Prompt export stopped at ${EXPORT_MAX_PROMPT_PAGES * EXPORT_PROMPT_PAGE_SIZE} prompts — this file does not contain every prompt on record.`,
+        ]);
+      }
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summarySheet), "Summary");
+
+      if (rawCompetitors.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          rawCompetitors.map((c: any) => ({
+            Competitor: displayName(c),
+            Website: c.url || c.domain_name || "",
+            "Your brand": isYouRow(c) ? "Yes" : "No",
+            Mentions: Number(c.total_mentions || 0),
+            Citations: Number(c.total_citations || 0),
+            "Visibility score": Number(c.visibility_score || 0),
+            "Sentiment score": Number(c.sentiment_score || 0),
+            "Avg position": Number(c.average_position || 0),
+            "Share of voice (%)": Number(c.share_of_voice_percentage || 0),
+            "Trend (%)": Number(c.trend_percentage || 0),
+            Status: c.track_status || "",
+          })),
+        ), "Competitors");
+      }
+
+      if (snapshotRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          [...snapshotRows]
+            .sort((a: any, b: any) =>
+              new Date(a.timestamp || a.created_at || 0).getTime() -
+              new Date(b.timestamp || b.created_at || 0).getTime())
+            .map((snap: any) => ({
+              Date: String(snap.timestamp || snap.created_at || "").split("T")[0],
+              Competitor: snap.competitor_name || "Unknown",
+              Mentions: Number(snap.total_mentions || 0),
+              Citations: Number(snap.total_citations || 0),
+              "Visibility score": Number(snap.visibility_score || 0),
+              "Sentiment score": Number(snap.sentiment_score || 0),
+              "Avg position": Number(snap.average_position || 0),
+              "Share of voice (%)": Number(snap.share_of_voice_percentage || 0),
+            })),
+        ), "Metric History");
+      }
+
+      if (platformRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(platformRows), "Platform Mentions");
+      }
+
+      // Platform columns vary by domain, so they are taken from the response
+      // rather than hardcoded to a fixed set of engines.
+      if (heatRows.length && heatPlatforms.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          heatRows.map((row: any) => {
+            const out: Record<string, any> = {
+              Competitor: row.isYou ? `${row.name} (You)` : row.name,
+            };
+            heatPlatforms.forEach((platform) => {
+              out[platform] = Number(row.platforms?.[platform] ?? 0);
+            });
+            return out;
+          }),
+        ), "Visibility Heatmap");
+      }
+
+      if (promptSheetRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(promptSheetRows), "Prompt Analytics");
+      }
+
+      // Brand keys vary by domain, same reasoning as the heatmap columns.
+      if (strengthRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          strengthRows.map((row: any) => {
+            const out: Record<string, any> = { Metric: row.metric };
+            Object.entries(row).forEach(([key, value]) => {
+              if (key !== "metric") out[key] = value;
+            });
+            return out;
+          }),
+        ), "Competitive Strength");
+      }
+
+      if (insightRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          insightRows.map((insight: any) => ({
+            Title: insight.title || "",
+            Type: insight.type || "",
+            Impact: insight.impact || "",
+            Description: insight.description || "",
+          })),
+        ), "Competitive Insights");
+      }
+
+      if (gapRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          gapRows.map((gap: any) => ({
+            Query: gap.query || "",
+            Competitor: gap.competitor || "",
+            "Competitor mentions": Number(gap.mentions || 0),
+            "Your mentions": Number(gap.yourMentions || 0),
+            Opportunity: gap.opportunity || "",
+            Platforms: Array.isArray(gap.platforms) ? gap.platforms.join(", ") : "",
+          })),
+        ), "Answer Gaps");
+      }
+
+      const safeName = (selectedDomain?.name || "domain").replace(/[^a-z0-9]+/gi, "_");
+      const today = new Date().toISOString().split("T")[0];
+      XLSX.writeFile(wb, `competitors_${safeName}_${today}.xlsx`);
+
+      toast({
+        title: "Export ready",
+        description: promptsTruncated
+          ? `Downloaded ${wb.SheetNames.length} sheets. Prompt data was capped — see the Summary sheet.`
+          : `Downloaded ${wb.SheetNames.length} sheet${wb.SheetNames.length === 1 ? "" : "s"} covering all recorded data.`,
+      });
+    } catch (error: any) {
+      console.error("Competitor export failed:", error);
+      toast({
+        title: "Export failed",
+        description: error?.message || "Could not build the workbook.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   // Sync domainId from selectedDomain (Zustand store) or server when domain changes
@@ -1488,10 +1746,12 @@ const Competitors = () => {
             </p>
           </div>
           <div className="flex gap-3">
-            {/* <Button variant="outline" onClick={handleExportReport}>
-              <FileText className="h-4 w-4 mr-2" />
-              Export Report
-            </Button> */}
+            <Button variant="outline" onClick={handleExportReport} disabled={isExporting}>
+              {isExporting
+                ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                : <Download className="h-4 w-4 mr-2" />}
+              {isExporting ? "Exporting..." : "Export to Excel"}
+            </Button>
             <Button onClick={handleAddCompetitor} className="gradient-primary shadow-md shadow-primary/20">
               <Plus className="h-4 w-4 mr-2" />
               Add Competitor

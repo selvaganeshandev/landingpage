@@ -25,6 +25,8 @@ import {
   ArrowLeftRight,
   Lightbulb,
   AlertTriangle,
+  Download,
+  Loader2,
   Trash2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -49,6 +51,13 @@ import {
   Cell
 } from "recharts";
 
+// The page charts a 30-day window by default; the export covers everything on
+// record, so it re-fetches the time-scoped calls over a range wide enough to
+// reach the first snapshot and walks the paginated prompt table to its end.
+const EXPORT_DAYS = 3650;
+const EXPORT_PROMPT_PAGE_SIZE = 200;
+const EXPORT_MAX_PROMPT_PAGES = 100;
+
 const CompetitorDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -67,6 +76,7 @@ const CompetitorDetail = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [platformBreakdown, setPlatformBreakdown] = useState<any[]>([]);
   const [sentimentData, setSentimentData] = useState([
     { name: "Positive", value: 0, color: "hsl(var(--success))" },
@@ -260,9 +270,22 @@ const CompetitorDetail = () => {
           setMarketRank(null);
         }
 
-        // Calculate top prompts for competitor across all LLMs
-        const compAnalytics = Array.isArray(promptAnalytics) ? promptAnalytics : promptAnalytics?.results || [];
-        
+        // Calculate top prompts for competitor across all LLMs.
+        //
+        // The list endpoint groups its results by prompt —
+        // {prompt_id, prompt_text, analytics: [...]} — with the per-platform
+        // readings one level down in `analytics`. Flatten to one row per
+        // reading, carrying the prompt identity down with it, so the
+        // aggregation below sees the fields it expects.
+        const compPromptGroups = Array.isArray(promptAnalytics) ? promptAnalytics : promptAnalytics?.results || [];
+        const compAnalytics = compPromptGroups.flatMap((group: any) =>
+          (Array.isArray(group.analytics) ? group.analytics : []).map((entry: any) => ({
+            ...entry,
+            promptId: group.prompt_id,
+            promptText: group.prompt_text || '',
+          }))
+        );
+
         // Aggregate prompts by prompt_id to combine data across all LLMs
         const promptMap = new Map();
         compAnalytics.forEach((item: any) => {
@@ -271,12 +294,9 @@ const CompetitorDetail = () => {
             return;
           }
           
-          // According to CompetitorPromptAnalyticsSerializer:
-          // - prompt: the prompt ID (number)
-          // - prompt_text: the prompt text (string)
-          const promptId = item.prompt; // This is the ID according to serializer
-          const promptText = item.prompt_text || '';
-          
+          const promptId = item.promptId;
+          const promptText = item.promptText;
+
           // Skip if we don't have both promptId and promptText
           if (!promptId || !promptText) {
             return;
@@ -453,11 +473,232 @@ const CompetitorDetail = () => {
     });
   };
 
-  const handleExport = () => {
-    toast({
-      title: "Exporting Report",
-      description: "Comprehensive competitor report is being generated...",
-    });
+  /**
+   * Export this competitor's full record as a multi-sheet workbook.
+   *
+   * The charts above are scoped to the selected time period; the export is not,
+   * so the snapshot and prompt calls are re-issued over the full range. Prompt
+   * rows are rebuilt from the API response rather than read out of page state:
+   * the list endpoint returns prompts grouped as
+   * `{prompt_id, prompt_text, analytics: [...]}`, and the per-prompt figures
+   * live one level down in `analytics`. Sheets with no rows are skipped.
+   */
+  const handleExport = async () => {
+    if (!id || !domainId || !competitor) {
+      toast({
+        title: "Export failed",
+        description: "Competitor data is not loaded yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+
+      const snapshotData: any = await apiClient.getCompetitorMetricSnapshots({
+        domain_id: domainId,
+        competitor_id: id,
+        days: EXPORT_DAYS,
+      });
+
+      // Walk every page of this competitor's prompts. The page cap is a runaway
+      // guard — if it bites, the Summary sheet says so rather than letting a
+      // partial file read as complete.
+      const promptGroups: any[] = [];
+      let promptPage = 1;
+      let promptTotalPages = 1;
+      let promptsTruncated = false;
+      while (promptPage <= promptTotalPages) {
+        if (promptPage > EXPORT_MAX_PROMPT_PAGES) {
+          promptsTruncated = true;
+          break;
+        }
+        const res: any = await apiClient.getCompetitorPromptAnalyticsEngine({
+          domain_id: domainId,
+          competitor_id: id,
+          page_size: String(EXPORT_PROMPT_PAGE_SIZE),
+          page: promptPage,
+        });
+        const batch = Array.isArray(res) ? res : res?.results || [];
+        promptGroups.push(...batch);
+        promptTotalPages = Array.isArray(res) ? 1 : Number(res?.total_pages || 1);
+        promptPage += 1;
+      }
+
+      const promptRows: any[] = [];
+      promptGroups.forEach((group: any) => {
+        (Array.isArray(group.analytics) ? group.analytics : []).forEach((a: any) => {
+          promptRows.push({
+            Prompt: group.prompt_text || "",
+            Platform: a.platform || "",
+            Mentioned: a.is_mentioned ? "Yes" : "No",
+            Mentions: Number(a.mention_count ?? (a.is_mentioned ? 1 : 0)),
+            Citations: Array.isArray(a.citation_list) ? a.citation_list.length : 0,
+            Position: a.position ?? "",
+            Sentiment: a.sentiment_category || "",
+            "Sentiment score": Number(a.sentiment_score || 0),
+            "Tracked at": a.tracked_at ? new Date(a.tracked_at).toLocaleString() : "",
+          });
+        });
+      });
+
+      // Per-prompt totals across every platform, strongest first.
+      const perPrompt = new Map<string, { mentions: number; citations: number; platforms: Set<string> }>();
+      promptGroups.forEach((group: any) => {
+        (Array.isArray(group.analytics) ? group.analytics : []).forEach((a: any) => {
+          if (!a.is_mentioned) return;
+          const key = group.prompt_text || "";
+          if (!key) return;
+          const held = perPrompt.get(key) || { mentions: 0, citations: 0, platforms: new Set<string>() };
+          held.mentions += Number(a.mention_count || 0);
+          held.citations += Array.isArray(a.citation_list) ? a.citation_list.length : 0;
+          if (a.platform) held.platforms.add(a.platform);
+          perPrompt.set(key, held);
+        });
+      });
+      const topPromptRows = Array.from(perPrompt.entries())
+        .map(([prompt, agg]) => ({
+          Prompt: prompt,
+          Mentions: agg.mentions,
+          Citations: agg.citations,
+          Platforms: Array.from(agg.platforms).join(", "),
+        }))
+        .sort((a, b) => b.Mentions - a.Mentions);
+
+      // Sentiment split, weighted by mention count, over the full history.
+      const sentimentTotals: Record<string, number> = { positive: 0, neutral: 0, negative: 0 };
+      promptGroups.forEach((group: any) => {
+        (Array.isArray(group.analytics) ? group.analytics : []).forEach((a: any) => {
+          const category = String(a.sentiment_category || "").toLowerCase();
+          if (category in sentimentTotals) {
+            sentimentTotals[category] += Number(a.mention_count || 0);
+          }
+        });
+      });
+      const sentimentTotal = Object.values(sentimentTotals).reduce((sum, n) => sum + n, 0);
+
+      const snapshots: any[] = Array.isArray(snapshotData) ? snapshotData : snapshotData?.results || [];
+      const sortedSnapshots = [...snapshots].sort((a: any, b: any) =>
+        new Date(a.timestamp || a.created_at || 0).getTime() -
+        new Date(b.timestamp || b.created_at || 0).getTime());
+      const latestSnapshot = sortedSnapshots[sortedSnapshots.length - 1];
+      const latestPlatformMetrics: any[] = Array.isArray(latestSnapshot?.platform_metrics)
+        ? latestSnapshot.platform_metrics
+        : [];
+      const latestPlatformTotal = latestPlatformMetrics.reduce(
+        (sum: number, pm: any) => sum + Number(pm.mentions || 0), 0);
+
+      const wb = XLSX.utils.book_new();
+
+      const summarySheet: any[][] = [
+        ["Competitor Report", ""],
+        ["Competitor", competitor.name],
+        ["Website", competitor.url || ""],
+        ["Domain", selectedDomain?.name || ""],
+        ["Coverage", "Full history — unfiltered by time period"],
+        ["Generated", new Date().toLocaleString()],
+        ["", ""],
+        ["Metric", "Value"],
+        ["Market rank", marketRank ?? "Not ranked"],
+        ["Total mentions", competitor.mentions],
+        ["Total citations", competitor.citations],
+        ["Visibility score", competitor.visibility],
+        ["Sentiment (%)", competitor.sentiment],
+        ["Average position", competitor.avgPosition],
+        ["Share of voice (%)", competitor.shareOfVoice],
+        ["Trend (%)", competitor.trend],
+        ["", ""],
+        ["Metric snapshots", snapshots.length],
+        ["Prompts covered", promptGroups.length],
+        ["Prompt analytics rows", promptRows.length],
+      ];
+      if (promptsTruncated) {
+        summarySheet.push(["", ""]);
+        summarySheet.push([
+          "Note",
+          `Prompt export stopped at ${EXPORT_MAX_PROMPT_PAGES * EXPORT_PROMPT_PAGE_SIZE} prompts — this file does not contain every prompt on record.`,
+        ]);
+      }
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summarySheet), "Summary");
+
+      if (sortedSnapshots.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          sortedSnapshots.map((snap: any) => ({
+            Date: String(snap.timestamp || snap.created_at || "").split("T")[0],
+            Mentions: Number(snap.total_mentions || 0),
+            Citations: Number(snap.total_citations || 0),
+            "Visibility score": Number(snap.visibility_score || 0),
+            "Sentiment score": Number(snap.sentiment_score || 0),
+            "Avg position": Number(snap.average_position || 0),
+            "Share of voice (%)": Number(snap.share_of_voice_percentage || 0),
+          })),
+        ), "Metric History");
+      }
+
+      if (latestPlatformMetrics.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          latestPlatformMetrics.map((pm: any) => ({
+            Platform: pm.platform || "Unknown",
+            Mentions: Number(pm.mentions || 0),
+            Citations: Number(pm.citations || 0),
+            "Share (%)": latestPlatformTotal > 0
+              ? Number(((Number(pm.mentions || 0) / latestPlatformTotal) * 100).toFixed(1))
+              : 0,
+            "As of": String(latestSnapshot?.timestamp || latestSnapshot?.created_at || "").split("T")[0],
+          })),
+        ), "Platform Distribution");
+      }
+
+      if (sentimentTotal > 0) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(
+          ["positive", "neutral", "negative"].map((category) => ({
+            Sentiment: category.charAt(0).toUpperCase() + category.slice(1),
+            Mentions: sentimentTotals[category],
+            "Share (%)": Number(((sentimentTotals[category] / sentimentTotal) * 100).toFixed(1)),
+          })),
+        ), "Sentiment");
+      }
+
+      if (topPromptRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(topPromptRows), "Top Prompts");
+      }
+
+      if (promptRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(promptRows), "Prompt Analytics");
+      }
+
+      const swotRows = (["strengths", "weaknesses", "opportunities", "threats"] as const)
+        .flatMap((bucket) =>
+          (swotInsights[bucket] || []).map((point: string) => ({
+            Category: bucket.charAt(0).toUpperCase() + bucket.slice(1),
+            Insight: point,
+          })));
+      if (swotRows.length) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(swotRows), "SWOT");
+      }
+
+      const safeName = (competitor.name || "competitor").replace(/[^a-z0-9]+/gi, "_");
+      const today = new Date().toISOString().split("T")[0];
+      XLSX.writeFile(wb, `competitor_${safeName}_${today}.xlsx`);
+
+      toast({
+        title: "Export ready",
+        description: promptsTruncated
+          ? `Downloaded ${wb.SheetNames.length} sheets. Prompt data was capped — see the Summary sheet.`
+          : `Downloaded ${wb.SheetNames.length} sheet${wb.SheetNames.length === 1 ? "" : "s"} for ${competitor.name}.`,
+      });
+    } catch (error: any) {
+      console.error("Competitor export failed:", error);
+      toast({
+        title: "Export failed",
+        description: error?.message || "Could not build the workbook.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleDeleteCompetitor = async () => {
@@ -551,17 +792,25 @@ const CompetitorDetail = () => {
               </div>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            className="text-destructive hover:text-destructive hover:bg-destructive/10"
-            onClick={() => {
-              setDeleteConfirmText("");
-              setDeleteDialogOpen(true);
-            }}
-          >
-            <Trash2 className="h-4 w-4 mr-2" />
-            Delete Competitor
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button variant="outline" onClick={handleExport} disabled={isExporting}>
+              {isExporting
+                ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                : <Download className="h-4 w-4 mr-2" />}
+              {isExporting ? "Exporting..." : "Export to Excel"}
+            </Button>
+            <Button
+              variant="ghost"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => {
+                setDeleteConfirmText("");
+                setDeleteDialogOpen(true);
+              }}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Competitor
+            </Button>
+          </div>
         </div>
       </div>
 
