@@ -14,6 +14,8 @@ import {
   Check,
   Loader2,
   CircleAlert,
+  Globe,
+  Wand2,
 } from "lucide-react";
 
 /**
@@ -35,8 +37,13 @@ import {
  *  LLM context — it never populates these inputs.
  *
  *  "none" is what the user's own typing gets: it needs no badge, because the
- *  thing they just entered is not news to them. */
-type Provenance = "saved" | "missing" | "none";
+ *  thing they just entered is not news to them.
+ *
+ *  "inferred" means the Autofill button read it off the site. That badge is the
+ *  one thing on this form the user did not write, so it is worth flagging for
+ *  review — the model is told to omit rather than guess, but it can still be
+ *  wrong. */
+type Provenance = "saved" | "missing" | "none" | "inferred";
 
 export interface WizardConfig {
   // Step 1
@@ -80,6 +87,36 @@ const BUSINESS_MODELS = [
 
 const PRICE_POSITIONS = ["Budget", "Mid-market", "Premium", "Mixed"];
 
+/** The choice chips store their own label, but the extractor is constrained to
+ *  stable slugs (a model asked for "B2B SaaS" free-hand returns "b2b saas",
+ *  "SaaS (B2B)", …, none of which match a chip). Translate on the way in; an
+ *  unmapped slug is dropped rather than shown as a selection that isn't there. */
+const BUSINESS_MODEL_BY_SLUG: Record<string, string> = {
+  b2c_ecommerce: "B2C ecommerce",
+  d2c_brand: "D2C brand",
+  b2b_saas: "B2B SaaS",
+  local_services: "Local services",
+  marketplace: "Marketplace",
+  agency_services: "Agency / services",
+  other: "Other",
+};
+
+/** The fields Autofill can write. Kept in one place so the "already stored"
+ *  check and the fill loop cannot drift apart. Mirrors the backend's
+ *  site_profile TEXT_FIELDS + LIST_FIELDS. */
+const AUTOFILL_FIELDS = [
+  "short_description", "target_audience", "business_model", "price_positioning",
+  "niches", "offering_categories", "regions_served", "use_cases",
+  "buying_criteria", "differentiators", "key_competitors",
+] as const;
+
+const PRICE_POSITION_BY_SLUG: Record<string, string> = {
+  budget: "Budget",
+  mid_market: "Mid-market",
+  premium: "Premium",
+  mixed: "Mixed",
+};
+
 const FOCUS_PRESETS = [
   { key: "balanced", label: "Balanced", hint: "Even spread across the funnel" },
   { key: "discovery", label: "Discovery-heavy", hint: "Category questions where you may be invisible" },
@@ -106,6 +143,13 @@ const toList = (v: any): string[] => {
 
 const Badge = ({ state }: { state: Provenance }) => {
   if (state === "none") return null;
+  if (state === "inferred") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-primary">
+        <Globe className="h-3 w-3" /> From your site
+      </span>
+    );
+  }
   if (state === "saved") {
     return (
       <span className="inline-flex items-center gap-1 text-[11px] font-medium text-success">
@@ -159,11 +203,25 @@ export const PromptGenerationWizard = ({
     seed_questions: ["", "", ""],
     target_count: 20,
     funnel_mix: "balanced",
-    branded_ratio: 30,
+    // 0 by default: visibility monitoring is about whether the brand surfaces
+    // in the generic questions buyers actually ask. A question that names the
+    // brand presupposes the user already knows it, which measures nothing about
+    // discovery. Raise the slider deliberately to track brand-defence queries.
+    branded_ratio: 0,
   });
   // Which fields arrived already populated from the project record — drives the
   // Saved badge. Anything the user types is unbadged.
   const [prefilled, setPrefilled] = useState<Record<string, boolean>>({});
+  // Fields the Autofill button filled from the site, so they can be badged as
+  // not-the-user's-words and given a second look.
+  const [inferred, setInferred] = useState<Record<string, boolean>>({});
+  const [autofilling, setAutofilling] = useState(false);
+  const [autofillNote, setAutofillNote] = useState<string | null>(null);
+  // Fields the user has edited by hand this session. Autofill treats these as
+  // final; everything else (blank, or loaded from the project record) is fair
+  // game to replace.
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [confirmRefetch, setConfirmRefetch] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -173,6 +231,9 @@ export const PromptGenerationWizard = ({
       }
       try {
         const d: any = await apiClient.getDomain(selectedDomain.id);
+        // Load every field the project stores, not just the original seven.
+        // Autofill writes its findings back to Domain, so reading them all back
+        // is what stops the crawl being paid for on every visit.
         const next: Partial<WizardConfig> = {
           brand_name: d?.name || selectedDomain.name || "",
           short_description: d?.short_description || "",
@@ -181,17 +242,22 @@ export const PromptGenerationWizard = ({
           target_audience: d?.target_audience || "",
           topics_to_avoid: toList(d?.topics_to_avoid),
           key_competitors: toList(d?.key_competitors),
+          business_model: d?.business_model || "",
+          price_positioning: d?.price_positioning || "",
+          offering_categories: toList(d?.offering_categories),
+          regions_served: toList(d?.regions_served),
+          use_cases: toList(d?.use_cases),
+          buying_criteria: toList(d?.buying_criteria),
+          common_objections: toList(d?.common_objections),
+          differentiators: toList(d?.differentiators),
         };
         setCfg((p) => ({ ...p, ...next }));
-        setPrefilled({
-          brand_name: !!next.brand_name,
-          short_description: !!next.short_description,
-          niches: !!next.niches?.length,
-          country: !!next.country,
-          target_audience: !!next.target_audience,
-          topics_to_avoid: !!next.topics_to_avoid?.length,
-          key_competitors: !!next.key_competitors?.length,
-        });
+        const isSet = (v: any) => (Array.isArray(v) ? v.length > 0 : !!v);
+        setPrefilled(
+          Object.fromEntries(
+            Object.entries(next).map(([k, v]) => [k, isSet(v)]),
+          ) as Record<string, boolean>,
+        );
       } catch {
         // Prefill is a convenience; the wizard still works fully without it.
       } finally {
@@ -201,13 +267,100 @@ export const PromptGenerationWizard = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDomain?.id]);
 
-  const set = <K extends keyof WizardConfig>(k: K, v: WizardConfig[K]) =>
+  const set = <K extends keyof WizardConfig>(k: K, v: WizardConfig[K]) => {
     setCfg((p) => ({ ...p, [k]: v }));
+    // Editing a field makes it the user's own answer: it stops being badged as
+    // read off the site, and Autofill must not overwrite it afterwards.
+    setInferred((p) => (p[k as string] ? { ...p, [k as string]: false } : p));
+    setTouched((p) => (p[k as string] ? p : { ...p, [k as string]: true }));
+  };
+
+  /** Read the project's website and fill the form in from it.
+   *
+   *  What it may replace:
+   *    - empty fields
+   *    - values loaded from the project record ("Saved"), which are often
+   *      stale — DataBlue's stored niches were generic DevOps terms with
+   *      nothing to do with what the site actually sells
+   *
+   *  What it never replaces: anything edited in this session. That is the line
+   *  that keeps the button safe to press at any point — your own words always
+   *  win over a guess, no matter how many times it runs.
+   */
+  /** Fields Autofill would replace that already hold a stored value. Used to
+   *  decide whether pressing the button needs confirming first. */
+  const storedFieldCount = () =>
+    AUTOFILL_FIELDS.filter((k) => {
+      if (touched[k]) return false;          // user's own — never replaced anyway
+      const v = cfg[k as keyof WizardConfig];
+      return Array.isArray(v) ? v.length > 0 : !!v;
+    }).length;
+
+  const autofillFromSite = async (force = false) => {
+    if (!selectedDomain?.id || autofilling) return;
+
+    // Details are saved back to the project after a fetch, so a second press is
+    // usually a re-crawl of something already answered. Confirm rather than
+    // silently spend a crawl and a model call and replace what is there.
+    if (!force && storedFieldCount() > 0) {
+      setConfirmRefetch(true);
+      return;
+    }
+    setConfirmRefetch(false);
+    setAutofilling(true);
+    setAutofillNote(null);
+    try {
+      const res: any = await apiClient.prefillFromSite(selectedDomain.id);
+      const fields: Record<string, any> = res?.fields || {};
+
+      if (res?.error) {
+        setAutofillNote(res.error);
+        return;
+      }
+
+      const filled: Record<string, boolean> = {};
+      setCfg((prev) => {
+        const next: any = { ...prev };
+        for (const [rawKey, rawValue] of Object.entries(fields)) {
+          const key = rawKey as keyof WizardConfig;
+          if (!(key in prev)) continue;
+
+          let value: any = rawValue;
+          if (key === "business_model") value = BUSINESS_MODEL_BY_SLUG[String(rawValue)];
+          if (key === "price_positioning") value = PRICE_POSITION_BY_SLUG[String(rawValue)];
+          if (!value) continue;
+
+          const current = prev[key];
+          const isEmpty = Array.isArray(current) ? current.length === 0 : !current;
+          // Fill the blanks, and refresh stale project-record values — but stop
+          // dead at anything the user has edited themselves.
+          if (!isEmpty && touched[rawKey]) continue;
+
+          next[key] = value;
+          filled[rawKey] = true;
+        }
+        return next;
+      });
+
+      setInferred((p) => ({ ...p, ...filled }));
+      const n = Object.keys(filled).length;
+      setAutofillNote(
+        n === 0
+          ? "Nothing to change — everything here is already your own answer."
+          : `Filled ${n} field${n === 1 ? "" : "s"} from your site. Worth a quick check.`,
+      );
+    } catch (e: any) {
+      setAutofillNote(e?.message || "Could not read the site. Fill it in by hand.");
+    } finally {
+      setAutofilling(false);
+    }
+  };
 
   const stateOf = (k: keyof WizardConfig): Provenance => {
     const v = cfg[k];
     const empty = Array.isArray(v) ? v.length === 0 : !v;
     if (empty) return "missing";
+    if (inferred[k as string]) return "inferred";
     return prefilled[k] ? "saved" : "none";
   };
 
@@ -234,6 +387,85 @@ export const PromptGenerationWizard = ({
 
   return (
     <div className="max-w-3xl mx-auto">
+      {/* ---------- Autofill ----------
+          Most of what this form asks is already stated on the brand's own
+          homepage, and typing it out is the slowest part of the flow. Kept as
+          an explicit button rather than something that runs on open: it costs
+          a crawl and a model call, and it should be the user's choice to
+          spend that. Only blank fields are touched. */}
+      <div className="mb-6 rounded-xl border border-border bg-muted/30 p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <Globe className="h-4 w-4 text-primary shrink-0" />
+          <div className="flex-1 min-w-[12rem]">
+            <p className="text-sm font-medium">Fill this in from your website</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {autofillNote ??
+                "Read these answers off your website. Saved to the project, so this only needs running once."}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => autofillFromSite()}
+            disabled={autofilling || !selectedDomain?.id}
+            className="border-border shrink-0"
+          >
+            {autofilling ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Reading your site…
+              </>
+            ) : (
+              <>
+                <Wand2 className="h-4 w-4 mr-2" />
+                Autofill from my site
+              </>
+            )}
+          </Button>
+        </div>
+
+        {/* Inline rather than a modal: the question is about the fields visible
+            directly below, and a dialog would cover them up. */}
+        {confirmRefetch && (
+          <div className="mt-3 rounded-lg border border-warning/30 bg-warning/5 p-3.5">
+            <div className="flex gap-2.5">
+              <CircleAlert className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-medium">
+                  This project already has details saved
+                </p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  {storedFieldCount()} field{storedFieldCount() === 1 ? " is" : "s are"}{" "}
+                  already filled in from an earlier read. Fetching again re-reads
+                  your site and overwrites them. Anything you have edited here
+                  yourself is kept either way.
+                </p>
+                <div className="flex gap-2 mt-3">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="gradient-primary"
+                    onClick={() => autofillFromSite(true)}
+                  >
+                    Fetch again and overwrite
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="border-border"
+                    onClick={() => setConfirmRefetch(false)}
+                  >
+                    Keep what I have
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* ---------- Stepper ---------- */}
       <div className="flex items-center justify-center gap-2 mb-8">
         {STEPS.map((s, i) => (
@@ -580,7 +812,9 @@ export const PromptGenerationWizard = ({
             />
             <p className="text-xs text-muted-foreground">
               Unbranded questions are where you can be invisible without knowing
-              it — we default to favouring them.
+              it, so this starts at zero branded. Naming your brand in the
+              question assumes the asker already knows you — raise this only to
+              track what AI says when they do.
             </p>
           </div>
         </div>

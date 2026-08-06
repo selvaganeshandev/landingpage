@@ -97,7 +97,25 @@ def _client(organisation=None):
 
 
 def _chat(client, model, system, user, *, max_tokens=2000, temperature=0.7):
-    """One completion, returning text. Raises GenerationError on failure."""
+    """One completion, returning text. Raises GenerationError on failure.
+
+    The default model (openai/gpt-5-mini) is a REASONING model, and that changes
+    what max_tokens means: it caps reasoning *plus* answer, and reasoning is
+    spent first. A budget sized for the answer alone therefore returns
+    finish_reason="length" with content of None — a silent empty string, not an
+    error.
+
+    That is not hypothetical. On 2026-08-05 a 25-tuple plan was rendered in two
+    batches; the first exhausted its 2000 tokens on reasoning and was dropped by
+    the caller's `unusable batch` guard. Because build_plan emits unbranded
+    intents before branded ones, that lost batch was *every unbranded prompt* —
+    the user asked for a 30/70 mix and received five prompts, all branded, with
+    only a WARNING in a log to explain it.
+
+    So: keep reasoning short (this is rendering, not problem-solving) and give
+    the answer real headroom. `extra_body` is passed through to OpenRouter and
+    is ignored by providers that do not implement it.
+    """
     try:
         resp = client.chat.completions.create(
             model=model,
@@ -107,13 +125,27 @@ def _chat(client, model, system, user, *, max_tokens=2000, temperature=0.7):
             ],
             temperature=temperature,
             max_tokens=max_tokens,
+            extra_body={"reasoning": {"effort": "low"}},
         )
     except Exception as exc:
         raise GenerationError(f"LLM call failed: {exc}") from exc
 
     usage = getattr(resp, 'usage', None)
     tokens = getattr(usage, 'total_tokens', 0) or 0
-    return (resp.choices[0].message.content or '').strip(), tokens
+    text = (resp.choices[0].message.content or '').strip() if resp.choices else ''
+
+    # An empty reply is nearly always the truncation above. Say so plainly —
+    # the previous silence is what let a half-empty result look like a complete
+    # one.
+    if not text:
+        finish = getattr(resp.choices[0], 'finish_reason', '?') if resp.choices else '?'
+        reasoning = getattr(getattr(usage, 'completion_tokens_details', None), 'reasoning_tokens', '?')
+        logger.error(
+            "[PromptGen] empty completion (finish_reason=%s, reasoning_tokens=%s, max_tokens=%s) "
+            "— raise max_tokens if this repeats",
+            finish, reasoning, max_tokens,
+        )
+    return text, tokens
 
 
 def _json_from(text: str, expect_list=True):
@@ -179,11 +211,19 @@ def stage_ground(run, domain) -> Dict[str, Any]:
     }
 
     # Site read is best-effort — the wizard already collected enough to run.
+    #
+    # The class is WebCrawler; this imported `Crawler` and so raised ImportError
+    # on every single run since the feature shipped. Being inside a broad
+    # `except Exception` meant it never surfaced as a failure: generation simply
+    # proceeded with no site context at all, logging one WARNING per run. Every
+    # prompt generated so far was written without the model ever seeing the site.
     try:
-        from core.misinformation_services.crawler import Crawler
-        content, _status, _err = Crawler().crawl(domain.url)
+        from core.misinformation_services.crawler import WebCrawler
+        content, _status, _err = WebCrawler().crawl(domain.url)
         if content:
             ground['site_excerpt'] = re.sub(r'\s+', ' ', content)[:4000]
+        else:
+            logger.warning("[PromptGen] no site content for %s (status %s)", domain.url, _status)
     except Exception as exc:
         logger.warning("[PromptGen] crawl skipped for %s: %s", domain.url, exc)
 
@@ -213,7 +253,8 @@ def stage_entities(client, model, ground) -> Dict[str, List[str]]:
         'site_excerpt': ground.get('site_excerpt', '')[:2000],
     })
 
-    text, tokens = _chat(client, model, system, user, max_tokens=1200, temperature=0.4)
+    # 1200 left almost no room once reasoning took its share — see _chat.
+    text, tokens = _chat(client, model, system, user, max_tokens=3000, temperature=0.4)
     data = _json_from(text, expect_list=False)
 
     merged = {
@@ -266,8 +307,13 @@ def build_plan(ground, entities, target, focus, branded_ratio) -> List[Dict[str,
     allocation.update(allocate(unbranded_intents, unbranded_target))
     allocation.update(allocate(branded_intents, branded_target))
 
-    # Modifier pools, longest-lived first so early tuples are the most useful.
+    # Categories become the cluster key in stage_assemble, so the size of this
+    # pool is the number of groups the run produces. stage_entities happily
+    # returns twelve, which turned a 10-prompt run into ten one-prompt groups.
+    # Cap it at roughly one group per six prompts (min 2) and take the earliest,
+    # which stage_entities orders most-central-first.
     categories = entities['categories'] or ground['categories'] or [ground['brand_name']]
+    categories = categories[:max(2, min(8, round(target / 6) or 1))]
     modifiers = {
         'region': ground['regions'],
         'use_case': entities['use_cases'],
@@ -319,6 +365,7 @@ def stage_expand(client, model, ground, plan) -> (List[Dict[str, Any]], int):
 
     out: List[Dict[str, Any]] = []
     total_tokens = 0
+    dropped = 0
     seeds = ground.get('seeds') or []
 
     for start in range(0, len(plan), RENDER_BATCH):
@@ -347,14 +394,25 @@ def stage_expand(client, model, ground, plan) -> (List[Dict[str, Any]], int):
             client, model,
             system,
             json.dumps(user_payload),
-            max_tokens=2000,
+            # RENDER_BATCH is 20 questions per call. At ~25 tokens each that is
+            # 500 for the answer alone, before reasoning and JSON overhead —
+            # 2000 was not enough and cost whole batches.
+            max_tokens=6000,
         )
         total_tokens += tokens
 
         try:
             rows = _json_from(text)
         except GenerationError:
-            logger.warning("[PromptGen] unusable batch at offset %s, skipping", start)
+            # Losing a batch is not cosmetic: build_plan emits unbranded intents
+            # first, so the batch at offset 0 carries the generic prompts that
+            # are the entire point of visibility monitoring. Dropping it quietly
+            # produced an all-branded result that looked deliberate.
+            dropped += len(batch)
+            logger.error(
+                "[PromptGen] LOST %s planned prompts — unusable batch at offset %s "
+                "(model returned nothing parseable)", len(batch), start,
+            )
             continue
 
         for row in rows:
@@ -368,6 +426,16 @@ def stage_expand(client, model, ground, plan) -> (List[Dict[str, Any]], int):
 
     if not out:
         raise GenerationError("The model returned no usable prompts. Try again.")
+
+    # Surviving a partial loss is right — some prompts beat none — but the user
+    # is about to review a list whose mix no longer matches what they asked for,
+    # so record how skewed it may be.
+    if dropped:
+        branded = sum(1 for c in out if c.get('is_branded'))
+        logger.error(
+            "[PromptGen] rendered %s of %s planned (%s lost); surviving mix is %s branded / %s unbranded",
+            len(out), len(plan), dropped, branded, len(out) - branded,
+        )
     return out, total_tokens
 
 
@@ -438,7 +506,7 @@ def stage_score(client, model, ground, candidates) -> (List[Dict[str, Any]], int
         try:
             text, tokens = _chat(
                 client, model, system, json.dumps(payload),
-                max_tokens=1500, temperature=0.1,
+                max_tokens=4000, temperature=0.1,
             )
             total_tokens += tokens
             rows = _json_from(text)
@@ -497,22 +565,31 @@ def select_best(candidates, target) -> List[Dict[str, Any]]:
 # --------------------------------------------------------------------------
 
 def stage_assemble(run, candidates):
-    """Cluster and persist. The planner already knows the cluster key."""
+    """Cluster and persist. The planner already knows the cluster key.
+
+    Grouping is by ENTITY ALONE. Including the intent split every subject across
+    as many groups as it had question types: a 10-prompt run came back as
+    "Web Scraping Api — Use case" and "Web Scraping Api — Problem", one prompt in
+    each, and the Prompts page became a wall of single-prompt cards. Since the
+    planner deliberately spreads each entity across the funnel, keying on intent
+    guaranteed that fragmentation for every run.
+
+    Intent is still stored on the candidate and shown as a label in review — it
+    just no longer decides what belongs together.
+    """
     from shared_models.models import PromptCandidate
 
     rows = []
     for c in candidates:
         entity = (c.get('entity') or 'general').strip()
-        intent = c['intent']
-        title = f"{entity.title()} — {INTENTS[intent]['label']}"
         rows.append(PromptCandidate(
             run=run,
             text=c['text'],
-            intent=intent,
+            intent=c['intent'],
             entity=entity,
             is_branded=bool(c.get('is_branded')),
-            cluster_key=f"{entity.lower()}::{intent}",
-            cluster_title=title,
+            cluster_key=entity.lower(),
+            cluster_title=entity.title(),
             score_realism=c.get('score_realism', 0.5),
             score_elicits_brands=c.get('score_elicits_brands', 0.5),
             status='pending',

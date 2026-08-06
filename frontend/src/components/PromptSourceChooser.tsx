@@ -4,17 +4,20 @@ import { Sparkles, BarChart3, Upload, ArrowRight, AlertCircle } from "lucide-rea
 /**
  * Step 1 of Add Prompt Group — how the prompt list gets built.
  *
- * Three routes into the same review step: AI generation, a completed GEO
- * audit, or a spreadsheet upload. Presentation only; each card just reports
- * the chosen method upward and the dialog decides what to render next.
+ * Two routes into the same review step: AI generation or a spreadsheet upload.
+ * Presentation only; each card reports the chosen method upward and the dialog
+ * decides what to render next.
  *
- * "From audit" is rendered locked because the GEO Audit Engine does not exist
- * yet. It is shown rather than hidden so the path is discoverable and the
- * prerequisite is explicit — the same reason the reference design keeps it
- * visible with a callout instead of dropping the card.
+ * "From audit" is built but hidden behind SHOW_AUDIT: the GEO Audit Engine does
+ * not exist yet, and a permanently locked card sitting between the two working
+ * options read as a broken feature rather than a forthcoming one. The card is
+ * kept rather than deleted so restoring it is a one-line change once audits
+ * ship.
  */
 
 export type PromptSource = "ai" | "audit" | "upload";
+
+const SHOW_AUDIT = false;
 
 interface PromptSourceChooserProps {
   onSelect: (source: PromptSource) => void;
@@ -32,15 +35,19 @@ export const PromptSourceChooser = ({
     <div className="py-2">
       <div className="text-center mb-8">
         <h2 className="font-inter text-2xl font-bold tracking-tight">
-          How do you want to build your list?
+          How would you like to add prompts?
         </h2>
         <p className="text-muted-foreground mt-2 text-sm max-w-md mx-auto">
-          AI-generated, from a completed audit, or upload your own list — same
-          review step afterward.
+          Let AI write them, or bring a list you already have. Either way you
+          review everything before anything is tracked.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div
+        className={`grid grid-cols-1 gap-4 ${
+          SHOW_AUDIT ? "md:grid-cols-3" : "md:grid-cols-2 max-w-3xl mx-auto"
+        }`}
+      >
         {/* ---------- Generate with AI ---------- */}
         <div className="group flex flex-col rounded-xl border border-border bg-card p-5 transition-all hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5">
           <div className="h-11 w-11 rounded-xl gradient-primary flex items-center justify-center shadow-md shadow-primary/20">
@@ -49,16 +56,16 @@ export const PromptSourceChooser = ({
 
           <h3 className="font-semibold text-base mt-4">Generate with AI</h3>
           <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
-            Describe your goals and let AI build a targeted prompt list from
-            scratch.
+            Tell us about your brand — or pull the answers straight off your
+            website — and we'll write the questions for you.
           </p>
 
           <div className="border-t border-border my-4" />
 
           <ul className="space-y-2 text-sm font-medium flex-1">
-            <li>No prior audit needed</li>
-            <li>Control funnel mix and tone</li>
-            <li>Best for new topics or fresh angles</li>
+            <li>Ready in about a minute</li>
+            <li>The questions buyers really ask, not ads for you</li>
+            <li>Edit or drop any of them before they go live</li>
           </ul>
 
           <Button
@@ -70,81 +77,81 @@ export const PromptSourceChooser = ({
           </Button>
         </div>
 
-        {/* ---------- From audit ---------- */}
-        <div
-          className={`flex flex-col rounded-xl border border-border bg-card p-5 transition-all ${
-            hasCompletedAudit
-              ? "group hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5"
-              : ""
-          }`}
-        >
+        {/* ---------- From audit (hidden until the audit engine ships) ---------- */}
+        {SHOW_AUDIT && (
           <div
-            className={`h-11 w-11 rounded-xl flex items-center justify-center ${
+            className={`flex flex-col rounded-xl border border-border bg-card p-5 transition-all ${
               hasCompletedAudit
-                ? "bg-primary/10"
-                : "bg-muted"
+                ? "group hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5"
+                : ""
             }`}
           >
-            <BarChart3
-              className={`h-5 w-5 ${
-                hasCompletedAudit ? "text-primary" : "text-muted-foreground"
+            <div
+              className={`h-11 w-11 rounded-xl flex items-center justify-center ${
+                hasCompletedAudit ? "bg-primary/10" : "bg-muted"
               }`}
-            />
-          </div>
-
-          <h3
-            className={`font-semibold text-base mt-4 ${
-              hasCompletedAudit ? "" : "text-muted-foreground"
-            }`}
-          >
-            From audit
-          </h3>
-          <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
-            {hasCompletedAudit
-              ? "Build the list from prompts your latest GEO audit already tested."
-              : "No completed audits yet. Run one first."}
-          </p>
-
-          {hasCompletedAudit ? (
-            <>
-              <div className="border-t border-border my-4" />
-              <ul className="space-y-2 text-sm font-medium flex-1">
-                <li>Grounded in real results</li>
-                <li>Prioritises competitor gaps</li>
-                <li>Same review table as AI and Upload</li>
-              </ul>
-              <Button
-                variant="outline"
-                onClick={() => onSelect("audit")}
-                className="w-full mt-5 border-border"
-              >
-                Use audit results
-              </Button>
-            </>
-          ) : (
-            <div className="mt-4 flex-1 flex flex-col">
-              <div className="rounded-lg border border-warning/30 bg-warning/5 p-3.5 flex-1">
-                <div className="flex gap-2.5">
-                  <AlertCircle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
-                  <p className="text-xs text-foreground/80 leading-relaxed">
-                    Run a GEO Audit first to unlock this mode. Audits test your
-                    brand across 100+ AI prompts and reveal where competitors
-                    are winning.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={onGoToAudit}
-                  className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-warning hover:underline underline-offset-2"
-                >
-                  Go to GEO Audit Engine
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
+            >
+              <BarChart3
+                className={`h-5 w-5 ${
+                  hasCompletedAudit ? "text-primary" : "text-muted-foreground"
+                }`}
+              />
             </div>
-          )}
-        </div>
+
+            <h3
+              className={`font-semibold text-base mt-4 ${
+                hasCompletedAudit ? "" : "text-muted-foreground"
+              }`}
+            >
+              From audit
+            </h3>
+            <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+              {hasCompletedAudit
+                ? "Build the list from prompts your latest GEO audit already tested."
+                : "No completed audits yet. Run one first."}
+            </p>
+
+            {hasCompletedAudit ? (
+              <>
+                <div className="border-t border-border my-4" />
+                <ul className="space-y-2 text-sm font-medium flex-1">
+                  <li>Grounded in real results</li>
+                  <li>Prioritises competitor gaps</li>
+                  <li>Same review table as AI and Upload</li>
+                </ul>
+                <Button
+                  variant="outline"
+                  onClick={() => onSelect("audit")}
+                  className="w-full mt-5 border-border"
+                >
+                  Use audit results
+                </Button>
+              </>
+            ) : (
+              <div className="mt-4 flex-1 flex flex-col">
+                <div className="rounded-lg border border-warning/30 bg-warning/5 p-3.5 flex-1">
+                  <div className="flex gap-2.5">
+                    <AlertCircle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+                    <p className="text-xs text-foreground/80 leading-relaxed">
+                      Run a GEO Audit first to unlock this mode. Audits test your
+                      brand across 100+ AI prompts and reveal where competitors
+                      are winning.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={onGoToAudit}
+                    className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-warning hover:underline underline-offset-2"
+                  >
+                    Go to GEO Audit Engine
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ---------- Upload CSV / Excel ---------- */}
         <div className="group flex flex-col rounded-xl border border-border bg-card p-5 transition-all hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5">
@@ -152,17 +159,18 @@ export const PromptSourceChooser = ({
             <Upload className="h-5 w-5 text-success" />
           </div>
 
-          <h3 className="font-semibold text-base mt-4">Upload CSV / Excel</h3>
+          <h3 className="font-semibold text-base mt-4">Upload your own</h3>
           <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
-            Bring your own prompt list from a spreadsheet or existing workflow.
+            Already have a list somewhere? Bring it straight in from a
+            spreadsheet.
           </p>
 
           <div className="border-t border-border my-4" />
 
           <ul className="space-y-2 text-sm font-medium flex-1">
-            <li>Supports .csv, .xlsx, .xls</li>
-            <li>Template with all columns included</li>
-            <li>Same review table as AI and Audit</li>
+            <li>Works with .csv, .xlsx and .xls</li>
+            <li>Grab our template if you're unsure of the format</li>
+            <li>Goes through the same review step</li>
           </ul>
 
           <Button
@@ -171,14 +179,13 @@ export const PromptSourceChooser = ({
             className="w-full mt-5 border-border"
           >
             <Upload className="h-4 w-4 mr-2" />
-            Upload file
+            Upload a file
           </Button>
         </div>
       </div>
 
       <p className="text-center text-xs text-muted-foreground mt-6 max-w-lg mx-auto leading-relaxed">
-        You can run AI first, then audit (or the reverse), upload your own list,
-        or add prompts manually in review.
+        Nothing is tracked until you've reviewed it and pressed add.
       </p>
     </div>
   );

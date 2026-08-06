@@ -68,6 +68,7 @@ const Prompts = () => {
     start: startRun,
     accept: acceptRun,
     discard: discardRun,
+    refresh: refreshRun,
   } = useGenerationRun(selectedDomain?.id);
   const { user } = useAuth();
 
@@ -233,10 +234,10 @@ const Prompts = () => {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Export hidden — the spreadsheet it produces carries no useful
-              information for this page. Kept rather than deleted so it can be
-              restored if the report is ever made worth exporting. */}
-          {false && (
+          {/* Only with groups to export — on an empty project the button can
+              only ever produce an empty spreadsheet, which reads as a broken
+              export rather than an empty one. */}
+          {promptGroups.length > 0 && (
           <Button
             variant="outline"
             onClick={async () => {
@@ -261,15 +262,33 @@ const Prompts = () => {
               }
             }}
             disabled={isExporting}
+            className="border-border"
           >
             <Download className="h-4 w-4 mr-2" />
             {isExporting ? "Exporting..." : "Export"}
           </Button>
           )}
-          <Button onClick={() => setAddDialogOpen(true)} className="gradient-primary shadow-md shadow-primary/20">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Prompts Manually
-          </Button>
+          {/* With groups already on the page the chooser is unreachable — it
+              only renders in the empty state — so this is the way back into it.
+              With no groups the chooser is already on screen, and the button
+              stays the direct manual route rather than pointing at itself. */}
+          {promptGroups.length > 0 ? (
+            <Button
+              onClick={() => {
+                setBuildStep("choose");
+                setForceBuildPanel(true);
+              }}
+              className="gradient-primary shadow-md shadow-primary/20"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Prompts
+            </Button>
+          ) : (
+            <Button onClick={() => setAddDialogOpen(true)} className="gradient-primary shadow-md shadow-primary/20">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Prompts Manually
+            </Button>
+          )}
         </div>
       </div>
 
@@ -404,6 +423,24 @@ const Prompts = () => {
         </>
         ) : (
           <Card className="p-8 md:p-10">
+            {/* Reached from the header button, so it needs a way back — without
+                this the groups list is unreachable until a run completes.
+                Leaving is safe at every step: the run lives on the server and
+                the banner above returns the user to it. */}
+            {forceBuildPanel && promptGroups.length > 0 && (
+              <div className="mb-6">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setForceBuildPanel(false)}
+                  className="text-muted-foreground hover:text-foreground -ml-2"
+                >
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to prompt groups
+                </Button>
+              </div>
+            )}
+
             {/* A live run outranks whatever step the user was on — it survives
                 navigation, so the page must reflect it on arrival. */}
             {genRun && (genRun.status === "INIT" || genRun.status === "PROC") ? (
@@ -480,18 +517,29 @@ const Prompts = () => {
               />
             ) : (
               <div className="max-w-2xl mx-auto">
-                <PromptUploadStep />
-                <div className="flex justify-end gap-2 mt-6">
+                <PromptUploadStep
+                  onUpload={async (file) => {
+                    const activeDomainId = selectedDomain?.id ?? getActiveDomainIdNumber(user);
+                    if (!activeDomainId) throw new Error("Select a project first.");
+                    const res: any = await apiClient.uploadPromptFile(activeDomainId, file);
+                    // The upload returns a DONE run with candidates attached, so
+                    // refreshing swaps this step for the same review table the
+                    // AI path uses — no separate review screen to maintain.
+                    await refreshRun();
+                    toast({
+                      title: "Prompts ready to review",
+                      description: `${res?.candidate_count ?? 0} prompts grouped by theme. Nothing is tracked until you add them.`,
+                    });
+                  }}
+                />
+                <div className="flex justify-start mt-6">
                   <Button
                     variant="outline"
                     onClick={() => setBuildStep("choose")}
-                    className="mr-auto border-border"
+                    className="border-border"
                   >
                     <ArrowLeft className="h-4 w-4 mr-2" />
                     Back
-                  </Button>
-                  <Button disabled className="gradient-primary">
-                    Continue
                   </Button>
                 </div>
               </div>

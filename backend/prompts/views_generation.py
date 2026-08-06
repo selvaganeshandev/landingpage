@@ -175,12 +175,18 @@ def active_generation_run(request):
         domain=domain, status__in=LIVE_STATES,
     ).order_by('-created_at').first()
 
-    # A failed run is worth surfacing once so the user can retry, but only if
-    # nothing newer superseded it.
+    # A failed run is worth surfacing so the user can retry — but only while it
+    # is still the latest thing that happened. This used to take the newest FAIL
+    # regardless of what came after, so a failure stayed on screen permanently
+    # even once a later run had succeeded and been accepted: the page showed
+    # "Generation failed" over the top of the source chooser, and there was no
+    # way to start a new run at all.
     if run is None:
-        run = PromptGenerationRun.objects.filter(
-            domain=domain, status='FAIL',
+        latest = PromptGenerationRun.objects.filter(
+            domain=domain,
         ).order_by('-created_at').first()
+        if latest is not None and latest.status == 'FAIL':
+            run = latest
 
     return Response(_run_payload(run) if run else {'run': None})
 
@@ -292,3 +298,110 @@ def discard_generation_run(request, run_id):
     run.status = 'DISC'
     run.save(update_fields=['status', 'modified_at'])
     return Response({'status': 'discarded'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_prompt_file(request):
+    """Turn an uploaded spreadsheet into a reviewable run.
+
+    Produces exactly what generation produces — a DONE run with PromptCandidate
+    rows — so review, inline edits, accept and discard all work unchanged. The
+    difference is only in how the candidates were obtained.
+
+    Synchronous: parsing is instant and grouping is one model call per 40
+    prompts, so even a 500-row file lands well inside a request. Should the cap
+    ever rise, this belongs on the engine's queue like generation itself.
+    """
+    domain_id = request.data.get('domain_id')
+    upload = request.FILES.get('file')
+
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not upload:
+        return Response({'error': 'No file was uploaded.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    domain = get_object_or_404(_visible_domains(request.user), id=domain_id)
+
+    # Same one-live-run rule as generation: two sources competing for the review
+    # panel would silently discard one of them.
+    existing = PromptGenerationRun.objects.filter(
+        domain=domain, status__in=LIVE_STATES,
+    ).order_by('-created_at').first()
+    if existing:
+        return Response(
+            {'error': 'Finish reviewing the current prompt list first.',
+             'run': _run_payload(existing)},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    from .upload_prompts import UploadError, group_prompts, parse_prompts, to_candidate_rows
+
+    try:
+        prompts = parse_prompts(upload.name, upload.read())
+    except UploadError as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as exc:
+        logger.error('[Upload] unreadable file %s: %s', upload.name, exc, exc_info=True)
+        return Response({'error': 'That file could not be read.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    grouped = group_prompts(domain, prompts)
+
+    with transaction.atomic():
+        run = PromptGenerationRun.objects.create(
+            domain=domain,
+            created_by=request.user,
+            status='DONE',
+            stage='assemble',
+            progress=100,
+            config={
+                'source': 'upload',
+                'filename': upload.name,
+                'target_count': len(prompts),
+            },
+        )
+        PromptCandidate.objects.bulk_create(
+            [PromptCandidate(run=run, **row) for row in to_candidate_rows(grouped)],
+            batch_size=200,
+        )
+
+    logger.info(
+        '[Upload] run %s for domain %s: %s prompts from %s',
+        run.id, domain.id, len(prompts), upload.name,
+    )
+    return Response(_run_payload(run, include_candidates=True),
+                    status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def prefill_from_site(request):
+    """Propose wizard answers by reading the project's own website.
+
+    Returns the fields only — nothing is saved. The wizard fills the inputs the
+    user has left empty and leaves anything they typed alone, so a guess can
+    never overwrite a fact the user supplied.
+
+    Always 200, even on failure: an unreachable site is an ordinary outcome for
+    this button, not a client error, and the wizard just carries on by hand with
+    the message shown. Reserving non-2xx for real faults keeps the frontend's
+    error handling meaningful.
+    """
+    domain_id = request.data.get('domain_id')
+    if not domain_id:
+        return Response({'error': 'domain_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    domain = get_object_or_404(_visible_domains(request.user), id=domain_id)
+
+    from .site_profile import infer_profile
+    result = infer_profile(domain)
+
+    # Persist so the crawl is paid for once per project, not once per visit to
+    # the wizard. The next open reads these straight off Domain and shows them
+    # as "Saved" — the button is then only needed to deliberately refresh.
+    if result['fields']:
+        from .site_profile import to_storage
+        _persist_brand_facts(domain, to_storage(result['fields']))
+
+    return Response({'fields': result['fields'], 'error': result['error']})
