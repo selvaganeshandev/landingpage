@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from core.queryset_scoping import user_can_access_domain
-from django.db.models import Q, Count, Avg, F, Sum
+from django.db.models import Q, Count, Avg, F, Sum, Prefetch
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.conf import settings
@@ -1451,8 +1451,9 @@ def prompt_groups_list(request):
             if not has_access:
                 return Response({'error': 'Forbidden: no access to this domain.'}, status=status.HTTP_403_FORBIDDEN)
 
-            # Get prompt groups scoped to domain
-            groups = PromptGroup.objects.filter(domain_id=domain_id)
+            # Get prompt groups scoped to domain.
+            # select_related('domain') because every row reads domain.id/.name.
+            groups = PromptGroup.objects.filter(domain_id=domain_id).select_related('domain')
             
             # Apply search filter if provided
             search_query = request.GET.get('search', '')
@@ -1475,46 +1476,69 @@ def prompt_groups_list(request):
             limit = max(1, min(limit, 100))
             offset = max(0, offset)
             total_count = groups.count()
-            groups = groups[offset:offset + limit]
-            
+            # Prompts are prefetched in one query and split by type in Python
+            # below; ordering here reproduces the per-group
+            # .order_by('created_at') the loop used to issue.
+            groups = list(
+                groups.prefetch_related(
+                    Prefetch('prompts', queryset=Prompt.objects.order_by('created_at'))
+                )[offset:offset + limit]
+            )
+
+            # ---- Batched analytics aggregates -------------------------------
+            # Every figure below was previously computed with its own query
+            # inside the loop, so a 20-row page cost ~180 queries and grew with
+            # the page size. Each is now one grouped query for the whole page.
+            page_ids = [g.id for g in groups]
+            _base = PromptAnalytics.objects.filter(prompt__group_id__in=page_ids)
+
+            def _by_group(qs, **ann):
+                return {
+                    r['prompt__group_id']: r
+                    for r in qs.values('prompt__group_id').annotate(**ann)
+                }
+
+            _totals = _by_group(_base, n=Count('id'), avg_pos=Avg('position'))
+            _mentions = _by_group(
+                _base.filter(is_mention=True, is_published=True), n=Count('id'))
+
+            _platforms = {}
+            for gid, platform in _base.values_list(
+                    'prompt__group_id', 'platform').distinct():
+                _platforms.setdefault(gid, []).append(platform)
+
+            # Growth windows, same boundaries the loop used.
+            from datetime import timedelta as _td
+            _now = timezone.now()
+            _d7 = _now - _td(days=7)
+            _d14 = _now - _td(days=14)
+            _published = _base.filter(is_mention=True, is_published=True)
+            _cur = _by_group(_published.filter(created_at__gte=_d7), n=Count('id'))
+            _prev = _by_group(
+                _published.filter(created_at__gte=_d14, created_at__lt=_d7), n=Count('id'))
+            _older = _by_group(_published.filter(created_at__lt=_d14), n=Count('id'))
+
             # Prepare response data
             groups_data = []
             for group in groups:
-                # Get analytics summary for the group
-                analytics = PromptAnalytics.objects.filter(
-                    prompt__group=group
-                )
-                # Derive primary and secondary prompts
-                primary_prompt_obj = group.prompts.filter(type='primary').order_by('created_at').first()
+                # Prefetched — no query.
+                group_prompts = list(group.prompts.all())
+                primary_prompt_obj = next(
+                    (p for p in group_prompts if p.type == 'primary'), None)
                 primary_prompt_text = primary_prompt_obj.prompt if primary_prompt_obj else ''
-                secondary_prompts_list = list(
-                    group.prompts.filter(type='secondary').order_by('created_at').values_list('prompt', flat=True)
-                )
+                secondary_prompts_list = [
+                    p.prompt for p in group_prompts if p.type == 'secondary']
                 
                 # Calculate visibility growth: compare current mentions with previous period (last 7 days vs previous 7 days)
                 # Only show growth if there's historical data across multiple time periods
                 visibility_growth = None
                 
                 try:
-                    # Get mentions from last 7 days
-                    from datetime import timedelta
-                    now = timezone.now()
-                    seven_days_ago = now - timedelta(days=7)
-                    fourteen_days_ago = now - timedelta(days=14)
-                    
-                    current_period_mentions = analytics.filter(
-                        is_mention=True,
-                        is_published=True,
-                        created_at__gte=seven_days_ago
-                    ).count()
-                    
-                    previous_period_mentions = analytics.filter(
-                        is_mention=True,
-                        is_published=True,
-                        created_at__gte=fourteen_days_ago,
-                        created_at__lt=seven_days_ago
-                    ).count()
-                    
+                    # Read from the batched aggregates above rather than
+                    # issuing three counts per group.
+                    current_period_mentions = _cur.get(group.id, {}).get('n', 0)
+                    previous_period_mentions = _prev.get(group.id, {}).get('n', 0)
+
                     # Only calculate growth if we have data in BOTH periods (historical comparison)
                     # This prevents showing 100% growth when there's only data in one period
                     if previous_period_mentions > 0:
@@ -1523,12 +1547,8 @@ def prompt_groups_list(request):
                     elif current_period_mentions > 0 and previous_period_mentions == 0:
                         # Current period has data but previous doesn't - check if we have ANY older data
                         # If we have data older than 14 days, it means we're tracking but just no data in previous period
-                        older_mentions = analytics.filter(
-                            is_mention=True,
-                            is_published=True,
-                            created_at__lt=fourteen_days_ago
-                        ).count()
-                        
+                        older_mentions = _older.get(group.id, {}).get('n', 0)
+
                         if older_mentions > 0:
                             # We have historical data (older than 14 days), so this is a valid comparison
                             # Previous period had 0, current has some = 100% growth
@@ -1553,7 +1573,7 @@ def prompt_groups_list(request):
                     'average_position': float(group.average_position),
                     'created_at': group.created_at.isoformat(),
                     'modified_at': group.modified_at.isoformat(),
-                    'prompts_count': group.prompts.count(),
+                    'prompts_count': len(group_prompts),
                     'primary_prompt': primary_prompt_text,
                     'secondary_prompts': secondary_prompts_list,
                     'visibility_growth': visibility_growth,
@@ -1561,10 +1581,10 @@ def prompt_groups_list(request):
                     'track_message': group.track_message,
                     'tracked_at': group.tracked_at.isoformat() if group.tracked_at else None,
                     'analytics_summary': {
-                        'total_analytics': analytics.count(),
-                        'mentions_count': analytics.filter(is_mention=True, is_published=True).count(),
-                        'avg_position': float(analytics.aggregate(avg_pos=Avg('position'))['avg_pos'] or 0),
-                        'platforms': list(analytics.values_list('platform', flat=True).distinct())
+                        'total_analytics': _totals.get(group.id, {}).get('n', 0),
+                        'mentions_count': _mentions.get(group.id, {}).get('n', 0),
+                        'avg_position': float(_totals.get(group.id, {}).get('avg_pos') or 0),
+                        'platforms': _platforms.get(group.id, [])
                     }
                 })
             
