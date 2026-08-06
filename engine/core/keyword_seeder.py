@@ -145,9 +145,16 @@ def generate_keywords_for_domain(domain, count=DEFAULT_KEYWORD_COUNT):
                     domain.id, len(existing))
         return 0
 
+    # ChatGPTClient, not core.openrouter_client — that module lives in the
+    # backend. This is also what binds the call to the organisation's own key,
+    # the way every other engine-side model call does.
     try:
-        from core.openrouter_client import get_internal_client
-        client = get_internal_client(timeout=120)
+        from core.chatgpt_client import ChatGPTClient
+        chat = ChatGPTClient(org_id=getattr(domain, 'organisation_id', None))
+        chat._ensure_client()
+        client = chat.client
+        if client is None:
+            raise RuntimeError('no usable API key')
     except Exception as exc:
         logger.error('[KeywordSeed] no client for domain %s: %s', domain.id, exc)
         return 0
