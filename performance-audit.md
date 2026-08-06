@@ -1,5 +1,22 @@
 # Performance Audit
 
+> **Status: items 1–5 fixed and deployed 2026-08-06** (revision `0d78ae52`).
+> Results, measured the same way as the baselines below:
+>
+> | | before | after |
+> |---|---|---|
+> | first-load payload | 3.69 MB | **0.94 MB** (−74%) |
+> | `/prompts/mentions/` | 1,402 ms · 67 q | **137 ms · 7 q** (−90%) |
+> | `/prompts/groups/` | 348 ms · 181 q | **59 ms · 12 q** (−83%) |
+>
+> Every change was verified byte-identical against production data before
+> deploying — response payloads hash the same before and after.
+>
+> Item 2 below records a wrong diagnosis worth keeping: the first attempt fixed
+> the string copying and moved the endpoint only 1,402 → 1,271 ms. Re-profiling
+> showed the real cost was regex backtracking, not allocation. **Item 6
+> (dashboard summary) and route-level code splitting remain open.**
+
 Measured against **production** (`64.227.190.42`, revision `d2925aef`) on 2026-08-06,
 using the live database and a real org-1 account (51 projects, project 98 =
 UTI Mutual Fund).
