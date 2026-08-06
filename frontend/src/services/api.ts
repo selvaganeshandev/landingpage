@@ -603,6 +603,29 @@ export const apiClient = {
       body: JSON.stringify(data),
     }),
 
+  /**
+   * Onboarding site analysis: crawls the brand's homepage and extracts its
+   * profile, falling back to model knowledge when the site can't be read.
+   * Blocking — a crawl plus a model call, ~15s. Nothing is saved.
+   */
+  analyzeBrandSite: (data: { domain_name: string; brand_name: string }) =>
+    apiRequest('/domains/analyze-site/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** Creates the brand from an analyzeBrandSite result. No keywords, no prompts. */
+  createAnalyzedDomain: (data: {
+    domain_name: string;
+    brand_name: string;
+    country: string;
+    fields?: Record<string, any>;
+  }) =>
+    apiRequest('/domains/create-analyzed/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   getDomainHealthCheck: (domainId: number) =>
     apiRequest(`/domains/${domainId}/health-check/`, { timeout: 300000 }),  // 5 minutes - health check calls multiple external APIs
 

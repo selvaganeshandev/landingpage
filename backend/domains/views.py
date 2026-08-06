@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db.models import Q, Count
 from django.db import transaction, connection
 from django.db import IntegrityError
 from django.db.utils import ProgrammingError
@@ -25,6 +25,7 @@ from authentication.models import Account
 from keywords.models import Keyword, SecondaryKeyword
 import json
 import logging
+from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +244,14 @@ def domain_list(request):
         if request.query_params.get('fields') == 'minimal':
             domains = domains.only('id', 'name', 'url')
         else:
-            domains = domains.select_related('organisation').prefetch_related('health_checks')
+            # Annotate the prompt count rather than letting the serializer count
+            # per row: this list is the domain switcher, so a per-domain COUNT(*)
+            # would be one query per project on every page load.
+            domains = (
+                domains.select_related('organisation')
+                .prefetch_related('health_checks')
+                .annotate(prompt_count_annotated=Count('prompt_groups__prompts', distinct=True))
+            )
 
         # Search support
         search = request.query_params.get('search', '').strip()
@@ -2885,6 +2893,249 @@ Return ONLY a valid JSON object with these fields:
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------------------------------------------------------------------------
+# Lightweight onboarding: read the site, create the brand. No prompt/keyword
+# generation — a project tracked for SEO alone should not have to sit through
+# a GEO keyword run it will never use. Prompts are added later, on demand,
+# from the Prompts page.
+# ---------------------------------------------------------------------------
+
+COUNTRY_NAMES = {
+    'us': 'United States', 'gb': 'United Kingdom', 'ca': 'Canada',
+    'au': 'Australia', 'de': 'Germany', 'fr': 'France', 'es': 'Spain',
+    'it': 'Italy', 'jp': 'Japan', 'in': 'India', 'br': 'Brazil',
+    'mx': 'Mexico', 'nl': 'Netherlands', 'se': 'Sweden', 'no': 'Norway',
+    'dk': 'Denmark', 'fi': 'Finland', 'pl': 'Poland', 'be': 'Belgium',
+    'at': 'Austria', 'ch': 'Switzerland', 'ie': 'Ireland',
+    'nz': 'New Zealand', 'sg': 'Singapore',
+}
+
+
+def _normalize_domain_host(raw: str) -> str:
+    """Bare host from whatever the user pasted: no scheme, www., path or port."""
+    host = (raw or '').strip().lower()
+    for prefix in ('http://', 'https://'):
+        if host.startswith(prefix):
+            host = host[len(prefix):]
+            break
+    if host.startswith('www.'):
+        host = host[4:]
+    for sep in ('/', '?', '#'):
+        if sep in host:
+            host = host.split(sep, 1)[0]
+    if ':' in host:
+        host = host.split(':', 1)[0]
+    return host
+
+
+def _brand_facts_from_knowledge(brand_name, website):
+    """Fall back to what the model already knows when the site can't be read.
+
+    Same field shape as site_profile.infer_profile so the caller can treat both
+    sources identically. A blocked homepage, a JS-only page or a timeout should
+    cost the user a slightly thinner profile, not the ability to add a brand.
+    """
+    from prompts.site_profile import BUSINESS_MODELS, PRICE_POSITIONS, _clean, _json_from
+
+    system = (
+        "You are a brand analyst. Return ONLY a JSON object, no prose and no "
+        "code fence.\n\nKeys and types:\n"
+        '  short_description   string, one sentence, what the company does\n'
+        '  target_audience     string, who buys from them\n'
+        f'  business_model      string, exactly one of: {", ".join(BUSINESS_MODELS)}\n'
+        f'  price_positioning   string, exactly one of: {", ".join(PRICE_POSITIONS)}\n'
+        '  offering_categories array of short noun phrases — what they sell\n'
+        '  niches              array of specific market segments they serve\n'
+        '  regions_served      array of cities/countries/regions, or ["All over"] if global\n'
+        '  use_cases           array of problems customers solve with this\n'
+        '  buying_criteria     array of what customers compare on\n'
+        '  differentiators     array of what this brand claims sets it apart\n'
+        '  key_competitors     array of named competing brands\n\n'
+        "Omit any key you are not reasonably confident about. The site itself "
+        "could not be read, so answer from what you know about this brand and "
+        "its domain name — omit rather than invent."
+    )
+
+    try:
+        client = get_openai_client()
+        response = client.chat.completions.create(
+            model=getattr(settings, "OPENROUTER_INTERNAL_MODEL", "openai/gpt-5-mini"),
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": f"Brand: {brand_name}\nURL: {website}"},
+            ],
+            temperature=0.3,
+            # Reasoning model: budget for thinking AND the answer, or the reply
+            # comes back empty with finish_reason="length".
+            max_tokens=4000,
+            extra_body={"reasoning": {"effort": "low"}},
+        )
+        reply = (response.choices[0].message.content or '') if response.choices else ''
+    except Exception as exc:
+        logger.error(f"[AnalyzeSite] knowledge fallback failed for {website}: {exc}")
+        return {}
+
+    return _clean(_json_from(reply))
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def analyze_brand_site(request):
+    """Read a prospective brand's website and report what we can extract.
+
+    The onboarding twin of the generation wizard's "Autofill from my site": the
+    same crawl and the same extraction, except there is no Domain row yet, so it
+    runs against a stand-in carrying only the three attributes infer_profile
+    reads. Nothing is persisted here — the client posts the fields back to
+    /domains/create-analyzed/ once the user confirms.
+    """
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response(
+            {'error': 'Only organization administrators can add domains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    host = _normalize_domain_host(request.data.get('domain_name', ''))
+    brand_name = (request.data.get('brand_name') or '').strip()
+
+    if not host:
+        return Response({'error': 'domain_name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    website = f"https://{host}"
+    stand_in = SimpleNamespace(
+        url=website,
+        name=brand_name or host,
+        organisation=request.user.organisation,
+    )
+
+    from prompts.site_profile import infer_profile
+
+    result = infer_profile(stand_in)
+    fields, error = result.get('fields') or {}, result.get('error')
+
+    if fields:
+        return Response({
+            'success': True,
+            'source': 'site',
+            'fields': fields,
+            'warning': None,
+        })
+
+    # The crawl came back empty or unusable. Answer from model knowledge rather
+    # than making the user type a profile by hand at the point of signup.
+    logger.info(f"[AnalyzeSite] {website} unreadable ({error}); using model knowledge")
+    fields = _brand_facts_from_knowledge(brand_name or host, website)
+
+    return Response({
+        'success': True,
+        'source': 'knowledge' if fields else 'none',
+        'fields': fields,
+        'warning': (
+            f"We couldn't read {host} ({error or 'no readable content'}), so this "
+            f"profile is based on what's publicly known about the brand."
+        ),
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_analyzed_domain(request):
+    """Create a brand from an /analyze-site/ result. No keywords, no prompts.
+
+    Deliberately does no LLM work of its own: everything expensive already
+    happened in the analysis step the user watched, so confirming is instant.
+    """
+    if request.user.role not in ['admin', 'super_admin']:
+        return Response(
+            {'error': 'Only organization administrators can add domains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    host = _normalize_domain_host(request.data.get('domain_name', ''))
+    brand_name = (request.data.get('brand_name') or '').strip()
+    country_code = (request.data.get('country') or 'us').lower()
+    fields = request.data.get('fields') or {}
+
+    if not host:
+        return Response({'error': 'domain_name is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not brand_name:
+        return Response({'error': 'brand_name is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not isinstance(fields, dict):
+        fields = {}
+
+    from prompts.site_profile import to_storage
+    from prompts.views_generation import (
+        DOMAIN_TEXT_FIELDS, DOMAIN_LIST_FIELDS, DOMAIN_CSV_FIELDS,
+    )
+
+    stored = to_storage(fields)
+    attrs = {}
+    for field in DOMAIN_TEXT_FIELDS:
+        value = stored.get(field)
+        if isinstance(value, str) and value.strip():
+            attrs[field] = value.strip()
+    for field in DOMAIN_LIST_FIELDS:
+        value = stored.get(field)
+        if isinstance(value, list) and value:
+            attrs[field] = value
+    for field in DOMAIN_CSV_FIELDS:
+        value = stored.get(field)
+        if isinstance(value, list) and value:
+            attrs[field] = ', '.join(str(v) for v in value)
+        elif isinstance(value, str) and value.strip():
+            attrs[field] = value.strip()
+
+    niches = stored.get('niches')
+    attrs['niches'] = [str(n).strip() for n in niches if str(n).strip()][:10] if isinstance(niches, list) else []
+
+    try:
+        with transaction.atomic():
+            domain = Domain.objects.create(
+                name=brand_name,
+                url=f"https://{host}",
+                organisation=request.user.organisation,
+                country=COUNTRY_NAMES.get(country_code, 'United States'),
+                # Nothing is queued for this domain, so there is no processing to
+                # wait on — anything else would park it behind a loader forever.
+                processing_status='COMP',
+                **attrs,
+            )
+
+            try:
+                DomainAccess.objects.create(
+                    domain=domain,
+                    user=request.user,
+                    granted_by=request.user,
+                )
+            except Exception as exc:
+                logger.error(f"Error creating domain access: {exc}")
+
+        return Response({
+            'success': True,
+            'message': 'Domain created successfully',
+            'domain': {
+                'id': domain.id,
+                'name': domain.name,
+                'url': domain.url,
+                'country': domain.country,
+                'niches': domain.niches,
+                'processing_status': domain.processing_status,
+                'short_description': domain.short_description,
+                'target_audience': domain.target_audience,
+                'key_competitors': domain.key_competitors,
+            },
+        }, status=status.HTTP_201_CREATED)
+
+    except IntegrityError:
+        return Response({
+            'success': False,
+            'error': 'This domain already exists in your organization.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as exc:
+        logger.error(f"Error creating analyzed domain: {exc}")
+        return Response({'success': False, 'error': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # Internal Link Map Management
