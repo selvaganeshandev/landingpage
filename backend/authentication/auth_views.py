@@ -1336,7 +1336,12 @@ def delete_invitation(request, invitation_id):
 def team_members(request):
     if not _can_view_team(request.user):
         return Response({'error': 'You do not have permission to view team members'}, status=status.HTTP_403_FORBIDDEN)
-    members = Account.objects.filter(organisation=request.user.organisation).exclude(role='super_admin')
+    # Removed members are deactivated rather than deleted so their work stays
+    # attributed to them, but they are no longer part of the team and must not
+    # be listed — this also keeps the list consistent with Organisation.team_count,
+    # which has always counted active accounts only. Re-inviting them revives
+    # the account (see accept_invitation) and brings them back here.
+    members = Account.objects.filter(organisation=request.user.organisation, is_active=True).exclude(role='super_admin')
     members_data = []
     for member in members:
         members_data.append({'id': member.id, 'email': member.email, 'first_name': member.first_name, 'last_name': member.last_name, 'role': member.role, 'organisation': member.organisation.id, 'organisation_name': member.organisation.name, 'is_active': member.is_active, 'created_at': member.created_at, 'modified_at': member.modified_at})
