@@ -3118,7 +3118,7 @@ def create_analyzed_domain(request):
             except Exception as exc:
                 logger.error(f"Error creating domain access: {exc}")
 
-        # Keywords are generated in the background rather than inline.
+        # Keywords are generated behind the response rather than inline.
         #
         # They are not optional — Topics group Keyword rows, SEO rankings track
         # them, and prompt/keyword links are what let a topic reach the prompts
@@ -3126,15 +3126,11 @@ def create_analyzed_domain(request):
         # making the user watch that is exactly the wait this onboarding removed.
         # So the brand is returned now and its keywords land a moment later.
         try:
-            engine_api_url = getattr(settings, 'ENGINE_API_URL', 'http://localhost:8001').rstrip('/')
-            requests.post(
-                f"{engine_api_url}/api/keywords/seed/",
-                json={'domain_id': domain.id, 'count': 50},
-                timeout=10,
-            )
+            from .keyword_seeder import seed_keywords_in_background
+            seed_keywords_in_background(domain.id)
         except Exception as exc:
             # A brand with no keywords is recoverable; a failed creation is not.
-            logger.error(f"Could not queue keyword seeding for domain {domain.id}: {exc}")
+            logger.error(f"Could not start keyword seeding for domain {domain.id}: {exc}")
 
         return Response({
             'success': True,

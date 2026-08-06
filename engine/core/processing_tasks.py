@@ -383,30 +383,6 @@ def schedule_weekly_competitor_batches(self, last_id: int = 0, force: bool = Fal
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3)
-def seed_domain_keywords_task(self, domain_id: int, count: int = 50):
-    """Generate a brand's starting keyword set, then group it into topics.
-
-    Queued by onboarding so adding a brand stays instant. Chaining topic
-    grouping here rather than leaving it to the user means a new brand arrives
-    with its Topics page already populated instead of an empty card and a
-    button.
-    """
-    from shared_models.models import Domain
-    from core.keyword_seeder import generate_keywords_for_domain
-
-    try:
-        domain = Domain.objects.get(id=domain_id)
-    except Domain.DoesNotExist:
-        logger.error(f"[KeywordSeed] domain {domain_id} not found")
-        return {'error': 'domain_not_found'}
-
-    created = generate_keywords_for_domain(domain, count=count)
-    if created:
-        process_topics_for_domain_task.delay(domain_id)
-    return {'keywords_created': created}
-
-
-@shared_task(bind=True, ignore_result=True, max_retries=3)
 def process_topics_for_domain_task(self, domain_id: int):
     """
     Process topics for a domain by grouping keywords using NLP
